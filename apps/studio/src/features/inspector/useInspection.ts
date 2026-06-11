@@ -30,6 +30,11 @@ export type NoteInspectionResult = {
   scaleDegree: string | null;
   /** スケール内文脈の説明 (例 "Ⅲ度（スケール内）") */
   scaleContext: string;
+  /**
+   * キー文脈の説明 (describeNoteInKey の結果)。
+   * コード選択が併存する場合でも常時保持し、スケール外音のクロマチック文脈説明を落とさずに表示できる。
+   */
+  keyContext: string;
   /** コードトーン判定結果 */
   noteAnalysis: NoteAnalysis | null;
   /** コード内での度数表記 (例 "3度") — コードトーンのときのみ */
@@ -102,13 +107,16 @@ function buildNoteInspection(
 
   let scaleDegree: string | null = null;
   let scaleContext = '';
+  let keyContext = '';
   let inScale = false;
   try {
     scaleDegree = getNoteScaleDegree(note.pitch, key, scale);
     scaleContext = describeNoteInKey(note.pitch, key, scale);
+    keyContext = scaleContext;
     inScale = scaleDegree !== null;
   } catch {
     scaleContext = 'スケール情報を取得できませんでした。';
+    keyContext = scaleContext;
   }
 
   const chord = chordAtBeat(note.startBeat);
@@ -128,6 +136,7 @@ function buildNoteInspection(
     noteName,
     scaleDegree,
     scaleContext,
+    keyContext,
     noteAnalysis,
     degreeInChord,
     currentChordSymbol: chord?.symbol ?? null,

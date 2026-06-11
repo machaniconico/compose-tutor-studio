@@ -27,6 +27,7 @@ import {
   generateBassLine,
   generateScaleMelody,
   getProgressionTemplate,
+  realizeProgression,
   type BassMode,
   type GeneratedNote,
   type ChordEventInput,
@@ -256,6 +257,35 @@ export function applyProgressionTemplate(templateId: string): void {
     }
     captured.push({ project, chords });
     return { ...project, chordTrack: chords };
+  });
+  const first = captured[0];
+  if (first) {
+    for (const chord of first.chords) emitChordAdded(first.project, chord);
+  }
+}
+
+/**
+ * 指定の beat 位置からプログレッションテンプレートを挿入する。
+ * 挿入範囲と重複する既存コードのみ置換し、それ以外の後続コードは保持する。
+ * 各コードは1小節幅で配置する。
+ */
+export function insertProgressionAtBeat(templateId: string, startBeat: number): void {
+  const captured: { project: Project; chords: ChordEvent[] }[] = [];
+  useStore.getState().applyProjectChange((project) => {
+    const symbols = realizeProgression(templateId, project.key, project.scale);
+    if (symbols.length === 0) return project;
+    const bpb = projectBeatsPerBar(project);
+    const insertedChords: ChordEvent[] = symbols.map((symbol, i) =>
+      buildChordEvent(project, symbol, startBeat + i * bpb, bpb),
+    );
+    const insertEnd = startBeat + symbols.length * bpb;
+    // Keep chords that do not overlap with the inserted range.
+    const kept = project.chordTrack.filter(
+      (c) => c.startBeat + c.durationBeats <= startBeat || c.startBeat >= insertEnd,
+    );
+    const newTrack = [...kept, ...insertedChords].sort((a, b) => a.startBeat - b.startBeat);
+    captured.push({ project, chords: insertedChords });
+    return { ...project, chordTrack: newTrack };
   });
   const first = captured[0];
   if (first) {

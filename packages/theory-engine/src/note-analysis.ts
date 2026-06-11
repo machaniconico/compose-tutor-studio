@@ -208,6 +208,44 @@ export function detectChordTensions(
   }).map(([, label]) => label);
 }
 
+/**
+ * コードの構成音インターバル（ルートからの半音差の配列）から
+ * テンション (9th/11th/13th 等) を判定して日本語ラベルの配列で返す純粋関数。
+ *
+ * detectChordTensions がキー/スケールを参照するのに対し、
+ * analyzeChordTensions はコード構成音のインターバルのみから
+ * 「コードに含まれていないテンションインターバルが構成音として追加されている場合」を検出する。
+ * add9 や maj7#11 などの拡張コードのテンション音を返す。
+ *
+ * @param intervals ルートからの半音差の配列 (例: [0,4,7] = メジャートライアド、[0,4,7,14] = add9)
+ * @returns テンション日本語ラベルの配列 (例 ["9th"])。テンションなしのとき空配列。
+ */
+export function analyzeChordTensions(intervals: number[]): string[] {
+  // テンションインターバル定義 (オクターブ内正規化後の半音差 -> ラベル)
+  const TENSION_INTERVALS: Array<[number, string]> = [
+    [1, '♭9th'],
+    [2, '9th'],
+    [3, '♯9th'],
+    [5, '11th'],
+    [6, '♯11th'],
+    [8, '♭13th'],
+    [9, '13th'],
+  ];
+  const BASIC_TRIAD_AND_7TH = new Set([0, 3, 4, 6, 7, 8, 10, 11]);
+
+  // 構成音をオクターブ内正規化してセットにまとめる
+  const normalizedSet = new Set(intervals.map((iv) => ((iv % 12) + 12) % 12));
+
+  return TENSION_INTERVALS.filter(([semitones]) => {
+    // 構成音に含まれているインターバルのみテンションとして検出
+    if (!normalizedSet.has(semitones)) return false;
+    // 基本音程（トライアド/7th の主要インターバル）は除外しない — 明示的に追加されたものは全て対象
+    // ただしルート(0)・長短3度(3,4)・完全5度(7)は基本トライアド構成音なのでテンション扱いしない
+    if (semitones === 0 || semitones === 3 || semitones === 4 || semitones === 7) return false;
+    return true;
+  }).map(([, label]) => label);
+}
+
 /** スケール度数のローマ数字ラベル (1始まり)。 */
 const DEGREE_LABELS = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ', 'Ⅵ', 'Ⅶ'] as const;
 

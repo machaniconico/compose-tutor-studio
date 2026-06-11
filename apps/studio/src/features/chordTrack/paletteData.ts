@@ -2,12 +2,10 @@ import {
   getDiatonicChords,
   PROGRESSION_TEMPLATES,
   realizeProgression,
-  type ScaleName,
-} from '@cts/theory-engine';
-import {
   borrowedChords,
   dominantMotionChords,
-} from '../../../../../packages/theory-engine/src/harmony';
+  type ScaleName,
+} from '@cts/theory-engine';
 
 export type PaletteTab = 'diatonic' | 'progressions' | 'borrowed' | 'dominant';
 

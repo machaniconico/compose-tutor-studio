@@ -22,6 +22,9 @@ export interface Course {
   lessonIds: string[];
 }
 
+/** Alias for Course — used by the TutorialEngine content pipeline */
+export type TutorialCourse = Course;
+
 export interface TutorialLesson {
   id: string;
   courseId: string;
@@ -50,6 +53,7 @@ export type ProjectPredicate =
   | { type: 'chordCountAtLeast'; value: number }
   | { type: 'progressionEquals'; symbols: string[] }
   | { type: 'drumLaneActive'; lane: DrumLane; minSteps: number }
+  | { type: 'drumPatternHas'; lanes: Array<{ lane: DrumLane; minSteps: number }> }
   | { type: 'noteCountAtLeast'; trackName: string; value: number }
   | { type: 'hasSection'; sectionType: SectionType }
   | { type: 'bpmInRange'; min: number; max: number }

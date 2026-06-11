@@ -80,11 +80,16 @@ export {
   analyzeChord,
   getDiatonicChords,
   suggestNextChords,
+  borrowedChords,
+  dominantMotionChords,
   type AnalyzeChordInput,
   type ChordAnalysisResult,
   type DiatonicChord,
   type SuggestNextChordsInput,
   type ChordSuggestion,
+  type BorrowedChord,
+  type DominantMotionChord,
+  type DominantMotionInput,
 } from './harmony';
 
 // prompt 02 関数 9: 単音解析 (公開シグネチャ)
@@ -93,6 +98,7 @@ export {
   getNoteScaleDegree,
   describeNoteInKey,
   detectChordTensions,
+  analyzeChordTensions,
   type NoteRelation,
   type NoteAnalysis,
 } from './note-analysis';

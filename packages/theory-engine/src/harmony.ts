@@ -103,9 +103,16 @@ export type DominantMotionChord = {
   reason: string;
 };
 
-/** キー文字列のルート部分を取り出してフラット志向か判定する。 */
-function keyPrefersFlats(keyRootName: string): boolean {
-  return keyRootName.includes('b') || keyRootName === 'F';
+const FLAT_MAJOR_ROOTS = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb']);
+const FLAT_MINOR_ROOTS = new Set(['D', 'G', 'C', 'F', 'Bb', 'Eb', 'Ab']);
+
+/** キーとスケールから、調号に近いフラット/シャープ志向を判定する。 */
+function scalePrefersFlats(keyRootName: string, scale: ScaleName): boolean {
+  if (keyRootName.includes('b')) return true;
+  if (keyRootName.includes('#')) return false;
+  return isMinorScale(scale)
+    ? FLAT_MINOR_ROOTS.has(keyRootName)
+    : FLAT_MAJOR_ROOTS.has(keyRootName);
 }
 
 /** ピッチクラスをキーの綴り志向で音名にする。 */
@@ -256,7 +263,7 @@ function diatonicDegreeInfos(key: string, scale: ScaleName): DegreeInfo[] {
 /** ダイアトニックトライアド (7和音) を返す。 */
 export function getDiatonicChords(key: string, scale: ScaleName): DiatonicChord[] {
   const keyRootName = parseKeyRootName(key);
-  const preferFlats = keyPrefersFlats(keyRootName);
+  const preferFlats = scalePrefersFlats(keyRootName, scale);
   const isMinorKey =
     scale === 'naturalMinor' || scale === 'harmonicMinor' || scale === 'melodicMinor';
   const infos = diatonicDegreeInfos(key, scale);
@@ -297,7 +304,8 @@ export function borrowedChords(key: string, scale: ScaleName): BorrowedChord[] {
   const rootPc = noteNameToPitchClass(keyRootName);
   const currentDiatonic = new Set(diatonicDegreeInfos(key, scale).map(diatonicQualityKey));
   const currentIsMinor = isMinorScale(scale);
-  const preferFlats = currentIsMinor ? keyPrefersFlats(keyRootName) : true;
+  const borrowedScale: ScaleName = currentIsMinor ? 'major' : 'naturalMinor';
+  const preferFlats = scalePrefersFlats(keyRootName, borrowedScale);
 
   const majorBorrowed = [
     {
@@ -364,8 +372,14 @@ export function borrowedChords(key: string, scale: ScaleName): BorrowedChord[] {
   });
 }
 
+function isDominantMotionTargetQuality(quality: CanonicalChordQuality): boolean {
+  return quality === 'major' || quality === 'minor';
+}
+
 function dominantTargetCandidates(key: string, scale: ScaleName): DegreeInfo[] {
-  return diatonicDegreeInfos(key, scale).filter((info) => info.degreeIndex !== 6);
+  return diatonicDegreeInfos(key, scale).filter((info) =>
+    isDominantMotionTargetQuality(info.quality),
+  );
 }
 
 function dominantMotionCandidateForTarget(
@@ -373,11 +387,17 @@ function dominantMotionCandidateForTarget(
   scale: ScaleName,
   target: DegreeInfo,
   preferFlats: boolean,
+  displayTargetSymbol?: string,
+  displayTargetQuality?: CanonicalChordQuality,
 ): DominantMotionChord {
   const dominantRootPc = (target.rootPc + 7) % 12;
   const symbol = chordSymbolForQuality(dominantRootPc, 'dominant7', preferFlats);
-  const targetSymbol = chordSymbolForQuality(target.rootPc, target.quality, preferFlats);
-  const targetDegree = romanForDegree(target.degreeIndex, target.quality);
+  const targetSymbol =
+    displayTargetSymbol ?? chordSymbolForQuality(target.rootPc, target.quality, preferFlats);
+  // Use the parsed quality (e.g. 'minor' for a borrowed "Fm") when it differs
+  // from the diatonic quality so the Roman numeral casing reflects the actual chord.
+  const effectiveQuality = displayTargetQuality ?? target.quality;
+  const targetDegree = romanForDegree(target.degreeIndex, effectiveQuality);
   const degree = `V7/${targetDegree}`;
   return {
     symbol,
@@ -393,7 +413,7 @@ export function dominantMotionChords(input: DominantMotionInput): DominantMotion
   if (!HEPTATONIC.has(input.scale)) return [];
 
   const keyRootName = parseKeyRootName(input.key);
-  const preferFlats = keyPrefersFlats(keyRootName);
+  const preferFlats = scalePrefersFlats(keyRootName, input.scale);
   const includePrimary = input.includePrimary ?? input.targetSymbol !== undefined;
 
   if (input.targetSymbol !== undefined) {
@@ -402,8 +422,18 @@ export function dominantMotionChords(input: DominantMotionInput): DominantMotion
     const targetPc = noteNameToPitchClass(parsed.root);
     const target = degreeInfoByRootPc(input.key, input.scale).get(targetPc);
     if (!target) return [];
+    if (!isDominantMotionTargetQuality(target.quality)) return [];
     if (target.degreeIndex === 0 && !includePrimary) return [];
-    return [dominantMotionCandidateForTarget(input.key, input.scale, target, preferFlats)];
+    return [
+      dominantMotionCandidateForTarget(
+        input.key,
+        input.scale,
+        target,
+        preferFlats,
+        parsed.symbol,
+        parsed.quality,
+      ),
+    ];
   }
 
   return dominantTargetCandidates(input.key, input.scale)
@@ -459,7 +489,7 @@ export function analyzeChord(input: AnalyzeChordInput): ChordAnalysisResult {
   }
 
   const keyRootName = parseKeyRootName(input.key);
-  const preferFlats = keyPrefersFlats(keyRootName);
+  const preferFlats = scalePrefersFlats(keyRootName, input.scale);
   const heptatonic = HEPTATONIC.has(input.scale);
 
   const result: ChordAnalysisResult = {

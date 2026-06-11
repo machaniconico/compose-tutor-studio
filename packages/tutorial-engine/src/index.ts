@@ -75,6 +75,10 @@ export { gradeExercise } from './exercises.js';
 // ─── Spaced repetition review queue ──────────────────────────────────────────
 export { ReviewQueue } from './review.js';
 
+// ─── Predicate feedback ───────────────────────────────────────────────────────
+export { explainPredicate } from './feedback.js';
+export type { PredicateFeedback } from './feedback.js';
+
 // ─── Content (ALL_COURSES, ALL_LESSONS, getLessonById) ───────────────────────
 export {
   ALL_COURSES,
@@ -83,5 +87,7 @@ export {
   BASIC_LESSONS,
   COMPOSE_COURSE,
   COMPOSE_LESSONS,
+  COURSE0_COURSE,
+  COURSE0_LESSONS,
   getLessonById,
 } from './content/index.js';

@@ -110,11 +110,11 @@ function NoteInspector({ data }: { data: NoteInspectionResult }) {
       {data.noteAnalysis ? (
         <p className="inspector-explain">{data.noteAnalysis.message}</p>
       ) : null}
-      {/* スケール外の音は、コードとの関係説明に加えてスケール文脈説明も常に表示する */}
+      {/* キー文脈説明: コード選択が併存する場合でも、スケール外音のクロマチック説明を常に表示する */}
       {!data.inScale ? (
-        <p className="inspector-explain">{data.scaleContext}</p>
+        <p className="inspector-explain">{data.keyContext}</p>
       ) : !data.noteAnalysis ? (
-        <p className="inspector-explain">{data.scaleContext}</p>
+        <p className="inspector-explain">{data.keyContext}</p>
       ) : null}
     </div>
   );
@@ -178,12 +178,10 @@ function ChordInspector({ data }: { data: ChordInspectionResult }) {
         <span>{data.functionLabel}</span>
       </div>
 
-      {data.tension.length > 0 ? (
-        <div className="kv">
-          <span>テンション</span>
-          <span>{data.tension.join('・')}</span>
-        </div>
-      ) : null}
+      <div className="kv">
+        <span>テンション</span>
+        <span>{data.tension.length > 0 ? data.tension.join('・') : 'なし（基本形）'}</span>
+      </div>
 
       {data.explanation ? (
         <p className="inspector-explain">{data.explanation}</p>

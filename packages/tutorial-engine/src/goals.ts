@@ -46,6 +46,31 @@ export function evaluateProjectPredicate(
       return false;
     }
 
+    case 'drumPatternHas': {
+      // Every lane requirement must be satisfied (AND semantics)
+      for (const req of predicate.lanes) {
+        let satisfied = false;
+        for (const track of project.tracks) {
+          if (track.type !== 'drum') continue;
+          for (const clip of track.clips) {
+            if (!clip.drumEvents) continue;
+            const stepIndices = new Set(
+              clip.drumEvents
+                .filter((e) => e.lane === req.lane)
+                .map((e) => e.stepIndex),
+            );
+            if (stepIndices.size >= req.minSteps) {
+              satisfied = true;
+              break;
+            }
+          }
+          if (satisfied) break;
+        }
+        if (!satisfied) return false;
+      }
+      return true;
+    }
+
     case 'noteCountAtLeast': {
       for (const track of project.tracks) {
         if (track.name !== predicate.trackName) continue;

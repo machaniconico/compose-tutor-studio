@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TutorialEngine } from '../src/engine.js';
+import { COURSE0_LESSONS } from '../src/content/index.js';
 import type { AppEvent, TutorialLesson } from '../src/types.js';
-import { makeProject } from './helpers.js';
+import {
+  makeBassTrack,
+  makeDrumEvent,
+  makeDrumTrack,
+  makeMelodyTrack,
+  makeNote,
+  makeProject,
+  makeSection,
+} from './helpers.js';
 
 // Minimal 3-step lesson: event → project → exercise
 const TEST_LESSON: TutorialLesson = {
@@ -340,5 +349,290 @@ describe('TutorialEngine — exportCompleted predicate', () => {
     );
     expect(result.advanced).toBe(false);
     expect(engine.getState().status).toBe('inProgress');
+  });
+});
+
+// ─── Course 0 integration tests ───────────────────────────────────────────────
+
+describe('COURSE0_LESSONS — 0-1 through 0-8 integration', () => {
+  // ─── Helper: drive a lesson through all steps to completion ────────────────
+
+  function driveToCompletion(
+    engine: TutorialEngine,
+    events: AppEvent[],
+    project: ReturnType<typeof makeProject>,
+  ): void {
+    for (const ev of events) {
+      engine.handleEvent(ev, project);
+      if (engine.getState().status === 'completed') break;
+      // answer exercise step if needed
+      const step = engine.getState().currentStep;
+      if (step?.goal.kind === 'exercise') {
+        const ex = engine.getCurrentExercise();
+        if (ex?.kind === 'multipleChoice') {
+          engine.answerExercise({ kind: 'multipleChoice', selectedIndex: ex.correctIndex });
+        }
+      }
+    }
+  }
+
+  // ─── 0-1: テンプレートから音を鳴らす ─────────────────────────────────────
+
+  it('0-1: completes via project.created → transport.played (+ exercise)', () => {
+    const engine = new TutorialEngine();
+    const lesson = COURSE0_LESSONS[0]!;
+    engine.loadLesson(lesson);
+
+    expect(engine.getState().stepIndex).toBe(0);
+
+    // step 1: project.created
+    const r1 = engine.handleEvent(
+      { type: 'project.created', payload: { key: 'C', bpm: 120 } },
+      makeProject(),
+    );
+    expect(r1.advanced).toBe(true);
+    expect(engine.getState().stepIndex).toBe(1);
+
+    // step 2: transport.played
+    const r2 = engine.handleEvent(
+      { type: 'transport.played', payload: { positionBeats: 0 } },
+      makeProject(),
+    );
+    expect(r2.advanced).toBe(true);
+    expect(engine.getState().stepIndex).toBe(2);
+
+    // step 3: exercise
+    const ex = engine.getCurrentExercise();
+    expect(ex).not.toBeNull();
+    expect(ex!.kind).toBe('multipleChoice');
+    const grade = engine.answerExercise({
+      kind: 'multipleChoice',
+      selectedIndex: (ex as { correctIndex: number }).correctIndex,
+    });
+    expect(grade.correct).toBe(true);
+    expect(grade.completedLesson).toBe(true);
+    expect(engine.getState().status).toBe('completed');
+  });
+
+  // ─── 0-2: コード進行を選ぶ ────────────────────────────────────────────────
+
+  it('0-2: completes via chord count → progression equals → exercise', () => {
+    const engine = new TutorialEngine();
+    const lesson = COURSE0_LESSONS[1]!;
+    engine.loadLesson(lesson);
+
+    const oneChord = makeProject({
+      chordTrack: [
+        { id: '1', startBeat: 0, durationBeats: 4, symbol: 'C', root: 'C', quality: 'major', notes: [] },
+      ],
+    });
+    const r1 = engine.handleEvent(
+      { type: 'chord.added', payload: { bar: 0, chordSymbol: 'C' } },
+      oneChord,
+    );
+    expect(r1.advanced).toBe(true);
+
+    const fullProgression = makeProject({
+      chordTrack: [
+        { id: '1', startBeat: 0, durationBeats: 4, symbol: 'C', root: 'C', quality: 'major', notes: [] },
+        { id: '2', startBeat: 4, durationBeats: 4, symbol: 'G', root: 'G', quality: 'major', notes: [] },
+        { id: '3', startBeat: 8, durationBeats: 4, symbol: 'Am', root: 'A', quality: 'minor', notes: [] },
+        { id: '4', startBeat: 12, durationBeats: 4, symbol: 'F', root: 'F', quality: 'major', notes: [] },
+      ],
+    });
+    const r2 = engine.handleEvent(
+      { type: 'chord.changed', payload: { bar: 3, chordSymbol: 'F' } },
+      fullProgression,
+    );
+    expect(r2.advanced).toBe(true);
+    expect(engine.getState().stepIndex).toBe(2);
+
+    // exercise step
+    const ex = engine.getCurrentExercise()!;
+    const grade = engine.answerExercise({
+      kind: 'multipleChoice',
+      selectedIndex: (ex as { correctIndex: number }).correctIndex,
+    });
+    expect(grade.correct).toBe(true);
+    expect(grade.completedLesson).toBe(true);
+  });
+
+  // ─── 0-3: ドラムを足す — drumPatternHas kick≥4/snare≥2 ──────────────────
+
+  it('0-3: step 2 advances when kick≥4 AND snare≥2 in project', () => {
+    const engine = new TutorialEngine();
+    const lesson = COURSE0_LESSONS[2]!;
+    engine.loadLesson(lesson);
+
+    // step 1: any drum.stepToggled event
+    const projectWithOneDrum = makeProject({
+      tracks: [makeDrumTrack([makeDrumEvent('kick', 0)])],
+    });
+    engine.handleEvent(
+      { type: 'drum.stepToggled', payload: { lane: 'kick', stepIndex: 0, active: true, trackId: 'drums' } },
+      projectWithOneDrum,
+    );
+    expect(engine.getState().stepIndex).toBe(1);
+
+    // step 2 (drumPatternHas): project must have kick≥4 AND snare≥2
+    const insufficientProject = makeProject({
+      tracks: [
+        makeDrumTrack([
+          makeDrumEvent('kick', 0),
+          makeDrumEvent('kick', 4),
+          makeDrumEvent('kick', 8),
+          makeDrumEvent('kick', 12),
+          // no snare → should NOT advance
+        ]),
+      ],
+    });
+    const noAdvance = engine.handleEvent(
+      { type: 'drum.stepToggled', payload: { lane: 'kick', stepIndex: 12, active: true, trackId: 'drums' } },
+      insufficientProject,
+    );
+    expect(noAdvance.advanced).toBe(false);
+    expect(engine.getState().stepIndex).toBe(1);
+
+    // now with kick≥4 AND snare≥2
+    const goodProject = makeProject({
+      tracks: [
+        makeDrumTrack([
+          makeDrumEvent('kick', 0),
+          makeDrumEvent('kick', 4),
+          makeDrumEvent('kick', 8),
+          makeDrumEvent('kick', 12),
+          makeDrumEvent('snare', 4),
+          makeDrumEvent('snare', 12),
+        ]),
+      ],
+    });
+    const r = engine.handleEvent(
+      { type: 'drum.stepToggled', payload: { lane: 'snare', stepIndex: 12, active: true, trackId: 'drums' } },
+      goodProject,
+    );
+    expect(r.advanced).toBe(true);
+    expect(engine.getState().stepIndex).toBe(2);
+
+    // exercise step
+    const ex = engine.getCurrentExercise()!;
+    const grade = engine.answerExercise({
+      kind: 'multipleChoice',
+      selectedIndex: (ex as { correctIndex: number }).correctIndex,
+    });
+    expect(grade.correct).toBe(true);
+    expect(grade.completedLesson).toBe(true);
+  });
+
+  it('0-3: does NOT advance on kick≥4 only (snare missing)', () => {
+    const engine = new TutorialEngine();
+    const lesson = COURSE0_LESSONS[2]!;
+    engine.loadLesson(lesson);
+
+    // advance past step 1
+    engine.handleEvent(
+      { type: 'drum.stepToggled', payload: { lane: 'kick', stepIndex: 0, active: true, trackId: 'drums' } },
+      makeProject({ tracks: [makeDrumTrack([makeDrumEvent('kick', 0)])] }),
+    );
+
+    // kick only — snare missing → step 2 should NOT advance
+    const kickOnly = makeProject({
+      tracks: [
+        makeDrumTrack([
+          makeDrumEvent('kick', 0),
+          makeDrumEvent('kick', 4),
+          makeDrumEvent('kick', 8),
+          makeDrumEvent('kick', 12),
+        ]),
+      ],
+    });
+    const result = engine.handleEvent(
+      { type: 'drum.stepToggled', payload: { lane: 'kick', stepIndex: 12, active: true, trackId: 'drums' } },
+      kickOnly,
+    );
+    expect(result.advanced).toBe(false);
+    expect(engine.getState().stepIndex).toBe(1);
+  });
+
+  // ─── 0-8: 書き出す — export.midi AND export.wav ───────────────────────────
+
+  it('0-8: completes via export.midi event', () => {
+    const engine = new TutorialEngine();
+    const lesson = COURSE0_LESSONS[7]!;
+    engine.loadLesson(lesson);
+
+    // advance past step 1 (transport.played)
+    engine.handleEvent(
+      { type: 'transport.played', payload: { positionBeats: 0 } },
+      makeProject(),
+    );
+    expect(engine.getState().stepIndex).toBe(1);
+
+    // step 2: exportCompleted — trigger via export.midi
+    const r = engine.handleEvent(
+      { type: 'export.midi', payload: { format: 'midi' } },
+      makeProject(),
+    );
+    expect(r.advanced).toBe(true);
+    expect(engine.getState().stepIndex).toBe(2);
+
+    // exercise step
+    const ex = engine.getCurrentExercise()!;
+    const grade = engine.answerExercise({
+      kind: 'multipleChoice',
+      selectedIndex: (ex as { correctIndex: number }).correctIndex,
+    });
+    expect(grade.correct).toBe(true);
+    expect(grade.completedLesson).toBe(true);
+    expect(engine.getState().status).toBe('completed');
+  });
+
+  it('0-8: completes via export.wav event', () => {
+    const engine = new TutorialEngine();
+    const lesson = COURSE0_LESSONS[7]!;
+    engine.loadLesson(lesson);
+
+    // advance past step 1
+    engine.handleEvent(
+      { type: 'transport.played', payload: { positionBeats: 0 } },
+      makeProject(),
+    );
+
+    // step 2: exportCompleted — trigger via export.wav
+    const r = engine.handleEvent(
+      { type: 'export.wav', payload: { format: 'wav' } },
+      makeProject(),
+    );
+    expect(r.advanced).toBe(true);
+    expect(engine.getState().stepIndex).toBe(2);
+
+    const ex = engine.getCurrentExercise()!;
+    const grade = engine.answerExercise({
+      kind: 'multipleChoice',
+      selectedIndex: (ex as { correctIndex: number }).correctIndex,
+    });
+    expect(grade.correct).toBe(true);
+    expect(grade.completedLesson).toBe(true);
+    expect(engine.getState().status).toBe('completed');
+  });
+
+  it('0-8: non-export event does NOT advance step 2', () => {
+    const engine = new TutorialEngine();
+    const lesson = COURSE0_LESSONS[7]!;
+    engine.loadLesson(lesson);
+
+    // advance past step 1
+    engine.handleEvent(
+      { type: 'transport.played', payload: { positionBeats: 0 } },
+      makeProject(),
+    );
+    expect(engine.getState().stepIndex).toBe(1);
+
+    // chord.added should NOT satisfy exportCompleted
+    const result = engine.handleEvent(
+      { type: 'chord.added', payload: { bar: 0, chordSymbol: 'C' } },
+      makeProject(),
+    );
+    expect(result.advanced).toBe(false);
+    expect(engine.getState().stepIndex).toBe(1);
   });
 });

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Section } from '@cts/project-model';
 import { addSection, updateSection } from '@cts/project-model';
 import { useStore } from '../../state/store';
+import { publishAppEvent } from '../../state/appEvents';
 import { pxPerBeat } from '../timeline';
 
 /** Section types with Japanese labels and an accent class. */
@@ -50,6 +51,10 @@ export function Arranger() {
         lengthBars: length,
       }),
     );
+    publishAppEvent({
+      type: 'section.added',
+      payload: { sectionType: 'verse', startBar: clampedStart, lengthBars: length },
+    });
   };
 
   const onRemove = (id: string) => {

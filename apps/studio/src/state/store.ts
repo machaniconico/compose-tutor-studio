@@ -475,7 +475,17 @@ export const useStore = create<StoreState>((set, get) => {
 
     // --- editor toggles (UI only) ---
     setActiveView: (view) => set((s) => ({ editor: { ...s.editor, activeView: view } })),
-    toggleScaleSnap: () => set((s) => ({ editor: { ...s.editor, scaleSnap: !s.editor.scaleSnap } })),
+    toggleScaleSnap: () => {
+      const next = !get().editor.scaleSnap;
+      set((s) => ({ editor: { ...s.editor, scaleSnap: next } }));
+      if (next) {
+        const project = get().project;
+        publishAppEvent({
+          type: 'scale_snap.enabled',
+          payload: { key: project.key, scale: project.scale },
+        });
+      }
+    },
     toggleChordToneHighlight: () =>
       set((s) => ({ editor: { ...s.editor, chordToneHighlight: !s.editor.chordToneHighlight } })),
     setZoomX: (zoomX) => set((s) => ({ editor: { ...s.editor, zoomX } })),

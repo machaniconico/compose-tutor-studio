@@ -6,20 +6,23 @@ import {
   BASIC_LESSONS,
   COMPOSE_COURSE,
   COMPOSE_LESSONS,
+  COURSE0_COURSE,
+  COURSE0_LESSONS,
   getLessonById,
 } from '../src/content/index.js';
 import type { TutorialLesson } from '../src/types.js';
 
 describe('content registry', () => {
-  it('ALL_COURSES contains 2 courses (basic, compose)', () => {
-    expect(ALL_COURSES).toHaveLength(2);
+  it('ALL_COURSES contains 3 courses (course0, basic, compose)', () => {
+    expect(ALL_COURSES).toHaveLength(3);
     const ids = ALL_COURSES.map((c) => c.id);
+    expect(ids).toContain('course0');
     expect(ids).toContain('basic');
     expect(ids).toContain('compose');
   });
 
-  it('ALL_LESSONS contains 9 lessons (4 basic + 5 compose)', () => {
-    expect(ALL_LESSONS).toHaveLength(9);
+  it('ALL_LESSONS contains 17 lessons (8 course0 + 4 basic + 5 compose)', () => {
+    expect(ALL_LESSONS).toHaveLength(17);
   });
 
   it('BASIC_LESSONS contains 4 lessons', () => {
@@ -36,6 +39,14 @@ describe('content registry', () => {
 
   it('COMPOSE_COURSE.lessonIds matches COMPOSE_LESSONS ids in order', () => {
     expect(COMPOSE_COURSE.lessonIds).toEqual(COMPOSE_LESSONS.map((l) => l.id));
+  });
+
+  it('COURSE0_LESSONS contains 8 lessons', () => {
+    expect(COURSE0_LESSONS).toHaveLength(8);
+  });
+
+  it('COURSE0_COURSE.lessonIds matches COURSE0_LESSONS ids in order', () => {
+    expect(COURSE0_COURSE.lessonIds).toEqual(COURSE0_LESSONS.map((l) => l.id));
   });
 
   it('getLessonById returns correct lesson', () => {

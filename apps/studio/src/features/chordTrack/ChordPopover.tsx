@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { ChordEvent, Project } from '@cts/project-model';
-import { parseChord, suggestNextChords } from '@cts/theory-engine';
-import { applyProgressionTemplate, updateChordSymbol } from '../../state/editorActions';
+import { parseChord, realizeProgression, suggestNextChords } from '@cts/theory-engine';
+import { buildChordEvent, projectBeatsPerBar, updateChordSymbol } from '../../state/editorActions';
 import { useStore } from '../../state/store';
 import {
   borrowedPalette,
@@ -43,6 +43,7 @@ export function ChordPopover(props: {
 }) {
   const { project, chord, onClose } = props;
   const removeChord = useStore((s) => s.removeChord);
+  const applyProjectChange = useStore((s) => s.applyProjectChange);
   const [text, setText] = useState(chord.symbol);
   const [activeTab, setActiveTab] = useState<PaletteTab>('diatonic');
 
@@ -107,8 +108,38 @@ export function ChordPopover(props: {
   };
 
   const commitProgression = (templateId: string) => {
-    applyProgressionTemplate(templateId);
-    onClose();
+    try {
+      applyProjectChange((currentProject) => {
+        const symbols = realizeProgression(templateId, currentProject.key, currentProject.scale);
+        if (symbols.length === 0) return currentProject;
+
+        const anchor = currentProject.chordTrack.find((c) => c.id === chord.id) ?? chord;
+        const beatsPerBar = projectBeatsPerBar(currentProject);
+        const existingByStart = new Map(currentProject.chordTrack.map((c) => [c.startBeat, c]));
+        const inserted = symbols.map((symbol, index) => {
+          const startBeat = anchor.startBeat + index * beatsPerBar;
+          return buildChordEvent(
+            currentProject,
+            symbol,
+            startBeat,
+            beatsPerBar,
+            existingByStart.get(startBeat)?.id,
+          );
+        });
+        const insertedStarts = new Set(inserted.map((c) => c.startBeat));
+
+        return {
+          ...currentProject,
+          chordTrack: [
+            ...currentProject.chordTrack.filter((c) => !insertedStarts.has(c.startBeat)),
+            ...inserted,
+          ].sort((a, b) => a.startBeat - b.startBeat),
+        };
+      });
+      onClose();
+    } catch {
+      // Invalid templates are ignored; palette entries are generated from known templates.
+    }
   };
 
   const chordCandidates =
