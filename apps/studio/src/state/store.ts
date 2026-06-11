@@ -50,13 +50,22 @@ export type EditorState = {
   zoomX: number;
 };
 
+export type SaveState = {
+  status: 'idle' | 'saving' | 'saved' | 'error';
+  lastSavedAt: string | null;
+  errorMessage: string | null;
+};
+
 const HISTORY_CAP = 100;
 const SAVE_DEBOUNCE_MS = 2000;
+const SAVE_FAILURE_MESSAGE =
+  '保存に失敗しました。ブラウザの保存容量が不足している可能性があります。不要なプロジェクトを削除してからもう一度保存してください。';
 
 type StoreState = {
   project: Project;
   transport: TransportState;
   editor: EditorState;
+  save: SaveState;
   tutorialPanelOpen: boolean;
   /** Free-form inspector content state (e.g. selected chord summary). */
   inspector: { content: string | null };
@@ -131,7 +140,8 @@ type StoreState = {
   canRedo: () => boolean;
 
   // persistence
-  saveToLocalStorage: () => void;
+  saveToLocalStorage: () => boolean;
+  flushPendingSave: () => boolean;
   listSavedProjects: () => ProjectSummary[];
   createNewProject: (title?: string) => void;
   deleteProject: (id: string) => void;
@@ -145,13 +155,36 @@ type StoreState = {
 // Debounced save (module-level so it survives re-renders).
 // ---------------------------------------------------------------------------
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingSave: (() => boolean) | null = null;
 
-function scheduleSave(getProject: () => Project): void {
+function scheduleSave(saveNow: () => boolean): void {
   if (saveTimer) clearTimeout(saveTimer);
+  pendingSave = saveNow;
   saveTimer = setTimeout(() => {
-    saveProject(getProject());
+    const run = pendingSave;
     saveTimer = null;
+    pendingSave = null;
+    run?.();
   }, SAVE_DEBOUNCE_MS);
+}
+
+function clearScheduledSave(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  pendingSave = null;
+}
+
+function flushScheduledSave(): boolean {
+  if (!pendingSave) return true;
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  const run = pendingSave;
+  pendingSave = null;
+  return run();
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +216,14 @@ function makeEditor(project: Project): EditorState {
   };
 }
 
+function makeIdleSave(): SaveState {
+  return { status: 'idle', lastSavedAt: null, errorMessage: null };
+}
+
+function makeSavedState(savedAt: string): SaveState {
+  return { status: 'saved', lastSavedAt: savedAt, errorMessage: null };
+}
+
 /** Load the most recent saved project, or build a fresh default. */
 function initialProject(): Project {
   return loadMostRecentProject() ?? createDefaultProject();
@@ -212,19 +253,50 @@ function pitchInScale(project: Project, pitch: number): boolean {
 const startingProject = initialProject();
 
 export const useStore = create<StoreState>((set, get) => {
+  const markSaving = (): void => {
+    const { lastSavedAt } = get().save;
+    set({ save: { status: 'saving', lastSavedAt, errorMessage: null } });
+  };
+
+  const persistProject = (project: Project): boolean => {
+    markSaving();
+    const saved = saveProject(project);
+    if (saved) {
+      set({ save: makeSavedState(nowIso()) });
+      return true;
+    }
+    const { lastSavedAt } = get().save;
+    set({
+      save: {
+        status: 'error',
+        lastSavedAt,
+        errorMessage: SAVE_FAILURE_MESSAGE,
+      },
+    });
+    return false;
+  };
+
+  const persistCurrentProject = (): boolean => persistProject(get().project);
+
   /** Apply an immutable project change: bump updatedAt, push history, save. */
   const commitProject = (next: Project): void => {
     const current = get().project;
     const stamped: Project = { ...next, updatedAt: nowIso() };
     const past = [...get().past, current].slice(-HISTORY_CAP);
-    set({ project: stamped, past, future: [] });
-    scheduleSave(() => get().project);
+    set({
+      project: stamped,
+      past,
+      future: [],
+      save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
+    });
+    scheduleSave(persistCurrentProject);
   };
 
   return {
     project: startingProject,
     transport: makeTransport(),
     editor: makeEditor(startingProject),
+    save: makeIdleSave(),
     tutorialPanelOpen: false,
     inspector: { content: null },
     past: [],
@@ -445,8 +517,9 @@ export const useStore = create<StoreState>((set, get) => {
         project: previous,
         past: past.slice(0, -1),
         future: [project, ...future].slice(0, HISTORY_CAP),
+        save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
       });
-      scheduleSave(() => get().project);
+      scheduleSave(persistCurrentProject);
     },
     redo: () => {
       const { past, project, future } = get();
@@ -456,31 +529,32 @@ export const useStore = create<StoreState>((set, get) => {
         project: next,
         past: [...past, project].slice(-HISTORY_CAP),
         future: future.slice(1),
+        save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
       });
-      scheduleSave(() => get().project);
+      scheduleSave(persistCurrentProject);
     },
     canUndo: () => get().past.length > 0,
     canRedo: () => get().future.length > 0,
 
     // --- persistence ---
     saveToLocalStorage: () => {
-      if (saveTimer) {
-        clearTimeout(saveTimer);
-        saveTimer = null;
-      }
-      saveProject(get().project);
+      clearScheduledSave();
+      return persistCurrentProject();
     },
+    flushPendingSave: () => flushScheduledSave(),
     listSavedProjects: () => listSavedProjects(),
     createNewProject: (title) => {
+      clearScheduledSave();
       const project = createDefaultProject(title);
       set({
         project,
         editor: makeEditor(project),
         transport: makeTransport(),
+        save: makeIdleSave(),
         past: [],
         future: [],
       });
-      saveProject(project);
+      persistProject(project);
       publishAppEvent({
         type: 'project.created',
         payload: { key: project.key, bpm: project.bpm },
@@ -489,24 +563,28 @@ export const useStore = create<StoreState>((set, get) => {
     loadProjectById: (id) => {
       const loaded = loadStoredProject(id);
       if (!loaded) return false;
+      clearScheduledSave();
       set({
         project: loaded,
         editor: makeEditor(loaded),
         transport: makeTransport(),
+        save: makeSavedState(loaded.updatedAt),
         past: [],
         future: [],
       });
       return true;
     },
     replaceProject: (project) => {
+      clearScheduledSave();
       set({
         project,
         editor: makeEditor(project),
         transport: makeTransport(),
+        save: makeIdleSave(),
         past: [],
         future: [],
       });
-      saveProject(project);
+      persistProject(project);
       publishAppEvent({
         type: 'project.created',
         payload: { key: project.key, bpm: project.bpm },
@@ -517,11 +595,14 @@ export const useStore = create<StoreState>((set, get) => {
       // If the active project was deleted, switch to the most recent saved one
       // or a fresh default so the UI always has a project to render.
       if (get().project.id === id) {
-        const fallback = loadMostRecentProject() ?? createDefaultProject();
+        clearScheduledSave();
+        const savedFallback = loadMostRecentProject();
+        const fallback = savedFallback ?? createDefaultProject();
         set({
           project: fallback,
           editor: makeEditor(fallback),
           transport: makeTransport(),
+          save: savedFallback ? makeSavedState(savedFallback.updatedAt) : makeIdleSave(),
           past: [],
           future: [],
         });

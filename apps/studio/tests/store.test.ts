@@ -1,19 +1,27 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { installLocalStorage } from './localStorageStub';
+import { installLocalStorage, MemoryStorage } from './localStorageStub';
 import { createDefaultProject } from '../src/state/defaultProject';
+import { projectKey } from '../src/state/persistence';
 
 // The store reads localStorage at module-import time, so install the stub
 // BEFORE importing it. We import dynamically inside beforeAll for that reason.
 let useStore: typeof import('../src/state/store')['useStore'];
+let storage: MemoryStorage;
+
+class FailingStorage extends MemoryStorage {
+  override setItem(): void {
+    throw new Error('QuotaExceededError');
+  }
+}
 
 beforeAll(async () => {
-  installLocalStorage();
+  storage = installLocalStorage();
   ({ useStore } = await import('../src/state/store'));
 });
 
 beforeEach(() => {
   // Reset to a clean project + history before each test.
-  installLocalStorage();
+  storage = installLocalStorage();
   useStore.getState().createNewProject('テスト');
 });
 
@@ -196,14 +204,59 @@ describe('persistence integration', () => {
     const id = useStore.getState().project.id;
     const list = useStore.getState().listSavedProjects();
     expect(list.some((p) => p.id === id)).toBe(true);
+    expect(useStore.getState().save.status).toBe('saved');
   });
 
   it('saveToLocalStorage writes synchronously and survives reload', () => {
     useStore.getState().setTitle('永続化');
-    useStore.getState().saveToLocalStorage();
+    expect(useStore.getState().save.status).toBe('saving');
+    expect(useStore.getState().saveToLocalStorage()).toBe(true);
     const id = useStore.getState().project.id;
     const list = useStore.getState().listSavedProjects();
     const found = list.find((p) => p.id === id);
     expect(found?.title).toBe('永続化');
+    expect(useStore.getState().save.status).toBe('saved');
+    expect(useStore.getState().save.lastSavedAt).not.toBeNull();
+  });
+
+  it('flushes a debounced save synchronously before unload', () => {
+    const id = useStore.getState().project.id;
+    useStore.getState().setTitle('リロード直前の編集');
+
+    const beforeFlush = storage.getItem(projectKey(id));
+    expect(beforeFlush ? JSON.parse(beforeFlush).title : null).toBe('テスト');
+
+    expect(useStore.getState().flushPendingSave()).toBe(true);
+    const afterFlush = storage.getItem(projectKey(id));
+    expect(afterFlush ? JSON.parse(afterFlush).title : null).toBe('リロード直前の編集');
+    expect(useStore.getState().save.status).toBe('saved');
+  });
+
+  it('reports a Japanese user-facing message when saving fails', () => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: new FailingStorage(),
+      configurable: true,
+      writable: true,
+    });
+
+    useStore.getState().setTitle('保存失敗テスト');
+
+    expect(useStore.getState().saveToLocalStorage()).toBe(false);
+    expect(useStore.getState().save.status).toBe('error');
+    expect(useStore.getState().save.errorMessage).toContain('保存に失敗しました');
+    expect(useStore.getState().save.errorMessage).toContain('保存容量');
+  });
+});
+
+describe('transport toggles', () => {
+  it('toggles loop and metronome state', () => {
+    expect(useStore.getState().transport.loopEnabled).toBe(false);
+    expect(useStore.getState().transport.metronome).toBe(false);
+
+    useStore.getState().toggleLoop();
+    useStore.getState().toggleMetronome();
+
+    expect(useStore.getState().transport.loopEnabled).toBe(true);
+    expect(useStore.getState().transport.metronome).toBe(true);
   });
 });

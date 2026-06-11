@@ -1,4 +1,11 @@
-import type { Track } from '@cts/project-model';
+import type { EffectConfig, Track } from '@cts/project-model';
+import {
+  DEFAULT_EFFECT_PARAMS,
+  effectParam,
+  findEffect,
+  upsertEffect,
+  type SupportedEffectType,
+} from '../../audio/effects';
 import { useStore } from '../../state/store';
 
 /** Convert a linear gain (0..2) to an approximate dB label for display. */
@@ -14,6 +21,14 @@ function panLabel(pan: number): string {
   if (Math.abs(pan) < 0.02) return 'C';
   const amount = Math.round(Math.abs(pan) * 100);
   return pan < 0 ? `L${amount}` : `R${amount}`;
+}
+
+function percentLabel(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function effectLabel(effect: EffectConfig | undefined, key: string, fallback: number): number {
+  return effectParam(effect, key, fallback);
 }
 
 /**
@@ -48,6 +63,36 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
   const setTrackPan = useStore((s) => s.setTrackPan);
   const toggleMute = useStore((s) => s.toggleMute);
   const toggleSolo = useStore((s) => s.toggleSolo);
+  const applyProjectChange = useStore((s) => s.applyProjectChange);
+
+  const updateEffect = (
+    type: SupportedEffectType,
+    update: (effect: EffectConfig) => EffectConfig,
+  ) => {
+    applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((candidate) =>
+        candidate.id === track.id
+          ? {
+              ...candidate,
+              effects: upsertEffect(candidate.effects, type, update),
+            }
+          : candidate,
+      ),
+    }));
+  };
+
+  const setEffectEnabled = (type: SupportedEffectType, enabled: boolean) => {
+    updateEffect(type, (effect) => ({ ...effect, enabled }));
+  };
+
+  const setEffectParam = (type: SupportedEffectType, key: string, value: number) => {
+    updateEffect(type, (effect) => ({
+      ...effect,
+      enabled: true,
+      params: { ...effect.params, [key]: value },
+    }));
+  };
 
   return (
     <div className={`mix-ch${isMaster ? ' is-master' : ''}`}>
@@ -113,6 +158,134 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
           </button>
         </div>
       ) : null}
+
+      {!isMaster ? (
+        <EffectControls
+          track={track}
+          setEffectEnabled={setEffectEnabled}
+          setEffectParam={setEffectParam}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function EffectControls(props: {
+  track: Track;
+  setEffectEnabled: (type: SupportedEffectType, enabled: boolean) => void;
+  setEffectParam: (type: SupportedEffectType, key: string, value: number) => void;
+}) {
+  const { track, setEffectEnabled, setEffectParam } = props;
+  const filter = findEffect(track.effects, 'filter');
+  const delay = findEffect(track.effects, 'delay');
+  const reverb = findEffect(track.effects, 'reverb');
+  const filterOn = filter?.enabled ?? false;
+  const delayOn = delay?.enabled ?? false;
+  const reverbOn = reverb?.enabled ?? false;
+
+  const cutoffHz = effectLabel(
+    filter,
+    'cutoffHz',
+    DEFAULT_EFFECT_PARAMS.filter.cutoffHz ?? 1800,
+  );
+  const delayTime = effectLabel(
+    delay,
+    'timeSeconds',
+    DEFAULT_EFFECT_PARAMS.delay.timeSeconds ?? 0.25,
+  );
+  const delayFeedback = effectLabel(
+    delay,
+    'feedback',
+    DEFAULT_EFFECT_PARAMS.delay.feedback ?? 0.28,
+  );
+  const reverbMix = effectLabel(
+    reverb,
+    'mix',
+    DEFAULT_EFFECT_PARAMS.reverb.mix ?? 0.25,
+  );
+
+  return (
+    <details className="mix-ch__effects">
+      <summary>FX</summary>
+      <div className="mix-ch__effect">
+        <label>
+          <input
+            type="checkbox"
+            checked={filterOn}
+            aria-label={`${track.name} フィルター`}
+            onChange={(event) => setEffectEnabled('filter', event.target.checked)}
+          />
+          フィルター
+        </label>
+        <input
+          type="range"
+          min={200}
+          max={12000}
+          step={10}
+          value={cutoffHz}
+          disabled={!filterOn}
+          aria-label={`${track.name} フィルター cutoff`}
+          onChange={(event) => setEffectParam('filter', 'cutoffHz', Number(event.target.value))}
+        />
+        <span>{Math.round(cutoffHz)} Hz</span>
+      </div>
+
+      <div className="mix-ch__effect">
+        <label>
+          <input
+            type="checkbox"
+            checked={delayOn}
+            aria-label={`${track.name} ディレイ`}
+            onChange={(event) => setEffectEnabled('delay', event.target.checked)}
+          />
+          ディレイ
+        </label>
+        <input
+          type="range"
+          min={0.05}
+          max={1}
+          step={0.01}
+          value={delayTime}
+          disabled={!delayOn}
+          aria-label={`${track.name} ディレイ time`}
+          onChange={(event) => setEffectParam('delay', 'timeSeconds', Number(event.target.value))}
+        />
+        <span>{delayTime.toFixed(2)} s</span>
+        <input
+          type="range"
+          min={0}
+          max={0.8}
+          step={0.01}
+          value={delayFeedback}
+          disabled={!delayOn}
+          aria-label={`${track.name} ディレイ feedback`}
+          onChange={(event) => setEffectParam('delay', 'feedback', Number(event.target.value))}
+        />
+        <span>{percentLabel(delayFeedback)}</span>
+      </div>
+
+      <div className="mix-ch__effect">
+        <label>
+          <input
+            type="checkbox"
+            checked={reverbOn}
+            aria-label={`${track.name} リバーブ`}
+            onChange={(event) => setEffectEnabled('reverb', event.target.checked)}
+          />
+          リバーブ
+        </label>
+        <input
+          type="range"
+          min={0}
+          max={0.8}
+          step={0.01}
+          value={reverbMix}
+          disabled={!reverbOn}
+          aria-label={`${track.name} リバーブ mix`}
+          onChange={(event) => setEffectParam('reverb', 'mix', Number(event.target.value))}
+        />
+        <span>{percentLabel(reverbMix)}</span>
+      </div>
+    </details>
   );
 }

@@ -7,6 +7,12 @@
 // live gain nodes.
 
 import type { Track } from '@cts/project-model';
+import {
+  buildTrackEffectChain,
+  effectSignature,
+  type SupportedEffectType,
+  type TrackEffectChain,
+} from './effects';
 
 /**
  * Resolve which tracks are audible given mute/solo flags.
@@ -46,19 +52,28 @@ export function clampPan(pan: number): number {
 export class TrackGraph {
   readonly trackId: string;
   readonly input: GainNode;
+  private readonly ctx: BaseAudioContext;
+  private readonly master: AudioNode;
   private readonly gain: GainNode;
   private readonly panner: StereoPannerNode;
+  private effects: TrackEffectChain | null = null;
 
   constructor(ctx: BaseAudioContext, master: AudioNode, track: Track) {
+    this.ctx = ctx;
+    this.master = master;
     this.trackId = track.id;
     this.gain = ctx.createGain();
     this.panner = ctx.createStereoPanner();
     this.gain.gain.value = clampVolume(track.volume);
     this.panner.pan.value = clampPan(track.pan);
-    // Voices connect to `input` (the gain node); gain -> panner -> master.
+    // Voices connect to `input` (the gain node); gain -> panner -> FX -> master.
     this.input = this.gain;
     this.gain.connect(this.panner);
-    this.panner.connect(master);
+    this.rebuildEffects(track, ctx.currentTime);
+  }
+
+  get effectTypes(): readonly SupportedEffectType[] {
+    return this.effects?.effectTypes ?? [];
   }
 
   /** Apply volume/pan/mute/solo state to the live nodes. */
@@ -67,6 +82,7 @@ export class TrackGraph {
     // Short ramp avoids zipper noise on live changes.
     this.gain.gain.setTargetAtTime(target, when, 0.01);
     this.panner.pan.setTargetAtTime(clampPan(track.pan), when, 0.01);
+    this.syncEffects(track, when);
   }
 
   /** Disconnect from the graph. */
@@ -74,9 +90,29 @@ export class TrackGraph {
     try {
       this.gain.disconnect();
       this.panner.disconnect();
+      this.effects?.dispose();
+      this.effects = null;
     } catch {
       // already disconnected
     }
+  }
+
+  private syncEffects(track: Track, when: number): void {
+    if ((this.effects?.signature ?? '') !== effectSignature(track.effects)) {
+      this.rebuildEffects(track, when);
+      return;
+    }
+    this.effects?.apply(track.effects, when);
+  }
+
+  private rebuildEffects(track: Track, when: number): void {
+    try {
+      this.panner.disconnect();
+    } catch {
+      // not connected yet
+    }
+    this.effects?.dispose();
+    this.effects = buildTrackEffectChain(this.ctx, this.panner, this.master, track.effects, when);
   }
 }
 

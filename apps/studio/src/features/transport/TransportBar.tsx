@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
-import { useStore } from '../../state/store';
+import { useStore, type SaveState } from '../../state/store';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
 import { formatPosition } from '../timeline';
 import { initAudioBridge } from '../../audio/playback';
 import { ProjectMenu } from '../projectMenu/ProjectMenu';
 import { ExportMenu } from '../export/ExportMenu';
+import { installBeforeUnloadFlush } from '../../state/persistence';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -18,10 +19,27 @@ const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'blues', label: 'ブルース' },
 ];
 
+function formatSaveTime(value: string | null): string {
+  if (!value) return '--:--:--';
+  return new Date(value).toLocaleTimeString('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function saveIndicatorText(save: SaveState): string {
+  if (save.status === 'saving') return '保存中...';
+  if (save.status === 'error') return `保存失敗: ${save.errorMessage ?? 'もう一度保存してください。'}`;
+  if (save.status === 'saved') return `保存済み ${formatSaveTime(save.lastSavedAt)}`;
+  return '未保存';
+}
+
 /** Top transport + project metadata bar. */
 export function TransportBar() {
   const project = useStore((s) => s.project);
   const transport = useStore((s) => s.transport);
+  const save = useStore((s) => s.save);
   const isPlaying = transport.isPlaying;
   const play = useStore((s) => s.play);
   const stop = useStore((s) => s.stop);
@@ -40,6 +58,22 @@ export function TransportBar() {
   // Connect the store to the audio engine once. The bridge subscribes to
   // transport.isPlaying so the play/stop buttons below only touch store state.
   useEffect(() => initAudioBridge(), []);
+
+  useEffect(() => installBeforeUnloadFlush(() => useStore.getState().flushPendingSave()), []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        saveToLocalStorage();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [saveToLocalStorage]);
 
   const beatsPerBar = project.timeSignature[0];
 
@@ -150,8 +184,12 @@ export function TransportBar() {
 
         <ExportMenu />
 
-        <span className="save-indicator">
-          更新: {new Date(project.updatedAt).toLocaleTimeString('ja-JP')}
+        <span
+          className={`save-indicator save-indicator--${save.status}`}
+          role={save.status === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+        >
+          {saveIndicatorText(save)}
         </span>
       </div>
     </header>

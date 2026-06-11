@@ -14,6 +14,8 @@ export type ProjectSummary = {
   updatedAt: string;
 };
 
+export type BeforeUnloadTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
+
 /** Resolve the active Storage, or null when none is available (e.g. SSR). */
 function getStorage(): Storage | null {
   try {
@@ -22,6 +24,11 @@ function getStorage(): Storage | null {
     // Accessing localStorage can throw in sandboxed contexts.
   }
   return null;
+}
+
+function getBeforeUnloadTarget(): BeforeUnloadTarget | null {
+  if (typeof window === 'undefined') return null;
+  return window;
 }
 
 /** Build the storage key for a project id. */
@@ -38,6 +45,21 @@ export function saveProject(project: Project, storage: Storage | null = getStora
   } catch {
     return false;
   }
+}
+
+/** Flush debounced persistence synchronously before a page reload/navigation. */
+export function installBeforeUnloadFlush(
+  flush: () => boolean,
+  target: BeforeUnloadTarget | null = getBeforeUnloadTarget(),
+): () => void {
+  if (!target) return () => {};
+  const onBeforeUnload = (): void => {
+    flush();
+  };
+  target.addEventListener('beforeunload', onBeforeUnload);
+  return () => {
+    target.removeEventListener('beforeunload', onBeforeUnload);
+  };
 }
 
 /** Load one project by id, or null if missing/corrupt. */

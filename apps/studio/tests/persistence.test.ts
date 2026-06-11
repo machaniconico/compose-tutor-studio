@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   deleteProject,
+  installBeforeUnloadFlush,
   listSavedProjects,
   loadMostRecentProject,
   loadProject,
@@ -9,6 +10,29 @@ import {
 } from '../src/state/persistence';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { MemoryStorage } from './localStorageStub';
+
+class FailingStorage extends MemoryStorage {
+  override setItem(): void {
+    throw new Error('QuotaExceededError');
+  }
+}
+
+function makeBeforeUnloadTarget() {
+  const listeners = new Set<() => void>();
+  return {
+    target: {
+      addEventListener(type: string, listener: () => void): void {
+        if (type === 'beforeunload') listeners.add(listener);
+      },
+      removeEventListener(type: string, listener: () => void): void {
+        if (type === 'beforeunload') listeners.delete(listener);
+      },
+    } as Window,
+    dispatchBeforeUnload(): void {
+      for (const listener of listeners) listener();
+    },
+  };
+}
 
 describe('persistence', () => {
   it('round-trips a project through storage', () => {
@@ -59,5 +83,27 @@ describe('persistence', () => {
     saveProject(project, storage);
     expect(deleteProject(project.id, storage)).toBe(true);
     expect(loadProject(project.id, storage)).toBeNull();
+  });
+
+  it('returns false when storage rejects a save', () => {
+    const project = createDefaultProject();
+    expect(saveProject(project, new FailingStorage())).toBe(false);
+  });
+
+  it('installs a beforeunload flush handler and removes it cleanly', () => {
+    const { target, dispatchBeforeUnload } = makeBeforeUnloadTarget();
+    let flushes = 0;
+
+    const dispose = installBeforeUnloadFlush(() => {
+      flushes += 1;
+      return true;
+    }, target);
+
+    dispatchBeforeUnload();
+    expect(flushes).toBe(1);
+
+    dispose();
+    dispatchBeforeUnload();
+    expect(flushes).toBe(1);
   });
 });
