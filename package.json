@@ -1,0 +1,17 @@
+{
+  "name": "compose-tutor-studio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Education-integrated composition app: learn chords, scales, and song structure while making an 8-16 bar original song.",
+  "scripts": {
+    "dev": "pnpm --filter @cts/studio dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}

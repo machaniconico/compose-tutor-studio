@@ -1,0 +1,450 @@
+openapi: 3.1.0
+info:
+  title: Compose Tutor Studio Local API / IPC Boundary
+  version: 0.1.0
+  description: |
+    Desktop-first app internal API/IPC specification. In Tauri, these endpoints can be implemented as commands rather than HTTP.
+servers:
+  - url: local://app
+paths:
+  /projects:
+    get:
+      summary: List local projects
+      operationId: listProjects
+      responses:
+        '200':
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectSummary'
+    post:
+      summary: Create project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Created project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+  /projects/{projectId}:
+    get:
+      summary: Load project
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+    put:
+      summary: Save project
+      operationId: saveProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Project'
+      responses:
+        '200':
+          description: Saved
+  /projects/{projectId}/chords:
+    post:
+      summary: Add or update chord event
+      operationId: upsertChordEvent
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChordEvent'
+      responses:
+        '200':
+          description: Analyzed chord event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChordEvent'
+  /theory/analyze-chord:
+    post:
+      summary: Analyze chord symbol in key context
+      operationId: analyzeChord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeChordRequest'
+      responses:
+        '200':
+          description: Chord analysis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChordAnalysis'
+  /theory/suggest-progression:
+    post:
+      summary: Suggest next chords or full progression
+      operationId: suggestProgression
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestProgressionRequest'
+      responses:
+        '200':
+          description: Suggested chords
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChordSuggestion'
+  /lessons:
+    get:
+      summary: List lessons
+      operationId: listLessons
+      responses:
+        '200':
+          description: Lessons
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LessonSummary'
+  /lessons/{lessonId}/events:
+    post:
+      summary: Send user action event to tutorial engine
+      operationId: dispatchLessonEvent
+      parameters:
+        - name: lessonId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TutorialEvent'
+      responses:
+        '200':
+          description: Lesson feedback
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LessonFeedback'
+  /export/midi:
+    post:
+      summary: Export project as MIDI
+      operationId: exportMidi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportRequest'
+      responses:
+        '200':
+          description: Export result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportResult'
+  /export/wav:
+    post:
+      summary: Export project as WAV
+      operationId: exportWav
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportRequest'
+      responses:
+        '200':
+          description: Export result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportResult'
+components:
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    ProjectSummary:
+      type: object
+      required: [id, title, updatedAt]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    CreateProjectRequest:
+      type: object
+      required: [title, bpm, key, scale, timeSignature]
+      properties:
+        title:
+          type: string
+        bpm:
+          type: number
+          minimum: 20
+          maximum: 300
+        key:
+          type: string
+        scale:
+          type: string
+        timeSignature:
+          type: array
+          prefixItems:
+            - type: integer
+            - type: integer
+    Project:
+      type: object
+      required: [id, schemaVersion, title, bpm, timeSignature, key, scale, tracks, chordTrack]
+      properties:
+        id:
+          type: string
+        schemaVersion:
+          type: integer
+        title:
+          type: string
+        bpm:
+          type: number
+        timeSignature:
+          type: array
+          items:
+            type: integer
+        key:
+          type: string
+        scale:
+          type: string
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Track'
+        chordTrack:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChordEvent'
+    Track:
+      type: object
+      required: [id, name, type, clips, volume, pan, mute, solo]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          enum: [instrument, drum, audio, bus, master]
+        clips:
+          type: array
+          items:
+            $ref: '#/components/schemas/Clip'
+        volume:
+          type: number
+        pan:
+          type: number
+        mute:
+          type: boolean
+        solo:
+          type: boolean
+    Clip:
+      type: object
+      required: [id, type, startBeat, lengthBeats]
+      properties:
+        id:
+          type: string
+        type:
+          enum: [midi, drum, audio, automation]
+        startBeat:
+          type: number
+        lengthBeats:
+          type: number
+        loop:
+          type: boolean
+        notes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NoteEvent'
+    NoteEvent:
+      type: object
+      required: [id, pitch, startBeat, durationBeats, velocity]
+      properties:
+        id:
+          type: string
+        pitch:
+          type: integer
+          minimum: 0
+          maximum: 127
+        startBeat:
+          type: number
+        durationBeats:
+          type: number
+        velocity:
+          type: integer
+          minimum: 1
+          maximum: 127
+    ChordEvent:
+      type: object
+      required: [id, startBeat, durationBeats, symbol]
+      properties:
+        id:
+          type: string
+        startBeat:
+          type: number
+        durationBeats:
+          type: number
+        symbol:
+          type: string
+        degree:
+          type: string
+        function:
+          type: string
+        explanation:
+          type: string
+    AnalyzeChordRequest:
+      type: object
+      required: [symbol, key, scale]
+      properties:
+        symbol:
+          type: string
+        key:
+          type: string
+        scale:
+          type: string
+    ChordAnalysis:
+      type: object
+      properties:
+        symbol:
+          type: string
+        root:
+          type: string
+        quality:
+          type: string
+        notes:
+          type: array
+          items:
+            type: string
+        degree:
+          type: string
+        function:
+          type: string
+        explanation:
+          type: string
+    SuggestProgressionRequest:
+      type: object
+      required: [key, scale]
+      properties:
+        key:
+          type: string
+        scale:
+          type: string
+        currentProgression:
+          type: array
+          items:
+            type: string
+        goal:
+          type: string
+    ChordSuggestion:
+      type: object
+      properties:
+        symbol:
+          type: string
+        degree:
+          type: string
+        reason:
+          type: string
+        confidence:
+          type: number
+    LessonSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        level:
+          type: string
+        estimatedMinutes:
+          type: integer
+    TutorialEvent:
+      type: object
+      required: [type, timestamp, payload]
+      properties:
+        type:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        payload:
+          type: object
+    LessonFeedback:
+      type: object
+      properties:
+        status:
+          enum: [not_started, in_progress, completed]
+        currentStep:
+          type: integer
+        message:
+          type: string
+        hints:
+          type: array
+          items:
+            type: string
+    ExportRequest:
+      type: object
+      required: [projectId, outputPath]
+      properties:
+        projectId:
+          type: string
+        outputPath:
+          type: string
+        range:
+          type: object
+          properties:
+            startBeat:
+              type: number
+            endBeat:
+              type: number
+    ExportResult:
+      type: object
+      properties:
+        path:
+          type: string
+        format:
+          enum: [midi, wav]
+        durationSeconds:
+          type: number
+        warnings:
+          type: array
+          items:
+            type: string
