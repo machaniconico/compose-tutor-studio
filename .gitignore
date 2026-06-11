@@ -30,3 +30,6 @@ test-results/
 
 # Tauri (future)
 src-tauri/target/
+
+# OMC state
+.omc/
