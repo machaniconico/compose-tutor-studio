@@ -3,9 +3,9 @@
 // No Math.random() or Date.now() here — ids come from makeId().
 
 import { makeId } from './ids';
+import { createMidiClip, createDrumClip } from './factories';
 import type {
   ChordEvent,
-  Clip,
   MusicalKey,
   NoteEvent,
   Project,
@@ -46,42 +46,6 @@ export function createDrumTrack(name = 'Drums'): Track {
     mute: false,
     solo: false,
     effects: [],
-  };
-}
-
-/** Create an empty MIDI clip covering [startBeat, startBeat + lengthBeats). */
-export function createMidiClip(
-  trackId: string,
-  startBeat: number,
-  lengthBeats: number,
-): Clip {
-  return {
-    id: makeId('clip'),
-    trackId,
-    type: 'midi',
-    startBeat,
-    lengthBeats,
-    loop: false,
-    notes: [],
-  };
-}
-
-/** Create an empty drum clip. stepsPerBar defaults to 16. */
-export function createDrumClip(
-  trackId: string,
-  startBeat: number,
-  lengthBeats: number,
-  stepsPerBar = 16,
-): Clip {
-  return {
-    id: makeId('clip'),
-    trackId,
-    type: 'drum',
-    startBeat,
-    lengthBeats,
-    loop: false,
-    stepsPerBar,
-    drumEvents: [],
   };
 }
 

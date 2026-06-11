@@ -7,7 +7,7 @@ import { systemClock } from './clock';
 import { createEmptyProject } from './factories';
 import { chordPitchClasses } from './theory';
 import { beatsPerBar } from './time';
-import { uid } from './uid';
+import { makeId } from './ids';
 import type {
   ChordEvent,
   DrumEvent,
@@ -232,7 +232,7 @@ function buildChordTrack(
     for (const step of template.progression) {
       if (bar >= template.lengthBars) break;
       events.push({
-        id: uid('chord'),
+        id: makeId('chord'),
         startBeat: bar * barBeats,
         durationBeats: step.bars * barBeats,
         symbol: step.symbol,
@@ -253,7 +253,7 @@ function buildDrumEvents(template: ProjectTemplate, stepsPerBar: number): DrumEv
     const base = bar * stepsPerBar;
     for (const hit of template.drumPattern) {
       events.push({
-        id: uid('drum'),
+        id: makeId('drum'),
         lane: hit.lane,
         stepIndex: base + hit.step,
         velocity: hit.lane === 'kick' || hit.lane === 'snare' ? 110 : 90,

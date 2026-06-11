@@ -32,9 +32,40 @@ import {
   type ChordEventInput,
   type HarmonicFunction,
 } from '@cts/theory-engine';
+import { getScalePitchClasses } from '@cts/theory-engine';
 import { useStore } from './store';
 import { uid } from './ids';
+import { publishAppEvent } from './appEvents';
 import { quantizeStart } from '../features/pianoRoll/gridMath';
+
+/** Bar index (0-based) for a beat offset under the project's time signature. */
+function barOf(project: Project, startBeat: number): number {
+  const bpb = projectBeatsPerBar(project);
+  return bpb > 0 ? Math.floor(startBeat / bpb) : 0;
+}
+
+/** Whether a MIDI pitch belongs to the project's key/scale. */
+function pitchInScale(project: Project, pitch: number): boolean {
+  try {
+    const pcs = getScalePitchClasses(project.key, project.scale);
+    const pc = ((pitch % 12) + 12) % 12;
+    return pcs.includes(pc);
+  } catch {
+    return false;
+  }
+}
+
+/** Publish a chord.added app event for a freshly written chord. */
+function emitChordAdded(project: Project, event: ChordEvent): void {
+  publishAppEvent({
+    type: 'chord.added',
+    payload: {
+      bar: barOf(project, event.startBeat),
+      chordSymbol: event.symbol,
+      ...(event.degree !== undefined ? { degree: event.degree } : {}),
+    },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Small immutable helpers (mirrors store's private mapTracks).
@@ -141,14 +172,19 @@ export function addChordWithAnalysis(
   startBeat: number,
   durationBeats: number,
 ): void {
+  const captured: { project: Project; event: ChordEvent }[] = [];
   useStore.getState().applyProjectChange((project) => {
     const event = buildChordEvent(project, symbol, startBeat, durationBeats);
+    captured.push({ project, event });
     return { ...project, chordTrack: [...project.chordTrack, event] };
   });
+  const first = captured[0];
+  if (first) emitChordAdded(first.project, first.event);
 }
 
 /** Update a chord's symbol and re-derive its full analysis fields. */
 export function updateChordSymbol(chordId: string, symbol: string): void {
+  const captured: { project: Project; event: ChordEvent; previous: string }[] = [];
   useStore.getState().applyProjectChange((project) => {
     const existing = project.chordTrack.find((c) => c.id === chordId);
     if (!existing) return project;
@@ -159,23 +195,39 @@ export function updateChordSymbol(chordId: string, symbol: string): void {
       existing.durationBeats,
       existing.id,
     );
+    captured.push({ project, event: rebuilt, previous: existing.symbol });
     return {
       ...project,
       chordTrack: project.chordTrack.map((c) => (c.id === chordId ? rebuilt : c)),
     };
   });
+  const first = captured[0];
+  if (first) {
+    publishAppEvent({
+      type: 'chord.changed',
+      payload: {
+        bar: barOf(first.project, first.event.startBeat),
+        chordSymbol: first.event.symbol,
+        previousSymbol: first.previous,
+      },
+    });
+  }
 }
 
 /** Append a chord right after the last chord event (used by suggestions). */
 export function appendChordAfterLast(symbol: string): void {
+  const captured: { project: Project; event: ChordEvent }[] = [];
   useStore.getState().applyProjectChange((project) => {
     const sorted = [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat);
     const last = sorted[sorted.length - 1];
     const bpb = projectBeatsPerBar(project);
     const startBeat = last ? last.startBeat + last.durationBeats : 0;
     const event = buildChordEvent(project, symbol, startBeat, bpb);
+    captured.push({ project, event });
     return { ...project, chordTrack: [...project.chordTrack, event] };
   });
+  const first = captured[0];
+  if (first) emitChordAdded(first.project, first.event);
 }
 
 /** Replace the entire chord track with a fresh set of chords. */
@@ -189,6 +241,7 @@ export function replaceChordTrack(chords: ChordEvent[]): void {
  * fill `lengthBars`.
  */
 export function applyProgressionTemplate(templateId: string): void {
+  const captured: { project: Project; chords: ChordEvent[] }[] = [];
   useStore.getState().applyProjectChange((project) => {
     const template = getProgressionTemplate(templateId);
     if (!template) return project;
@@ -201,8 +254,13 @@ export function applyProgressionTemplate(templateId: string): void {
       if (symbol === undefined) continue;
       chords.push(buildChordEvent(project, symbol, bar * bpb, bpb));
     }
+    captured.push({ project, chords });
     return { ...project, chordTrack: chords };
   });
+  const first = captured[0];
+  if (first) {
+    for (const chord of first.chords) emitChordAdded(first.project, chord);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +291,7 @@ export function duplicateNotes(
 ): string[] {
   const ids = new Set(noteIds);
   const newIds: string[] = [];
+  const dupesByCall: { project: Project; dupes: NoteEvent[] }[] = [];
   useStore.getState().applyProjectChange((project) =>
     mapClip(project, clipId, (c) => {
       const source = (c.notes ?? []).filter((n) => ids.has(n.id));
@@ -247,10 +306,34 @@ export function duplicateNotes(
           velocity: n.velocity,
         };
       });
+      dupesByCall.push({ project, dupes });
       return { ...c, notes: [...(c.notes ?? []), ...dupes] };
     }),
   );
+  emitNotesAdded(clipId, dupesByCall[0]);
   return newIds;
+}
+
+/** Emit a note.added event per note for a clip-targeted batch write. */
+function emitNotesAdded(
+  clipId: string,
+  batch: { project: Project; dupes: NoteEvent[] } | undefined,
+): void {
+  if (!batch) return;
+  const track = batch.project.tracks.find((t) => t.clips.some((c) => c.id === clipId));
+  for (const note of batch.dupes) {
+    publishAppEvent({
+      type: 'note.added',
+      payload: {
+        pitch: note.pitch,
+        startBeat: note.startBeat,
+        durationBeats: note.durationBeats,
+        trackId: track?.id ?? '',
+        trackName: track?.name ?? '',
+        inScale: pitchInScale(batch.project, note.pitch),
+      },
+    });
+  }
 }
 
 /** Set the velocity of the given notes within a clip (clamped 1..127). */
@@ -322,7 +405,9 @@ export function generateBassIntoClip(clipId: string, mode: BassMode): GeneratedN
     scale: project.scale,
     beatsPerBar: projectBeatsPerBar(project),
   });
-  replaceClipNotes(clipId, generatedToNoteEvents(generated));
+  const events = generatedToNoteEvents(generated);
+  replaceClipNotes(clipId, events);
+  emitNotesAdded(clipId, { project: useStore.getState().project, dupes: events });
   return generated;
 }
 
@@ -341,7 +426,9 @@ export function generateMelodyIntoClip(clipId: string, seed: number): GeneratedN
     seed,
     beatsPerBar: projectBeatsPerBar(project),
   });
-  replaceClipNotes(clipId, generatedToNoteEvents(generated));
+  const events = generatedToNoteEvents(generated);
+  replaceClipNotes(clipId, events);
+  emitNotesAdded(clipId, { project: useStore.getState().project, dupes: events });
   return generated;
 }
 

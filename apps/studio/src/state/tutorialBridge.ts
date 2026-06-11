@@ -1,0 +1,280 @@
+// Tutorial bridge — owns the active TutorialEngine instance and connects it to
+// app activity.
+//
+// Responsibilities:
+//  - Instantiate a TutorialEngine for the active lesson, restoring saved
+//    progress from localStorage ('cts.tutorial.<lessonId>').
+//  - Subscribe to the app-event pub/sub (src/state/appEvents.ts) and forward
+//    every AppEvent into engine.handleEvent(event, project), surfacing toast
+//    feedback when a step advances or the lesson completes.
+//  - Expose a tiny external store (subscribe + getSnapshot) so React components
+//    re-render on engine/toast changes without the engine itself being reactive.
+//  - Persist progress per lesson and expose per-lesson saved statuses for the
+//    lesson browser.
+//
+// Pure-ish: the only side effects are localStorage and the in-memory engine. No
+// React imports here so the bridge stays unit-testable.
+
+import type { Project } from '@cts/project-model';
+import {
+  TutorialEngine,
+  getLessonById,
+  type AppEvent,
+  type EngineState,
+  type ExerciseAnswer,
+  type FeedbackResult,
+  type GradeResult,
+  type LessonStatus,
+  type SavedProgress,
+} from '@cts/tutorial-engine';
+import { subscribeAppEvents } from './appEvents';
+import { useStore } from './store';
+
+const PROGRESS_PREFIX = 'cts.tutorial.';
+
+// ─── Toast model ──────────────────────────────────────────────────────────────
+
+export type ToastKind = 'info' | 'success' | 'error';
+
+export type Toast = {
+  id: string;
+  kind: ToastKind;
+  message: string;
+};
+
+const TOAST_TTL_MS = 4000;
+let toastCounter = 0;
+
+// ─── Bridge state (external store) ────────────────────────────────────────────
+
+type BridgeSnapshot = {
+  /** Engine state of the active lesson, or null when no lesson is running. */
+  engineState: EngineState | null;
+  /** Active toasts (newest last). */
+  toasts: Toast[];
+  /** The hint last requested for the current step, or null. */
+  hint: string | null;
+};
+
+let snapshot: BridgeSnapshot = { engineState: null, toasts: [], hint: null };
+
+const subscribers = new Set<() => void>();
+
+function emit(): void {
+  for (const fn of subscribers) fn();
+}
+
+/** Subscribe to bridge state changes (used by React's useSyncExternalStore). */
+export function subscribeBridge(listener: () => void): () => void {
+  subscribers.add(listener);
+  return () => {
+    subscribers.delete(listener);
+  };
+}
+
+/** Current immutable bridge snapshot. */
+export function getBridgeSnapshot(): BridgeSnapshot {
+  return snapshot;
+}
+
+function setSnapshot(patch: Partial<BridgeSnapshot>): void {
+  snapshot = { ...snapshot, ...patch };
+  emit();
+}
+
+// ─── Active engine ────────────────────────────────────────────────────────────
+
+let engine: TutorialEngine | null = null;
+let activeLessonId: string | null = null;
+let unsubscribeEvents: (() => void) | null = null;
+
+/** Refresh the snapshot's engineState from the live engine. */
+function syncEngineState(): void {
+  setSnapshot({ engineState: engine ? engine.getState() : null });
+}
+
+// ─── Progress persistence ─────────────────────────────────────────────────────
+
+function progressKey(lessonId: string): string {
+  return `${PROGRESS_PREFIX}${lessonId}`;
+}
+
+function getStorage(): Storage | null {
+  try {
+    if (typeof localStorage !== 'undefined') return localStorage;
+  } catch {
+    // sandboxed contexts can throw
+  }
+  return null;
+}
+
+/** Read saved progress for a lesson, or null if absent/corrupt. */
+export function loadProgress(lessonId: string): SavedProgress | null {
+  const storage = getStorage();
+  if (!storage) return null;
+  const raw = storage.getItem(progressKey(lessonId));
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      typeof (value as SavedProgress).lessonId === 'string'
+    ) {
+      return value as SavedProgress;
+    }
+  } catch {
+    // corrupt entry — ignore
+  }
+  return null;
+}
+
+/** Persist the current engine progress for the active lesson. */
+export function saveProgress(): void {
+  if (!engine) return;
+  const progress = engine.toProgress();
+  if (!progress) return;
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    storage.setItem(progressKey(progress.lessonId), JSON.stringify(progress));
+  } catch {
+    // best-effort
+  }
+}
+
+/** Lesson status for the browser: completed / inProgress / idle (未開始). */
+export function lessonStatus(lessonId: string): LessonStatus {
+  const progress = loadProgress(lessonId);
+  return progress ? progress.status : 'idle';
+}
+
+/** Saved current step index for a lesson (0 when none). */
+export function lessonSavedStep(lessonId: string): number {
+  const progress = loadProgress(lessonId);
+  return progress ? progress.currentStep : 0;
+}
+
+// ─── Toasts ───────────────────────────────────────────────────────────────────
+
+/** Push a toast; it auto-dismisses after TOAST_TTL_MS. */
+export function pushToast(message: string, kind: ToastKind = 'info'): void {
+  toastCounter += 1;
+  const id = `toast-${toastCounter}`;
+  const toast: Toast = { id, kind, message };
+  setSnapshot({ toasts: [...snapshot.toasts, toast] });
+  if (typeof setTimeout !== 'undefined') {
+    setTimeout(() => dismissToast(id), TOAST_TTL_MS);
+  }
+}
+
+/** Remove a toast by id. */
+export function dismissToast(id: string): void {
+  setSnapshot({ toasts: snapshot.toasts.filter((t) => t.id !== id) });
+}
+
+// ─── Event handling ───────────────────────────────────────────────────────────
+
+function applyFeedback(result: FeedbackResult): void {
+  if (result.completedLesson) {
+    if (result.message) pushToast(`🎉 ${result.message}`, 'success');
+    saveProgress();
+    syncEngineState();
+    return;
+  }
+  if (result.advanced) {
+    if (result.message) pushToast(result.message, 'info');
+    saveProgress();
+    syncEngineState();
+  }
+}
+
+/** Forward an app event into the active engine (exported for tests). */
+export function handleAppEvent(event: AppEvent, project: Project): FeedbackResult {
+  if (!engine) return { advanced: false, completedLesson: false };
+  const before = engine.getState();
+  const result = engine.handleEvent(event, project);
+  applyFeedback(result);
+  // Persist event-count progress even when a step did not advance, so the
+  // progress bar / counts survive a reload mid-step.
+  if (!result.advanced && before.status === 'inProgress') {
+    saveProgress();
+  }
+  return result;
+}
+
+// ─── Lesson lifecycle ─────────────────────────────────────────────────────────
+
+/** Start (or resume) a lesson by id. Restores saved progress when present. */
+export function startLesson(lessonId: string): void {
+  const lesson = getLessonById(lessonId);
+  if (!lesson) return;
+
+  engine = new TutorialEngine();
+  const saved = loadProgress(lessonId);
+  // A completed lesson restarts fresh so the user can replay it.
+  if (saved && saved.status !== 'completed') {
+    engine.loadLesson(lesson, saved);
+  } else {
+    engine.loadLesson(lesson);
+  }
+  activeLessonId = lessonId;
+
+  // (Re)subscribe to app events.
+  if (unsubscribeEvents) unsubscribeEvents();
+  unsubscribeEvents = subscribeAppEvents((event) => {
+    handleAppEvent(event, useStore.getState().project);
+  });
+
+  saveProgress();
+  setSnapshot({ hint: null });
+  syncEngineState();
+}
+
+/** Stop the active lesson and return to the browser (中断). Progress is kept. */
+export function stopLesson(): void {
+  if (engine) saveProgress();
+  if (unsubscribeEvents) {
+    unsubscribeEvents();
+    unsubscribeEvents = null;
+  }
+  engine = null;
+  activeLessonId = null;
+  setSnapshot({ engineState: null, hint: null });
+}
+
+/** The lesson id currently running, or null. */
+export function getActiveLessonId(): string | null {
+  return activeLessonId;
+}
+
+/** Cycle to the next hint for the current step, surfacing it in the snapshot. */
+export function requestHint(): void {
+  if (!engine) return;
+  const hint = engine.requestHint();
+  setSnapshot({ hint });
+}
+
+/** Answer the current exercise step. Returns the grade for inline UI feedback. */
+export function answerExercise(answer: ExerciseAnswer): GradeResult & FeedbackResult {
+  if (!engine) {
+    return {
+      correct: false,
+      feedback: 'レッスンが読み込まれていません。',
+      advanced: false,
+      completedLesson: false,
+    };
+  }
+  const result = engine.answerExercise(answer);
+  applyFeedback(result);
+  return result;
+}
+
+/** Reset bridge state — used by tests to isolate cases. */
+export function __resetBridgeForTest(): void {
+  if (unsubscribeEvents) unsubscribeEvents();
+  unsubscribeEvents = null;
+  engine = null;
+  activeLessonId = null;
+  snapshot = { engineState: null, toasts: [], hint: null };
+}

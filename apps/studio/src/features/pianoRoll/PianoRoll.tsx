@@ -3,6 +3,7 @@ import { useStore } from '../../state/store';
 import type { Clip, NoteEvent, Track } from '@cts/project-model';
 import { midiToNoteName } from '@cts/theory-engine';
 import { pxPerBeat } from '../timeline';
+import { isAnyDialogOpen } from '../common/dialogState';
 import { useScaleInfo } from './useScaleInfo';
 import {
   GRID_SNAP_OPTIONS,
@@ -104,6 +105,7 @@ export function PianoRoll() {
     }
     function onKey(e: KeyboardEvent) {
       if (isEditableTarget(e.target)) return;
+      if (isAnyDialogOpen()) return;
       if (editor.activeView !== 'pianoRoll') return;
       const ids = editor.selectedNoteIds;
       if ((e.key === 'Delete' || e.key === 'Backspace') && clip && ids.length > 0) {

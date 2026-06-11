@@ -3,7 +3,7 @@
 
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
-import { uid } from './uid';
+import { makeId } from './ids';
 import type {
   ChordEvent,
   Clip,
@@ -40,7 +40,7 @@ export function addChordEvent(
   chord: Omit<ChordEvent, 'id'> & { id?: string },
   clock: Clock = systemClock,
 ): Project {
-  const event: ChordEvent = { ...chord, id: chord.id ?? uid('chord') };
+  const event: ChordEvent = { ...chord, id: chord.id ?? makeId('chord') };
   return touch({ ...project, chordTrack: [...project.chordTrack, event] }, clock);
 }
 
@@ -71,7 +71,7 @@ export function addNoteToClip(
   note: Omit<NoteEvent, 'id'> & { id?: string },
   clock: Clock = systemClock,
 ): Project {
-  const event: NoteEvent = { ...note, id: note.id ?? uid('note') };
+  const event: NoteEvent = { ...note, id: note.id ?? makeId('note') };
   const tracks = mapClip(project, clipId, (clip) => ({
     ...clip,
     notes: [...(clip.notes ?? []), event],
@@ -127,7 +127,7 @@ export function toggleDrumStep(
     if (existing) {
       return { ...clip, drumEvents: events.filter((e) => e !== existing) };
     }
-    const event: DrumEvent = { id: uid('drum'), lane, stepIndex, velocity };
+    const event: DrumEvent = { id: makeId('drum'), lane, stepIndex, velocity };
     return { ...clip, drumEvents: [...events, event] };
   });
   return touch({ ...project, tracks }, clock);
@@ -178,7 +178,7 @@ export function addSection(
   section: Omit<Section, 'id'> & { id?: string },
   clock: Clock = systemClock,
 ): Project {
-  const event: Section = { ...section, id: section.id ?? uid('section') };
+  const event: Section = { ...section, id: section.id ?? makeId('section') };
   return touch({ ...project, sections: [...project.sections, event] }, clock);
 }
 

@@ -1,10 +1,10 @@
-// Project/entity factories. All ids come from the uid helper; timestamps come
+// Project/entity factories. All ids come from the makeId helper; timestamps come
 // from an injectable clock (defaults to the real system clock).
 
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
 import { beatsPerBar } from './time';
-import { uid } from './uid';
+import { makeId } from './ids';
 import type {
   Clip,
   InstrumentConfig,
@@ -45,7 +45,7 @@ export function createTrack(
   color?: string,
 ): Track {
   return {
-    id: uid('track'),
+    id: makeId('track'),
     name,
     type,
     ...(color !== undefined ? { color } : {}),
@@ -62,7 +62,7 @@ export function createTrack(
 /** Create an empty MIDI clip covering [startBeat, startBeat + lengthBeats). */
 export function createMidiClip(trackId: string, startBeat: number, lengthBeats: number): Clip {
   return {
-    id: uid('clip'),
+    id: makeId('clip'),
     trackId,
     type: 'midi',
     startBeat,
@@ -80,7 +80,7 @@ export function createDrumClip(
   stepsPerBar = 16,
 ): Clip {
   return {
-    id: uid('clip'),
+    id: makeId('clip'),
     trackId,
     type: 'drum',
     startBeat,
@@ -125,7 +125,7 @@ export function createEmptyProject(options: CreateProjectOptions = {}): Project 
   drums.clips.push(createDrumClip(drums.id, 0, lengthBeats));
 
   return {
-    id: uid('project'),
+    id: makeId('project'),
     schemaVersion: CURRENT_SCHEMA_VERSION,
     title,
     bpm,

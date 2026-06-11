@@ -1,6 +1,5 @@
 export * from './types';
 export * from './clock';
-export * from './uid';
 export * from './time';
 export * from './theory';
 export * from './validation';

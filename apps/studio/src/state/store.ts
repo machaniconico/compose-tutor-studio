@@ -15,12 +15,15 @@ import type {
   ScaleName,
   Track,
 } from '@cts/project-model';
+import { getScalePitchClasses } from '@cts/theory-engine';
 import { createDefaultProject } from './defaultProject';
 import { nowIso, uid } from './ids';
+import { publishAppEvent } from './appEvents';
 import {
   deleteProject as deleteStoredProject,
   listSavedProjects,
   loadMostRecentProject,
+  loadProject as loadStoredProject,
   saveProject,
   type ProjectSummary,
 } from './persistence';
@@ -132,6 +135,10 @@ type StoreState = {
   listSavedProjects: () => ProjectSummary[];
   createNewProject: (title?: string) => void;
   deleteProject: (id: string) => void;
+  /** Load a saved project by id into the store (resets history + selection). */
+  loadProjectById: (id: string) => boolean;
+  /** Replace the whole project (e.g. template instantiation / file import). */
+  replaceProject: (project: Project) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -184,6 +191,22 @@ function initialProject(): Project {
 /** Map over tracks immutably. */
 function mapTracks(project: Project, fn: (t: Track) => Track): Project {
   return { ...project, tracks: project.tracks.map(fn) };
+}
+
+/** Find the track that owns a clip (read-only). */
+function trackOfClip(project: Project, clipId: string): Track | undefined {
+  return project.tracks.find((t) => t.clips.some((c) => c.id === clipId));
+}
+
+/** Whether a MIDI pitch belongs to the project's key/scale. */
+function pitchInScale(project: Project, pitch: number): boolean {
+  try {
+    const pcs = getScalePitchClasses(project.key, project.scale);
+    const pc = ((pitch % 12) + 12) % 12;
+    return pcs.includes(pc);
+  } catch {
+    return false;
+  }
 }
 
 const startingProject = initialProject();
@@ -264,6 +287,18 @@ export const useStore = create<StoreState>((set, get) => {
           ),
         })),
       );
+      const track = trackOfClip(project, clipId);
+      publishAppEvent({
+        type: 'note.added',
+        payload: {
+          pitch: newNote.pitch,
+          startBeat: newNote.startBeat,
+          durationBeats: newNote.durationBeats,
+          trackId: track?.id ?? '',
+          trackName: track?.name ?? '',
+          inScale: pitchInScale(project, newNote.pitch),
+        },
+      });
     },
     updateNote: (clipId, noteId, patch) => {
       const project = get().project;
@@ -277,6 +312,21 @@ export const useStore = create<StoreState>((set, get) => {
           ),
         })),
       );
+      const track = trackOfClip(project, clipId);
+      const moved = track?.clips
+        .find((c) => c.id === clipId)
+        ?.notes?.find((n) => n.id === noteId);
+      const pitch = patch.pitch ?? moved?.pitch ?? 0;
+      const startBeat = patch.startBeat ?? moved?.startBeat ?? 0;
+      publishAppEvent({
+        type: 'note.moved',
+        payload: {
+          pitch,
+          startBeat,
+          trackId: track?.id ?? '',
+          trackName: track?.name ?? '',
+        },
+      });
     },
     removeNote: (clipId, noteId) => {
       const project = get().project;
@@ -293,6 +343,9 @@ export const useStore = create<StoreState>((set, get) => {
     // --- drums ---
     toggleDrumStep: (clipId, lane, stepIndex) => {
       const project = get().project;
+      const track = trackOfClip(project, clipId);
+      const prevEvents = track?.clips.find((c) => c.id === clipId)?.drumEvents ?? [];
+      const wasActive = prevEvents.some((e) => e.lane === lane && e.stepIndex === stepIndex);
       commitProject(
         mapTracks(project, (t) => ({
           ...t,
@@ -313,12 +366,21 @@ export const useStore = create<StoreState>((set, get) => {
           }),
         })),
       );
+      publishAppEvent({
+        type: 'drum.stepToggled',
+        payload: { lane, stepIndex, active: !wasActive, trackId: track?.id ?? '' },
+      });
     },
 
     // --- mixer ---
     setTrackVolume: (trackId, volume) => {
       const project = get().project;
       commitProject(mapTracks(project, (t) => (t.id === trackId ? { ...t, volume } : t)));
+      const track = project.tracks.find((t) => t.id === trackId);
+      publishAppEvent({
+        type: 'track.volumeChanged',
+        payload: { trackId, trackName: track?.name ?? '', volume },
+      });
     },
     setTrackPan: (trackId, pan) => {
       const project = get().project;
@@ -349,7 +411,13 @@ export const useStore = create<StoreState>((set, get) => {
     setInspectorContent: (content) => set({ inspector: { content } }),
 
     // --- transport ---
-    play: () => set((s) => ({ transport: { ...s.transport, isPlaying: true } })),
+    play: () => {
+      set((s) => ({ transport: { ...s.transport, isPlaying: true } }));
+      publishAppEvent({
+        type: 'transport.played',
+        payload: { positionBeats: get().transport.positionBeat },
+      });
+    },
     stop: (reset) =>
       set((s) => {
         // Playing -> pause (keep position) unless an explicit reset is asked.
@@ -413,6 +481,36 @@ export const useStore = create<StoreState>((set, get) => {
         future: [],
       });
       saveProject(project);
+      publishAppEvent({
+        type: 'project.created',
+        payload: { key: project.key, bpm: project.bpm },
+      });
+    },
+    loadProjectById: (id) => {
+      const loaded = loadStoredProject(id);
+      if (!loaded) return false;
+      set({
+        project: loaded,
+        editor: makeEditor(loaded),
+        transport: makeTransport(),
+        past: [],
+        future: [],
+      });
+      return true;
+    },
+    replaceProject: (project) => {
+      set({
+        project,
+        editor: makeEditor(project),
+        transport: makeTransport(),
+        past: [],
+        future: [],
+      });
+      saveProject(project);
+      publishAppEvent({
+        type: 'project.created',
+        payload: { key: project.key, bpm: project.bpm },
+      });
     },
     deleteProject: (id) => {
       deleteStoredProject(id);
