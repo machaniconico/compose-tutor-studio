@@ -76,6 +76,33 @@ export type ChordSuggestion = {
   reason: string;
 };
 
+/** 借用和音候補。 */
+export type BorrowedChord = {
+  symbol: string;
+  degree: string;
+  source: 'parallelMinor' | 'parallelMajor';
+  reason: string;
+};
+
+/** Dominant Motion 候補入力。 */
+export type DominantMotionInput = {
+  key: string;
+  scale: ScaleName;
+  /** 指定すると、その次コードへ向かう V7/x だけを返す。 */
+  targetSymbol?: string;
+  /** true なら V7/I も候補に含める。未指定時は targetSymbol 指定時のみ含める。 */
+  includePrimary?: boolean;
+};
+
+/** Dominant Motion 候補。 */
+export type DominantMotionChord = {
+  symbol: string;
+  degree: string;
+  targetSymbol: string;
+  targetDegree: string;
+  reason: string;
+};
+
 /** キー文字列のルート部分を取り出してフラット志向か判定する。 */
 function keyPrefersFlats(keyRootName: string): boolean {
   return keyRootName.includes('b') || keyRootName === 'F';
@@ -192,6 +219,10 @@ function functionForMinorDegree(degreeIndex: number): HarmonicFunction {
   }
 }
 
+function isMinorScale(scale: ScaleName): boolean {
+  return scale === 'naturalMinor' || scale === 'harmonicMinor' || scale === 'melodicMinor';
+}
+
 /** スケールのダイアトニックトライアド情報。 */
 type DegreeInfo = {
   degreeIndex: number;
@@ -248,6 +279,136 @@ function degreeInfoByRootPc(key: string, scale: ScaleName): Map<number, DegreeIn
     if (!map.has(info.rootPc)) map.set(info.rootPc, info);
   }
   return map;
+}
+
+function chordSymbolForQuality(rootPc: number, quality: CanonicalChordQuality, preferFlats: boolean): string {
+  return spell(rootPc, preferFlats) + QUALITY_SUFFIX[quality];
+}
+
+function diatonicQualityKey(info: DegreeInfo): string {
+  return `${info.rootPc}:${info.quality}`;
+}
+
+/** 同主調から借りやすいコードを返す。 */
+export function borrowedChords(key: string, scale: ScaleName): BorrowedChord[] {
+  if (!HEPTATONIC.has(scale)) return [];
+
+  const keyRootName = parseKeyRootName(key);
+  const rootPc = noteNameToPitchClass(keyRootName);
+  const currentDiatonic = new Set(diatonicDegreeInfos(key, scale).map(diatonicQualityKey));
+  const currentIsMinor = isMinorScale(scale);
+  const preferFlats = currentIsMinor ? keyPrefersFlats(keyRootName) : true;
+
+  const majorBorrowed = [
+    {
+      degree: 'bVII',
+      offset: 10,
+      quality: 'major' as const,
+      reason: '同主短調から借りるbVIIで、Iへ戻る前にロックや映画音楽のような広がりを作れます。',
+    },
+    {
+      degree: 'iv',
+      offset: 5,
+      quality: 'minor' as const,
+      reason: '同主短調のivは、IVより少し切ない色でIへ自然に戻れます。',
+    },
+    {
+      degree: 'bVI',
+      offset: 8,
+      quality: 'major' as const,
+      reason: '同主短調のbVIは、明るいキーに一瞬だけ陰りを足して展開の変化を作れます。',
+    },
+    {
+      degree: 'bIII',
+      offset: 3,
+      quality: 'major' as const,
+      reason: '同主短調のbIIIは、トニックから遠すぎず大きな景色の変化を出せます。',
+    },
+  ];
+
+  const minorBorrowed = [
+    {
+      degree: 'I',
+      offset: 0,
+      quality: 'major' as const,
+      reason: '同主長調からIを借りると、短調の中で一瞬明るく終わる感じを作れます。',
+    },
+    {
+      degree: 'IV',
+      offset: 5,
+      quality: 'major' as const,
+      reason: '同主長調のIVは、短調のivより前向きな展開を作れます。',
+    },
+    {
+      degree: 'V',
+      offset: 7,
+      quality: 'major' as const,
+      reason: '同主長調のVは、iへ戻る力を強くする明るいドミナントです。',
+    },
+  ];
+
+  const source = currentIsMinor ? 'parallelMajor' : 'parallelMinor';
+  const patterns = currentIsMinor ? minorBorrowed : majorBorrowed;
+
+  return patterns.flatMap((pattern) => {
+    const root = (rootPc + pattern.offset) % 12;
+    if (currentDiatonic.has(`${root}:${pattern.quality}`)) return [];
+    return [
+      {
+        symbol: chordSymbolForQuality(root, pattern.quality, preferFlats),
+        degree: pattern.degree,
+        source,
+        reason: pattern.reason,
+      },
+    ];
+  });
+}
+
+function dominantTargetCandidates(key: string, scale: ScaleName): DegreeInfo[] {
+  return diatonicDegreeInfos(key, scale).filter((info) => info.degreeIndex !== 6);
+}
+
+function dominantMotionCandidateForTarget(
+  key: string,
+  scale: ScaleName,
+  target: DegreeInfo,
+  preferFlats: boolean,
+): DominantMotionChord {
+  const dominantRootPc = (target.rootPc + 7) % 12;
+  const symbol = chordSymbolForQuality(dominantRootPc, 'dominant7', preferFlats);
+  const targetSymbol = chordSymbolForQuality(target.rootPc, target.quality, preferFlats);
+  const targetDegree = romanForDegree(target.degreeIndex, target.quality);
+  const degree = `V7/${targetDegree}`;
+  return {
+    symbol,
+    degree,
+    targetSymbol,
+    targetDegree,
+    reason: `${targetSymbol}（${targetDegree}）へ向かう一時的なドミナントです。次のコードへ強く着地する流れを作れます。`,
+  };
+}
+
+/** 次のコード、または各ダイアトニックコードへ向かう V7/x 候補を返す。 */
+export function dominantMotionChords(input: DominantMotionInput): DominantMotionChord[] {
+  if (!HEPTATONIC.has(input.scale)) return [];
+
+  const keyRootName = parseKeyRootName(input.key);
+  const preferFlats = keyPrefersFlats(keyRootName);
+  const includePrimary = input.includePrimary ?? input.targetSymbol !== undefined;
+
+  if (input.targetSymbol !== undefined) {
+    const parsed = parseChordSymbol(input.targetSymbol);
+    if (parsed === null) return [];
+    const targetPc = noteNameToPitchClass(parsed.root);
+    const target = degreeInfoByRootPc(input.key, input.scale).get(targetPc);
+    if (!target) return [];
+    if (target.degreeIndex === 0 && !includePrimary) return [];
+    return [dominantMotionCandidateForTarget(input.key, input.scale, target, preferFlats)];
+  }
+
+  return dominantTargetCandidates(input.key, input.scale)
+    .filter((target) => includePrimary || target.degreeIndex !== 0)
+    .map((target) => dominantMotionCandidateForTarget(input.key, input.scale, target, preferFlats));
 }
 
 /** ダイアトニックなトライアドのローマ数字(大小のみ、7なし)を取得する。 */

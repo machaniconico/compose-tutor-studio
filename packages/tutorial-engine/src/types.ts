@@ -54,7 +54,7 @@ export type ProjectPredicate =
   | { type: 'hasSection'; sectionType: SectionType }
   | { type: 'bpmInRange'; min: number; max: number }
   | { type: 'trackVolumeInRange'; trackName: string; min: number; max: number }
-  | { type: 'exportCompleted'; format: 'midi' | 'wav' };
+  | { type: 'exportCompleted'; format?: 'midi' | 'wav' };
 
 // ─── Step Goals ───────────────────────────────────────────────────────────────
 

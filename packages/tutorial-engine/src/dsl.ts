@@ -21,6 +21,7 @@ export type EditEvent =
   | { type: 'note.added'; pitch: number; startBeat: number }
   | { type: 'drum.step.toggled'; lane: string; stepIndex: number }
   | { type: 'section.added'; sectionType: string }
+  | { type: 'track.volumeChanged'; trackName: string; volume: number }
   | { type: 'exported'; format: 'midi' | 'wav' };
 
 // ─── CheckCondition ───────────────────────────────────────────────────────────

@@ -242,3 +242,103 @@ describe('TutorialEngine', () => {
     expect(extra.completedLesson).toBe(false);
   });
 });
+
+// ─── export.midi / export.wav advancement ─────────────────────────────────────
+
+describe('TutorialEngine — exportCompleted predicate', () => {
+  const project = makeProject({ bpm: 120 });
+
+  const EXPORT_LESSON: TutorialLesson = {
+    id: 'export-test-lesson',
+    courseId: 'test',
+    level: 'basic',
+    schemaVersion: 1,
+    title: '書き出しテスト',
+    description: 'export.midi / export.wav 達成判定テスト',
+    steps: [
+      {
+        id: 'export-step-midi',
+        title: 'MIDIで書き出す',
+        instruction: 'MIDIファイルを書き出してください。',
+        explanation: 'MIDIは音符情報ファイルです。',
+        goal: {
+          kind: 'project',
+          predicate: { type: 'exportCompleted', format: 'midi' },
+        },
+        hints: ['ファイルメニューから「書き出し → MIDI」を選んでください。'],
+      },
+    ],
+  };
+
+  const WAV_EXPORT_LESSON: TutorialLesson = {
+    id: 'wav-export-test-lesson',
+    courseId: 'test',
+    level: 'basic',
+    schemaVersion: 1,
+    title: 'WAV書き出しテスト',
+    description: 'export.wav 達成判定テスト',
+    steps: [
+      {
+        id: 'export-step-wav',
+        title: 'WAVで書き出す',
+        instruction: 'WAVファイルを書き出してください。',
+        explanation: 'WAVはどこでも再生できる音声ファイルです。',
+        goal: {
+          kind: 'project',
+          predicate: { type: 'exportCompleted', format: 'wav' },
+        },
+        hints: ['ファイルメニューから「書き出し → WAV」を選んでください。'],
+      },
+    ],
+  };
+
+  it('advances step when export.midi event fires for midi format goal', () => {
+    const engine = new TutorialEngine();
+    engine.loadLesson(EXPORT_LESSON);
+    expect(engine.getState().stepIndex).toBe(0);
+
+    const result = engine.handleEvent(
+      { type: 'export.midi', payload: { format: 'midi' } },
+      project,
+    );
+    expect(result.advanced).toBe(true);
+    expect(result.completedLesson).toBe(true);
+    expect(engine.getState().status).toBe('completed');
+  });
+
+  it('does NOT advance when export.wav fires but goal requires midi', () => {
+    const engine = new TutorialEngine();
+    engine.loadLesson(EXPORT_LESSON);
+
+    const result = engine.handleEvent(
+      { type: 'export.wav', payload: { format: 'wav' } },
+      project,
+    );
+    expect(result.advanced).toBe(false);
+    expect(engine.getState().status).toBe('inProgress');
+  });
+
+  it('advances step when export.wav event fires for wav format goal', () => {
+    const engine = new TutorialEngine();
+    engine.loadLesson(WAV_EXPORT_LESSON);
+
+    const result = engine.handleEvent(
+      { type: 'export.wav', payload: { format: 'wav' } },
+      project,
+    );
+    expect(result.advanced).toBe(true);
+    expect(result.completedLesson).toBe(true);
+  });
+
+  it('transport.played does NOT satisfy exportCompleted goal', () => {
+    const engine = new TutorialEngine();
+    engine.loadLesson(EXPORT_LESSON);
+
+    const result = engine.handleEvent(
+      { type: 'transport.played', payload: { positionBeats: 0 } },
+      project,
+    );
+    expect(result.advanced).toBe(false);
+    expect(engine.getState().status).toBe('inProgress');
+  });
+});

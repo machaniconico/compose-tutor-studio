@@ -34,10 +34,13 @@ export function evaluateProjectPredicate(
         if (track.type !== 'drum') continue;
         for (const clip of track.clips) {
           if (!clip.drumEvents) continue;
-          const activeSteps = clip.drumEvents.filter(
-            (e) => e.lane === predicate.lane,
+          // Count unique step indices for the requested lane (dedup in case of duplicates)
+          const stepIndices = new Set(
+            clip.drumEvents
+              .filter((e) => e.lane === predicate.lane)
+              .map((e) => e.stepIndex),
           );
-          if (activeSteps.length >= predicate.minSteps) return true;
+          if (stepIndices.size >= predicate.minSteps) return true;
         }
       }
       return false;
@@ -74,8 +77,8 @@ export function evaluateProjectPredicate(
     }
 
     case 'exportCompleted': {
-      // Export state is tracked via events, not in Project. Always false here;
-      // the engine handles export events separately.
+      // Export state is not stored in Project; evaluated via events in checkGoalOnEvent.
+      // This branch should not be reached in normal flow — returns false as a safe default.
       return false;
     }
   }
@@ -149,6 +152,14 @@ export function checkGoalOnEvent(
   }
 
   if (goal.kind === 'project') {
+    // exportCompleted cannot be evaluated from Project alone — check the triggering event instead.
+    if (goal.predicate.type === 'exportCompleted') {
+      const format = goal.predicate.format;
+      const satisfied =
+        (event.type === 'export.midi' && (format === undefined || format === 'midi')) ||
+        (event.type === 'export.wav' && (format === undefined || format === 'wav'));
+      return { satisfied, newEventCount: eventCount };
+    }
     const satisfied = evaluateProjectPredicate(goal.predicate, project);
     return { satisfied, newEventCount: eventCount };
   }

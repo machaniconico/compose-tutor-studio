@@ -90,6 +90,9 @@ export {
 // prompt 02 関数 9: 単音解析 (公開シグネチャ)
 export {
   analyzeNoteAgainstChordAndScale,
+  getNoteScaleDegree,
+  describeNoteInKey,
+  detectChordTensions,
   type NoteRelation,
   type NoteAnalysis,
 } from './note-analysis';

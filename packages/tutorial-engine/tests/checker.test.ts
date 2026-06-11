@@ -246,8 +246,8 @@ describe('checkCondition: exported', () => {
 // ─── evaluateLesson — partial progress ───────────────────────────────────────
 
 describe('evaluateLesson: partial progress', () => {
-  // Use lesson03 which has 2 steps: chordCountAtLeast(1) then progressionEquals
-  const lesson03 = course0[2] as Lesson;
+  // Use lesson02 (0-2 コード進行を選ぶ) which has 2 steps: chordCountAtLeast(1) then progressionEquals
+  const lesson03 = course0[1] as Lesson;
 
   it('currentStep is 0 when no events have been applied', () => {
     const result = evaluateLesson(lesson03, emptyState());
@@ -277,7 +277,7 @@ describe('evaluateLesson: partial progress', () => {
 // ─── evaluateLesson — course0 lesson 3 completion ────────────────────────────
 
 describe('evaluateLesson: course0 lesson03 completion', () => {
-  const lesson03 = course0[2] as Lesson;
+  const lesson03 = course0[1] as Lesson;
 
   it('isComplete when both steps are satisfied', () => {
     const state = stateFrom(
@@ -335,34 +335,48 @@ describe('evaluateLesson: other course0 lessons', () => {
     expect(result.isComplete).toBe(true);
   });
 
-  it('lesson04 completes after 4 note.added events', () => {
+  it('lesson04 (ベースを足す) completes after 4 note.added events', () => {
     const lesson04 = course0[3] as Lesson;
+    const state = stateFrom(
+      { type: 'note.added', pitch: 36, startBeat: 0 },
+      { type: 'note.added', pitch: 43, startBeat: 4 },
+      { type: 'note.added', pitch: 33, startBeat: 8 },
+      { type: 'note.added', pitch: 41, startBeat: 12 },
+    );
+    const result = evaluateLesson(lesson04, state);
+    expect(result.isComplete).toBe(true);
+  });
+
+  it('lesson05 (メロディを足す) completes after 4 note.added events', () => {
+    const lesson05 = course0[4] as Lesson;
     const state = stateFrom(
       { type: 'note.added', pitch: 60, startBeat: 0 },
       { type: 'note.added', pitch: 64, startBeat: 1 },
       { type: 'note.added', pitch: 67, startBeat: 2 },
       { type: 'note.added', pitch: 69, startBeat: 3 },
     );
-    const result = evaluateLesson(lesson04, state);
-    expect(result.isComplete).toBe(true);
-  });
-
-  it('lesson05 completes after 4 drum.step.toggled events', () => {
-    const lesson05 = course0[4] as Lesson;
-    const state = stateFrom(
-      { type: 'drum.step.toggled', lane: 'kick', stepIndex: 0 },
-      { type: 'drum.step.toggled', lane: 'kick', stepIndex: 4 },
-      { type: 'drum.step.toggled', lane: 'snare', stepIndex: 4 },
-      { type: 'drum.step.toggled', lane: 'snare', stepIndex: 12 },
-    );
     const result = evaluateLesson(lesson05, state);
     expect(result.isComplete).toBe(true);
   });
 
-  it('lesson06 completes after exported midi', () => {
-    const lesson06 = course0[5] as Lesson;
+  it('lesson03 (ドラムを足す) completes after 6 drum.step.toggled events', () => {
+    const lesson03drums = course0[2] as Lesson;
+    const state = stateFrom(
+      { type: 'drum.step.toggled', lane: 'kick', stepIndex: 0 },
+      { type: 'drum.step.toggled', lane: 'kick', stepIndex: 4 },
+      { type: 'drum.step.toggled', lane: 'kick', stepIndex: 8 },
+      { type: 'drum.step.toggled', lane: 'kick', stepIndex: 12 },
+      { type: 'drum.step.toggled', lane: 'snare', stepIndex: 4 },
+      { type: 'drum.step.toggled', lane: 'snare', stepIndex: 12 },
+    );
+    const result = evaluateLesson(lesson03drums, state);
+    expect(result.isComplete).toBe(true);
+  });
+
+  it('lesson08 (書き出す) completes after exported midi', () => {
+    const lesson08 = course0[7] as Lesson;
     const state = stateFrom({ type: 'exported', format: 'midi' });
-    const result = evaluateLesson(lesson06, state);
+    const result = evaluateLesson(lesson08, state);
     expect(result.isComplete).toBe(true);
   });
 });

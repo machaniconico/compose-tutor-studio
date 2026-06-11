@@ -1,24 +1,11 @@
 import { useMemo, useState } from 'react';
-import type { NoteEvent } from '@cts/project-model';
-import {
-  analyzeChord,
-  analyzeNoteAgainstChordAndScale,
-  midiToNoteName,
-  suggestNextChords,
-  type HarmonicFunction,
-} from '@cts/theory-engine';
+import { suggestNextChords, type HarmonicFunction } from '@cts/theory-engine';
 import { useStore } from '../../state/store';
 import { appendChordAfterLast } from '../../state/editorActions';
-import { useScaleInfo } from '../pianoRoll/useScaleInfo';
 import { AssistantPanel } from '../assistant/AssistantPanel';
 import { TutorialPanel } from '../tutorial/TutorialPanel';
-
-const FUNCTION_LABEL: Record<HarmonicFunction, string> = {
-  T: 'トニック（安定）',
-  SD: 'サブドミナント（展開）',
-  D: 'ドミナント（緊張）',
-  Other: 'その他',
-};
+import { useInspection } from './useInspection';
+import type { NoteInspectionResult, ChordInspectionResult, KeyScaleOverview } from './useInspection';
 
 type RightTab = 'inspector' | 'assistant' | 'tutorial';
 
@@ -58,64 +45,107 @@ export function InspectorPanel() {
   );
 }
 
-/** The inspector content itself: selected chord, selected note, or a hint. */
+/** The inspector content itself: dispatches to note/chord/overview views. */
 function InspectorContent() {
-  const project = useStore((s) => s.project);
-  const selectedChordId = useStore((s) => s.editor.selectedChordId);
-  const selectedNoteIds = useStore((s) => s.editor.selectedNoteIds);
+  const state = useInspection();
 
-  const chord = project.chordTrack.find((c) => c.id === selectedChordId) ?? null;
-  const note = useSelectedNote(selectedNoteIds);
+  if (state.kind === 'note') return <NoteInspector data={state.data} />;
+  if (state.kind === 'chord') return <ChordInspector data={state.data} />;
+  return <KeyScaleView data={state.data} />;
+}
 
-  if (chord) return <ChordInspector key={chord.id} />;
-  if (note) return <NoteInspector note={note.note} startBeat={note.startBeat} />;
+// ---------------------------------------------------------------------------
+// Note Inspector
+// ---------------------------------------------------------------------------
+
+/** Selected-note inspector: pitch name, scale degree, chord tone classification. */
+function NoteInspector({ data }: { data: NoteInspectionResult }) {
+  const relationLabel = data.noteAnalysis
+    ? relationToLabel(data.noteAnalysis.relation)
+    : data.inScale
+      ? 'スケール内'
+      : 'スケール外';
+
   return (
     <div className="panel-section">
-      <p className="panel-section__title">操作ヒント</p>
-      <ul className="inspector-hints">
-        <li>上のコードトラックでコードを選ぶと、構成音や機能の解説が出ます。</li>
-        <li>空いている小節をクリックするとコードを追加できます。</li>
-        <li>ピアノロールでノートをクリックすると、その音の役割を説明します。</li>
-        <li>「アシスタント」タブからベースやメロディを自動生成できます。</li>
-      </ul>
+      <p className="panel-section__title">ノート情報</p>
+      <div className="chord-headline">{data.noteName}</div>
+
+      <div className="kv">
+        <span>音名</span>
+        <span>{data.noteName}</span>
+      </div>
+
+      {data.scaleDegree ? (
+        <div className="kv">
+          <span>キー内の度数</span>
+          <span>{data.scaleDegree}度</span>
+        </div>
+      ) : null}
+
+      <div className="kv">
+        <span>スケール</span>
+        <span>{data.inScale ? '内（自然な音）' : '外（色付けの音）'}</span>
+      </div>
+
+      {data.currentChordSymbol ? (
+        <div className="kv">
+          <span>現在のコード</span>
+          <span>{data.currentChordSymbol}</span>
+        </div>
+      ) : null}
+
+      {data.degreeInChord ? (
+        <div className="kv">
+          <span>コード内の役割</span>
+          <span>{data.degreeInChord}（{relationLabel}）</span>
+        </div>
+      ) : (
+        <div className="kv">
+          <span>コードとの関係</span>
+          <span>{relationLabel}</span>
+        </div>
+      )}
+
+      {data.noteAnalysis ? (
+        <p className="inspector-explain">{data.noteAnalysis.message}</p>
+      ) : null}
+      {/* スケール外の音は、コードとの関係説明に加えてスケール文脈説明も常に表示する */}
+      {!data.inScale ? (
+        <p className="inspector-explain">{data.scaleContext}</p>
+      ) : !data.noteAnalysis ? (
+        <p className="inspector-explain">{data.scaleContext}</p>
+      ) : null}
     </div>
   );
 }
 
-/** Resolve the (single) selected note from the selected clip. */
-function useSelectedNote(
-  selectedNoteIds: readonly string[],
-): { note: NoteEvent; startBeat: number } | null {
-  const project = useStore((s) => s.project);
-  const selectedClipId = useStore((s) => s.editor.selectedClipId);
-  return useMemo(() => {
-    if (selectedNoteIds.length === 0) return null;
-    const id = selectedNoteIds[selectedNoteIds.length - 1];
-    for (const track of project.tracks) {
-      const clip = track.clips.find((c) => c.id === selectedClipId);
-      const found = clip?.notes?.find((n) => n.id === id);
-      if (found) return { note: found, startBeat: found.startBeat };
-    }
-    return null;
-  }, [project.tracks, selectedClipId, selectedNoteIds]);
+function relationToLabel(relation: string): string {
+  switch (relation) {
+    case 'chordTone':
+      return 'コードトーン（安定音）';
+    case 'scaleTone':
+      return 'スケール音（経過音向き）';
+    case 'tension':
+      return 'テンション（色付け音）';
+    case 'nonScale':
+      return 'スケール外（経過音・アプローチ音）';
+    default:
+      return relation;
+  }
 }
 
+// ---------------------------------------------------------------------------
+// Chord Inspector
+// ---------------------------------------------------------------------------
+
 /** Full chord analysis display with "next chord" buttons. */
-function ChordInspector() {
+function ChordInspector({ data }: { data: ChordInspectionResult }) {
   const project = useStore((s) => s.project);
   const selectedChordId = useStore((s) => s.editor.selectedChordId);
-  const chord = project.chordTrack.find((c) => c.id === selectedChordId);
-
-  const analysis = useMemo(() => {
-    if (!chord) return null;
-    try {
-      return analyzeChord({ symbol: chord.symbol, key: project.key, scale: project.scale });
-    } catch {
-      return null;
-    }
-  }, [chord, project.key, project.scale]);
 
   const nextChords = useMemo(() => {
+    const chord = project.chordTrack.find((c) => c.id === selectedChordId);
     if (!chord) return [];
     const before = [...project.chordTrack]
       .sort((a, b) => a.startBeat - b.startBeat)
@@ -126,30 +156,37 @@ function ChordInspector() {
     } catch {
       return [];
     }
-  }, [chord, project.chordTrack, project.key, project.scale]);
+  }, [project.chordTrack, project.key, project.scale, selectedChordId]);
 
-  if (!chord) return null;
-  const fnLabel = analysis?.function ? FUNCTION_LABEL[analysis.function] : '—';
-  const notes = analysis?.notes?.length ? analysis.notes.join(' ') : '—';
+  const notes = data.notes.length > 0 ? data.notes.join('・') : '—';
 
   return (
     <div className="panel-section">
       <p className="panel-section__title">コード解析</p>
-      <div className="chord-headline">{chord.symbol}</div>
+      <div className="chord-headline">{data.symbol}</div>
+
       <div className="kv">
         <span>構成音</span>
         <span>{notes}</span>
       </div>
       <div className="kv">
         <span>度数</span>
-        <span>{analysis?.degree ?? chord.degree ?? '—'}</span>
+        <span>{data.degree}</span>
       </div>
       <div className="kv">
         <span>機能</span>
-        <span>{fnLabel}</span>
+        <span>{data.functionLabel}</span>
       </div>
-      {analysis?.explanation ? (
-        <p className="inspector-explain">{analysis.explanation}</p>
+
+      {data.tension.length > 0 ? (
+        <div className="kv">
+          <span>テンション</span>
+          <span>{data.tension.join('・')}</span>
+        </div>
+      ) : null}
+
+      {data.explanation ? (
+        <p className="inspector-explain">{data.explanation}</p>
       ) : null}
 
       {nextChords.length > 0 ? (
@@ -175,54 +212,37 @@ function ChordInspector() {
   );
 }
 
-/** Selected-note inspector: pitch name, scale membership, classification. */
-function NoteInspector(props: { note: NoteEvent; startBeat: number }) {
-  const { note } = props;
-  const project = useStore((s) => s.project);
-  const scaleInfo = useScaleInfo(project);
+// ---------------------------------------------------------------------------
+// Key/Scale Overview (nothing selected)
+// ---------------------------------------------------------------------------
 
-  const pc = ((note.pitch % 12) + 12) % 12;
-  const inScale = scaleInfo.scalePcs.has(pc);
-  const chord = scaleInfo.chordAtBeat(note.startBeat);
-
-  const classification = useMemo(() => {
-    if (!chord) {
-      return inScale
-        ? 'この音はスケール内の音です。安定して使えます。'
-        : 'この音はスケール外の音です。経過音やテンションとして使えます。';
-    }
-    try {
-      const result = analyzeNoteAgainstChordAndScale(
-        note.pitch,
-        chord.symbol,
-        project.key,
-        project.scale,
-      );
-      return result.message;
-    } catch {
-      return '';
-    }
-  }, [chord, inScale, note.pitch, project.key, project.scale]);
-
+/** Shown when nothing is selected: current key and scale summary. */
+function KeyScaleView({ data }: { data: KeyScaleOverview }) {
   return (
     <div className="panel-section">
-      <p className="panel-section__title">ノート情報</p>
-      <div className="chord-headline">{midiToNoteName(note.pitch)}</div>
+      <p className="panel-section__title">キー / スケール概要</p>
+
+      <div className="kv">
+        <span>キー</span>
+        <span>{data.key}</span>
+      </div>
       <div className="kv">
         <span>スケール</span>
-        <span>{inScale ? '内（自然な音）' : '外（色付けの音）'}</span>
+        <span>{data.scaleLabel}</span>
       </div>
-      <div className="kv">
-        <span>強さ</span>
-        <span>{note.velocity}</span>
-      </div>
-      {chord ? (
+      {data.scaleNotes.length > 0 ? (
         <div className="kv">
-          <span>現在のコード</span>
-          <span>{chord.symbol}</span>
+          <span>構成音</span>
+          <span>{data.scaleNotes.join('・')}</span>
         </div>
       ) : null}
-      {classification ? <p className="inspector-explain">{classification}</p> : null}
+
+      <ul className="inspector-hints">
+        <li>上のコードトラックでコードを選ぶと、構成音や機能の解説が出ます。</li>
+        <li>空いている小節をクリックするとコードを追加できます。</li>
+        <li>ピアノロールでノートをクリックすると、その音の役割を説明します。</li>
+        <li>「アシスタント」タブからベースやメロディを自動生成できます。</li>
+      </ul>
     </div>
   );
 }

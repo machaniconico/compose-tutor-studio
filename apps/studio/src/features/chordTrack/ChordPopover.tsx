@@ -1,12 +1,22 @@
 import { useMemo, useState } from 'react';
 import type { ChordEvent, Project } from '@cts/project-model';
-import {
-  getDiatonicChords,
-  parseChord,
-  suggestNextChords,
-} from '@cts/theory-engine';
-import { updateChordSymbol } from '../../state/editorActions';
+import { parseChord, suggestNextChords } from '@cts/theory-engine';
+import { applyProgressionTemplate, updateChordSymbol } from '../../state/editorActions';
 import { useStore } from '../../state/store';
+import {
+  borrowedPalette,
+  diatonicPalette,
+  dominantPalette,
+  progressionPalette,
+  type PaletteTab,
+} from './paletteData';
+
+const TABS: { id: PaletteTab; label: string }[] = [
+  { id: 'diatonic', label: 'Diatonic' },
+  { id: 'progressions', label: 'Progressions' },
+  { id: 'borrowed', label: 'Borrowed' },
+  { id: 'dominant', label: 'Dominant' },
+];
 
 /** Live parse feedback for the free-text input. */
 function parseFeedback(symbol: string, key: string): { ok: boolean; text: string } {
@@ -34,16 +44,9 @@ export function ChordPopover(props: {
   const { project, chord, onClose } = props;
   const removeChord = useStore((s) => s.removeChord);
   const [text, setText] = useState(chord.symbol);
+  const [activeTab, setActiveTab] = useState<PaletteTab>('diatonic');
 
   const feedback = useMemo(() => parseFeedback(text, project.key), [text, project.key]);
-
-  const diatonic = useMemo(() => {
-    try {
-      return getDiatonicChords(project.key, project.scale);
-    } catch {
-      return [];
-    }
-  }, [project.key, project.scale]);
 
   const suggestions = useMemo(() => {
     const sorted = [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat);
@@ -59,11 +62,57 @@ export function ChordPopover(props: {
     }
   }, [project.key, project.scale, project.chordTrack, chord.startBeat]);
 
+  const nextChord = useMemo(() => {
+    return [...project.chordTrack]
+      .filter((c) => c.id !== chord.id && c.startBeat > chord.startBeat)
+      .sort((a, b) => a.startBeat - b.startBeat)[0];
+  }, [project.chordTrack, chord.id, chord.startBeat]);
+
+  const diatonic = useMemo(() => {
+    try {
+      return diatonicPalette(project.key, project.scale);
+    } catch {
+      return [];
+    }
+  }, [project.key, project.scale]);
+
+  const progressions = useMemo(() => {
+    try {
+      return progressionPalette(project.key, project.scale);
+    } catch {
+      return [];
+    }
+  }, [project.key, project.scale]);
+
+  const borrowed = useMemo(() => {
+    try {
+      return borrowedPalette(project.key, project.scale);
+    } catch {
+      return [];
+    }
+  }, [project.key, project.scale]);
+
+  const dominant = useMemo(() => {
+    try {
+      return dominantPalette(project.key, project.scale, nextChord?.symbol);
+    } catch {
+      return [];
+    }
+  }, [project.key, project.scale, nextChord?.symbol]);
+
   const commit = (symbol: string) => {
     if (symbol.trim() === '') return;
     updateChordSymbol(chord.id, symbol.trim());
     onClose();
   };
+
+  const commitProgression = (templateId: string) => {
+    applyProgressionTemplate(templateId);
+    onClose();
+  };
+
+  const chordCandidates =
+    activeTab === 'diatonic' ? diatonic : activeTab === 'borrowed' ? borrowed : dominant;
 
   return (
     <div className="chord-pop" role="dialog" aria-label="コード編集">
@@ -96,21 +145,52 @@ export function ChordPopover(props: {
       <p className={`chord-pop__feedback${feedback.ok ? ' is-ok' : ' is-warn'}`}>{feedback.text}</p>
 
       <div className="chord-pop__section">
-        <p className="chord-pop__label">ダイアトニック</p>
+        <p className="chord-pop__label">コードパレット</p>
         <div className="chord-pop__palette">
-          {diatonic.map((d) => (
+          {TABS.map((tab) => (
             <button
               type="button"
-              key={d.degree}
-              className="chord-pop__chip"
-              onClick={() => commit(d.symbol)}
-              title={`${d.degree} / ${d.symbol}`}
+              key={tab.id}
+              className={`chord-pop__chip${activeTab === tab.id ? ' is-active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+              aria-pressed={activeTab === tab.id}
             >
-              <span className="chord-pop__chip-roman">{d.degree}</span>
-              <span className="chord-pop__chip-sym">{d.symbol}</span>
+              <span className="chord-pop__chip-sym">{tab.label}</span>
             </button>
           ))}
         </div>
+
+        {activeTab === 'progressions' ? (
+          <ul className="chord-pop__suggestions">
+            {progressions.map((p) => (
+              <li key={p.id}>
+                <button type="button" onClick={() => commitProgression(p.id)}>
+                  {p.name}
+                </button>
+                <span className="chord-pop__reason">
+                  {p.symbols.join(' - ')} / {p.reason}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <ul className="chord-pop__suggestions">
+            {chordCandidates.map((candidate) => (
+              <li key={`${activeTab}-${candidate.degree}-${candidate.symbol}`}>
+                <button type="button" onClick={() => commit(candidate.symbol)}>
+                  {candidate.symbol}
+                </button>
+                <span className="chord-pop__reason">
+                  {candidate.degree} / {candidate.reason}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {activeTab === 'dominant' && nextChord ? (
+          <p className="chord-pop__feedback is-ok">次のコード {nextChord.symbol} へ向かう候補です。</p>
+        ) : null}
       </div>
 
       {suggestions.length > 0 ? (

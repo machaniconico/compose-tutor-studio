@@ -334,3 +334,111 @@ describe('checkGoalOnEvent — event kind', () => {
     expect(result.satisfied).toBe(false);
   });
 });
+
+// ─── exportCompleted predicate via checkGoalOnEvent ───────────────────────────
+
+describe('checkGoalOnEvent — exportCompleted predicate', () => {
+  const project = makeProject();
+
+  it('satisfies on export.midi event when format is midi', () => {
+    const event: AppEvent = { type: 'export.midi', payload: { format: 'midi' } };
+    const goal = {
+      kind: 'project' as const,
+      predicate: { type: 'exportCompleted' as const, format: 'midi' as const },
+    };
+    const result = checkGoalOnEvent(goal, event, project, 0);
+    expect(result.satisfied).toBe(true);
+  });
+
+  it('satisfies on export.wav event when format is wav', () => {
+    const event: AppEvent = { type: 'export.wav', payload: { format: 'wav' } };
+    const goal = {
+      kind: 'project' as const,
+      predicate: { type: 'exportCompleted' as const, format: 'wav' as const },
+    };
+    const result = checkGoalOnEvent(goal, event, project, 0);
+    expect(result.satisfied).toBe(true);
+  });
+
+  it('satisfies on export.midi when format is undefined (any format)', () => {
+    const event: AppEvent = { type: 'export.midi', payload: { format: 'midi' } };
+    const goal = {
+      kind: 'project' as const,
+      predicate: { type: 'exportCompleted' as const },
+    };
+    const result = checkGoalOnEvent(goal, event, project, 0);
+    expect(result.satisfied).toBe(true);
+  });
+
+  it('does NOT satisfy when format is midi but event is export.wav', () => {
+    const event: AppEvent = { type: 'export.wav', payload: { format: 'wav' } };
+    const goal = {
+      kind: 'project' as const,
+      predicate: { type: 'exportCompleted' as const, format: 'midi' as const },
+    };
+    const result = checkGoalOnEvent(goal, event, project, 0);
+    expect(result.satisfied).toBe(false);
+  });
+
+  it('does NOT satisfy on non-export event', () => {
+    const event: AppEvent = { type: 'transport.played', payload: { positionBeats: 0 } };
+    const goal = {
+      kind: 'project' as const,
+      predicate: { type: 'exportCompleted' as const, format: 'midi' as const },
+    };
+    const result = checkGoalOnEvent(goal, event, project, 0);
+    expect(result.satisfied).toBe(false);
+  });
+});
+
+// ─── drumLaneActive — dedup step indices ──────────────────────────────────────
+
+describe('drumLaneActive — dedup unique step indices', () => {
+  it('counts unique step indices, not raw event count', () => {
+    // Same stepIndex toggled twice should count as 1 unique step
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([
+          makeDrumEvent('kick', 0),
+          makeDrumEvent('kick', 0), // duplicate
+          makeDrumEvent('kick', 4),
+        ]),
+      ],
+    });
+    // Only 2 unique steps (0 and 4), not 3 raw events
+    expect(
+      evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'kick', minSteps: 2 }, project),
+    ).toBe(true);
+    expect(
+      evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'kick', minSteps: 3 }, project),
+    ).toBe(false);
+  });
+
+  it('returns false when snare lane is empty even if kick is active', () => {
+    const project = makeProject({
+      tracks: [makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('kick', 8)])],
+    });
+    expect(
+      evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'snare', minSteps: 1 }, project),
+    ).toBe(false);
+  });
+
+  it('returns true when both kick and snare each meet minSteps independently', () => {
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([
+          makeDrumEvent('kick', 0),
+          makeDrumEvent('kick', 8),
+          makeDrumEvent('snare', 4),
+          makeDrumEvent('snare', 12),
+        ]),
+      ],
+    });
+    expect(
+      evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'kick', minSteps: 2 }, project),
+    ).toBe(true);
+    expect(
+      evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'snare', minSteps: 2 }, project),
+    ).toBe(true);
+  });
+});

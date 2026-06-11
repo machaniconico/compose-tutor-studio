@@ -1,22 +1,23 @@
 /**
- * Tutorial Engine — Course 0: はじめての8小節
+ * Tutorial Engine — Course 0: はじめての1曲
  *
+ * 仕様書 docs/03_tutorial_learning_spec.md Course 0 の8レッスン構成。
  * Static, beginner-friendly lesson data.
  * All instruction/successMessage text is in Japanese.
  */
 
 import type { Lesson } from './dsl.js';
 
-// ─── Lesson 0-1: プロジェクトを作ってテンポを設定しよう ─────────────────────
+// ─── Lesson 0-1: テンプレートから音を鳴らす ─────────────────────────────────
 
 const lesson01: Lesson = {
   id: 'course0_lesson01',
   courseId: 'course0',
   level: 'beginner',
   lessonSchemaVersion: 1,
-  title: 'プロジェクトを作ってテンポを設定しよう',
+  title: 'テンプレートから音を鳴らす',
   summary:
-    '最初の一歩！新しいプロジェクトを作り、曲のテンポを設定します。テンポとは1分間の拍数（BPM）のことです。',
+    '最初の一歩！テンプレートを使って新しいプロジェクトを作り、テンポを設定して再生してみましょう。',
   steps: [
     {
       id: 'course0_lesson01_step1',
@@ -39,43 +40,19 @@ const lesson01: Lesson = {
   ],
 };
 
-// ─── Lesson 0-2: キーをCメジャーに設定しよう ────────────────────────────────
+// ─── Lesson 0-2: コード進行を選ぶ ───────────────────────────────────────────
 
 const lesson02: Lesson = {
   id: 'course0_lesson02',
   courseId: 'course0',
   level: 'beginner',
   lessonSchemaVersion: 1,
-  title: 'キーをCメジャーに設定しよう',
-  summary:
-    'キー（調）は曲の「音の家」です。今回はピアノの白鍵だけで演奏できる「Cメジャー」を使います。',
-  steps: [
-    {
-      id: 'course0_lesson02_step1',
-      title: 'キーをCメジャーに変更する',
-      instruction:
-        '画面上部の「キー」設定を「C」「メジャー」に変更しましょう。これで曲の土台が決まります。',
-      check: { kind: 'hasEvent', eventType: 'key.changed' },
-      hint: 'キー設定はツールバーの「Key」と書かれたドロップダウンから変更できます。',
-      successMessage:
-        'Cメジャーに設定されました！ドレミファソラシドの音で作れます。',
-    },
-  ],
-};
-
-// ─── Lesson 0-3: コード進行を作ろう（I–V–vi–IV） ────────────────────────────
-
-const lesson03: Lesson = {
-  id: 'course0_lesson03',
-  courseId: 'course0',
-  level: 'beginner',
-  lessonSchemaVersion: 1,
-  title: 'コード進行を作ろう（I–V–vi–IV）',
+  title: 'コード進行を選ぶ',
   summary:
     '世界中のヒット曲で使われる「I–V–vi–IV」進行を作ります。Cメジャーでは C → G → Am → F の4コードです。',
   steps: [
     {
-      id: 'course0_lesson03_step1',
+      id: 'course0_lesson02_step1',
       title: 'コードを1つ追加する',
       instruction:
         'コードトラックにコードを追加しましょう。まず「C」（Cメジャー）を1小節目に置いてみてください。',
@@ -84,7 +61,7 @@ const lesson03: Lesson = {
       successMessage: '最初のコードが置けました！続けて進行を完成させましょう。',
     },
     {
-      id: 'course0_lesson03_step2',
+      id: 'course0_lesson02_step2',
       title: 'C → G → Am → F の進行を設定する',
       instruction:
         'コード進行パネルで C、G、Am、F の順に4つのコードを並べましょう。この進行は「1度→5度→6度→4度」と呼ばれます。',
@@ -96,19 +73,75 @@ const lesson03: Lesson = {
   ],
 };
 
-// ─── Lesson 0-4: メロディを作ろう ───────────────────────────────────────────
+// ─── Lesson 0-3: ドラムを足す ────────────────────────────────────────────────
+
+const lesson03: Lesson = {
+  id: 'course0_lesson03',
+  courseId: 'course0',
+  level: 'beginner',
+  lessonSchemaVersion: 1,
+  title: 'ドラムを足す',
+  summary:
+    'ドラムパターンを作ると曲にグルーヴが生まれます。キックとスネアで基本のビートを打ち込みましょう。',
+  steps: [
+    {
+      id: 'course0_lesson03_step1',
+      title: 'キックを配置する',
+      instruction:
+        'ドラムトラックのステップシーケンサーを開いて、キック（Kick）を1・5・9・13ステップ目に置きましょう。4拍のダウンビートです。',
+      check: { kind: 'eventCount', eventType: 'drum.step.toggled', min: 4 },
+      hint: 'キックは低音の「ドン」という音です。1拍目から4拍置いて試してみましょう。',
+      successMessage: 'キックが置けました！続けてスネアも追加しましょう。',
+    },
+    {
+      id: 'course0_lesson03_step2',
+      title: 'スネアを追加して16ステップパターンを完成させる',
+      instruction:
+        'スネア（Snare）を5ステップ目・13ステップ目（2拍目・4拍目）に置きましょう。キックとスネアが交互に鳴るビートになります。',
+      check: { kind: 'eventCount', eventType: 'drum.step.toggled', min: 6 },
+      hint: 'スネアは高めの「パン」という音です。キックの合間に置くと基本のビートが完成します。',
+      successMessage: 'ドラムパターンができました！曲にリズムが生まれましたね！',
+    },
+  ],
+};
+
+// ─── Lesson 0-4: ベースを足す ────────────────────────────────────────────────
 
 const lesson04: Lesson = {
   id: 'course0_lesson04',
   courseId: 'course0',
   level: 'beginner',
   lessonSchemaVersion: 1,
-  title: 'メロディを作ろう',
+  title: 'ベースを足す',
+  summary:
+    'ベースはコードのルート音（一番低い音）を弾いて、曲の土台を支えます。シンプルなルートベースを作りましょう。',
+  steps: [
+    {
+      id: 'course0_lesson04_step1',
+      title: 'ベーストラックに4音以上入力する',
+      instruction:
+        'ベーストラックのピアノロールを開いて、各コードのルート音（C・G・A・F）を4音以上置きましょう。低い音域（オクターブ2〜3あたり）を使うと本物らしくなります。',
+      check: { kind: 'noteCountAtLeast', min: 4 },
+      hint: 'コードが C のとき → C（ド）、G のとき → G（ソ）を置くとルートベースになります。',
+      successMessage:
+        'ベースができました！曲の土台がしっかりしてきましたね。',
+    },
+  ],
+};
+
+// ─── Lesson 0-5: メロディを足す ─────────────────────────────────────────────
+
+const lesson05: Lesson = {
+  id: 'course0_lesson05',
+  courseId: 'course0',
+  level: 'beginner',
+  lessonSchemaVersion: 1,
+  title: 'メロディを足す',
   summary:
     'ピアノロールを使ってメロディを入力します。4つ以上のノートを置くと、曲らしくなってきます。',
   steps: [
     {
-      id: 'course0_lesson04_step1',
+      id: 'course0_lesson05_step1',
       title: 'メロディを4音以上入力する',
       instruction:
         'メロディトラックのピアノロールを開いて、4つ以上の音符を置きましょう。Cメジャースケール（白鍵）の音を使うと合わせやすいです。',
@@ -120,56 +153,94 @@ const lesson04: Lesson = {
   ],
 };
 
-// ─── Lesson 0-5: ドラムを足そう ─────────────────────────────────────────────
-
-const lesson05: Lesson = {
-  id: 'course0_lesson05',
-  courseId: 'course0',
-  level: 'beginner',
-  lessonSchemaVersion: 1,
-  title: 'ドラムを足そう',
-  summary:
-    'ドラムパターンを作ると曲にグルーヴが生まれます。16ステップのドラムパッドでリズムを打ち込みましょう。',
-  steps: [
-    {
-      id: 'course0_lesson05_step1',
-      title: 'ドラムステップを4つ以上オンにする',
-      instruction:
-        'ドラムトラックのステップシーケンサーを開いて、キックやスネアのステップを4つ以上オンにしましょう。',
-      check: { kind: 'eventCount', eventType: 'drum.step.toggled', min: 4 },
-      hint: 'まずキックを1・5・9・13ステップ目（4拍のダウンビート）に置いてみましょう。',
-      successMessage: 'ドラムパターンができました！曲にリズムが生まれましたね！',
-    },
-  ],
-};
-
-// ─── Lesson 0-6: MIDIで書き出そう ───────────────────────────────────────────
+// ─── Lesson 0-6: 8小節に展開する ─────────────────────────────────────────────
 
 const lesson06: Lesson = {
   id: 'course0_lesson06',
   courseId: 'course0',
   level: 'beginner',
   lessonSchemaVersion: 1,
-  title: 'MIDIで書き出そう',
+  title: '8小節に展開する',
   summary:
-    '完成した曲をMIDIファイルとして書き出します。MIDIファイルは他のDAWや楽器でも使えます。',
+    '4小節のループを8小節に伸ばして、A/A\'（Aセクション → 少し変化させたA\'セクション）の構成を作ります。',
   steps: [
     {
       id: 'course0_lesson06_step1',
-      title: 'MIDIファイルを書き出す',
+      title: 'セクションを追加して8小節にする',
       instruction:
-        '「ファイル → 書き出し → MIDI」を選んで曲をMIDIファイルで保存しましょう。',
-      check: { kind: 'exported', format: 'midi' },
+        'アレンジャー画面でセクションを追加して、曲を8小節に展開しましょう。最初の4小節をコピーして2回繰り返すだけでも OK です。',
+      check: { kind: 'hasEvent', eventType: 'section.added' },
+      hint: 'アレンジャー画面の空白部分を右クリックして「セクションを追加」を選択してみましょう。',
+      successMessage:
+        '8小節に展開できました！曲に流れが生まれましたね。',
+    },
+  ],
+};
+
+// ─── Lesson 0-7: 音量を整える ─────────────────────────────────────────────────
+
+const lesson07: Lesson = {
+  id: 'course0_lesson07',
+  courseId: 'course0',
+  level: 'beginner',
+  lessonSchemaVersion: 1,
+  title: '音量を整える',
+  summary:
+    'ミキサーでトラックの音量バランスを整えます。クリップ（音が割れる状態）が出ないように調整しましょう。',
+  steps: [
+    {
+      id: 'course0_lesson07_step1',
+      title: 'トラックの音量を調整する',
+      instruction:
+        'ミキサーを開いて、各トラックのフェーダー（音量スライダー）を動かして音量バランスを整えましょう。メロディが一番聴こえやすいように他を少し下げてみてください。',
+      check: { kind: 'hasEvent', eventType: 'track.volumeChanged' },
+      hint: '一般的にはドラム・ベースを中心に、メロディが埋もれないようにバランスを取ります。',
+      successMessage:
+        '音量バランスが整いました！完成まであと少しです。',
+    },
+  ],
+};
+
+// ─── Lesson 0-8: 書き出す ────────────────────────────────────────────────────
+
+const lesson08: Lesson = {
+  id: 'course0_lesson08',
+  courseId: 'course0',
+  level: 'beginner',
+  lessonSchemaVersion: 1,
+  title: '書き出す',
+  summary:
+    '完成した曲をMIDIまたはWAVファイルとして書き出します。これで最初の1曲が完成です！',
+  steps: [
+    {
+      id: 'course0_lesson08_step1',
+      title: 'MIDIまたはWAVファイルを書き出す',
+      instruction:
+        '「ファイル → 書き出し」からMIDIまたはWAVを選んで曲を保存しましょう。MIDIは他のDAWでも使え、WAVはどこでも再生できる音声ファイルです。',
+      check: { kind: 'exported' },
       hint: 'キーボードショートカット Cmd+Shift+E（Mac）/ Ctrl+Shift+E（Win）でも書き出せます。',
       successMessage:
-        'おめでとうございます！最初の8小節コースが完了しました！MIDIファイルが書き出されました。',
+        'おめでとうございます！最初の1曲が完成しました！MIDIまたはWAVファイルが書き出されました。',
     },
   ],
 };
 
 // ─── Course 0 export ─────────────────────────────────────────────────────────
 
-/** "はじめての8小節" — Course 0 lessons in order. */
+/**
+ * "はじめての1曲" — Course 0 の8レッスン。
+ * 仕様書 docs/03_tutorial_learning_spec.md 「Course 0: 最初の1曲」準拠。
+ *
+ * Index mapping (used by checker.test.ts):
+ *   [0] = 0-1 テンプレートから音を鳴らす
+ *   [1] = 0-2 コード進行を選ぶ
+ *   [2] = 0-3 ドラムを足す
+ *   [3] = 0-4 ベースを足す
+ *   [4] = 0-5 メロディを足す
+ *   [5] = 0-6 8小節に展開する
+ *   [6] = 0-7 音量を整える
+ *   [7] = 0-8 書き出す
+ */
 export const course0: Lesson[] = [
   lesson01,
   lesson02,
@@ -177,4 +248,6 @@ export const course0: Lesson[] = [
   lesson04,
   lesson05,
   lesson06,
+  lesson07,
+  lesson08,
 ];

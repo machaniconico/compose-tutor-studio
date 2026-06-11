@@ -11,9 +11,9 @@
  */
 
 import type { ScaleName } from './types';
-import { pitchClassOf } from './pitch';
+import { pitchClassOf, noteNameToPitchClass, parseKeyRoot } from './pitch';
 import { parseNoteName } from './notes';
-import { getScalePitchClasses } from './scales';
+import { getScalePitchClasses, getScaleIntervals } from './scales';
 import { parseChordSymbol } from './parse-chord';
 
 /** 単音解析の関係種別。 */
@@ -156,4 +156,127 @@ export function analyzeNoteAgainstChordAndScale(
     severity: 'warn',
     message: `${noteLabel}は${key}スケールにも${chord.symbol}コードにも含まれない音です。経過音やブルーノートとして意図的に使う場合を除き、響きを確認しましょう。`,
   };
+}
+
+/**
+ * コードに対して使えるテンション音を構成音から判定して日本語ラベルの配列で返す。
+ *
+ * テンションは「9th / ♭9th / ♯9th / 11th / ♯11th / 13th / ♭13th」。
+ * スケール構成音に含まれるテンションインターバル(コードルートからの半音差)を列挙する。
+ * コード構成音と重複するインターバルは除外する。
+ *
+ * @param chordSymbol コードシンボル (例 "C", "G7", "Dm7")
+ * @param key キー文字列 (例 "C", "F#")
+ * @param scale スケール名
+ * @returns テンション日本語ラベルの配列 (例 ["9th", "13th"])
+ */
+export function detectChordTensions(
+  chordSymbol: string,
+  key: string,
+  scale: ScaleName,
+): string[] {
+  const chord = parseChordSymbol(chordSymbol);
+  if (chord === null) return [];
+
+  let scalePcs: number[];
+  try {
+    scalePcs = getScalePitchClasses(key, scale);
+  } catch {
+    return [];
+  }
+
+  const chordRootPc = chord.pitchClasses[0] ?? 0;
+  // テンションインターバル定義 (半音差 -> ラベル)
+  const TENSION_INTERVALS: Array<[number, string]> = [
+    [1, '♭9th'],
+    [2, '9th'],
+    [3, '♯9th'],
+    [5, '11th'],
+    [6, '♯11th'],
+    [8, '♭13th'],
+    [9, '13th'],
+  ];
+
+  const chordIntervalSet = new Set(chord.intervals.map((iv) => ((iv % 12) + 12) % 12));
+
+  return TENSION_INTERVALS.filter(([semitones]) => {
+    const tensorPc = (chordRootPc + semitones) % 12;
+    // コード構成音に含まれるインターバルは除外
+    if (chordIntervalSet.has(semitones)) return false;
+    // スケール内にある場合のみテンションとして提示
+    return scalePcs.includes(tensorPc);
+  }).map(([, label]) => label);
+}
+
+/** スケール度数のローマ数字ラベル (1始まり)。 */
+const DEGREE_LABELS = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ', 'Ⅵ', 'Ⅶ'] as const;
+
+/**
+ * MIDIノート番号（または音名）をキー/スケールに対する度数ラベルへ変換する。
+ * スケール構成音であれば "Ⅰ" ～ "Ⅶ" を返す。スケール外なら null を返す。
+ *
+ * @param note MIDI番号または音名
+ * @param key  キー文字列 (例 "C", "F#")
+ * @param scale スケール名
+ */
+export function getNoteScaleDegree(
+  note: number | string,
+  key: string,
+  scale: ScaleName,
+): string | null {
+  const notePc = resolvePitchClass(note);
+  if (notePc === null) return null;
+
+  let keyRootPc: number;
+  try {
+    keyRootPc = noteNameToPitchClass(parseKeyRoot(key));
+  } catch {
+    return null;
+  }
+
+  const intervals = getScaleIntervals(scale);
+  const scalePcs = getScalePitchClasses(key, scale);
+
+  const idx = scalePcs.indexOf(notePc);
+  if (idx < 0) return null;
+
+  const label = DEGREE_LABELS[idx];
+  return label ?? null;
+}
+
+/**
+ * ノートのスケール内文脈を日本語ラベルで返す。
+ * スケール内なら度数ラベル (例 "Ⅲ度")、スケール外なら文脈に応じた説明を返す。
+ */
+export function describeNoteInKey(
+  note: number | string,
+  key: string,
+  scale: ScaleName,
+): string {
+  const notePc = resolvePitchClass(note);
+  if (notePc === null) return '解析不能';
+
+  const scalePcs = getScalePitchClasses(key, scale);
+  const idx = scalePcs.indexOf(notePc);
+  if (idx >= 0) {
+    const label = DEGREE_LABELS[idx];
+    return label ? `${label}度（スケール内）` : 'スケール内';
+  }
+
+  // スケール外: キーのルートとの音程から文脈を推定する
+  let keyRootPc: number;
+  try {
+    keyRootPc = noteNameToPitchClass(parseKeyRoot(key));
+  } catch {
+    return 'スケール外';
+  }
+  const fromRoot = ((notePc - keyRootPc) + 12) % 12;
+  const chromatic: Record<number, string> = {
+    1: '♭Ⅱ（半音上のアプローチ音）',
+    3: '♭Ⅲ（ブルーノート系）',
+    6: '♭Ⅴ（トライトン／ブルーノート）',
+    8: '♭Ⅵ（借用音）',
+    10: '♭Ⅶ（借用音）',
+  };
+  return chromatic[fromRoot] ?? 'スケール外（経過音・アプローチ音として使えます）';
 }
