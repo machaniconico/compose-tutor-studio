@@ -94,9 +94,6 @@ importers:
       '@cts/project-model':
         specifier: workspace:*
         version: link:../project-model
-      '@cts/theory-engine':
-        specifier: workspace:*
-        version: link:../theory-engine
     devDependencies:
       typescript:
         specifier: ^5.8.0
