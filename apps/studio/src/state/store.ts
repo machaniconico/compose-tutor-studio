@@ -62,6 +62,9 @@ type StoreState = {
   past: Project[];
   future: Project[];
 
+  /** Generic escape hatch: apply an immutable project change (bumps updatedAt, pushes history, saves). */
+  applyProjectChange: (fn: (p: Project) => Project) => void;
+
   // project metadata actions
   setBpm: (bpm: number) => void;
   setKey: (key: MusicalKey) => void;
@@ -193,6 +196,8 @@ export const useStore = create<StoreState>((set, get) => {
     inspector: { content: null },
     past: [],
     future: [],
+
+    applyProjectChange: (fn) => commitProject(fn(get().project)),
 
     // --- project metadata ---
     setBpm: (bpm) => commitProject({ ...get().project, bpm }),
