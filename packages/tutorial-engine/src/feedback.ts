@@ -317,7 +317,7 @@ function explainBpmInRange(
   // close: BPM is within ±20% of the range boundary it overshot
   // e.g. range 100-140, current=90 → lower boundary 100, 90 >= 100*0.8=80 → close
   const rangeSpan = max - min;
-  const tolerance = Math.max(rangeSpan * 0.2, (max - min) * 0.2, 10);
+  const tolerance = Math.max(rangeSpan * 0.2, 10);
   const isClose = current >= min - tolerance && current <= max + tolerance;
   const grade: PredicateGrade = isClose ? 'close' : 'needs_work';
 

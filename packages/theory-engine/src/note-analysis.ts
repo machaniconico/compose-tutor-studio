@@ -13,7 +13,7 @@
 import type { ScaleName } from './types';
 import { pitchClassOf, noteNameToPitchClass, parseKeyRoot } from './pitch';
 import { parseNoteName } from './notes';
-import { getScalePitchClasses, getScaleIntervals } from './scales';
+import { getScalePitchClasses } from './scales';
 import { parseChordSymbol } from './parse-chord';
 
 /** 単音解析の関係種別。 */
@@ -231,8 +231,6 @@ export function analyzeChordTensions(intervals: number[]): string[] {
     [8, '♭13th'],
     [9, '13th'],
   ];
-  const BASIC_TRIAD_AND_7TH = new Set([0, 3, 4, 6, 7, 8, 10, 11]);
-
   // 構成音をオクターブ内正規化してセットにまとめる
   const normalizedSet = new Set(intervals.map((iv) => ((iv % 12) + 12) % 12));
 
@@ -265,14 +263,13 @@ export function getNoteScaleDegree(
   const notePc = resolvePitchClass(note);
   if (notePc === null) return null;
 
-  let keyRootPc: number;
+  // 不正なキー文字列は throw ではなく null を返す契約を維持する
   try {
-    keyRootPc = noteNameToPitchClass(parseKeyRoot(key));
+    noteNameToPitchClass(parseKeyRoot(key));
   } catch {
     return null;
   }
 
-  const intervals = getScaleIntervals(scale);
   const scalePcs = getScalePitchClasses(key, scale);
 
   const idx = scalePcs.indexOf(notePc);
