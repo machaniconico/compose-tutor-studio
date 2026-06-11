@@ -3,6 +3,8 @@ import { useStore } from '../../state/store';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
 import { formatPosition } from '../timeline';
 import { initAudioBridge } from '../../audio/playback';
+import { ProjectMenu } from '../projectMenu/ProjectMenu';
+import { ExportMenu } from '../export/ExportMenu';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -44,6 +46,8 @@ export function TransportBar() {
   return (
     <header className="transport-bar">
       <div className="transport-bar__row">
+        <ProjectMenu />
+
         <button
           type="button"
           className={isPlaying ? 'is-active' : ''}
@@ -143,6 +147,8 @@ export function TransportBar() {
         <button type="button" onClick={() => saveToLocalStorage()}>
           保存
         </button>
+
+        <ExportMenu />
 
         <span className="save-indicator">
           更新: {new Date(project.updatedAt).toLocaleTimeString('ja-JP')}
