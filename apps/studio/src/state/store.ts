@@ -30,6 +30,8 @@ import {
 
 export type EditorView = 'pianoRoll' | 'drums' | 'arranger';
 
+export type Difficulty = 'beginner' | 'standard' | 'advanced';
+
 export type TransportState = {
   isPlaying: boolean;
   positionBeat: number;
@@ -48,6 +50,8 @@ export type EditorState = {
   scaleSnap: boolean;
   chordToneHighlight: boolean;
   zoomX: number;
+  /** 難易度モード。beginner=平易表示, standard=標準, advanced=詳細表示。 */
+  difficulty: Difficulty;
 };
 
 export type SaveState = {
@@ -115,6 +119,7 @@ type StoreState = {
   setZoomX: (zoomX: number) => void;
   toggleTutorialPanel: () => void;
   setInspectorContent: (content: string | null) => void;
+  setDifficulty: (difficulty: Difficulty) => void;
 
   // transport
   //
@@ -201,6 +206,30 @@ function makeTransport(): TransportState {
   };
 }
 
+const DIFFICULTY_STORAGE_KEY = 'cts.editor.difficulty';
+
+function loadDifficulty(): Difficulty {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(DIFFICULTY_STORAGE_KEY);
+      if (raw === 'beginner' || raw === 'standard' || raw === 'advanced') return raw;
+    }
+  } catch {
+    // ignore
+  }
+  return 'beginner';
+}
+
+function saveDifficulty(difficulty: Difficulty): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DIFFICULTY_STORAGE_KEY, difficulty);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function makeEditor(project: Project): EditorState {
   const firstTrack = project.tracks[0];
   const firstClip = firstTrack?.clips[0];
@@ -213,6 +242,7 @@ function makeEditor(project: Project): EditorState {
     scaleSnap: true,
     chordToneHighlight: true,
     zoomX: 1,
+    difficulty: loadDifficulty(),
   };
 }
 
@@ -491,6 +521,10 @@ export const useStore = create<StoreState>((set, get) => {
     setZoomX: (zoomX) => set((s) => ({ editor: { ...s.editor, zoomX } })),
     toggleTutorialPanel: () => set((s) => ({ tutorialPanelOpen: !s.tutorialPanelOpen })),
     setInspectorContent: (content) => set({ inspector: { content } }),
+    setDifficulty: (difficulty) => {
+      saveDifficulty(difficulty);
+      set((s) => ({ editor: { ...s.editor, difficulty } }));
+    },
 
     // --- transport ---
     play: () => {

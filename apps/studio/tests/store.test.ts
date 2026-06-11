@@ -260,3 +260,31 @@ describe('transport toggles', () => {
     expect(useStore.getState().transport.metronome).toBe(true);
   });
 });
+
+describe('difficulty mode', () => {
+  it('defaults to beginner', () => {
+    expect(useStore.getState().editor.difficulty).toBe('beginner');
+  });
+
+  it('setDifficulty changes difficulty in editor state', () => {
+    useStore.getState().setDifficulty('standard');
+    expect(useStore.getState().editor.difficulty).toBe('standard');
+
+    useStore.getState().setDifficulty('advanced');
+    expect(useStore.getState().editor.difficulty).toBe('advanced');
+
+    useStore.getState().setDifficulty('beginner');
+    expect(useStore.getState().editor.difficulty).toBe('beginner');
+  });
+
+  it('setDifficulty persists to localStorage', () => {
+    useStore.getState().setDifficulty('advanced');
+    const stored = storage.getItem('cts.editor.difficulty');
+    expect(stored).toBe('advanced');
+  });
+
+  it('setDifficulty does not push undo history', () => {
+    useStore.getState().setDifficulty('standard');
+    expect(useStore.getState().canUndo()).toBe(false);
+  });
+});

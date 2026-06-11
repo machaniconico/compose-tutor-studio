@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useStore, type SaveState } from '../../state/store';
+import { useStore, type SaveState, type Difficulty } from '../../state/store';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
 import { formatPosition } from '../timeline';
 import { initAudioBridge } from '../../audio/playback';
@@ -8,6 +8,12 @@ import { ExportMenu } from '../export/ExportMenu';
 import { installBeforeUnloadFlush } from '../../state/persistence';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
+
+const DIFFICULTIES: { value: Difficulty; label: string }[] = [
+  { value: 'beginner', label: '初級' },
+  { value: 'standard', label: '標準' },
+  { value: 'advanced', label: '上級' },
+];
 
 const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'major', label: 'メジャー' },
@@ -54,6 +60,8 @@ export function TransportBar() {
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
   const saveToLocalStorage = useStore((s) => s.saveToLocalStorage);
+  const difficulty = useStore((s) => s.editor.difficulty);
+  const setDifficulty = useStore((s) => s.setDifficulty);
 
   // Connect the store to the audio engine once. The bridge subscribes to
   // transport.isPlaying so the play/stop buttons below only touch store state.
@@ -162,6 +170,20 @@ export function TransportBar() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="field difficulty-switcher" role="group" aria-label="難易度">
+          {DIFFICULTIES.map((d) => (
+            <button
+              key={d.value}
+              type="button"
+              className={difficulty === d.value ? 'is-active' : ''}
+              aria-pressed={difficulty === d.value}
+              onClick={() => setDifficulty(d.value)}
+            >
+              {d.label}
+            </button>
+          ))}
         </div>
 
         <button type="button" disabled={!canUndo} onClick={() => undo()}>

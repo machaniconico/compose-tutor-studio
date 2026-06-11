@@ -1,11 +1,21 @@
 import { useMemo, useState } from 'react';
-import { suggestNextChords, type HarmonicFunction } from '@cts/theory-engine';
+import { suggestNextChords } from '@cts/theory-engine';
 import { useStore } from '../../state/store';
 import { appendChordAfterLast } from '../../state/editorActions';
 import { AssistantPanel } from '../assistant/AssistantPanel';
 import { TutorialPanel } from '../tutorial/TutorialPanel';
 import { useInspection } from './useInspection';
 import type { NoteInspectionResult, ChordInspectionResult, KeyScaleOverview } from './useInspection';
+import {
+  harmonicFunctionLabel,
+  degreeLabel,
+  tensionLabel,
+  advancedChordNote,
+  noteRelationLabel,
+  scalePresenceLabel,
+  simplifyExplanation,
+  type Difficulty,
+} from './difficultyText';
 
 type RightTab = 'inspector' | 'assistant' | 'tutorial';
 
@@ -48,10 +58,11 @@ export function InspectorPanel() {
 /** The inspector content itself: dispatches to note/chord/overview views. */
 function InspectorContent() {
   const state = useInspection();
+  const difficulty = useStore((s) => s.editor.difficulty);
 
-  if (state.kind === 'note') return <NoteInspector data={state.data} />;
-  if (state.kind === 'chord') return <ChordInspector data={state.data} />;
-  return <KeyScaleView data={state.data} />;
+  if (state.kind === 'note') return <NoteInspector data={state.data} difficulty={difficulty} />;
+  if (state.kind === 'chord') return <ChordInspector data={state.data} difficulty={difficulty} />;
+  return <KeyScaleView data={state.data} difficulty={difficulty} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,9 +70,9 @@ function InspectorContent() {
 // ---------------------------------------------------------------------------
 
 /** Selected-note inspector: pitch name, scale degree, chord tone classification. */
-function NoteInspector({ data }: { data: NoteInspectionResult }) {
+function NoteInspector({ data, difficulty }: { data: NoteInspectionResult; difficulty: Difficulty }) {
   const relationLabel = data.noteAnalysis
-    ? relationToLabel(data.noteAnalysis.relation)
+    ? noteRelationLabel(data.noteAnalysis.relation, difficulty)
     : data.inScale
       ? 'スケール内'
       : 'スケール外';
@@ -85,7 +96,7 @@ function NoteInspector({ data }: { data: NoteInspectionResult }) {
 
       <div className="kv">
         <span>スケール</span>
-        <span>{data.inScale ? '内（自然な音）' : '外（色付けの音）'}</span>
+        <span>{scalePresenceLabel(data.inScale, difficulty)}</span>
       </div>
 
       {data.currentChordSymbol ? (
@@ -120,27 +131,12 @@ function NoteInspector({ data }: { data: NoteInspectionResult }) {
   );
 }
 
-function relationToLabel(relation: string): string {
-  switch (relation) {
-    case 'chordTone':
-      return 'コードトーン（安定音）';
-    case 'scaleTone':
-      return 'スケール音（経過音向き）';
-    case 'tension':
-      return 'テンション（色付け音）';
-    case 'nonScale':
-      return 'スケール外（経過音・アプローチ音）';
-    default:
-      return relation;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Chord Inspector
 // ---------------------------------------------------------------------------
 
 /** Full chord analysis display with "next chord" buttons. */
-function ChordInspector({ data }: { data: ChordInspectionResult }) {
+function ChordInspector({ data, difficulty }: { data: ChordInspectionResult; difficulty: Difficulty }) {
   const project = useStore((s) => s.project);
   const selectedChordId = useStore((s) => s.editor.selectedChordId);
 
@@ -159,6 +155,9 @@ function ChordInspector({ data }: { data: ChordInspectionResult }) {
   }, [project.chordTrack, project.key, project.scale, selectedChordId]);
 
   const notes = data.notes.length > 0 ? data.notes.join('・') : '—';
+  const advancedNote = difficulty === 'advanced'
+    ? advancedChordNote(data.harmonicFunction, data.degree)
+    : '';
 
   return (
     <div className="panel-section">
@@ -171,20 +170,24 @@ function ChordInspector({ data }: { data: ChordInspectionResult }) {
       </div>
       <div className="kv">
         <span>度数</span>
-        <span>{data.degree}</span>
+        <span>{degreeLabel(data.degree, difficulty)}</span>
       </div>
       <div className="kv">
         <span>機能</span>
-        <span>{data.functionLabel}</span>
+        <span>{harmonicFunctionLabel(data.harmonicFunction, difficulty)}</span>
       </div>
 
       <div className="kv">
         <span>テンション</span>
-        <span>{data.tension.length > 0 ? data.tension.join('・') : 'なし（基本形）'}</span>
+        <span>{tensionLabel(data.tension, difficulty)}</span>
       </div>
 
       {data.explanation ? (
-        <p className="inspector-explain">{data.explanation}</p>
+        <p className="inspector-explain">{simplifyExplanation(data.explanation, difficulty)}</p>
+      ) : null}
+
+      {advancedNote ? (
+        <p className="inspector-explain inspector-explain--advanced">{advancedNote}</p>
       ) : null}
 
       {nextChords.length > 0 ? (
@@ -215,7 +218,29 @@ function ChordInspector({ data }: { data: ChordInspectionResult }) {
 // ---------------------------------------------------------------------------
 
 /** Shown when nothing is selected: current key and scale summary. */
-function KeyScaleView({ data }: { data: KeyScaleOverview }) {
+function KeyScaleView({ data, difficulty }: { data: KeyScaleOverview; difficulty: Difficulty }) {
+  const hints =
+    difficulty === 'beginner'
+      ? [
+          'コードトラックでコードをタップすると、そのコードのわかりやすい説明が出ます。',
+          '小節をクリックするとコードを追加できます。',
+          'ピアノロールでノートを選ぶと、その音の意味を教えてくれます。',
+          '「アシスタント」タブでベースやメロディを自動で作れます。',
+        ]
+      : difficulty === 'advanced'
+        ? [
+            'コードトラックでコードを選ぶと度数・機能・テンション・セカンダリドミナント応用の詳細が表示されます。',
+            '空いている小節をクリックするとコードを追加できます。',
+            'ピアノロールでノートを選ぶとコードトーン/テンション/ノンスケール音の詳細分析が出ます。',
+            '「アシスタント」タブからベースやメロディを自動生成できます。',
+          ]
+        : [
+            '上のコードトラックでコードを選ぶと、構成音や機能の解説が出ます。',
+            '空いている小節をクリックするとコードを追加できます。',
+            'ピアノロールでノートをクリックすると、その音の役割を説明します。',
+            '「アシスタント」タブからベースやメロディを自動生成できます。',
+          ];
+
   return (
     <div className="panel-section">
       <p className="panel-section__title">キー / スケール概要</p>
@@ -236,10 +261,9 @@ function KeyScaleView({ data }: { data: KeyScaleOverview }) {
       ) : null}
 
       <ul className="inspector-hints">
-        <li>上のコードトラックでコードを選ぶと、構成音や機能の解説が出ます。</li>
-        <li>空いている小節をクリックするとコードを追加できます。</li>
-        <li>ピアノロールでノートをクリックすると、その音の役割を説明します。</li>
-        <li>「アシスタント」タブからベースやメロディを自動生成できます。</li>
+        {hints.map((h) => (
+          <li key={h}>{h}</li>
+        ))}
       </ul>
     </div>
   );
