@@ -1,0 +1,57 @@
+// Metronome click voice.
+//
+// A short filtered sine "tick", brighter and louder on the first beat of each
+// bar (the accent). The metronome bypasses the per-track mix and connects
+// straight to the master bus so it is always audible and never recorded into
+// the WAV render (the render simply never schedules it).
+
+/** A metronome click resolved to a beat position. */
+export type MetronomeClick = {
+  beat: number;
+  /** True on the first beat of a bar. */
+  accent: boolean;
+};
+
+/**
+ * Enumerate metronome clicks across a beat range `[fromBeat, toBeat)`.
+ * Clicks land on whole beats; the accent is the first beat of each bar.
+ *
+ * Pure: useful for both live scheduling and tests.
+ */
+export function metronomeBeatEvents(
+  fromBeat: number,
+  toBeat: number,
+  beatsPerBar: number,
+): MetronomeClick[] {
+  const bpb = beatsPerBar > 0 ? beatsPerBar : 4;
+  const clicks: MetronomeClick[] = [];
+  // `|| 0` normalises a -0 result (e.g. Math.ceil(-1e-9)) to +0.
+  const first = Math.ceil(fromBeat - 1e-9) || 0;
+  for (let beat = first; beat < toBeat; beat += 1) {
+    const accent = ((beat % bpb) + bpb) % bpb === 0;
+    clicks.push({ beat, accent });
+  }
+  return clicks;
+}
+
+/** Schedule one metronome click at an absolute audio time. */
+export function scheduleMetronomeClick(
+  ctx: BaseAudioContext,
+  output: AudioNode,
+  time: number,
+  accent: boolean,
+): void {
+  const osc = ctx.createOscillator();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(accent ? 1600 : 1000, time);
+
+  const gain = ctx.createGain();
+  const peak = accent ? 0.3 : 0.18;
+  gain.gain.setValueAtTime(peak, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+
+  osc.connect(gain);
+  gain.connect(output);
+  osc.start(time);
+  osc.stop(time + 0.06);
+}

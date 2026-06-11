@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { useStore } from '../../state/store';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
 import { formatPosition } from '../timeline';
+import { initAudioBridge } from '../../audio/playback';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -21,6 +23,8 @@ export function TransportBar() {
   const isPlaying = transport.isPlaying;
   const play = useStore((s) => s.play);
   const stop = useStore((s) => s.stop);
+  const toggleLoop = useStore((s) => s.toggleLoop);
+  const toggleMetronome = useStore((s) => s.toggleMetronome);
   const setBpm = useStore((s) => s.setBpm);
   const setKey = useStore((s) => s.setKey);
   const setScale = useStore((s) => s.setScale);
@@ -30,6 +34,10 @@ export function TransportBar() {
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
   const saveToLocalStorage = useStore((s) => s.saveToLocalStorage);
+
+  // Connect the store to the audio engine once. The bridge subscribes to
+  // transport.isPlaying so the play/stop buttons below only touch store state.
+  useEffect(() => initAudioBridge(), []);
 
   const beatsPerBar = project.timeSignature[0];
 
@@ -42,7 +50,34 @@ export function TransportBar() {
           aria-pressed={isPlaying}
           onClick={() => (isPlaying ? stop() : play())}
         >
-          {isPlaying ? '停止' : '再生'}
+          {isPlaying ? '一時停止' : '再生'}
+        </button>
+
+        <button
+          type="button"
+          aria-label="先頭へ戻す"
+          disabled={isPlaying && transport.positionBeat === 0}
+          onClick={() => stop(true)}
+        >
+          先頭へ
+        </button>
+
+        <button
+          type="button"
+          className={transport.loopEnabled ? 'is-active' : ''}
+          aria-pressed={transport.loopEnabled}
+          onClick={() => toggleLoop()}
+        >
+          ループ
+        </button>
+
+        <button
+          type="button"
+          className={transport.metronome ? 'is-active' : ''}
+          aria-pressed={transport.metronome}
+          onClick={() => toggleMetronome()}
+        >
+          メトロノーム
         </button>
 
         <div className="position-display" aria-label="再生位置">

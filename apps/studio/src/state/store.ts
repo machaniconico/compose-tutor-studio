@@ -104,9 +104,19 @@ type StoreState = {
   toggleTutorialPanel: () => void;
   setInspectorContent: (content: string | null) => void;
 
-  // transport (UI-only)
+  // transport
+  //
+  // The store owns play/stop *intent* and position semantics only; the audio
+  // engine subscribes to these via `initAudioBridge()` (src/audio/playback.ts)
+  // so the store never imports audio code.
   play: () => void;
-  stop: () => void;
+  /**
+   * Stop playback.
+   *  - while playing: pause, keeping the current position (so a re-press of
+   *    play resumes from where it stopped);
+   *  - while already stopped (or with `reset` true): rewind to beat 0.
+   */
+  stop: (reset?: boolean) => void;
   setPosition: (beat: number) => void;
   toggleLoop: () => void;
   toggleMetronome: () => void;
@@ -338,9 +348,21 @@ export const useStore = create<StoreState>((set, get) => {
     toggleTutorialPanel: () => set((s) => ({ tutorialPanelOpen: !s.tutorialPanelOpen })),
     setInspectorContent: (content) => set({ inspector: { content } }),
 
-    // --- transport (UI only) ---
+    // --- transport ---
     play: () => set((s) => ({ transport: { ...s.transport, isPlaying: true } })),
-    stop: () => set((s) => ({ transport: { ...s.transport, isPlaying: false, positionBeat: 0 } })),
+    stop: (reset) =>
+      set((s) => {
+        // Playing -> pause (keep position) unless an explicit reset is asked.
+        // Already stopped -> rewind to 0.
+        const shouldReset = reset === true || !s.transport.isPlaying;
+        return {
+          transport: {
+            ...s.transport,
+            isPlaying: false,
+            positionBeat: shouldReset ? 0 : s.transport.positionBeat,
+          },
+        };
+      }),
     setPosition: (beat) => set((s) => ({ transport: { ...s.transport, positionBeat: beat } })),
     toggleLoop: () => set((s) => ({ transport: { ...s.transport, loopEnabled: !s.transport.loopEnabled } })),
     toggleMetronome: () =>
