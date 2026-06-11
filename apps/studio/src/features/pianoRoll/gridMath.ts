@@ -33,6 +33,14 @@ export function quantizeStart(startBeat: number, snap: number): number {
   return snapBeat(startBeat, snap);
 }
 
+/** Quantize every provided note's start to the given grid resolution. */
+export function quantizeNotes<T extends { startBeat: number }>(
+  notes: readonly T[],
+  resolution: number,
+): Array<Omit<T, 'startBeat'> & { startBeat: number }> {
+  return notes.map((note) => ({ ...note, startBeat: quantizeStart(note.startBeat, resolution) }));
+}
+
 /** Convert an x pixel offset (relative to grid origin) into a beat value. */
 export function xToBeat(x: number, pxPerBeat: number): number {
   if (pxPerBeat <= 0) return 0;

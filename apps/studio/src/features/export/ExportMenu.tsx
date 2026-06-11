@@ -14,11 +14,21 @@ import { pushToast } from '../../state/tutorialBridge';
 import { renderProjectToWav } from '../../audio/wav';
 import { Dialog } from '../common/Dialog';
 import { downloadBlob, safeFileStem } from './download';
+import {
+  clearExportHistory,
+  formatExportKindJa,
+  formatExportRelativeTimeJa,
+  getExportKindIcon,
+  loadExportHistory,
+  recordExportHistory,
+  type ExportHistoryEntry,
+} from './exportHistory';
 
 /** Top-bar export button + dialog. */
 export function ExportMenu() {
   const [open, setOpen] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [history, setHistory] = useState<ExportHistoryEntry[]>(() => loadExportHistory());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const project = useStore((s) => s.project);
@@ -26,13 +36,20 @@ export function ExportMenu() {
 
   const stem = safeFileStem(project.title);
 
+  const openMenu = () => {
+    setHistory(loadExportHistory());
+    setOpen(true);
+  };
+
   const exportMidi = () => {
     try {
       const bytes = projectToMidi(project);
       // Copy into a fresh ArrayBuffer so the Blob owns a plain ArrayBuffer.
       const buffer = bytes.slice().buffer;
-      downloadBlob(new Blob([buffer], { type: 'audio/midi' }), `${stem}.mid`);
+      const fileName = `${stem}.mid`;
+      downloadBlob(new Blob([buffer], { type: 'audio/midi' }), fileName);
       publishAppEvent({ type: 'export.midi', payload: { format: 'midi' } });
+      setHistory(recordExportHistory({ kind: 'midi', fileName, projectId: project.id }));
       pushToast('MIDIファイルを書き出しました。', 'success');
     } catch {
       pushToast('MIDIの書き出しに失敗しました。', 'error');
@@ -43,8 +60,10 @@ export function ExportMenu() {
     setRendering(true);
     try {
       const blob = await renderProjectToWav(project);
-      downloadBlob(blob, `${stem}.wav`);
+      const fileName = `${stem}.wav`;
+      downloadBlob(blob, fileName);
       publishAppEvent({ type: 'export.wav', payload: { format: 'wav' } });
+      setHistory(recordExportHistory({ kind: 'wav', fileName, projectId: project.id }));
       pushToast('WAVファイルを書き出しました。', 'success');
     } catch {
       pushToast('WAVの書き出しに失敗しました。', 'error');
@@ -56,14 +75,21 @@ export function ExportMenu() {
   const exportProjectFile = () => {
     try {
       const json = serializeProject(project);
+      const fileName = `${stem}.ctsproj.json`;
       downloadBlob(
         new Blob([json], { type: 'application/json' }),
-        `${stem}.ctsproj.json`,
+        fileName,
       );
+      setHistory(recordExportHistory({ kind: 'project', fileName, projectId: project.id }));
       pushToast('プロジェクトを書き出しました。', 'success');
     } catch {
       pushToast('プロジェクトの書き出しに失敗しました。', 'error');
     }
+  };
+
+  const clearHistory = () => {
+    clearExportHistory();
+    setHistory([]);
   };
 
   const onImportFile = async (file: File) => {
@@ -85,7 +111,7 @@ export function ExportMenu() {
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)}>
+      <button type="button" onClick={openMenu}>
         書き出し
       </button>
 
@@ -131,6 +157,34 @@ export function ExportMenu() {
               <p className="export-menu__hint">
                 書き出したファイル（.ctsproj.json）を読み込むと、続きから編集できます。
               </p>
+            </section>
+
+            <section className="export-menu__group" aria-label="書き出し履歴">
+              <div className="export-menu__row">
+                <p className="panel-section__title">書き出し履歴</p>
+                <button type="button" onClick={clearHistory} disabled={history.length === 0}>
+                  履歴をクリア
+                </button>
+              </div>
+              {history.length === 0 ? (
+                <p className="export-menu__hint">まだ書き出し履歴はありません。</p>
+              ) : (
+                <ul className="export-menu__history">
+                  {history.map((entry) => (
+                    <li
+                      key={`${entry.exportedAt}-${entry.kind}-${entry.fileName}`}
+                      className="export-menu__history-item"
+                    >
+                      <span aria-hidden="true">{getExportKindIcon(entry.kind)}</span>
+                      <span>{entry.fileName}</span>
+                      <span className="export-menu__hint">
+                        {formatExportKindJa(entry.kind)} ・{' '}
+                        {formatExportRelativeTimeJa(entry.exportedAt)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </div>
         </Dialog>

@@ -19,6 +19,7 @@ import type {
   Project,
   Track,
 } from '@cts/project-model';
+import type { ParsedMidi } from '@cts/midi-io';
 import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
 import {
   analyzeChord,
@@ -54,6 +55,10 @@ function pitchInScale(project: Project, pitch: number): boolean {
   } catch {
     return false;
   }
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 /** Publish a chord.added app event for a freshly written chord. */
@@ -409,6 +414,114 @@ export function generatedToNoteEvents(generated: readonly GeneratedNote[]): Note
     durationBeats: g.durationBeats,
     velocity: g.velocity,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// MIDI import.
+// ---------------------------------------------------------------------------
+
+const MIDI_IMPORT_COLORS = ['#6f9bd8', '#5bb0a8', '#c75b86', '#d98a4b', '#8b75d7'];
+
+export type MidiImportResult = {
+  importedTrackCount: number;
+  importedNoteCount: number;
+};
+
+/** Add parsed SMF note tracks as new instrument tracks in the current project. */
+export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
+  const sourceTracks = parsed.tracks.filter((track) => track.notes.length > 0);
+  if (sourceTracks.length === 0) {
+    throw new Error('MIDIの中に読み込めるノートが見つかりませんでした。');
+  }
+
+  let firstTrackId: string | null = null;
+  let firstClipId: string | null = null;
+  const importedNoteCount = sourceTracks.reduce((sum, track) => sum + track.notes.length, 0);
+
+  useStore.getState().applyProjectChange((project) => {
+    const nextTimeSignature = parsed.timeSignature;
+    const nextBeatsPerBar = Math.max(1, nextTimeSignature[0] * (4 / nextTimeSignature[1]));
+    const existingLengthBeats = project.lengthBars * projectBeatsPerBar(project);
+    const importedEndBeat = sourceTracks.reduce((max, track) => {
+      const trackEnd = track.notes.reduce(
+        (noteMax, note) => Math.max(noteMax, note.startBeat + note.durationBeats),
+        0,
+      );
+      return Math.max(max, trackEnd);
+    }, 0);
+    const projectLengthBeats = Math.max(existingLengthBeats, importedEndBeat, nextBeatsPerBar);
+    const lengthBars = Math.max(1, Math.ceil(projectLengthBeats / nextBeatsPerBar));
+
+    const importedTracks: Track[] = sourceTracks.map((track, index) => {
+      const trackId = uid('track');
+      const clipId = uid('clip');
+      if (firstTrackId === null) firstTrackId = trackId;
+      if (firstClipId === null) firstClipId = clipId;
+
+      const notes: NoteEvent[] = track.notes.map((note) => ({
+        id: uid('note'),
+        pitch: clampNumber(Math.round(note.pitch), 0, 127),
+        startBeat: Math.max(0, note.startBeat),
+        durationBeats: Math.max(1 / 64, note.durationBeats),
+        velocity: clampNumber(Math.round(note.velocity), 1, 127),
+      }));
+      const trackEndBeat = notes.reduce(
+        (max, note) => Math.max(max, note.startBeat + note.durationBeats),
+        0,
+      );
+      const clip: Clip = {
+        id: clipId,
+        trackId,
+        type: 'midi',
+        startBeat: 0,
+        lengthBeats: Math.max(nextBeatsPerBar, trackEndBeat),
+        loop: false,
+        notes,
+      };
+      return {
+        id: trackId,
+        name: track.name?.trim() || `MIDI ${index + 1}`,
+        type: 'instrument',
+        color: MIDI_IMPORT_COLORS[index % MIDI_IMPORT_COLORS.length],
+        clips: [clip],
+        volume: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        instrument: { type: 'synth', preset: 'piano' },
+        effects: [],
+      };
+    });
+
+    const masterIndex = project.tracks.findIndex((track) => track.type === 'master');
+    const tracks =
+      masterIndex >= 0
+        ? [
+            ...project.tracks.slice(0, masterIndex),
+            ...importedTracks,
+            ...project.tracks.slice(masterIndex),
+          ]
+        : [...project.tracks, ...importedTracks];
+
+    return {
+      ...project,
+      bpm: Math.round(parsed.bpm),
+      timeSignature: nextTimeSignature,
+      lengthBars,
+      tracks,
+    };
+  });
+
+  const store = useStore.getState();
+  store.selectTrack(firstTrackId);
+  store.selectClip(firstClipId);
+  store.selectNotes([]);
+  store.setActiveView('pianoRoll');
+
+  return {
+    importedTrackCount: sourceTracks.length,
+    importedNoteCount,
+  };
 }
 
 // ---------------------------------------------------------------------------

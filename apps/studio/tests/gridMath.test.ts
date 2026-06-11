@@ -3,6 +3,7 @@ import {
   snapBeat,
   floorToGrid,
   quantizeStart,
+  quantizeNotes,
   xToBeat,
   beatToX,
   yToPitch,
@@ -29,6 +30,28 @@ describe('snapBeat / quantizeStart', () => {
 
   it('passes through when snap is non-positive', () => {
     expect(snapBeat(3.7, 0)).toBe(3.7);
+  });
+});
+
+describe('quantizeNotes', () => {
+  it('quantizes note starts without changing other fields', () => {
+    const notes = [
+      { id: 'n1', startBeat: 0.49, pitch: 60, durationBeats: 0.5, velocity: 80 },
+      { id: 'n2', startBeat: 1.26, pitch: 64, durationBeats: 1, velocity: 96 },
+    ];
+
+    expect(quantizeNotes(notes, 0.5)).toEqual([
+      { id: 'n1', startBeat: 0.5, pitch: 60, durationBeats: 0.5, velocity: 80 },
+      { id: 'n2', startBeat: 1.5, pitch: 64, durationBeats: 1, velocity: 96 },
+    ]);
+  });
+
+  it('does not mutate the input notes', () => {
+    const notes = [{ id: 'n1', startBeat: 0.74, pitch: 60 }];
+
+    quantizeNotes(notes, 0.5);
+
+    expect(notes).toEqual([{ id: 'n1', startBeat: 0.74, pitch: 60 }]);
   });
 });
 

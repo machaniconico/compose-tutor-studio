@@ -9,6 +9,11 @@ import {
   generateMelodyIntoClip,
   projectBeatsPerBar,
 } from '../../state/editorActions';
+import type { CoachAdapter, CoachSuggestion } from '../../coach/adapter';
+import { MockCoach } from '../../coach/mockCoach';
+
+/** デフォルトのコーチ実装 (DI差し替え可能) */
+const defaultCoach: CoachAdapter = new MockCoach();
 
 const BASS_MODES: { value: BassMode; label: string; hint: string }[] = [
   { value: 'rootOnly', label: 'ルートのみ', hint: '各コードのルート音を拍頭に置きます。最もシンプルです。' },
@@ -17,12 +22,18 @@ const BASS_MODES: { value: BassMode; label: string; hint: string }[] = [
   { value: 'octavePulse', label: 'オクターブ', hint: 'ルートとオクターブ上を交互に刻み、躍動感を出します。' },
 ];
 
-/** Bass + Melody assistant. */
-export function AssistantPanel() {
+type AssistantPanelProps = {
+  /** AIコーチのDI差し替え用。省略時は MockCoach を使用。 */
+  coach?: CoachAdapter;
+};
+
+/** Bass + Melody + AI Coach assistant. */
+export function AssistantPanel({ coach = defaultCoach }: AssistantPanelProps) {
   return (
     <div className="assistant">
       <BassAssistant />
       <MelodyAssistant />
+      <CoachAssistant coach={coach} />
     </div>
   );
 }
@@ -160,6 +171,83 @@ function MelodyAssistant() {
       ) : (
         <p className="empty-hint">メロディトラックが見つかりません。</p>
       )}
+    </section>
+  );
+}
+
+type CoachAssistantProps = {
+  coach: CoachAdapter;
+};
+
+/** AIコーチセクション: 改善提案一覧と「なぜ?」説明を表示 */
+function CoachAssistant({ coach }: CoachAssistantProps) {
+  const project = useStore((s) => s.project);
+  const [suggestions, setSuggestions] = useState<CoachSuggestion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  const onAnalyze = async () => {
+    setLoading(true);
+    setSuggestions([]);
+    setExpandedIndex(null);
+    try {
+      const result = await coach.suggestImprovements(project);
+      setSuggestions(result);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleExpand = (i: number) => {
+    setExpandedIndex(expandedIndex === i ? null : i);
+  };
+
+  return (
+    <section className="panel-section">
+      <p className="panel-section__title">AIコーチ</p>
+      <p className="assistant__hint">
+        現在のプロジェクトを分析して、初心者向けの改善アドバイスを提案します。
+      </p>
+      <button
+        type="button"
+        className="assistant__generate"
+        onClick={onAnalyze}
+        disabled={loading}
+      >
+        {loading ? '分析中...' : '改善提案を見る'}
+      </button>
+      {suggestions.length > 0 ? (
+        <ul className="assistant__coach-suggestions">
+          {suggestions.map((s, i) => (
+            <li key={i} className="assistant__coach-suggestion">
+              <button
+                type="button"
+                className="assistant__coach-suggestion-header"
+                onClick={() => toggleExpand(i)}
+                aria-expanded={expandedIndex === i}
+              >
+                <span className="assistant__coach-suggestion-title">{s.title}</span>
+                {s.targetTrack ? (
+                  <span className="assistant__coach-suggestion-track">{s.targetTrack}</span>
+                ) : null}
+                <span className="assistant__coach-suggestion-toggle" aria-hidden="true">
+                  {expandedIndex === i ? '▲' : '▼'}
+                </span>
+              </button>
+              {expandedIndex === i ? (
+                <div className="assistant__coach-suggestion-body">
+                  <p className="assistant__coach-suggestion-reason">
+                    <strong>なぜ?</strong> {s.reason}
+                  </p>
+                  <p className="assistant__coach-suggestion-action">
+                    <strong>やってみよう:</strong> {s.action}
+                  </p>
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }

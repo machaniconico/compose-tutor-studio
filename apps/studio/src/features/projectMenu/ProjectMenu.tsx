@@ -2,13 +2,15 @@
 // the saved-project list (load / delete), and inline rename of the active
 // project title.
 
-import { useState } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import {
   PROJECT_TEMPLATES,
   instantiateTemplate,
   type TemplateId,
 } from '@cts/project-model';
+import { parseMidi } from '@cts/midi-io';
 import { useStore } from '../../state/store';
+import { importMidiTracks } from '../../state/editorActions';
 import { pushToast } from '../../state/tutorialBridge';
 import { Dialog } from '../common/Dialog';
 
@@ -90,6 +92,8 @@ export function ProjectMenu() {
 function NewProjectGallery({ onDone }: { onDone: () => void }) {
   const createNewProject = useStore((s) => s.createNewProject);
   const replaceProject = useStore((s) => s.replaceProject);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   /** Confirm before discarding edits when history is non-empty. */
   const confirmDiscard = (): boolean => {
@@ -116,35 +120,90 @@ function NewProjectGallery({ onDone }: { onDone: () => void }) {
     }
   };
 
+  const importMidi = async (file: File): Promise<void> => {
+    setImportError(null);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = importMidiTracks(parseMidi(bytes));
+      onDone();
+      pushToast(
+        `MIDIを読み込みました。${result.importedTrackCount}トラック、${result.importedNoteCount}音を追加しました。`,
+        'success',
+      );
+    } catch (error) {
+      const message = midiImportErrorMessage(error);
+      setImportError(message);
+      pushToast(message, 'error');
+    }
+  };
+
+  const handleMidiFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    void importMidi(file);
+  };
+
   const templateIds = Object.keys(PROJECT_TEMPLATES) as TemplateId[];
 
   return (
-    <div className="template-gallery">
-      <button type="button" className="template-card template-card--blank" onClick={startBlank}>
-        <span className="template-card__name">まっさら</span>
-        <span className="template-card__desc">
-          空のプロジェクトから自由に作り始めます。
-        </span>
-      </button>
-      {templateIds.map((id) => {
-        const t = PROJECT_TEMPLATES[id];
-        return (
-          <button
-            key={id}
-            type="button"
-            className="template-card"
-            onClick={() => startTemplate(id)}
-          >
-            <span className="template-card__name">{t.name}</span>
-            <span className="template-card__desc">{t.description}</span>
-            <span className="template-card__meta">
-              {t.bpm} BPM ・ {t.key} ・ {t.lengthBars}小節
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div className="template-gallery">
+        <button type="button" className="template-card template-card--blank" onClick={startBlank}>
+          <span className="template-card__name">まっさら</span>
+          <span className="template-card__desc">
+            空のプロジェクトから自由に作り始めます。
+          </span>
+        </button>
+        <button
+          type="button"
+          className="template-card"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <span className="template-card__name">MIDIを読み込む</span>
+          <span className="template-card__desc">
+            .mid / .midi ファイルを新しい楽器トラックとして追加します。
+          </span>
+        </button>
+        {templateIds.map((id) => {
+          const t = PROJECT_TEMPLATES[id];
+          return (
+            <button
+              key={id}
+              type="button"
+              className="template-card"
+              onClick={() => startTemplate(id)}
+            >
+              <span className="template-card__name">{t.name}</span>
+              <span className="template-card__desc">{t.description}</span>
+              <span className="template-card__meta">
+                {t.bpm} BPM ・ {t.key} ・ {t.lengthBars}小節
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".mid,.midi,audio/midi,audio/x-midi"
+        hidden
+        onChange={handleMidiFileChange}
+      />
+      {importError ? (
+        <p className="project-menu__empty" role="alert">
+          {importError}
+        </p>
+      ) : null}
+    </>
   );
+}
+
+function midiImportErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return `MIDIファイルを読み込めませんでした。${error.message}`;
+  }
+  return 'MIDIファイルを読み込めませんでした。Standard MIDI File（.mid）を書き出してからもう一度試してください。';
 }
 
 function SavedProjectList({ onDone }: { onDone: () => void }) {

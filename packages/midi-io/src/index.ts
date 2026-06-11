@@ -12,3 +12,12 @@ export {
   volumeToCc,
   panToCc,
 } from './export.js';
+
+export { parseMidi } from './import.js';
+export type {
+  ParsedMidi,
+  ParsedMidiNote,
+  ParsedMidiTempo,
+  ParsedMidiTimeSignature,
+  ParsedMidiTrack,
+} from './import.js';

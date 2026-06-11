@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
-import type { Clip, NoteEvent, Track } from '@cts/project-model';
+import type { Clip, NoteEvent, Project, Track } from '@cts/project-model';
 import { midiToNoteName } from '@cts/theory-engine';
 import { pxPerBeat } from '../timeline';
 import { isAnyDialogOpen } from '../common/dialogState';
@@ -13,21 +13,20 @@ import {
   beatToX,
   clampPitch,
   normalizeRect,
+  quantizeNotes as quantizeNoteStarts,
   rectsOverlap,
   snapBeat,
   snapPitchToPitchClasses,
   xToBeat,
   yToPitch,
 } from './gridMath';
-import {
-  duplicateNotes,
-  quantizeNotes,
-  removeNotes,
-} from '../../state/editorActions';
+import { duplicateNotes, removeNotes } from '../../state/editorActions';
 
 const ROW_HEIGHT = 16;
 const RESIZE_HANDLE_PX = 6;
 const DEFAULT_VELOCITY = 100;
+const MIN_VELOCITY = 1;
+const MAX_VELOCITY = 127;
 
 /** Find a clip across all tracks. */
 function findClip(tracks: readonly Track[], clipId: string | null): Clip | null {
@@ -46,6 +45,37 @@ function buildRows(): number[] {
   return rows;
 }
 
+function clampVelocity(velocity: number): number {
+  if (!Number.isFinite(velocity)) return DEFAULT_VELOCITY;
+  return Math.max(MIN_VELOCITY, Math.min(MAX_VELOCITY, Math.round(velocity)));
+}
+
+function mapClipNotes(
+  project: Project,
+  clipId: string,
+  updateNotes: (notes: readonly NoteEvent[]) => NoteEvent[],
+): Project {
+  return {
+    ...project,
+    tracks: project.tracks.map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) =>
+        clip.id === clipId ? { ...clip, notes: updateNotes(clip.notes ?? []) } : clip,
+      ),
+    })),
+  };
+}
+
+function hasVelocityChanges(
+  baseVelocities: ReadonlyMap<string, number>,
+  nextVelocities: ReadonlyMap<string, number>,
+): boolean {
+  for (const [id, velocity] of nextVelocities) {
+    if (baseVelocities.get(id) !== velocity) return true;
+  }
+  return false;
+}
+
 type DragState = {
   kind: 'move' | 'resize' | 'marquee';
   noteId: string | null;
@@ -56,6 +86,13 @@ type DragState = {
   originPitch: number;
   snapshot: { id: string; startBeat: number; pitch: number }[];
   shiftKey: boolean;
+};
+
+type VelocityDragState = {
+  noteIds: string[];
+  baseVelocities: Map<string, number>;
+  anchorVelocity: number;
+  nextVelocities: Map<string, number>;
 };
 
 /**
@@ -72,6 +109,7 @@ export function PianoRoll() {
   const selectNotes = useStore((s) => s.selectNotes);
   const addNote = useStore((s) => s.addNote);
   const updateNote = useStore((s) => s.updateNote);
+  const applyProjectChange = useStore((s) => s.applyProjectChange);
   const setZoomX = useStore((s) => s.setZoomX);
   const toggleScaleSnap = useStore((s) => s.toggleScaleSnap);
   const toggleChordToneHighlight = useStore((s) => s.toggleChordToneHighlight);
@@ -95,6 +133,24 @@ export function PianoRoll() {
 
   const notes = clip?.type === 'midi' ? clip.notes ?? [] : [];
 
+  const quantizeSelectedNotes = useCallback(() => {
+    if (!clip || clip.type !== 'midi' || editor.selectedNoteIds.length === 0) return;
+    const ids = new Set(editor.selectedNoteIds);
+    const selectedNotes = notes.filter((note) => ids.has(note.id));
+    const quantized = quantizeNoteStarts(selectedNotes, gridSnap);
+    const changed = quantized.some(
+      (note, index) => note.startBeat !== selectedNotes[index]?.startBeat,
+    );
+    if (!changed) return;
+    const quantizedById = new Map(quantized.map((note) => [note.id, note]));
+
+    applyProjectChange((project) =>
+      mapClipNotes(project, clip.id, (clipNotes) =>
+        clipNotes.map((note) => quantizedById.get(note.id) ?? note),
+      ),
+    );
+  }, [applyProjectChange, clip, editor.selectedNoteIds, gridSnap, notes]);
+
   // --- keyboard shortcuts (ignored while typing in inputs) ---
   useEffect(() => {
     function isEditableTarget(t: EventTarget | null): boolean {
@@ -114,7 +170,7 @@ export function PianoRoll() {
         selectNotes([]);
       } else if ((e.key === 'q' || e.key === 'Q') && clip && ids.length > 0) {
         e.preventDefault();
-        quantizeNotes(clip.id, ids, gridSnap);
+        quantizeSelectedNotes();
       } else if (e.key === 's' || e.key === 'S') {
         e.preventDefault();
         toggleScaleSnap();
@@ -129,7 +185,7 @@ export function PianoRoll() {
     editor.activeView,
     editor.selectedNoteIds,
     clip,
-    gridSnap,
+    quantizeSelectedNotes,
     selectNotes,
     toggleScaleSnap,
     toggleChordToneHighlight,
@@ -326,6 +382,13 @@ export function PianoRoll() {
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          onClick={quantizeSelectedNotes}
+          disabled={editor.selectedNoteIds.length === 0}
+        >
+          選択をクオンタイズ
+        </button>
         <div className="pr__zoom" role="group" aria-label="横ズーム">
           <button
             type="button"
@@ -473,6 +536,7 @@ export function PianoRoll() {
         ppb={ppb}
         width={gridWidth}
         selectedIds={selected}
+        applyProjectChange={applyProjectChange}
       />
     </div>
   );
@@ -490,46 +554,183 @@ function VelocityLane(props: {
   ppb: number;
   width: number;
   selectedIds: ReadonlySet<string>;
+  applyProjectChange: (fn: (project: Project) => Project) => void;
 }) {
-  const { clipId, notes, ppb, width, selectedIds } = props;
-  const updateNote = useStore((s) => s.updateNote);
+  const { clipId, notes, ppb, width, selectedIds, applyProjectChange } = props;
   const laneRef = useRef<HTMLDivElement | null>(null);
-  const draggingRef = useRef<string | null>(null);
+  const draggingRef = useRef<VelocityDragState | null>(null);
+  const [previewVelocities, setPreviewVelocities] = useState<Map<string, number> | null>(null);
+  const selectedNotes = useMemo(
+    () => notes.filter((note) => selectedIds.has(note.id)),
+    [notes, selectedIds],
+  );
+  const selectedAverageVelocity = useMemo(() => {
+    if (selectedNotes.length === 0) return null;
+    const sum = selectedNotes.reduce((total, note) => total + note.velocity, 0);
+    return Math.round(sum / selectedNotes.length);
+  }, [selectedNotes]);
+  const [velocityInput, setVelocityInput] = useState('');
+
+  useEffect(() => {
+    setVelocityInput(selectedAverageVelocity === null ? '' : String(selectedAverageVelocity));
+  }, [selectedAverageVelocity]);
 
   const velocityFromY = (clientY: number): number => {
     const rect = laneRef.current?.getBoundingClientRect();
     if (!rect) return DEFAULT_VELOCITY;
     const ratio = 1 - (clientY - rect.top) / rect.height;
-    return Math.max(1, Math.min(127, Math.round(ratio * 127)));
+    return clampVelocity(ratio * MAX_VELOCITY);
   };
+
+  const buildRelativeVelocityMap = useCallback(
+    (
+      noteIds: readonly string[],
+      baseVelocities: ReadonlyMap<string, number>,
+      anchorVelocity: number,
+      targetVelocity: number,
+    ): Map<string, number> => {
+      const delta = clampVelocity(targetVelocity) - anchorVelocity;
+      const nextVelocities = new Map<string, number>();
+      for (const id of noteIds) {
+        const baseVelocity = baseVelocities.get(id);
+        if (baseVelocity !== undefined) {
+          nextVelocities.set(id, clampVelocity(baseVelocity + delta));
+        }
+      }
+      return nextVelocities;
+    },
+    [],
+  );
+
+  const commitVelocityMap = useCallback(
+    (velocityById: ReadonlyMap<string, number>) => {
+      applyProjectChange((project) =>
+        mapClipNotes(project, clipId, (clipNotes) =>
+          clipNotes.map((note) => {
+            const velocity = velocityById.get(note.id);
+            return velocity === undefined || velocity === note.velocity
+              ? note
+              : { ...note, velocity };
+          }),
+        ),
+      );
+    },
+    [applyProjectChange, clipId],
+  );
 
   const onBarDown = (e: React.PointerEvent, noteId: string) => {
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    draggingRef.current = noteId;
-    updateNote(clipId, noteId, { velocity: velocityFromY(e.clientY) });
+    const anchorNote = notes.find((note) => note.id === noteId);
+    if (!anchorNote) return;
+    const noteIds = selectedIds.has(noteId)
+      ? notes.filter((note) => selectedIds.has(note.id)).map((note) => note.id)
+      : [noteId];
+    const baseVelocities = new Map(
+      noteIds
+        .map((id) => notes.find((note) => note.id === id))
+        .filter((note): note is NoteEvent => note !== undefined)
+        .map((note) => [note.id, note.velocity]),
+    );
+    const nextVelocities = buildRelativeVelocityMap(
+      noteIds,
+      baseVelocities,
+      anchorNote.velocity,
+      velocityFromY(e.clientY),
+    );
+    draggingRef.current = {
+      noteIds,
+      baseVelocities,
+      anchorVelocity: anchorNote.velocity,
+      nextVelocities,
+    };
+    setPreviewVelocities(nextVelocities);
   };
   const onMove = (e: React.PointerEvent) => {
-    const id = draggingRef.current;
-    if (!id) return;
-    updateNote(clipId, id, { velocity: velocityFromY(e.clientY) });
+    const drag = draggingRef.current;
+    if (!drag) return;
+    const nextVelocities = buildRelativeVelocityMap(
+      drag.noteIds,
+      drag.baseVelocities,
+      drag.anchorVelocity,
+      velocityFromY(e.clientY),
+    );
+    drag.nextVelocities = nextVelocities;
+    setPreviewVelocities(nextVelocities);
   };
   const onUp = () => {
+    const drag = draggingRef.current;
+    if (drag && hasVelocityChanges(drag.baseVelocities, drag.nextVelocities)) {
+      commitVelocityMap(drag.nextVelocities);
+    }
     draggingRef.current = null;
+    setPreviewVelocities(null);
+  };
+
+  const commitVelocityInput = () => {
+    if (selectedNotes.length === 0) return;
+    if (velocityInput.trim() === '') {
+      setVelocityInput(selectedAverageVelocity === null ? '' : String(selectedAverageVelocity));
+      return;
+    }
+    const rawVelocity = Number(velocityInput);
+    if (!Number.isFinite(rawVelocity)) {
+      setVelocityInput(selectedAverageVelocity === null ? '' : String(selectedAverageVelocity));
+      return;
+    }
+    const targetVelocity = clampVelocity(rawVelocity);
+    const noteIds = selectedNotes.map((note) => note.id);
+    const baseVelocities = new Map(selectedNotes.map((note) => [note.id, note.velocity]));
+    const nextVelocities = buildRelativeVelocityMap(
+      noteIds,
+      baseVelocities,
+      selectedAverageVelocity ?? targetVelocity,
+      targetVelocity,
+    );
+    if (hasVelocityChanges(baseVelocities, nextVelocities)) {
+      commitVelocityMap(nextVelocities);
+    }
+    setVelocityInput(String(targetVelocity));
+  };
+
+  const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.currentTarget.blur();
+    } else if (e.key === 'Escape') {
+      setVelocityInput(selectedAverageVelocity === null ? '' : String(selectedAverageVelocity));
+      e.currentTarget.blur();
+    }
   };
 
   return (
     <div className="pr__velocity">
       <span className="pr__velocity-label">強さ</span>
+      <label className="pr__field">
+        <span>選択</span>
+        <input
+          type="number"
+          min={MIN_VELOCITY}
+          max={MAX_VELOCITY}
+          value={velocityInput}
+          onChange={(e) => setVelocityInput(e.target.value)}
+          onBlur={commitVelocityInput}
+          onKeyDown={onInputKeyDown}
+          disabled={selectedNotes.length === 0}
+          aria-label="選択ノートの強さ"
+        />
+      </label>
       <div
         ref={laneRef}
         className="pr__velocity-lane"
         style={{ width, height: LANE_HEIGHT }}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onPointerCancel={onUp}
       >
         {notes.map((note) => {
-          const h = (note.velocity / 127) * LANE_HEIGHT;
+          const velocity = previewVelocities?.get(note.id) ?? note.velocity;
+          const h = (velocity / MAX_VELOCITY) * LANE_HEIGHT;
           const isSel = selectedIds.has(note.id);
           return (
             <div
@@ -537,7 +738,7 @@ function VelocityLane(props: {
               className={`pr__velbar${isSel ? ' is-selected' : ''}`}
               style={{ left: note.startBeat * ppb, height: h, bottom: 0 }}
               onPointerDown={(e) => onBarDown(e, note.id)}
-              title={`強さ ${note.velocity}`}
+              title={`強さ ${velocity}`}
             />
           );
         })}
