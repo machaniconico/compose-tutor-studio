@@ -1,9 +1,15 @@
 // Feedback generator — explains ProjectPredicate results in beginner-friendly Japanese.
 // Pure functions only; no side effects.
 
-import type { Project } from '@cts/project-model';
+import type { Project, ScaleName } from '@cts/project-model';
+import {
+  analyzeBassRootOnDownbeat,
+  analyzeDrumPattern,
+  analyzeMelodyChordToneOnStrongBeat,
+  analyzeNotesWithinScale,
+} from './checker.js';
 import { evaluateProjectPredicate } from './goals.js';
-import type { ProjectPredicate } from './types.js';
+import type { DrumPatternType, ProjectPredicate } from './types.js';
 
 // ─── Return type ──────────────────────────────────────────────────────────────
 
@@ -85,6 +91,23 @@ export function explainPredicate(
         project,
         satisfied,
       );
+
+    case 'hasBassRootOnDownbeat':
+      return explainBassRootOnDownbeat(predicate.trackName, predicate.minRatio, project, satisfied);
+
+    case 'hasMelodyChordToneOnStrongBeat':
+      return explainMelodyChordToneOnStrongBeat(
+        predicate.trackName,
+        predicate.minRatio,
+        project,
+        satisfied,
+      );
+
+    case 'hasNotesWithinScale':
+      return explainNotesWithinScale(predicate.trackName, predicate.minRatio, project, satisfied);
+
+    case 'hasDrumPattern':
+      return explainDrumPattern(predicate.patternType, project, satisfied);
   }
 }
 
@@ -404,6 +427,230 @@ function explainExportCompleted(format?: 'midi' | 'wav'): PredicateFeedback {
   };
 }
 
+// ─── 音楽的判定のフィードバック (docs/03 §4.2 / §4.3) ──────────────────────────
+// 小節番号・コード名・着地候補音名を含む日本語で「結果 → 理由 → 次の一手」を返す。
+// スケール外音・非コードトーンは一律に誤りと断定せず、比率と文脈で説明する。
+
+function percent(ratio: number): number {
+  return Math.round(ratio * 100);
+}
+
+/** 失敗時の close / needs_work 判定: 目標比率の半分以上まで来ていれば「惜しい」 */
+function ratioGrade(ratio: number, minRatio: number, hasAnyData: boolean): PredicateGrade {
+  if (!hasAnyData) return 'needs_work';
+  return ratio >= minRatio / 2 ? 'close' : 'needs_work';
+}
+
+function explainBassRootOnDownbeat(
+  trackName: string,
+  minRatio: number,
+  project: Project,
+  satisfied: boolean,
+): PredicateFeedback {
+  const analysis = analyzeBassRootOnDownbeat(project, trackName);
+
+  if (satisfied) {
+    return {
+      satisfied: true,
+      grade: 'success',
+      reason: `小節のあたま（1拍目）の ${percent(analysis.ratio)}% でコードのルート音が鳴っています。ベースが曲の土台をしっかり支えています！`,
+      nextAction: '',
+    };
+  }
+
+  if (analysis.consideredBars === 0) {
+    return {
+      satisfied: false,
+      grade: 'needs_work',
+      reason: 'コードがまだ置かれていないため、ベースのルート音判定ができません。',
+      nextAction: `先にコードトラックへコードを置いてから、「${trackName}」トラックの各小節1拍目にルート音を入れてみましょう。`,
+    };
+  }
+
+  const grade = ratioGrade(analysis.ratio, minRatio, analysis.rootBars > 0);
+  const issue = analysis.firstIssue;
+  if (issue) {
+    const where = `${issue.barNumber}小節目の1拍目`;
+    const reason = issue.hasNoteOnDownbeat
+      ? `${where}が${issue.chordSymbol}コードのルート音ではありません（ルート音が鳴っている小節は ${percent(analysis.ratio)}%）。`
+      : `${where}にベースの音がありません（ルート音が鳴っている小節は ${percent(analysis.ratio)}%）。`;
+    return {
+      satisfied: false,
+      grade,
+      reason,
+      nextAction: `${issue.barNumber}小節目の1拍目に ${issue.rootName} の音を置いてみましょう。${issue.chordSymbol}コードの土台はルートの ${issue.rootName} です。`,
+    };
+  }
+  // 理論上ここには来ない（不成立なら firstIssue があるはず）が、安全側の文言を返す。
+  return {
+    satisfied: false,
+    grade,
+    reason: `ルート音が鳴っている小節がまだ ${percent(analysis.ratio)}% です。`,
+    nextAction: `各小節の1拍目に、そのとき鳴っているコードのルート音を置いてみましょう。`,
+  };
+}
+
+function explainMelodyChordToneOnStrongBeat(
+  trackName: string,
+  minRatio: number,
+  project: Project,
+  satisfied: boolean,
+): PredicateFeedback {
+  const analysis = analyzeMelodyChordToneOnStrongBeat(project, trackName);
+
+  if (satisfied) {
+    return {
+      satisfied: true,
+      grade: 'success',
+      reason: `強拍に着地した音の ${percent(analysis.ratio)}% がコードの音です。メロディがコードに乗って安定して聞こえます！`,
+      nextAction: '',
+    };
+  }
+
+  if (analysis.landings === 0) {
+    return {
+      satisfied: false,
+      grade: 'needs_work',
+      reason: `「${trackName}」トラックには、強拍（各小節の1拍目・3拍目）に着地しているノートがまだありません。`,
+      nextAction: '各小節の1拍目か3拍目にノートを置いてみましょう。そのとき鳴っているコードの音に合わせると安定します。',
+    };
+  }
+
+  const grade = ratioGrade(analysis.ratio, minRatio, analysis.chordToneLandings > 0);
+  const issue = analysis.firstIssue;
+  if (issue) {
+    const tones = issue.chordToneNames.join('・');
+    const what = issue.outOfScale ? 'スケール外の音' : `${issue.chordSymbol}コードの構成音ではない音`;
+    const softener = issue.outOfScale
+      ? ''
+      : 'スケール内なので経過音としては使えますが、';
+    return {
+      satisfied: false,
+      grade,
+      reason: `${issue.barNumber}小節目の強拍が${what}です。${softener}${issue.chordSymbol}コードの上では ${tones} のどれかに着地すると安定して聞こえます。`,
+      nextAction: `ピアノロールで${issue.barNumber}小節目の強拍の音を ${tones} のどれかに動かしてみましょう。`,
+    };
+  }
+  return {
+    satisfied: false,
+    grade,
+    reason: `コードの音に着地した強拍はまだ ${percent(analysis.ratio)}% です。`,
+    nextAction: '強拍の音を、そのとき鳴っているコードの構成音に合わせてみましょう。',
+  };
+}
+
+function explainNotesWithinScale(
+  trackName: string,
+  minRatio: number,
+  project: Project,
+  satisfied: boolean,
+): PredicateFeedback {
+  const analysis = analyzeNotesWithinScale(project, trackName);
+  const scaleText = `${project.key} ${scaleLabel(project.scale)}`;
+
+  if (satisfied) {
+    return {
+      satisfied: true,
+      grade: 'success',
+      reason: `「${trackName}」トラックのノートの ${percent(analysis.ratio)}% が ${scaleText} の音です。キーのまとまりが感じられます！`,
+      nextAction: '',
+    };
+  }
+
+  if (analysis.totalNotes === 0) {
+    return {
+      satisfied: false,
+      grade: 'needs_work',
+      reason: `「${trackName}」トラックにはまだノートがありません。`,
+      nextAction: `ピアノロールを開いて「${trackName}」トラックにノートを入力してみましょう。`,
+    };
+  }
+
+  const grade = ratioGrade(analysis.ratio, minRatio, analysis.inScaleNotes > 0);
+  const barText =
+    analysis.firstOutsideBarNumber !== null
+      ? `最初のスケール外の音は ${analysis.firstOutsideBarNumber}小節目にあります。`
+      : '';
+  return {
+    satisfied: false,
+    grade,
+    reason: `${scaleText} 内の音は全体の ${percent(analysis.ratio)}%（目標 ${percent(minRatio)}%）です。${barText}スケール外の音がすべて間違いというわけではなく、経過音やアクセントとして効くこともあります。`,
+    nextAction: `まずは${analysis.firstOutsideBarNumber !== null ? `${analysis.firstOutsideBarNumber}小節目の` : ''}スケール外の音を、隣の ${scaleText} の音にずらして響きを聴き比べてみましょう。`,
+  };
+}
+
+function explainDrumPattern(
+  patternType: DrumPatternType,
+  project: Project,
+  satisfied: boolean,
+): PredicateFeedback {
+  const label = drumPatternLabel(patternType);
+
+  if (satisfied) {
+    return {
+      satisfied: true,
+      grade: 'success',
+      reason: `${label}のパターンができています。ノリのあるビートですね！`,
+      nextAction: '',
+    };
+  }
+
+  const analysis = analyzeDrumPattern(project, patternType);
+  const missingCount = analysis.missing.reduce((sum, req) => sum + req.stepIndices.length, 0);
+  // 必要ステップの半分以上が既に置けていれば「惜しい」
+  const grade: PredicateGrade =
+    analysis.requiredSteps > 0 && missingCount <= analysis.requiredSteps / 2
+      ? 'close'
+      : 'needs_work';
+
+  const first = analysis.missing[0];
+  if (first) {
+    const laneText = drumLaneLabel(first.lane);
+    const posText = describeStepPositions(first.stepIndices, analysis.stepsPerBar);
+    return {
+      satisfied: false,
+      grade,
+      reason: `${label}にはあと少し足りないところがあります。${laneText}が${posText}に入っていません。`,
+      nextAction: `ドラムグリッドで${laneText}を${posText}に追加してください。${drumPatternRecipe(patternType)}`,
+    };
+  }
+  return {
+    satisfied: false,
+    grade,
+    reason: `${label}のパターンがまだ完成していません。`,
+    nextAction: drumPatternRecipe(patternType),
+  };
+}
+
+/** ステップ位置を拍数表現にする（4分音符グリッドに乗らない位置はステップ番号で示す） */
+function describeStepPositions(stepIndices: number[], stepsPerBar: number): string {
+  const quarter = stepsPerBar / 4;
+  const parts = stepIndices.map((step) => {
+    const beat = step / quarter + 1;
+    return Number.isInteger(beat) ? `${beat}拍目` : `ステップ${step + 1}`;
+  });
+  return parts.join('・');
+}
+
+function drumPatternLabel(patternType: DrumPatternType): string {
+  const labels: Record<DrumPatternType, string> = {
+    fourOnFloor: '四つ打ち',
+    eightBeat: '8ビート',
+    backbeat: 'バックビート',
+  };
+  return labels[patternType];
+}
+
+function drumPatternRecipe(patternType: DrumPatternType): string {
+  const recipes: Record<DrumPatternType, string> = {
+    fourOnFloor: '四つ打ちは、キックを1・2・3・4拍目（毎拍）に置くパターンです。',
+    eightBeat:
+      '8ビートは、クローズハイハットを8分音符で刻み、キックを1拍目、スネアを2・4拍目に置くパターンです。',
+    backbeat: 'バックビートは、スネアを2・4拍目に置いてリズムのアクセントを作るパターンです。',
+  };
+  return recipes[patternType];
+}
+
 // ─── Label helpers ────────────────────────────────────────────────────────────
 
 function drumLaneLabel(lane: string): string {
@@ -411,14 +658,30 @@ function drumLaneLabel(lane: string): string {
     kick: 'キック',
     snare: 'スネア',
     hihat: 'ハイハット',
+    closedHat: 'クローズハイハット',
+    openHat: 'オープンハイハット',
     'hihat-open': 'オープンハイハット',
     tom: 'タム',
     crash: 'クラッシュシンバル',
     ride: 'ライドシンバル',
     clap: 'クラップ',
     rim: 'リム',
+    perc: 'パーカッション',
   };
   return labels[lane] ?? lane;
+}
+
+function scaleLabel(scale: ScaleName): string {
+  const labels: Record<ScaleName, string> = {
+    major: 'メジャースケール',
+    naturalMinor: 'ナチュラルマイナースケール',
+    harmonicMinor: 'ハーモニックマイナースケール',
+    melodicMinor: 'メロディックマイナースケール',
+    majorPentatonic: 'メジャーペンタトニックスケール',
+    minorPentatonic: 'マイナーペンタトニックスケール',
+    blues: 'ブルーススケール',
+  };
+  return labels[scale];
 }
 
 function sectionLabel(sectionType: string): string {

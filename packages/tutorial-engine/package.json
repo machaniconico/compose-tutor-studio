@@ -16,6 +16,7 @@
     "vitest": "^3.1.0"
   },
   "dependencies": {
-    "@cts/project-model": "workspace:*"
+    "@cts/project-model": "workspace:*",
+    "@cts/theory-engine": "workspace:*"
   }
 }

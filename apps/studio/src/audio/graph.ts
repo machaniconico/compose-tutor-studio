@@ -1,6 +1,7 @@
 // Per-track audio routing graph and mute/solo resolution.
 //
-// Each non-master track gets: trackGain (volume) -> panner (pan) -> master bus.
+// Each non-master track gets:
+// trackGain (volume) -> panner (pan) -> FX -> meter tap -> master bus.
 // The master bus + soft limiter live on the AudioEngine. Mute/solo is resolved
 // by the pure `computeAudibleTracks` so the rule ("any solo => only solos; mute
 // always wins") is unit-testable without any audio nodes, then applied to the
@@ -13,6 +14,9 @@ import {
   type SupportedEffectType,
   type TrackEffectChain,
 } from './effects';
+import { METER_ANALYSER_FFT_SIZE } from './metering';
+
+const liveTrackAnalysers = new Map<string, AnalyserNode>();
 
 /**
  * Resolve which tracks are audible given mute/solo flags.
@@ -52,10 +56,12 @@ export function clampPan(pan: number): number {
 export class TrackGraph {
   readonly trackId: string;
   readonly input: GainNode;
+  readonly analyser: AnalyserNode;
   private readonly ctx: BaseAudioContext;
   private readonly master: AudioNode;
   private readonly gain: GainNode;
   private readonly panner: StereoPannerNode;
+  private readonly meterTap: GainNode;
   private effects: TrackEffectChain | null = null;
 
   constructor(ctx: BaseAudioContext, master: AudioNode, track: Track) {
@@ -64,9 +70,16 @@ export class TrackGraph {
     this.trackId = track.id;
     this.gain = ctx.createGain();
     this.panner = ctx.createStereoPanner();
+    this.meterTap = ctx.createGain();
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = METER_ANALYSER_FFT_SIZE;
+    this.analyser.smoothingTimeConstant = 0;
     this.gain.gain.value = clampVolume(track.volume);
     this.panner.pan.value = clampPan(track.pan);
-    // Voices connect to `input` (the gain node); gain -> panner -> FX -> master.
+    this.meterTap.connect(this.master);
+    this.meterTap.connect(this.analyser);
+    registerLiveTrackAnalyser(ctx, this.trackId, this.analyser);
+    // Voices connect to `input` (the gain node); gain -> panner -> FX -> meter tap.
     this.input = this.gain;
     this.gain.connect(this.panner);
     this.rebuildEffects(track, ctx.currentTime);
@@ -89,12 +102,31 @@ export class TrackGraph {
   dispose(): void {
     try {
       this.gain.disconnect();
-      this.panner.disconnect();
-      this.effects?.dispose();
-      this.effects = null;
     } catch {
       // already disconnected
     }
+    try {
+      this.panner.disconnect();
+    } catch {
+      // already disconnected
+    }
+    try {
+      this.meterTap.disconnect();
+    } catch {
+      // already disconnected
+    }
+    try {
+      this.analyser.disconnect();
+    } catch {
+      // already disconnected
+    }
+    try {
+      this.effects?.dispose();
+    } catch {
+      // already disconnected
+    }
+    this.effects = null;
+    unregisterLiveTrackAnalyser(this.trackId, this.analyser);
   }
 
   private syncEffects(track: Track, when: number): void {
@@ -112,7 +144,7 @@ export class TrackGraph {
       // not connected yet
     }
     this.effects?.dispose();
-    this.effects = buildTrackEffectChain(this.ctx, this.panner, this.master, track.effects, when);
+    this.effects = buildTrackEffectChain(this.ctx, this.panner, this.meterTap, track.effects, when);
   }
 }
 
@@ -149,4 +181,29 @@ export function applyMixState(
     if (!graph) continue;
     graph.apply(track, audible.has(track.id), when);
   }
+}
+
+/** Return the live analyser for a track if playback has built one. */
+export function getTrackAnalyser(trackId: string): AnalyserNode | null {
+  return liveTrackAnalysers.get(trackId) ?? null;
+}
+
+function registerLiveTrackAnalyser(
+  ctx: BaseAudioContext,
+  trackId: string,
+  analyser: AnalyserNode,
+): void {
+  if (isLiveAudioContext(ctx)) {
+    liveTrackAnalysers.set(trackId, analyser);
+  }
+}
+
+function unregisterLiveTrackAnalyser(trackId: string, analyser: AnalyserNode): void {
+  if (liveTrackAnalysers.get(trackId) === analyser) {
+    liveTrackAnalysers.delete(trackId);
+  }
+}
+
+function isLiveAudioContext(ctx: BaseAudioContext): ctx is AudioContext {
+  return typeof AudioContext !== 'undefined' && ctx instanceof AudioContext;
 }

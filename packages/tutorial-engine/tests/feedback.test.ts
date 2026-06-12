@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { explainPredicate } from '../src/feedback.js';
 import {
+  makeBassTrack,
+  makeChord,
   makeDrumEvent,
   makeDrumTrack,
   makeMelodyTrack,
@@ -471,5 +473,242 @@ describe('explainPredicate — exportCompleted', () => {
     expect(result.satisfied).toBe(false);
     expect(result.grade).toBe('needs_work');
     expect(result.nextAction).toContain('エクスポート');
+  });
+});
+
+// ═══ 音楽的判定のフィードバック (docs/03 §4.2 / §4.3) ═══════════════════════════
+//
+// 共通設定: C メジャー / 4/4。MIDI: C2=36, G2=43 / E4=64, F#4=66, G4=67, A4=69, B4=71, D5=74
+
+describe('explainPredicate — hasMelodyChordToneOnStrongBeat', () => {
+  const predicate = {
+    type: 'hasMelodyChordToneOnStrongBeat' as const,
+    trackName: 'Melody',
+    minRatio: 0.8,
+  };
+  const TWO_CHORDS = [makeChord('C', 0), makeChord('G', 4)];
+
+  it('grade=success: 全強拍がコードトーンに着地', () => {
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [
+        makeMelodyTrack([makeNote(64, 0), makeNote(67, 2), makeNote(71, 4), makeNote(74, 6)]),
+      ],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(true);
+    expect(result.grade).toBe('success');
+    expect(result.nextAction).toBe('');
+  });
+
+  it('docs/03 §4.3 例: 小節番号・コード名・着地候補音名(G・B・D)を含む文言を返す', () => {
+    // 2小節目 (G コード) の強拍 beat4 に F#4 — スケール外かつ非コードトーン
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [makeMelodyTrack([makeNote(64, 0), makeNote(67, 2), makeNote(66, 4)])],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.reason).toContain('2小節目の強拍がスケール外の音です');
+    expect(result.reason).toContain('Gコードの上では G・B・D のどれかに着地すると安定して聞こえます');
+    expect(result.nextAction).toContain('2小節目');
+    expect(result.nextAction).toContain('G・B・D');
+  });
+
+  it('スケール内だが非コードトーンの着地は「誤り」と断定しない文言になる', () => {
+    // 2小節目 (G コード) の強拍 beat4 に A4 — C メジャー内だが G のコードトーンではない
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [makeMelodyTrack([makeNote(64, 0), makeNote(67, 2), makeNote(69, 4)])],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.reason).toContain('2小節目');
+    expect(result.reason).toContain('経過音');
+    expect(result.reason).toContain('G・B・D');
+    expect(result.reason).not.toContain('スケール外の音です');
+  });
+
+  it('grade=close: 着地の大半がコードトーンなら「惜しい」', () => {
+    // 4着地中3つ成功 (ratio=0.75 >= 0.8/2)
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [
+        makeMelodyTrack([makeNote(64, 0), makeNote(67, 2), makeNote(71, 4), makeNote(66, 6)]),
+      ],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.grade).toBe('close');
+  });
+
+  it('grade=needs_work: 強拍への着地が無い場合は置き方を案内する', () => {
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [makeMelodyTrack([makeNote(64, 1)])],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.grade).toBe('needs_work');
+    expect(result.reason).toContain('強拍');
+    expect(result.nextAction).toContain('1拍目');
+  });
+});
+
+describe('explainPredicate — hasBassRootOnDownbeat', () => {
+  const predicate = {
+    type: 'hasBassRootOnDownbeat' as const,
+    trackName: 'Bass',
+    minRatio: 1,
+  };
+  const TWO_CHORDS = [makeChord('C', 0), makeChord('G', 4)];
+
+  it('grade=success: 全小節の1拍目がルート音', () => {
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [makeBassTrack([makeNote(36, 0), makeNote(43, 4)])],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(true);
+    expect(result.grade).toBe('success');
+    expect(result.nextAction).toBe('');
+  });
+
+  it('失敗時: 小節番号・コード名・ルート音名を含む文言を返す', () => {
+    // 2小節目 (G) の1拍目に B1=35 (ルートではない)
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [makeBassTrack([makeNote(36, 0), makeNote(35, 4)])],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.grade).toBe('close'); // 1/2 はルートに置けている
+    expect(result.reason).toContain('2小節目の1拍目');
+    expect(result.reason).toContain('Gコード');
+    expect(result.nextAction).toContain('2小節目の1拍目に G の音を置いてみましょう');
+  });
+
+  it('1拍目にノートが無い小節は「音がありません」と案内する', () => {
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [makeBassTrack([makeNote(36, 0)])],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.reason).toContain('2小節目の1拍目にベースの音がありません');
+  });
+
+  it('grade=needs_work: コードが無い場合はコードを先に置くよう促す', () => {
+    const project = makeProject({ chordTrack: [], tracks: [makeBassTrack([])] });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.grade).toBe('needs_work');
+    expect(result.nextAction).toContain('コード');
+  });
+});
+
+describe('explainPredicate — hasNotesWithinScale', () => {
+  const predicate = {
+    type: 'hasNotesWithinScale' as const,
+    trackName: 'Melody',
+    minRatio: 0.8,
+  };
+
+  it('grade=success: 全ノートがスケール内', () => {
+    const project = makeProject({
+      tracks: [makeMelodyTrack([makeNote(60, 0), makeNote(62, 1), makeNote(64, 2)])],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(true);
+    expect(result.grade).toBe('success');
+    expect(result.reason).toContain('C メジャースケール');
+    expect(result.nextAction).toBe('');
+  });
+
+  it('失敗時: 比率・小節番号を含み、スケール外音を一律に誤りと断定しない', () => {
+    // 4ノート中3つスケール内 (75%)、スケール外 F#4 は beat 6 → 2小節目
+    const project = makeProject({
+      tracks: [
+        makeMelodyTrack([makeNote(60, 0), makeNote(62, 1), makeNote(64, 2), makeNote(66, 6)]),
+      ],
+    });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.grade).toBe('close');
+    expect(result.reason).toContain('75%');
+    expect(result.reason).toContain('80%');
+    expect(result.reason).toContain('2小節目');
+    expect(result.reason).toContain('間違いというわけではなく');
+    expect(result.nextAction).toContain('2小節目');
+  });
+
+  it('grade=needs_work: ノートが無い場合は入力を促す', () => {
+    const project = makeProject({ tracks: [makeMelodyTrack([])] });
+    const result = explainPredicate(predicate, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.grade).toBe('needs_work');
+    expect(result.reason).toContain('まだノートがありません');
+    expect(result.nextAction).toContain('ピアノロール');
+  });
+});
+
+describe('explainPredicate — hasDrumPattern', () => {
+  it('grade=success: 四つ打ちが完成している', () => {
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([
+          makeDrumEvent('kick', 0),
+          makeDrumEvent('kick', 4),
+          makeDrumEvent('kick', 8),
+          makeDrumEvent('kick', 12),
+        ]),
+      ],
+    });
+    const result = explainPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project);
+    expect(result.satisfied).toBe(true);
+    expect(result.grade).toBe('success');
+    expect(result.reason).toContain('四つ打ち');
+    expect(result.nextAction).toBe('');
+  });
+
+  it('grade=close: キックが1つ欠けたら不足位置(4拍目)を具体的に案内する', () => {
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('kick', 4), makeDrumEvent('kick', 8)]),
+      ],
+    });
+    const result = explainPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.grade).toBe('close');
+    expect(result.reason).toContain('キック');
+    expect(result.reason).toContain('4拍目');
+    expect(result.nextAction).toContain('ドラムグリッド');
+  });
+
+  it('grade=needs_work: 何も無い場合はパターンの作り方を説明する', () => {
+    const project = makeProject({ tracks: [makeDrumTrack([])] });
+    const result = explainPredicate({ type: 'hasDrumPattern', patternType: 'eightBeat' }, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.grade).toBe('needs_work');
+    expect(result.nextAction).toContain('8ビート');
+    expect(result.nextAction).toContain('ハイハット');
+  });
+
+  it('backbeat: スネアの2・4拍目を案内する', () => {
+    const project = makeProject({
+      tracks: [makeDrumTrack([makeDrumEvent('snare', 4)])],
+    });
+    const result = explainPredicate({ type: 'hasDrumPattern', patternType: 'backbeat' }, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.reason).toContain('スネア');
+    expect(result.reason).toContain('4拍目');
   });
 });

@@ -1,6 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { validateProject } from '@cts/project-model';
 import { installLocalStorage, MemoryStorage } from './localStorageStub';
 import { createDefaultProject } from '../src/state/defaultProject';
+import { createSampleProject, SAMPLE_PROJECT_TITLE } from '../src/state/sampleProject';
+import { isInScale, PITCH_CLASS } from '../src/state/music';
 import { projectKey } from '../src/state/persistence';
 
 // The store reads localStorage at module-import time, so install the stub
@@ -11,6 +14,14 @@ let storage: MemoryStorage;
 class FailingStorage extends MemoryStorage {
   override setItem(): void {
     throw new Error('QuotaExceededError');
+  }
+}
+
+/** Spin until the wall clock ticks, so consecutive saves get distinct updatedAt. */
+function waitNextMs(): void {
+  const t = Date.now();
+  while (Date.now() === t) {
+    // busy-wait (sub-millisecond)
   }
 }
 
@@ -258,6 +269,138 @@ describe('transport toggles', () => {
 
     expect(useStore.getState().transport.loopEnabled).toBe(true);
     expect(useStore.getState().transport.metronome).toBe(true);
+  });
+});
+
+describe('start screen state', () => {
+  it('is open on launch (before any user action)', () => {
+    // No other test mutates startScreenOpen before this describe runs.
+    expect(useStore.getState().startScreenOpen).toBe(true);
+  });
+
+  it('setStartScreenOpen closes and reopens without pushing history', () => {
+    useStore.getState().setStartScreenOpen(false);
+    expect(useStore.getState().startScreenOpen).toBe(false);
+
+    useStore.getState().setStartScreenOpen(true);
+    expect(useStore.getState().startScreenOpen).toBe(true);
+    expect(useStore.getState().canUndo()).toBe(false);
+  });
+
+  it('the "前回の続き" path loads the most recent saved project', () => {
+    useStore.getState().createNewProject('一曲目');
+    waitNextMs(); // two creations in the same ms would tie on updatedAt
+    useStore.getState().createNewProject('二曲目');
+
+    const latest = useStore.getState().listSavedProjects()[0];
+    expect(latest?.title).toBe('二曲目');
+
+    expect(useStore.getState().loadProjectById(latest!.id)).toBe(true);
+    expect(useStore.getState().project.id).toBe(latest!.id);
+  });
+
+  it('has no saved projects to continue from on a fresh install', () => {
+    installLocalStorage(); // wipe storage = first launch
+    expect(useStore.getState().listSavedProjects()).toEqual([]);
+  });
+});
+
+describe('right panel tab (lifted from InspectorPanel)', () => {
+  it('defaults to the inspector tab', () => {
+    expect(useStore.getState().rightPanelTab).toBe('inspector');
+  });
+
+  it('setRightPanelTab switches to tutorial via the store, with no history', () => {
+    useStore.getState().setRightPanelTab('tutorial');
+    expect(useStore.getState().rightPanelTab).toBe('tutorial');
+    expect(useStore.getState().canUndo()).toBe(false);
+
+    useStore.getState().setRightPanelTab('assistant');
+    expect(useStore.getState().rightPanelTab).toBe('assistant');
+
+    useStore.getState().setRightPanelTab('inspector');
+    expect(useStore.getState().rightPanelTab).toBe('inspector');
+  });
+});
+
+describe('sample project (試聴用)', () => {
+  it('is a valid 8-bar C-major project with the C G Am F progression', () => {
+    const sample = createSampleProject();
+    expect(validateProject(sample).errors).toEqual([]);
+    expect(sample.title).toBe(SAMPLE_PROJECT_TITLE);
+    expect(sample.lengthBars).toBe(8);
+    expect(sample.bpm).toBe(120);
+    expect(sample.key).toBe('C');
+    expect(sample.scale).toBe('major');
+    expect(sample.chordTrack.map((c) => c.symbol)).toEqual([
+      'C', 'G', 'Am', 'F', 'C', 'G', 'Am', 'F',
+    ]);
+  });
+
+  it('actually contains music: pad/bass/melody notes and drum hits', () => {
+    const sample = createSampleProject();
+    const byName = (name: string) => sample.tracks.find((t) => t.name === name);
+
+    for (const name of ['Chords', 'Bass', 'Melody']) {
+      const notes = byName(name)?.clips[0]?.notes ?? [];
+      expect(notes.length, `${name} should have notes`).toBeGreaterThan(0);
+      // Every note stays inside the 8 bars (32 beats).
+      for (const n of notes) {
+        expect(n.startBeat + n.durationBeats).toBeLessThanOrEqual(32);
+      }
+    }
+
+    const drumEvents = byName('Drums')?.clips[0]?.drumEvents ?? [];
+    expect(drumEvents.length).toBeGreaterThan(0);
+    const lanes = new Set(drumEvents.map((e) => e.lane));
+    expect(lanes.has('kick')).toBe(true);
+    expect(lanes.has('snare')).toBe(true);
+  });
+
+  it('keeps every melody and bass note inside the C major scale', () => {
+    const sample = createSampleProject();
+    for (const name of ['Bass', 'Melody']) {
+      const notes = sample.tracks.find((t) => t.name === name)?.clips[0]?.notes ?? [];
+      for (const n of notes) {
+        expect(
+          isInScale(n.pitch, PITCH_CLASS.C, 'major'),
+          `${name} pitch ${n.pitch} should be in C major`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('generates fresh ids each call (re-listening never collides)', () => {
+    const a = createSampleProject();
+    const b = createSampleProject();
+    expect(a.id).not.toBe(b.id);
+  });
+});
+
+describe('loadProjectForPreview', () => {
+  it('loads the sample without saving it to localStorage', () => {
+    const sample = createSampleProject();
+    useStore.getState().loadProjectForPreview(sample);
+
+    expect(useStore.getState().project.id).toBe(sample.id);
+    expect(useStore.getState().save.status).toBe('idle');
+    // Listening leaves no saved copy behind...
+    const saved = useStore.getState().listSavedProjects();
+    expect(saved.some((p) => p.id === sample.id)).toBe(false);
+    // ...and starts with clean history and transport.
+    expect(useStore.getState().canUndo()).toBe(false);
+    expect(useStore.getState().transport.isPlaying).toBe(false);
+    expect(useStore.getState().transport.positionBeat).toBe(0);
+  });
+
+  it('persists only once the user edits the previewed project', () => {
+    const sample = createSampleProject();
+    useStore.getState().loadProjectForPreview(sample);
+
+    useStore.getState().setBpm(96);
+    expect(useStore.getState().saveToLocalStorage()).toBe(true);
+    const saved = useStore.getState().listSavedProjects();
+    expect(saved.some((p) => p.id === sample.id)).toBe(true);
   });
 });
 

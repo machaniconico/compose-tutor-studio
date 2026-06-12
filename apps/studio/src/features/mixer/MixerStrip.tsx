@@ -1,4 +1,5 @@
 import type { EffectConfig, Track } from '@cts/project-model';
+import { useCallback, useMemo, useState } from 'react';
 import {
   DEFAULT_EFFECT_PARAMS,
   effectParam,
@@ -7,6 +8,8 @@ import {
   type SupportedEffectType,
 } from '../../audio/effects';
 import { useStore } from '../../state/store';
+import { LevelMeter, type LevelMeterReading } from './LevelMeter';
+import './meter.css';
 
 /** Convert a linear gain (0..2) to an approximate dB label for display. */
 function gainToDbLabel(gain: number): string {
@@ -40,30 +43,73 @@ export function MixerStrip() {
   const tracks = useStore((s) => s.project.tracks);
   const channels = tracks.filter((t) => t.type !== 'master');
   const master = tracks.find((t) => t.type === 'master') ?? null;
+  const [meterLevels, setMeterLevels] = useState<Record<string, LevelMeterReading>>({});
+  const updateMeterLevel = useCallback((trackId: string, reading: LevelMeterReading) => {
+    setMeterLevels((current) => {
+      const previous = current[trackId];
+      if (
+        previous &&
+        previous.clipping === reading.clipping &&
+        previous.fill === reading.fill &&
+        previous.displayDb === reading.displayDb &&
+        previous.peakDb === reading.peakDb
+      ) {
+        return current;
+      }
+      return { ...current, [trackId]: reading };
+    });
+  }, []);
+  const loudestTrack = useMemo(
+    () => findLoudestTrack(channels, meterLevels),
+    [channels, meterLevels],
+  );
+  const masterClipping = master ? (meterLevels[master.id]?.clipping ?? false) : false;
 
   return (
     <footer className="mixer-strip" aria-label="ミキサー">
       <div className="mixer-strip__row">
         {channels.map((track) => (
-          <ChannelStrip key={track.id} track={track} />
+          <ChannelStrip
+            key={track.id}
+            track={track}
+            onLevelChange={updateMeterLevel}
+          />
         ))}
       </div>
       {master ? (
         <div className="mixer-strip__master">
-          <ChannelStrip track={master} isMaster />
+          <ChannelStrip track={master} isMaster onLevelChange={updateMeterLevel} />
+          {masterClipping ? (
+            <div className="mixer-clip-warning" role="alert">
+              音が大きすぎて歪んでいます。一番大きいトラックの音量を下げてみましょう
+              {loudestTrack ? (
+                <span className="mixer-clip-warning__target">
+                  候補: {loudestTrack.name}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </footer>
   );
 }
 
-function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
-  const { track, isMaster = false } = props;
+function ChannelStrip(props: {
+  track: Track;
+  isMaster?: boolean;
+  onLevelChange: (trackId: string, reading: LevelMeterReading) => void;
+}) {
+  const { track, isMaster = false, onLevelChange } = props;
   const setTrackVolume = useStore((s) => s.setTrackVolume);
   const setTrackPan = useStore((s) => s.setTrackPan);
   const toggleMute = useStore((s) => s.toggleMute);
   const toggleSolo = useStore((s) => s.toggleSolo);
   const applyProjectChange = useStore((s) => s.applyProjectChange);
+  const handleLevelChange = useCallback(
+    (reading: LevelMeterReading) => onLevelChange(track.id, reading),
+    [onLevelChange, track.id],
+  );
 
   const updateEffect = (
     type: SupportedEffectType,
@@ -105,6 +151,14 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
         <span className="mix-ch__name" title={track.name}>
           {isMaster ? 'マスター' : track.name}
         </span>
+      </div>
+
+      <div className="mix-ch__meter">
+        <LevelMeter
+          label={isMaster ? 'マスター' : track.name}
+          source={isMaster ? { kind: 'master' } : { kind: 'track', trackId: track.id }}
+          onLevelChange={handleLevelChange}
+        />
       </div>
 
       <div className="mix-ch__fader">
@@ -168,6 +222,29 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
       ) : null}
     </div>
   );
+}
+
+function findLoudestTrack(
+  tracks: readonly Track[],
+  levels: Record<string, LevelMeterReading>,
+): Track | null {
+  let loudest: Track | null = null;
+  let loudestDb = Number.NEGATIVE_INFINITY;
+  let fallback: Track | null = null;
+  let fallbackVolume = Number.NEGATIVE_INFINITY;
+  for (const track of tracks) {
+    const level = levels[track.id];
+    const db = level?.peakDb ?? Number.NEGATIVE_INFINITY;
+    if (Number.isFinite(db) && db > loudestDb) {
+      loudest = track;
+      loudestDb = db;
+    }
+    if (track.volume > fallbackVolume) {
+      fallback = track;
+      fallbackVolume = track.volume;
+    }
+  }
+  return loudest ?? fallback;
 }
 
 function EffectControls(props: {

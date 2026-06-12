@@ -1,0 +1,91 @@
+.mix-ch__meter {
+  display: flex;
+  justify-content: center;
+  min-height: 86px;
+}
+
+.level-meter {
+  --meter-fill: #5fbf8f;
+  display: grid;
+  grid-template-rows: 72px 14px;
+  justify-items: center;
+  gap: 3px;
+  width: 28px;
+}
+
+.level-meter__rail {
+  position: relative;
+  width: 18px;
+  height: 72px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background:
+    linear-gradient(to top, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0)),
+    var(--bg);
+}
+
+.level-meter__rail::before {
+  content: '';
+  position: absolute;
+  inset: 14px 0 auto;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.level-meter__fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: bottom;
+  background: linear-gradient(to top, #4ea876, #d7b94d 76%, #df6b54);
+  transition: background-color 80ms linear;
+}
+
+.level-meter.is-clipping {
+  --meter-fill: #ef4d45;
+}
+
+.level-meter.is-clipping .level-meter__rail {
+  border-color: rgba(239, 77, 69, 0.88);
+  box-shadow: 0 0 0 1px rgba(239, 77, 69, 0.18);
+}
+
+.level-meter.is-clipping .level-meter__fill {
+  background: #ef4d45;
+}
+
+.level-meter__readout {
+  width: 44px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.mixer-strip__master {
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 220px;
+}
+
+.mixer-strip__master .mix-ch.is-master {
+  width: 100%;
+  flex: 0 0 auto;
+}
+
+.mixer-clip-warning {
+  border: 1px solid rgba(239, 77, 69, 0.72);
+  border-radius: 6px;
+  background: rgba(239, 77, 69, 0.12);
+  color: var(--text);
+  padding: var(--sp-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mixer-clip-warning__target {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-dim);
+}

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { suggestNextChords } from '@cts/theory-engine';
-import { useStore } from '../../state/store';
+import { useStore, type RightPanelTab } from '../../state/store';
 import { appendChordAfterLast } from '../../state/editorActions';
 import { AssistantPanel } from '../assistant/AssistantPanel';
 import { TutorialPanel } from '../tutorial/TutorialPanel';
@@ -17,17 +17,20 @@ import {
   type Difficulty,
 } from './difficultyText';
 
-type RightTab = 'inspector' | 'assistant' | 'tutorial';
-
-const TABS: { id: RightTab; label: string }[] = [
+const TABS: { id: RightPanelTab; label: string }[] = [
   { id: 'inspector', label: 'インスペクター' },
   { id: 'assistant', label: 'アシスタント' },
   { id: 'tutorial', label: 'チュートリアル' },
 ];
 
-/** Right column tab host: inspector / assistant / tutorial. */
+/**
+ * Right column tab host: inspector / assistant / tutorial.
+ * The active tab lives in the store (`rightPanelTab`) so other features —
+ * e.g. the start screen's「チュートリアルをはじめる」— can switch tabs too.
+ */
 export function InspectorPanel() {
-  const [tab, setTab] = useState<RightTab>('inspector');
+  const tab = useStore((s) => s.rightPanelTab);
+  const setTab = useStore((s) => s.setRightPanelTab);
 
   return (
     <aside className="inspector-panel" aria-label="インスペクタ">

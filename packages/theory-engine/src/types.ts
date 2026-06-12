@@ -64,6 +64,12 @@ export type ParsedChord = {
   bassPc: number;
 };
 
+/** MIDIノートへ展開済みのコード。voicing は低い音から高い音の順。 */
+export type RealizedChord = ParsedChord & {
+  /** 発音するMIDIノート番号。先頭は bassPc と一致する最低音。 */
+  voicing: number[];
+};
+
 /** コード解析結果 (docs/06 chord analyze 出力形状)。 */
 export type ChordAnalysis = {
   symbol: string;

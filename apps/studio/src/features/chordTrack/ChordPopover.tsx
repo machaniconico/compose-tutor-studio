@@ -25,7 +25,8 @@ function parseFeedback(symbol: string, key: string): { ok: boolean; text: string
   try {
     const parsed = parseChord(trimmed, key);
     const notes = parsed.notes.join(' ');
-    return { ok: true, text: `${parsed.root} ${parsed.quality} / 構成音: ${notes}` };
+    const bassText = trimmed.includes('/') ? ` / ベース音: ${parsed.bass}` : '';
+    return { ok: true, text: `${parsed.root} ${parsed.quality}${bassText} / 構成音: ${notes}` };
   } catch {
     return { ok: false, text: 'このコード名は読み取れませんでした。綴りを確認してください。' };
   }
@@ -167,7 +168,7 @@ export function ChordPopover(props: {
           onChange={(e) => setText(e.target.value)}
           aria-label="コード名"
           autoFocus
-          placeholder="例: C, Am, Fmaj7, G7"
+          placeholder="例: C, Am, Fmaj7, G7, C/E"
         />
         <button type="submit" className="is-active" disabled={!feedback.ok}>
           適用

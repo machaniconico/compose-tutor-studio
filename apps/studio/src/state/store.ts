@@ -32,6 +32,9 @@ export type EditorView = 'pianoRoll' | 'drums' | 'arranger';
 
 export type Difficulty = 'beginner' | 'standard' | 'advanced';
 
+/** Right-hand panel tabs (lifted from InspectorPanel so other features can switch tabs). */
+export type RightPanelTab = 'inspector' | 'assistant' | 'tutorial';
+
 export type TransportState = {
   isPlaying: boolean;
   positionBeat: number;
@@ -71,6 +74,13 @@ type StoreState = {
   editor: EditorState;
   save: SaveState;
   tutorialPanelOpen: boolean;
+  /**
+   * Whether the launch start screen is visible. Starts true on every app
+   * launch; closed by any of the start-screen entry actions.
+   */
+  startScreenOpen: boolean;
+  /** Which tab the right-hand panel shows (inspector / assistant / tutorial). */
+  rightPanelTab: RightPanelTab;
   /** Free-form inspector content state (e.g. selected chord summary). */
   inspector: { content: string | null };
 
@@ -120,6 +130,10 @@ type StoreState = {
   toggleTutorialPanel: () => void;
   setInspectorContent: (content: string | null) => void;
   setDifficulty: (difficulty: Difficulty) => void;
+  /** Show / hide the launch start screen (UI-only, no history). */
+  setStartScreenOpen: (open: boolean) => void;
+  /** Switch the right-hand panel tab (UI-only, no history). */
+  setRightPanelTab: (tab: RightPanelTab) => void;
 
   // transport
   //
@@ -154,6 +168,12 @@ type StoreState = {
   loadProjectById: (id: string) => boolean;
   /** Replace the whole project (e.g. template instantiation / file import). */
   replaceProject: (project: Project) => void;
+  /**
+   * Load a project for listening only (e.g. the bundled sample song).
+   * Unlike `replaceProject`, nothing is written to storage until the user
+   * actually edits, so auditioning the sample never clutters saved projects.
+   */
+  loadProjectForPreview: (project: Project) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -328,6 +348,8 @@ export const useStore = create<StoreState>((set, get) => {
     editor: makeEditor(startingProject),
     save: makeIdleSave(),
     tutorialPanelOpen: false,
+    startScreenOpen: true,
+    rightPanelTab: 'inspector',
     inspector: { content: null },
     past: [],
     future: [],
@@ -525,6 +547,8 @@ export const useStore = create<StoreState>((set, get) => {
       saveDifficulty(difficulty);
       set((s) => ({ editor: { ...s.editor, difficulty } }));
     },
+    setStartScreenOpen: (open) => set({ startScreenOpen: open }),
+    setRightPanelTab: (tab) => set({ rightPanelTab: tab }),
 
     // --- transport ---
     play: () => {
@@ -632,6 +656,17 @@ export const useStore = create<StoreState>((set, get) => {
       publishAppEvent({
         type: 'project.created',
         payload: { key: project.key, bpm: project.bpm },
+      });
+    },
+    loadProjectForPreview: (project) => {
+      clearScheduledSave();
+      set({
+        project,
+        editor: makeEditor(project),
+        transport: makeTransport(),
+        save: makeIdleSave(),
+        past: [],
+        future: [],
       });
     },
     deleteProject: (id) => {

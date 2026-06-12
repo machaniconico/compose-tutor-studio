@@ -35,6 +35,8 @@ export type ParsedChordSymbol = {
   intervals: number[];
   pitchClasses: number[];
   notes: string[];
+  bass?: string;
+  bassPc?: number;
 };
 
 /** 各品質のルートからの半音インターバル。 */
@@ -115,6 +117,11 @@ function spell(pc: number, preferFlats: boolean): string {
   return names[((pc % 12) + 12) % 12] as string;
 }
 
+function appendBassIfMissing<T>(items: T[], bassItem: T, pitchClasses: number[], bassPc: number): T[] {
+  if (pitchClasses.includes(bassPc)) return items;
+  return [...items, bassItem];
+}
+
 /**
  * コードシンボルをパースする。
  * 対応: major(""), minor("m"/"min"/"-"), dominant7("7"), major7("maj7"/"M7"),
@@ -126,8 +133,18 @@ export function parseChordSymbol(symbol: string): ParsedChordSymbol | null {
   const raw = symbol.trim();
   if (raw === '') return null;
 
+  const slashParts = raw.split('/');
+  if (slashParts.length > 2) return null;
+
+  const body = slashParts[0]?.trim() ?? '';
+  const bassPart = slashParts[1]?.trim();
+  if (body === '' || bassPart === '') return null;
+
+  const parsedBass = bassPart === undefined ? null : parseNoteName(bassPart);
+  if (bassPart !== undefined && parsedBass === null) return null;
+
   // ルート音名抽出 (文字 + 任意の #/b/♯/♭)。
-  const rootMatch = raw.match(/^([A-Ga-g])([#b♯♭]*)(.*)$/);
+  const rootMatch = body.match(/^([A-Ga-g])([#b♯♭]*)(.*)$/);
   if (!rootMatch) return null;
   const [, letter = '', accidentalsRaw = '', suffix = ''] = rootMatch;
   const rootToken = letter.toUpperCase() + accidentalsRaw.replace(/♯/g, '#').replace(/♭/g, 'b');
@@ -140,11 +157,19 @@ export function parseChordSymbol(symbol: string): ParsedChordSymbol | null {
 
   const rootPc = noteNameToPitchClass(rootToken);
   const intervals = chordIntervals(quality);
-  const pitchClasses = intervals.map((iv) => (rootPc + iv) % 12);
+  const chordPitchClasses = intervals.map((iv) => (rootPc + iv) % 12);
   const preferFlats = preferFlatsFromRoot(parsedRoot.name);
-  const notes = pitchClasses.map((pc) => spell(pc, preferFlats));
+  const chordNotes = chordPitchClasses.map((pc) => spell(pc, preferFlats));
+  const pitchClasses =
+    parsedBass === null
+      ? chordPitchClasses
+      : appendBassIfMissing(chordPitchClasses, parsedBass.pitchClass, chordPitchClasses, parsedBass.pitchClass);
+  const notes =
+    parsedBass === null
+      ? chordNotes
+      : appendBassIfMissing(chordNotes, parsedBass.name, chordPitchClasses, parsedBass.pitchClass);
 
-  return {
+  const parsed: ParsedChordSymbol = {
     symbol: raw,
     root: parsedRoot.name,
     quality,
@@ -152,4 +177,9 @@ export function parseChordSymbol(symbol: string): ParsedChordSymbol | null {
     pitchClasses,
     notes,
   };
+  if (parsedBass !== null) {
+    parsed.bass = parsedBass.name;
+    parsed.bassPc = parsedBass.pitchClass;
+  }
+  return parsed;
 }

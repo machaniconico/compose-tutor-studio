@@ -4,13 +4,27 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  analyzeBassRootOnDownbeat,
+  analyzeDrumPattern,
+  analyzeMelodyChordToneOnStrongBeat,
+  analyzeNotesWithinScale,
   applyEvent,
   checkCondition,
+  checkProjectPredicate,
   evaluateLesson,
 } from '../src/checker.js';
 import type { EditEvent, Lesson } from '../src/dsl.js';
 import type { LessonRuntimeState } from '../src/checker.js';
 import { course0 } from '../src/courses.js';
+import {
+  makeBassTrack,
+  makeChord,
+  makeDrumEvent,
+  makeDrumTrack,
+  makeMelodyTrack,
+  makeNote,
+  makeProject,
+} from './helpers.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -378,5 +392,336 @@ describe('evaluateLesson: other course0 lessons', () => {
     const state = stateFrom({ type: 'exported', format: 'midi' });
     const result = evaluateLesson(lesson08, state);
     expect(result.isComplete).toBe(true);
+  });
+});
+
+// ═══ 音楽的判定チェッカー (checkProjectPredicate) ═══════════════════════════════
+//
+// 共通設定: C メジャー / 4/4 / 4小節 / コード C → G → Am → F（各1小節）
+// MIDI: C2=36, F2=41, G2=43, A2=45 / C4=60, E4=64, F#4=66, G4=67, A4=69, B4=71, D5=74
+
+const FOUR_CHORDS = [
+  makeChord('C', 0),
+  makeChord('G', 4),
+  makeChord('Am', 8),
+  makeChord('F', 12),
+];
+
+// ─── hasBassRootOnDownbeat ────────────────────────────────────────────────────
+
+describe('checkProjectPredicate: hasBassRootOnDownbeat', () => {
+  const predicate = (minRatio: number) =>
+    ({ type: 'hasBassRootOnDownbeat', trackName: 'Bass', minRatio }) as const;
+
+  it('成功: 全小節の1拍目がルート音なら ratio=1.0 で満たす', () => {
+    const project = makeProject({
+      lengthBars: 4,
+      chordTrack: FOUR_CHORDS,
+      tracks: [
+        makeBassTrack([makeNote(36, 0), makeNote(43, 4), makeNote(45, 8), makeNote(41, 12)]),
+      ],
+    });
+    expect(checkProjectPredicate(predicate(0.75), project)).toBe(true);
+    const analysis = analyzeBassRootOnDownbeat(project, 'Bass');
+    expect(analysis.consideredBars).toBe(4);
+    expect(analysis.rootBars).toBe(4);
+    expect(analysis.firstIssue).toBeNull();
+  });
+
+  it('境界: 4小節中3小節がルート (ratio=0.75) で minRatio=0.75 ちょうど → 満たす', () => {
+    // 4小節目 (F) だけルート以外 (A2=45) を弾く
+    const project = makeProject({
+      lengthBars: 4,
+      chordTrack: FOUR_CHORDS,
+      tracks: [
+        makeBassTrack([makeNote(36, 0), makeNote(43, 4), makeNote(45, 8), makeNote(45, 12)]),
+      ],
+    });
+    expect(checkProjectPredicate(predicate(0.75), project)).toBe(true);
+  });
+
+  it('失敗: ratio=0.75 は minRatio=0.8 を満たさず、firstIssue が4小節目を指す', () => {
+    const project = makeProject({
+      lengthBars: 4,
+      chordTrack: FOUR_CHORDS,
+      tracks: [
+        makeBassTrack([makeNote(36, 0), makeNote(43, 4), makeNote(45, 8), makeNote(45, 12)]),
+      ],
+    });
+    expect(checkProjectPredicate(predicate(0.8), project)).toBe(false);
+    const analysis = analyzeBassRootOnDownbeat(project, 'Bass');
+    expect(analysis.firstIssue?.barNumber).toBe(4);
+    expect(analysis.firstIssue?.chordSymbol).toBe('F');
+    expect(analysis.firstIssue?.rootName).toBe('F');
+    expect(analysis.firstIssue?.hasNoteOnDownbeat).toBe(true);
+  });
+
+  it('1拍目にノートが無い小節は「未達」として分母に入る', () => {
+    // 1・2小節目だけルートを弾く → 2/4 = 0.5
+    const project = makeProject({
+      lengthBars: 4,
+      chordTrack: FOUR_CHORDS,
+      tracks: [makeBassTrack([makeNote(36, 0), makeNote(43, 4)])],
+    });
+    expect(checkProjectPredicate(predicate(0.5), project)).toBe(true);
+    expect(checkProjectPredicate(predicate(0.75), project)).toBe(false);
+    const analysis = analyzeBassRootOnDownbeat(project, 'Bass');
+    expect(analysis.firstIssue?.barNumber).toBe(3);
+    expect(analysis.firstIssue?.hasNoteOnDownbeat).toBe(false);
+  });
+
+  it('失敗: コードが1つも無ければ判定対象ゼロで満たさない', () => {
+    const project = makeProject({
+      lengthBars: 4,
+      chordTrack: [],
+      tracks: [makeBassTrack([makeNote(36, 0)])],
+    });
+    expect(checkProjectPredicate(predicate(0.5), project)).toBe(false);
+  });
+
+  it('オクターブ違いのルート音もルートとして認める（ピッチクラス判定）', () => {
+    const project = makeProject({
+      lengthBars: 1,
+      chordTrack: [makeChord('C', 0)],
+      tracks: [makeBassTrack([makeNote(48, 0)])], // C3
+    });
+    expect(checkProjectPredicate(predicate(1), project)).toBe(true);
+  });
+});
+
+// ─── hasMelodyChordToneOnStrongBeat ──────────────────────────────────────────
+
+describe('checkProjectPredicate: hasMelodyChordToneOnStrongBeat', () => {
+  const predicate = (minRatio: number) =>
+    ({ type: 'hasMelodyChordToneOnStrongBeat', trackName: 'Melody', minRatio }) as const;
+  const TWO_CHORDS = [makeChord('C', 0), makeChord('G', 4)];
+
+  it('成功: 強拍(1・3拍目)全てがコードトーンに着地 → ratio=1.0', () => {
+    // bar1: E4(C のコードトーン), G4 / bar2: B4(G のコードトーン), D5
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [
+        makeMelodyTrack([makeNote(64, 0), makeNote(67, 2), makeNote(71, 4), makeNote(74, 6)]),
+      ],
+    });
+    expect(checkProjectPredicate(predicate(1), project)).toBe(true);
+  });
+
+  it('境界: 4着地中3つがコードトーン (ratio=0.75) で minRatio=0.75 ちょうど → 満たす', () => {
+    // bar2 の3拍目 (beat 6) を F#4 (G のコードトーンでもスケール内でもない) にする
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [
+        makeMelodyTrack([makeNote(64, 0), makeNote(67, 2), makeNote(71, 4), makeNote(66, 6)]),
+      ],
+    });
+    expect(checkProjectPredicate(predicate(0.75), project)).toBe(true);
+    expect(checkProjectPredicate(predicate(0.8), project)).toBe(false);
+  });
+
+  it('failure 詳細: firstIssue に小節番号・コード名・着地候補・スケール外フラグが入る', () => {
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [
+        makeMelodyTrack([makeNote(64, 0), makeNote(67, 2), makeNote(71, 4), makeNote(66, 6)]),
+      ],
+    });
+    const analysis = analyzeMelodyChordToneOnStrongBeat(project, 'Melody');
+    expect(analysis.landings).toBe(4);
+    expect(analysis.chordToneLandings).toBe(3);
+    expect(analysis.firstIssue?.barNumber).toBe(2);
+    expect(analysis.firstIssue?.chordSymbol).toBe('G');
+    expect(analysis.firstIssue?.chordToneNames).toEqual(['G', 'B', 'D']);
+    expect(analysis.firstIssue?.outOfScale).toBe(true); // F# は C メジャー外
+  });
+
+  it('強拍にノートが無い（シンコペーション）は分母に入らない', () => {
+    // 着地は beat 0 の E4 だけ。beat 1.5 / 2.5 の音は判定対象外
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [
+        makeMelodyTrack([makeNote(64, 0), makeNote(66, 1.5), makeNote(69, 2.5)]),
+      ],
+    });
+    const analysis = analyzeMelodyChordToneOnStrongBeat(project, 'Melody');
+    expect(analysis.landings).toBe(1);
+    expect(analysis.chordToneLandings).toBe(1);
+    expect(checkProjectPredicate(predicate(1), project)).toBe(true);
+  });
+
+  it('失敗: 強拍への着地が1つも無ければ満たさない（minRatio が低くても）', () => {
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: TWO_CHORDS,
+      tracks: [makeMelodyTrack([makeNote(64, 1), makeNote(67, 3)])],
+    });
+    expect(checkProjectPredicate(predicate(0.1), project)).toBe(false);
+  });
+});
+
+// ─── hasNotesWithinScale ──────────────────────────────────────────────────────
+
+describe('checkProjectPredicate: hasNotesWithinScale', () => {
+  const predicate = (minRatio: number) =>
+    ({ type: 'hasNotesWithinScale', trackName: 'Melody', minRatio }) as const;
+
+  it('成功: 全ノートが C メジャースケール内 → ratio=1.0', () => {
+    const project = makeProject({
+      tracks: [makeMelodyTrack([makeNote(60, 0), makeNote(62, 1), makeNote(64, 2), makeNote(67, 3)])],
+    });
+    expect(checkProjectPredicate(predicate(1), project)).toBe(true);
+  });
+
+  it('境界: 4ノート中3つがスケール内 (ratio=0.75) で minRatio=0.75 ちょうど → 満たす', () => {
+    const project = makeProject({
+      tracks: [makeMelodyTrack([makeNote(60, 0), makeNote(62, 1), makeNote(64, 2), makeNote(66, 3)])],
+    });
+    expect(checkProjectPredicate(predicate(0.75), project)).toBe(true);
+    expect(checkProjectPredicate(predicate(0.8), project)).toBe(false);
+  });
+
+  it('スケール外ノートの最初の小節番号を報告する（4/4 で beat 6 → 2小節目）', () => {
+    const project = makeProject({
+      tracks: [makeMelodyTrack([makeNote(60, 0), makeNote(66, 6)])],
+    });
+    const analysis = analyzeNotesWithinScale(project, 'Melody');
+    expect(analysis.totalNotes).toBe(2);
+    expect(analysis.inScaleNotes).toBe(1);
+    expect(analysis.firstOutsideBarNumber).toBe(2);
+  });
+
+  it('失敗: ノートが1つも無ければ満たさない', () => {
+    const project = makeProject({ tracks: [makeMelodyTrack([])] });
+    expect(checkProjectPredicate(predicate(0.5), project)).toBe(false);
+  });
+
+  it('別キー/スケールでも判定する（A ナチュラルマイナー）', () => {
+    const project = makeProject({
+      key: 'A',
+      scale: 'naturalMinor',
+      tracks: [makeMelodyTrack([makeNote(69, 0), makeNote(71, 1), makeNote(72, 2)])], // A, B, C
+    });
+    expect(checkProjectPredicate(predicate(1), project)).toBe(true);
+  });
+});
+
+// ─── hasDrumPattern ───────────────────────────────────────────────────────────
+
+describe('checkProjectPredicate: hasDrumPattern', () => {
+  it('fourOnFloor 成功: キックが 0,4,8,12 にある', () => {
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([
+          makeDrumEvent('kick', 0),
+          makeDrumEvent('kick', 4),
+          makeDrumEvent('kick', 8),
+          makeDrumEvent('kick', 12),
+          makeDrumEvent('snare', 4), // 余分なレーンがあってもよい
+        ]),
+      ],
+    });
+    expect(
+      checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project),
+    ).toBe(true);
+  });
+
+  it('fourOnFloor 失敗: キックが1つ欠けると満たさない', () => {
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('kick', 4), makeDrumEvent('kick', 8)]),
+      ],
+    });
+    expect(
+      checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project),
+    ).toBe(false);
+    const analysis = analyzeDrumPattern(project, 'fourOnFloor');
+    expect(analysis.missing).toEqual([{ lane: 'kick', stepIndices: [12] }]);
+  });
+
+  it('backbeat 成功/失敗: スネアが2・4拍目 (4,12) に必要', () => {
+    const ok = makeProject({
+      tracks: [makeDrumTrack([makeDrumEvent('snare', 4), makeDrumEvent('snare', 12)])],
+    });
+    const ng = makeProject({
+      tracks: [makeDrumTrack([makeDrumEvent('snare', 4)])],
+    });
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'backbeat' }, ok)).toBe(true);
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'backbeat' }, ng)).toBe(false);
+  });
+
+  it('eightBeat 成功: ハイハット8分刻み + キック1拍目 + スネア2・4拍目', () => {
+    const hats = [0, 2, 4, 6, 8, 10, 12, 14].map((s) => makeDrumEvent('closedHat', s));
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([...hats, makeDrumEvent('kick', 0), makeDrumEvent('snare', 4), makeDrumEvent('snare', 12)]),
+      ],
+    });
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'eightBeat' }, project)).toBe(true);
+  });
+
+  it('eightBeat 失敗: ハイハットが無いと満たさない', () => {
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('snare', 4), makeDrumEvent('snare', 12)]),
+      ],
+    });
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'eightBeat' }, project)).toBe(false);
+  });
+
+  it('複数小節クリップ: 2小節目 (ステップ16-31) だけにパターンがあっても満たす', () => {
+    const project = makeProject({
+      tracks: [
+        makeDrumTrack([
+          makeDrumEvent('kick', 16),
+          makeDrumEvent('kick', 20),
+          makeDrumEvent('kick', 24),
+          makeDrumEvent('kick', 28),
+        ]),
+      ],
+    });
+    expect(
+      checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project),
+    ).toBe(true);
+  });
+
+  it('失敗: ドラムイベントが無ければ満たさず、必要要素を missing で返す', () => {
+    const project = makeProject({ tracks: [makeDrumTrack([])] });
+    expect(
+      checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'backbeat' }, project),
+    ).toBe(false);
+    const analysis = analyzeDrumPattern(project, 'backbeat');
+    expect(analysis.missing).toEqual([{ lane: 'snare', stepIndices: [4, 12] }]);
+  });
+});
+
+// ─── 委譲と純粋性 ────────────────────────────────────────────────────────────
+
+describe('checkProjectPredicate: 既存predicateへの委譲と純粋性', () => {
+  it('従来predicate (chordCountAtLeast) も評価できる', () => {
+    const project = makeProject({ chordTrack: [makeChord('C', 0)] });
+    expect(checkProjectPredicate({ type: 'chordCountAtLeast', value: 1 }, project)).toBe(true);
+    expect(checkProjectPredicate({ type: 'chordCountAtLeast', value: 2 }, project)).toBe(false);
+  });
+
+  it('決定的かつ非破壊: 同じ入力なら同じ結果で、Project を変更しない', () => {
+    const project = makeProject({
+      lengthBars: 2,
+      chordTrack: [makeChord('C', 0), makeChord('G', 4)],
+      tracks: [makeMelodyTrack([makeNote(64, 0), makeNote(66, 4)])],
+    });
+    const snapshot = JSON.stringify(project);
+    const predicate = {
+      type: 'hasMelodyChordToneOnStrongBeat',
+      trackName: 'Melody',
+      minRatio: 0.5,
+    } as const;
+    const first = checkProjectPredicate(predicate, project);
+    const second = checkProjectPredicate(predicate, project);
+    expect(first).toBe(second);
+    expect(JSON.stringify(project)).toBe(snapshot);
   });
 });

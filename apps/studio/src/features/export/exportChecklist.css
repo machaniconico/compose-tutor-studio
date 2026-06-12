@@ -1,0 +1,79 @@
+/* 書き出し前チェックリスト (US-305) — ExportMenu の確認ダイアログ専用スタイル */
+
+.export-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.export-checklist__summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.export-checklist__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.export-checklist__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.export-checklist__item--warning {
+  border-color: var(--warning);
+}
+
+.export-checklist__badge {
+  flex: none;
+  margin-top: 1px;
+  min-width: 34px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px var(--sp-1);
+  border-radius: var(--radius-sm);
+  background: var(--scale-in);
+  color: var(--text);
+}
+
+.export-checklist__item--warning .export-checklist__badge {
+  background: var(--warning);
+  color: #1d1208;
+}
+
+.export-checklist__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-checklist__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.export-checklist__advice {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.export-checklist__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}

@@ -8,6 +8,8 @@
 // This module is the only place that constructs a (live, non-offline)
 // AudioContext, which keeps the singleton invariant simple.
 
+import { METER_ANALYSER_FFT_SIZE } from './metering';
+
 /**
  * The app-wide audio engine. Wraps a lazily-created AudioContext and the master
  * output bus. Construct via {@link getAudioEngine}; do not instantiate directly.
@@ -16,6 +18,8 @@ export class AudioEngine {
   private context: AudioContext | null = null;
   /** Master input node: per-track chains connect here. */
   private masterBus: GainNode | null = null;
+  /** Meter tap on the master bus before the limiter. */
+  private masterAnalyser: AnalyserNode | null = null;
   /** Soft limiter on the master bus before the destination. */
   private limiter: DynamicsCompressorNode | null = null;
 
@@ -47,6 +51,9 @@ export class AudioEngine {
       this.context = new AudioContext();
       const master = this.context.createGain();
       master.gain.value = 1;
+      const analyser = this.context.createAnalyser();
+      analyser.fftSize = METER_ANALYSER_FFT_SIZE;
+      analyser.smoothingTimeConstant = 0;
 
       // Soft limiter: gentle compression with a high threshold acts as a
       // brick-wall-ish safety net against summed-voice clipping.
@@ -57,10 +64,12 @@ export class AudioEngine {
       limiter.attack.value = 0.002;
       limiter.release.value = 0.12;
 
+      master.connect(analyser);
       master.connect(limiter);
       limiter.connect(this.context.destination);
 
       this.masterBus = master;
+      this.masterAnalyser = analyser;
       this.limiter = limiter;
     }
 
@@ -77,6 +86,11 @@ export class AudioEngine {
       throw new Error('AudioEngine: master bus not initialised. Call ensureContext() first.');
     }
     return this.masterBus;
+  }
+
+  /** Master level analyser, tapped before the limiter. */
+  getMasterAnalyser(): AnalyserNode | null {
+    return this.masterAnalyser;
   }
 
   /** Suspend the audio hardware (no-op if no context). */
@@ -100,6 +114,7 @@ export class AudioEngine {
     }
     this.context = null;
     this.masterBus = null;
+    this.masterAnalyser = null;
     this.limiter = null;
   }
 }

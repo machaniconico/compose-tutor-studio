@@ -49,6 +49,26 @@ export interface TutorialLessonStep {
 
 // ─── Project Predicates ───────────────────────────────────────────────────────
 
+/** ドラムパターンの種類（hasDrumPattern 判定用） */
+export type DrumPatternType = 'fourOnFloor' | 'eightBeat' | 'backbeat';
+
+/**
+ * 音楽的判定predicate（docs/03 §4.2）。
+ * 実装は checker.ts の checkProjectPredicate（theory-engine を使った純粋関数）。
+ *
+ * minRatio 系は「比率で判定」する — スケール外音・非コードトーンを一律に
+ * 誤りと断定しないための設計（CLAUDE.md 音楽的正確性規則）。
+ */
+export type MusicalProjectPredicate =
+  /** ベーストラックの小節1拍目に、そのとき鳴っているコードのルート音が置かれている比率 */
+  | { type: 'hasBassRootOnDownbeat'; trackName: string; minRatio: number }
+  /** メロディが強拍（1拍目・3拍目）に着地したとき、その音がコードトーンである比率 */
+  | { type: 'hasMelodyChordToneOnStrongBeat'; trackName: string; minRatio: number }
+  /** トラック内ノートのうち、プロジェクトのキー/スケール内の音である比率 */
+  | { type: 'hasNotesWithinScale'; trackName: string; minRatio: number }
+  /** ドラムトラックに指定種別のパターン（四つ打ち・8ビート・バックビート）があるか */
+  | { type: 'hasDrumPattern'; patternType: DrumPatternType };
+
 export type ProjectPredicate =
   | { type: 'chordCountAtLeast'; value: number }
   | { type: 'progressionEquals'; symbols: string[] }
@@ -58,7 +78,8 @@ export type ProjectPredicate =
   | { type: 'hasSection'; sectionType: SectionType }
   | { type: 'bpmInRange'; min: number; max: number }
   | { type: 'trackVolumeInRange'; trackName: string; min: number; max: number }
-  | { type: 'exportCompleted'; format?: 'midi' | 'wav' };
+  | { type: 'exportCompleted'; format?: 'midi' | 'wav' }
+  | MusicalProjectPredicate;
 
 // ─── Step Goals ───────────────────────────────────────────────────────────────
 

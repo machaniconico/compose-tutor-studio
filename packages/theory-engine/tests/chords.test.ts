@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseChord } from '../src/chords';
+import { parseChord, realizeChords } from '../src/chords';
+import { parseChordSymbol } from '../src/parse-chord';
+import { realizeProgression } from '../src/progressions';
 
 describe('chords: parser', () => {
   it('major triad', () => {
@@ -64,7 +66,54 @@ describe('chords: parser', () => {
     expect(c.quality).toBe('minor7');
     expect(c.bass).toBe('G');
     expect(c.bassPc).toBe(7);
-    expect(c.pitchClasses).toEqual([2, 5, 9, 0]);
+    expect(c.pitchClasses).toEqual([2, 5, 9, 0, 7]);
+    expect(c.notes).toEqual(['D', 'F', 'A', 'C', 'G']);
+  });
+
+  it('slash chord C/E keeps chord tones and stores bass', () => {
+    const c = parseChord('C/E');
+    expect(c.root).toBe('C');
+    expect(c.quality).toBe('major');
+    expect(c.bass).toBe('E');
+    expect(c.bassPc).toBe(4);
+    expect(c.pitchClasses).toEqual([0, 4, 7]);
+  });
+
+  it('normalizes lowercase slash chord spelling', () => {
+    const c = parseChord('dm7/g');
+    expect(c.root).toBe('D');
+    expect(c.quality).toBe('minor7');
+    expect(c.bass).toBe('G');
+    expect(c.bassPc).toBe(7);
+  });
+
+  it('rejects invalid slash chord bass', () => {
+    expect(() => parseChord('Dm7/H')).toThrow();
+    expect(() => parseChord('C//G')).toThrow();
+  });
+
+  it('parseChordSymbol supports slash chord bass', () => {
+    const c = parseChordSymbol('Dm7/G');
+    expect(c).not.toBeNull();
+    expect(c!.root).toBe('D');
+    expect(c!.quality).toBe('minor7');
+    expect(c!.bass).toBe('G');
+    expect(c!.bassPc).toBe(7);
+    expect(c!.pitchClasses).toContain(7);
+  });
+
+  it('parseChordSymbol rejects invalid slash chord bass', () => {
+    expect(parseChordSymbol('Dm7/H')).toBeNull();
+    expect(parseChordSymbol('C//G')).toBeNull();
+  });
+
+  it('realizes slash chord bass as the lowest voiced note', () => {
+    const symbols = [...realizeProgression('ii-V-I', 'C', 'major')];
+    symbols[0] = 'Dm7/G';
+    const realized = realizeChords(symbols, 'C');
+    const firstVoicedNote = realized[0]!.voicing[0]!;
+    expect(firstVoicedNote % 12).toBe(7);
+    expect(Math.min(...realized[0]!.voicing)).toBe(firstVoicedNote);
   });
 
   it('spells with provided key (flat key)', () => {

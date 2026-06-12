@@ -1,0 +1,89 @@
+/* Start screen overlay (docs/04 §2.1). Sits above the studio shell and the
+   onboarding overlay (onboarding waits until this closes). */
+
+.start-screen-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: rgba(10, 12, 16, 0.78);
+  backdrop-filter: blur(2px);
+}
+
+.start-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: min(720px, 94vw);
+  max-height: min(680px, 92vh);
+  overflow-y: auto;
+  padding: var(--sp-4);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.start-screen__title {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.02em;
+}
+
+.start-screen__lead {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.start-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.start-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: stretch;
+  text-align: left;
+  padding: var(--sp-3);
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.start-entry:hover {
+  border-color: var(--accent-strong);
+}
+
+.start-entry__name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.start-entry__desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.start-screen__templates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.start-screen__back {
+  align-self: flex-start;
+}
+
+.start-screen__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}

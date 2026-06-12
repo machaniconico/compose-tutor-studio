@@ -1,6 +1,8 @@
 // First-launch welcome overlay. Shows once when there are no saved projects and
 // the 'cts.onboarded' flag is unset. Dismissible; never blocks the app (it sits
 // above the UI but can be closed immediately and is non-modal in spirit).
+// While the start screen is open this stays hidden — it only appears after the
+// user has picked an entry there.
 
 import { useState } from 'react';
 import { useStore } from '../../state/store';
@@ -30,13 +32,15 @@ const STEPS = [
   { n: '③', text: '「チュートリアル」タブで、作曲を学びながら進められます。' },
 ];
 
-/** Welcome overlay shown on first launch. */
+/** Welcome overlay shown on first launch (after the start screen is closed). */
 export function OnboardingOverlay() {
   // Snapshot saved-project count once on mount.
   const savedCount = useStore.getState().listSavedProjects().length;
   const [visible, setVisible] = useState(() => shouldShow(savedCount));
+  const startScreenOpen = useStore((s) => s.startScreenOpen);
 
-  if (!visible) return null;
+  // The start screen owns the first impression; onboarding waits its turn.
+  if (startScreenOpen || !visible) return null;
 
   const dismiss = () => {
     const storage = getStorage();

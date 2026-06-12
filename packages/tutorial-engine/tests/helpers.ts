@@ -1,6 +1,7 @@
 // Test helpers — build minimal fake Project objects
 
 import type {
+  ChordEvent,
   Clip,
   DrumEvent,
   DrumLane,
@@ -88,6 +89,20 @@ export function makeDrumEvent(lane: DrumLane, stepIndex: number): DrumEvent {
     lane,
     stepIndex,
     velocity: 100,
+  };
+}
+
+/** コードイベントを作る。root/quality はメタデータなので簡易値でよい（判定は symbol を解析する） */
+export function makeChord(symbol: string, startBeat: number, durationBeats = 4): ChordEvent {
+  const rootMatch = symbol.match(/^[A-G][#b]?/);
+  return {
+    id: `chord-${symbol}-${startBeat}`,
+    startBeat,
+    durationBeats,
+    symbol,
+    root: rootMatch ? rootMatch[0] : symbol,
+    quality: '',
+    notes: [],
   };
 }
 

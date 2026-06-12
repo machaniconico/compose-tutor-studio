@@ -6,6 +6,7 @@ import { InspectorPanel } from './features/inspector/InspectorPanel';
 import { MixerStrip } from './features/mixer/MixerStrip';
 import { ToastStack } from './features/tutorial/ToastStack';
 import { OnboardingOverlay } from './features/onboarding/OnboardingOverlay';
+import { StartScreen } from './features/startScreen/StartScreen';
 
 /** Root layout: CSS-grid studio shell wiring the feature panels together. */
 export function App() {
@@ -21,6 +22,7 @@ export function App() {
       <MixerStrip />
       <ToastStack />
       <OnboardingOverlay />
+      <StartScreen />
     </div>
   );
 }

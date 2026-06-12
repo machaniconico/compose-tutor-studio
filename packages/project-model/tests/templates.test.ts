@@ -4,6 +4,7 @@ import {
   instantiateTemplate,
   validateProject,
   projectLengthBeats,
+  beatToSeconds,
   type TemplateId,
 } from '../src/index';
 
@@ -15,6 +16,7 @@ const ALL_IDS: TemplateId[] = [
   'bgm-loop',
   'jingle-15s',
   'jingle-30s',
+  'jingle-60s',
   'lofi-chill',
   'game-loop',
 ];
@@ -79,6 +81,25 @@ describe('instantiateTemplate', () => {
     const lanes = new Set(drumClip.drumEvents!.map((e) => e.lane));
     expect(lanes.has('kick')).toBe(true);
     expect(lanes.has('snare')).toBe(true);
+  });
+
+  it('builds the 60-second jingle as 32 bars lasting about 60 seconds', () => {
+    const template = PROJECT_TEMPLATES['jingle-60s'];
+    expect(template.lengthBars).toBe(32);
+
+    const project = instantiateTemplate('jingle-60s', clock);
+    expect(project.lengthBars).toBe(32);
+
+    // Duration in seconds = total quarter-note beats * seconds per beat.
+    const seconds = projectLengthBeats(project) * beatToSeconds(project.bpm);
+    // 32 bars of 4/4 at 128 BPM = 128 beats * (60 / 128) s = exactly 60 s.
+    expect(seconds).toBeGreaterThanOrEqual(55);
+    expect(seconds).toBeLessThanOrEqual(65);
+    expect(seconds).toBeCloseTo(60, 5);
+
+    // Chord track and drums cover the whole 60 seconds.
+    const last = project.chordTrack[project.chordTrack.length - 1]!;
+    expect(last.startBeat + last.durationBeats).toBe(projectLengthBeats(project));
   });
 
   it('throws for unknown template ids', () => {

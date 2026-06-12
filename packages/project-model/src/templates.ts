@@ -23,6 +23,7 @@ export type TemplateId =
   | 'bgm-loop'
   | 'jingle-15s'
   | 'jingle-30s'
+  | 'jingle-60s'
   | 'lofi-chill'
   | 'game-loop';
 
@@ -193,6 +194,18 @@ export const PROJECT_TEMPLATES: Record<TemplateId, ProjectTemplate> = {
     key: 'C',
     scale: 'major',
     lengthBars: 8,
+    progression: iiVI,
+    drumPattern: FOUR_ON_THE_FLOOR,
+  },
+  'jingle-60s': {
+    id: 'jingle-60s',
+    name: '60秒ジングル',
+    description:
+      'ラジオCMや動画オープニング向けの約60秒ジングル。ii–V–Iをくり返してしっかり聴かせる32小節構成です（128 BPMで32小節＝ちょうど60秒）。',
+    bpm: 128,
+    key: 'C',
+    scale: 'major',
+    lengthBars: 32,
     progression: iiVI,
     drumPattern: FOUR_ON_THE_FLOOR,
   },

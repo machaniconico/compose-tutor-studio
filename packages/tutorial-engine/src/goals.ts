@@ -1,6 +1,10 @@
 // Goal evaluation — project predicates and event matching
 
 import type { Project } from '@cts/project-model';
+// NOTE: checker.ts とは相互import（goals → checker: 音楽的判定の委譲 /
+// checker → goals: 従来predicateの委譲）。両モジュールとも関数宣言のみで
+// トップレベル実行が無いため、ESM の循環importとして安全。
+import { checkProjectPredicate } from './checker.js';
 import type {
   AppEvent,
   AppEventType,
@@ -105,6 +109,14 @@ export function evaluateProjectPredicate(
       // Export state is not stored in Project; evaluated via events in checkGoalOnEvent.
       // This branch should not be reached in normal flow — returns false as a safe default.
       return false;
+    }
+
+    case 'hasBassRootOnDownbeat':
+    case 'hasMelodyChordToneOnStrongBeat':
+    case 'hasNotesWithinScale':
+    case 'hasDrumPattern': {
+      // 音楽的判定 (docs/03 §4.2) — 純粋実装は checker.ts 側にある。
+      return checkProjectPredicate(predicate, project);
     }
   }
 }

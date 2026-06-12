@@ -64,6 +64,11 @@ class FakeStereoPannerNode extends FakeNode {
   readonly pan = new FakeAudioParam(0);
 }
 
+class FakeAnalyserNode extends FakeNode {
+  fftSize = 2048;
+  smoothingTimeConstant = 0.8;
+}
+
 class FakeBiquadFilterNode extends FakeNode {
   type: BiquadFilterType = 'lowpass';
   readonly frequency = new FakeAudioParam(350);
@@ -111,6 +116,12 @@ class FakeAudioContext {
     return this.node(
       new FakeStereoPannerNode('StereoPanner', this.name('StereoPanner'), this.connections),
     ) as unknown as StereoPannerNode;
+  }
+
+  createAnalyser(): AnalyserNode {
+    return this.node(
+      new FakeAnalyserNode('Analyser', this.name('Analyser'), this.connections),
+    ) as unknown as AnalyserNode;
   }
 
   createBiquadFilter(): BiquadFilterNode {
@@ -229,14 +240,18 @@ describe('clampVolume / clampPan', () => {
 });
 
 describe('TrackGraph effects', () => {
-  it('keeps tracks without effects connected directly to the master', () => {
+  it('routes tracks without effects through a meter tap before the master', () => {
     const ctx = fakeContext();
     const master = ctx.createGain();
     const graph = new TrackGraph(ctx, master, track('a'));
     const panner = ctx.created.find((node) => node.kind === 'StereoPanner');
+    const analyser = ctx.created.find((node) => node.kind === 'Analyser');
+    const meterTap = panner?.connections[0];
 
     expect(graph.effectTypes).toEqual([]);
-    expect(panner?.connections).toEqual([master as unknown as FakeNode]);
+    expect(graph.analyser).toBe(analyser as unknown as AnalyserNode);
+    expect(meterTap?.connections).toContain(master as unknown as FakeNode);
+    expect(meterTap?.connections).toContain(analyser);
   });
 
   it('inserts enabled filter, delay, and reverb nodes before the master', () => {
@@ -258,6 +273,7 @@ describe('TrackGraph effects', () => {
     const filter = ctx.created.find((node) => node.kind === 'BiquadFilter');
     const delay = ctx.created.find((node) => node.kind === 'Delay');
     const convolver = ctx.created.find((node) => node.kind === 'Convolver');
+    const analyser = ctx.created.find((node) => node.kind === 'Analyser');
 
     expect(graph.effectTypes).toEqual(['filter', 'delay', 'reverb']);
     expect(filter).toBeDefined();
@@ -267,6 +283,7 @@ describe('TrackGraph effects', () => {
     expect(ctx.connections).toContain(`${delay?.name}->${delay?.connections[1]?.name}`);
     expect(ctx.connections.some((entry) => entry === `${panner?.name}->${masterNode.name}`)).toBe(false);
     expect(ctx.connections.some((entry) => entry.endsWith(`->${masterNode.name}`))).toBe(true);
+    expect(ctx.connections.some((entry) => entry.endsWith(`->${analyser?.name}`))).toBe(true);
   });
 
   it('rebuilds the chain when effects are enabled during playback', () => {
@@ -275,9 +292,10 @@ describe('TrackGraph effects', () => {
     const first = track('a');
     const graph = new TrackGraph(ctx, master, first);
     const panner = ctx.created.find((node) => node.kind === 'StereoPanner');
+    const originalMeterTap = panner?.connections[0];
 
     expect(graph.effectTypes).toEqual([]);
-    expect(panner?.connections).toEqual([master as unknown as FakeNode]);
+    expect(originalMeterTap?.connections).toContain(master as unknown as FakeNode);
 
     applyMixState(
       new Map([['a', graph]]),
@@ -288,5 +306,6 @@ describe('TrackGraph effects', () => {
     const filter = ctx.created.find((node) => node.kind === 'BiquadFilter');
     expect(graph.effectTypes).toEqual(['filter']);
     expect(panner?.connections).toEqual([filter]);
+    expect(filter?.connections).toEqual([originalMeterTap]);
   });
 });

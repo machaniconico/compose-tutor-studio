@@ -25,6 +25,91 @@ const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'blues', label: 'ブルース' },
 ];
 
+export type TransportShortcut = 'save' | 'togglePlayback' | 'undo' | 'redo';
+
+export type TransportShortcutEvent = Pick<
+  KeyboardEvent,
+  'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey' | 'target'
+> &
+  Partial<Pick<KeyboardEvent, 'code' | 'defaultPrevented'>>;
+
+type EditableTarget = EventTarget & {
+  getAttribute?: (name: string) => string | null;
+  isContentEditable?: boolean;
+  parentElement?: EditableTarget | null;
+  tagName?: string;
+};
+
+type TransportShortcutActions = {
+  isPlaying: boolean;
+  play: () => void;
+  redo: () => void;
+  saveToLocalStorage: () => void;
+  stop: () => void;
+  undo: () => void;
+};
+
+export function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  let element = target as EditableTarget | null;
+
+  while (element) {
+    const tagName = element.tagName?.toUpperCase();
+    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true;
+    if (element.isContentEditable) return true;
+
+    const contentEditable = element.getAttribute?.('contenteditable')?.toLowerCase();
+    if (contentEditable === 'false') return false;
+    if (contentEditable === '' || contentEditable === 'true' || contentEditable === 'plaintext-only') {
+      return true;
+    }
+
+    element = element.parentElement ?? null;
+  }
+
+  return false;
+}
+
+export function getTransportShortcut(event: TransportShortcutEvent): TransportShortcut | null {
+  if (event.defaultPrevented || isEditableShortcutTarget(event.target)) return null;
+
+  const key = event.key.toLowerCase();
+  const usesCommandKey = event.ctrlKey || event.metaKey;
+
+  if (usesCommandKey) {
+    if (key === 's') return 'save';
+    if (!event.altKey && key === 'z') return event.shiftKey ? 'redo' : 'undo';
+    if (!event.altKey && !event.shiftKey && key === 'y') return 'redo';
+  }
+
+  const isSpace =
+    event.key === ' ' || event.key === 'Space' || event.key === 'Spacebar' || event.code === 'Space';
+  if (!usesCommandKey && !event.altKey && !event.shiftKey && isSpace) return 'togglePlayback';
+
+  return null;
+}
+
+export function handleTransportShortcutKeyDown(
+  event: KeyboardEvent,
+  actions: TransportShortcutActions,
+): void {
+  const shortcut = getTransportShortcut(event);
+  if (!shortcut) return;
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (shortcut === 'save') {
+    actions.saveToLocalStorage();
+  } else if (shortcut === 'togglePlayback') {
+    if (actions.isPlaying) actions.stop();
+    else actions.play();
+  } else if (shortcut === 'undo') {
+    actions.undo();
+  } else {
+    actions.redo();
+  }
+}
+
 function formatSaveTime(value: string | null): string {
   if (!value) return '--:--:--';
   return new Date(value).toLocaleTimeString('ja-JP', {
@@ -72,16 +157,20 @@ export function TransportBar() {
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        saveToLocalStorage();
-      }
+      handleTransportShortcutKeyDown(event, {
+        isPlaying,
+        play,
+        redo,
+        saveToLocalStorage,
+        stop,
+        undo,
+      });
     };
-    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [saveToLocalStorage]);
+  }, [isPlaying, play, redo, saveToLocalStorage, stop, undo]);
 
   const beatsPerBar = project.timeSignature[0];
 
@@ -94,6 +183,7 @@ export function TransportBar() {
           type="button"
           className={isPlaying ? 'is-active' : ''}
           aria-pressed={isPlaying}
+          title="再生/停止 (Space)"
           onClick={() => (isPlaying ? stop() : play())}
         >
           {isPlaying ? '一時停止' : '再生'}
@@ -186,10 +276,15 @@ export function TransportBar() {
           ))}
         </div>
 
-        <button type="button" disabled={!canUndo} onClick={() => undo()}>
+        <button type="button" disabled={!canUndo} title="元に戻す (Ctrl/Cmd+Z)" onClick={() => undo()}>
           元に戻す
         </button>
-        <button type="button" disabled={!canRedo} onClick={() => redo()}>
+        <button
+          type="button"
+          disabled={!canRedo}
+          title="やり直す (Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y)"
+          onClick={() => redo()}
+        >
           やり直す
         </button>
 
@@ -200,7 +295,7 @@ export function TransportBar() {
           onChange={(e) => setTitle(e.target.value)}
         />
 
-        <button type="button" onClick={() => saveToLocalStorage()}>
+        <button type="button" title="保存 (Ctrl/Cmd+S)" onClick={() => saveToLocalStorage()}>
           保存
         </button>
 

@@ -8,7 +8,8 @@
  * 出力 ParsedChord: root, quality, intervals, pitchClasses, notes, bass。
  */
 
-import type { ChordQuality, ParsedChord } from './types';
+import type { ChordQuality, ParsedChord, RealizedChord } from './types';
+import { parseNoteName } from './notes';
 import { noteNameToPitchClass, spellPitchClass, pitchClassToSharpName } from './pitch';
 
 /** 各品質のルートからの半音インターバル。 */
@@ -64,6 +65,8 @@ export function qualityLabel(quality: ChordQuality): string {
 export function chordIntervals(quality: ChordQuality): number[] {
   return [...QUALITY_INTERVALS[quality]];
 }
+
+const DEFAULT_BASS_FLOOR_MIDI = 36;
 
 /**
  * 品質サフィックス文字列を正規化された ChordQuality へ変換する。
@@ -130,12 +133,18 @@ export function parseChord(symbol: string, key?: string): ParsedChord {
   }
 
   // スラッシュコード分離
-  let body = raw;
-  let bassSpelling: string | undefined;
-  const slashIdx = raw.indexOf('/');
-  if (slashIdx >= 0) {
-    body = raw.slice(0, slashIdx);
-    bassSpelling = raw.slice(slashIdx + 1).trim();
+  const slashParts = raw.split('/');
+  if (slashParts.length > 2) {
+    throw new Error(`不正なスラッシュコードです: ${symbol}`);
+  }
+  const body = slashParts[0]?.trim() ?? '';
+  const bassSpelling = slashParts[1]?.trim();
+  if (body === '' || bassSpelling === '') {
+    throw new Error(`不正なスラッシュコードです: ${symbol}`);
+  }
+  const parsedBass = bassSpelling === undefined ? null : parseNoteName(bassSpelling);
+  if (bassSpelling !== undefined && parsedBass === null) {
+    throw new Error(`ベース音を解析できません: ${symbol}`);
   }
 
   // ルート音名抽出 (文字 + 任意の # / b)
@@ -149,18 +158,21 @@ export function parseChord(symbol: string, key?: string): ParsedChord {
 
   const quality = parseQuality(suffix);
   const intervals = chordIntervals(quality);
-  const pitchClasses = intervals.map((iv) => (rootPc + iv) % 12);
+  const chordPitchClasses = intervals.map((iv) => (rootPc + iv) % 12);
 
   const spellKey = key ?? rootToken;
   const root = key ? spellPitchClass(rootPc, spellKey) : rootToken;
-  const notes = pitchClasses.map((pc) => spellPitchClass(pc, spellKey));
+  const chordNotes = chordPitchClasses.map((pc) => spellPitchClass(pc, spellKey));
 
   let bass = root;
   let bassPc = rootPc;
-  if (bassSpelling !== undefined && bassSpelling !== '') {
-    bassPc = noteNameToPitchClass(bassSpelling);
-    bass = key ? spellPitchClass(bassPc, spellKey) : bassSpelling;
+  if (parsedBass !== null) {
+    bassPc = parsedBass.pitchClass;
+    bass = parsedBass.name;
   }
+  const pitchClasses = chordPitchClasses.includes(bassPc) ? chordPitchClasses : [...chordPitchClasses, bassPc];
+  const notes =
+    chordPitchClasses.includes(bassPc) ? chordNotes : [...chordNotes, parsedBass?.name ?? spellPitchClass(bassPc, spellKey)];
 
   return {
     symbol: raw,
@@ -173,6 +185,47 @@ export function parseChord(symbol: string, key?: string): ParsedChord {
     bass,
     bassPc,
   };
+}
+
+function pitchClassOfMidi(midi: number): number {
+  return ((midi % 12) + 12) % 12;
+}
+
+function pitchAtOrAbove(pc: number, minimumMidi: number): number {
+  let pitch = minimumMidi + ((pc - pitchClassOfMidi(minimumMidi) + 12) % 12);
+  while (pitch < minimumMidi) pitch += 12;
+  return pitch;
+}
+
+function chordVoicing(parsed: ParsedChord, bassFloorMidi: number): number[] {
+  const bassPitch = pitchAtOrAbove(parsed.bassPc, bassFloorMidi);
+  const upper = parsed.pitchClasses
+    .filter((pc) => pc !== parsed.bassPc)
+    .map((pc) => pitchAtOrAbove(pc, bassPitch + 1));
+  return [bassPitch, ...upper].sort((a, b) => a - b);
+}
+
+export type RealizeChordOptions = {
+  /** ベース音を置く最低MIDIノート。既定は C2 (36)。 */
+  bassFloorMidi?: number;
+};
+
+/** コードシンボルをMIDIボイシングへ展開する。 */
+export function realizeChord(symbol: string, key?: string, options: RealizeChordOptions = {}): RealizedChord {
+  const parsed = parseChord(symbol, key);
+  return {
+    ...parsed,
+    voicing: chordVoicing(parsed, options.bassFloorMidi ?? DEFAULT_BASS_FLOOR_MIDI),
+  };
+}
+
+/** コードシンボル列を低音から高音へ並んだMIDIボイシング列に展開する。 */
+export function realizeChords(
+  symbols: string[],
+  key?: string,
+  options: RealizeChordOptions = {},
+): RealizedChord[] {
+  return symbols.map((symbol) => realizeChord(symbol, key, options));
 }
 
 /** 品質 -> シンボルのサフィックス (buildChordSymbol 用)。 */

@@ -1,5 +1,7 @@
 // Export menu in the top bar: MIDI / WAV / project-file export, and project-file
 // import. Surfaces progress + errors as toasts and emits export app events.
+// MIDI/WAV export first shows a pre-export checklist (docs/02 §8.2); warnings
+// are educational only and never block the export.
 
 import { useRef, useState } from 'react';
 import { projectToMidi } from '@cts/midi-io';
@@ -23,12 +25,27 @@ import {
   recordExportHistory,
   type ExportHistoryEntry,
 } from './exportHistory';
+import {
+  evaluateExportChecklist,
+  hasExportChecklistWarnings,
+  type ExportChecklistItem,
+} from './exportChecklist';
+import './exportChecklist.css';
+
+/** 書き出し前チェックの対象になる形式。 */
+type PendingExportKind = 'midi' | 'wav';
+
+type PendingChecklist = {
+  kind: PendingExportKind;
+  items: ExportChecklistItem[];
+};
 
 /** Top-bar export button + dialog. */
 export function ExportMenu() {
   const [open, setOpen] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [history, setHistory] = useState<ExportHistoryEntry[]>(() => loadExportHistory());
+  const [checklist, setChecklist] = useState<PendingChecklist | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const project = useStore((s) => s.project);
@@ -38,6 +55,7 @@ export function ExportMenu() {
 
   const openMenu = () => {
     setHistory(loadExportHistory());
+    setChecklist(null);
     setOpen(true);
   };
 
@@ -87,6 +105,28 @@ export function ExportMenu() {
     }
   };
 
+  /** MIDI/WAV ボタン → まず書き出し前チェックを表示する。 */
+  const openChecklist = (kind: PendingExportKind) => {
+    setChecklist({ kind, items: evaluateExportChecklist(project) });
+  };
+
+  /** チェックをやめてメニューに戻る (書き出しは実行しない)。 */
+  const cancelChecklist = () => {
+    setChecklist(null);
+  };
+
+  /** チェック内容を確認したうえで書き出しを実行する。 */
+  const proceedExport = () => {
+    if (!checklist) return;
+    const kind = checklist.kind;
+    setChecklist(null);
+    if (kind === 'midi') {
+      exportMidi();
+    } else {
+      void exportWav();
+    }
+  };
+
   const clearHistory = () => {
     clearExportHistory();
     setHistory([]);
@@ -115,16 +155,29 @@ export function ExportMenu() {
         書き出し
       </button>
 
-      {open ? (
+      {open && checklist ? (
+        <ExportChecklistDialog
+          checklist={checklist}
+          rendering={rendering}
+          onCancel={cancelChecklist}
+          onProceed={proceedExport}
+        />
+      ) : null}
+
+      {open && !checklist ? (
         <Dialog title="書き出し / 読み込み" onClose={() => setOpen(false)}>
           <div className="export-menu">
             <section className="export-menu__group">
               <p className="panel-section__title">音源として書き出す</p>
               <div className="export-menu__row">
-                <button type="button" onClick={exportMidi}>
+                <button type="button" onClick={() => openChecklist('midi')}>
                   MIDIエクスポート
                 </button>
-                <button type="button" onClick={exportWav} disabled={rendering}>
+                <button
+                  type="button"
+                  onClick={() => openChecklist('wav')}
+                  disabled={rendering}
+                >
                   {rendering ? '書き出し中…' : 'WAVエクスポート'}
                 </button>
               </div>
@@ -190,5 +243,62 @@ export function ExportMenu() {
         </Dialog>
       ) : null}
     </>
+  );
+}
+
+type ExportChecklistDialogProps = {
+  checklist: PendingChecklist;
+  rendering: boolean;
+  onCancel: () => void;
+  onProceed: () => void;
+};
+
+/**
+ * 書き出し前チェックリストの確認ダイアログ。
+ * warning があっても「このまま書き出す」で続行できる教育的UI (書き出しは妨げない)。
+ */
+function ExportChecklistDialog({
+  checklist,
+  rendering,
+  onCancel,
+  onProceed,
+}: ExportChecklistDialogProps) {
+  const hasWarnings = hasExportChecklistWarnings(checklist.items);
+  const kindLabel = formatExportKindJa(checklist.kind);
+
+  return (
+    <Dialog title={`書き出し前チェック（${kindLabel}）`} onClose={onCancel}>
+      <div className="export-checklist">
+        <p className="export-checklist__summary">
+          {hasWarnings
+            ? '気になるポイントが見つかりました。理由を読んで、直してから書き出すか、このまま書き出すかを選べます。'
+            : 'チェックはすべてOKです。このまま書き出せます。'}
+        </p>
+        <ul className="export-checklist__list">
+          {checklist.items.map((item) => (
+            <li
+              key={item.id}
+              className={`export-checklist__item export-checklist__item--${item.level}`}
+            >
+              <span className="export-checklist__badge">
+                {item.level === 'warning' ? '注意' : 'OK'}
+              </span>
+              <div className="export-checklist__text">
+                <p className="export-checklist__title">{item.title}</p>
+                <p className="export-checklist__advice">{item.advice}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="export-checklist__actions">
+          <button type="button" onClick={onCancel}>
+            キャンセル
+          </button>
+          <button type="button" onClick={onProceed} disabled={rendering}>
+            {hasWarnings ? 'このまま書き出す' : `${kindLabel}を書き出す`}
+          </button>
+        </div>
+      </div>
+    </Dialog>
   );
 }

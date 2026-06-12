@@ -15,8 +15,24 @@ export type {
 } from './dsl.js';
 
 // ─── Checker (pure functions) ─────────────────────────────────────────────────
-export type { LessonRuntimeState } from './checker.js';
-export { applyEvent, checkCondition, evaluateLesson } from './checker.js';
+export type {
+  BassDownbeatAnalysis,
+  DrumPatternAnalysis,
+  DrumPatternRequirement,
+  LessonRuntimeState,
+  MelodyLandingAnalysis,
+  ScaleConformanceAnalysis,
+} from './checker.js';
+export {
+  analyzeBassRootOnDownbeat,
+  analyzeDrumPattern,
+  analyzeMelodyChordToneOnStrongBeat,
+  analyzeNotesWithinScale,
+  applyEvent,
+  checkCondition,
+  checkProjectPredicate,
+  evaluateLesson,
+} from './checker.js';
 
 // ─── Built-in courses ─────────────────────────────────────────────────────────
 export { course0 } from './courses.js';
@@ -33,6 +49,7 @@ export type {
   ClipCreatedPayload,
   ClockFn,
   Course,
+  DrumPatternType,
   DrumStepToggledPayload,
   EngineState,
   EventMatch,
@@ -44,6 +61,7 @@ export type {
   LessonStatus,
   MultipleChoiceAnswer,
   MultipleChoiceExercise,
+  MusicalProjectPredicate,
   NoteAddedPayload,
   NoteMovedPayload,
   OrderChoicesAnswer,
