@@ -16,6 +16,15 @@ const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#',
 /** フラット綴りのピッチクラス名 (C=0)。 */
 const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
 
+type NoteNameList = typeof SHARP_NAMES | typeof FLAT_NAMES;
+
+/** オクターブ表記を含んでもよい音名のパース結果。 */
+export type ParsedPitchNoteName = {
+  name: string;
+  pitchClass: number;
+  octave?: number;
+};
+
 /** 自然音 (ナチュラル) のピッチクラス。 */
 const NATURAL_PC: Record<string, number> = {
   C: 0,
@@ -32,6 +41,19 @@ const NATURAL_PC: Record<string, number> = {
  * これら以外のナチュラルキー (C, F) はフラット/ナチュラル扱い。
  */
 const SHARP_KEY_ROOTS = new Set(['G', 'D', 'A', 'E', 'B']);
+
+/** 臨時記号を正規化する (♯->#, ♭->b)。 */
+function normalizeAccidentals(accidentals: string): string {
+  return accidentals.replace(/♯/g, '#').replace(/♭/g, 'b');
+}
+
+function normalizePitchClass(pc: number): number {
+  return ((pc % 12) + 12) % 12;
+}
+
+function namesForSpelling(flats = false): NoteNameList {
+  return flats ? FLAT_NAMES : SHARP_NAMES;
+}
 
 /**
  * 音名を正規化してピッチクラス(0-11)を返す。
@@ -52,7 +74,45 @@ export function noteNameToPitchClass(name: string): number {
     else if (ch === 'b' || ch === '♭') pc -= 1;
     else throw new Error(`不正な臨時記号です: ${name}`);
   }
-  return ((pc % 12) + 12) % 12;
+  return normalizePitchClass(pc);
+}
+
+/** 音名文字列を、オクターブの有無を保ったままパースする。 */
+export function parsePitchNoteName(input: string): ParsedPitchNoteName {
+  const match = input.trim().match(/^([A-Ga-g])([#x♯b♭]*)(-?\d+)?$/);
+  if (!match) {
+    throw new Error(`不正な音名です: ${input}`);
+  }
+
+  const [, letterRaw = '', accidentalsRaw = '', octaveStr] = match;
+  const name = letterRaw.toUpperCase() + normalizeAccidentals(accidentalsRaw);
+  const pitchClass = noteNameToPitchClass(name);
+
+  if (octaveStr === undefined) {
+    return { name, pitchClass };
+  }
+  return { name, pitchClass, octave: Number.parseInt(octaveStr, 10) };
+}
+
+/** パース済み音名を MIDI 番号へ変換する。 */
+export function parsedNoteNameToMidi(parsed: ParsedPitchNoteName, defaultOctave = 4): number {
+  const octave = parsed.octave ?? defaultOctave;
+  return (octave + 1) * 12 + parsed.pitchClass;
+}
+
+/**
+ * MIDIノート番号を音名へ変換する共有実装。
+ * notes.ts の公開APIは既存挙動に合わせて pitch class 側だけ整数化する。
+ */
+export function formatMidiNoteName(
+  midi: number,
+  opts?: { flats?: boolean; truncatePitchClass?: boolean },
+): string {
+  const midiForPitchClass = opts?.truncatePitchClass ? Math.trunc(midi) : midi;
+  const pc = normalizePitchClass(midiForPitchClass);
+  const octave = Math.floor(midi / 12) - 1;
+  const names = namesForSpelling(opts?.flats);
+  return `${names[pc]}${octave}`;
 }
 
 /**
@@ -60,10 +120,7 @@ export function noteNameToPitchClass(name: string): number {
  * オクターブ番号付き (MIDI 60 -> "C4")。
  */
 export function midiToNoteName(midi: number, opts?: { flats?: boolean }): string {
-  const pc = ((midi % 12) + 12) % 12;
-  const octave = Math.floor(midi / 12) - 1;
-  const names = opts?.flats ? FLAT_NAMES : SHARP_NAMES;
-  return `${names[pc]}${octave}`;
+  return formatMidiNoteName(midi, opts);
 }
 
 /**
@@ -71,19 +128,12 @@ export function midiToNoteName(midi: number, opts?: { flats?: boolean }): string
  * オクターブが無い場合は4オクターブを既定とする。
  */
 export function noteNameToMidi(name: string): number {
-  const match = name.trim().match(/^([A-Ga-g])([#x♯b♭]*)(-?\d+)?$/);
-  if (!match) {
-    throw new Error(`不正な音名です: ${name}`);
-  }
-  const [, letter = '', accidentals = '', octaveStr] = match;
-  const pc = noteNameToPitchClass(letter + accidentals);
-  const octave = octaveStr === undefined ? 4 : Number.parseInt(octaveStr, 10);
-  return (octave + 1) * 12 + pc;
+  return parsedNoteNameToMidi(parsePitchNoteName(name));
 }
 
 /** MIDIノート番号からピッチクラス(0-11)を抽出する。 */
 export function pitchClassOf(midi: number): number {
-  return ((midi % 12) + 12) % 12;
+  return normalizePitchClass(midi);
 }
 
 /** キー文字列から先頭のルート音名部分を取り出す ("Cm" -> "C", "Bbmaj" -> "Bb")。 */
@@ -93,7 +143,7 @@ export function parseKeyRoot(key: string): string {
     throw new Error(`不正なキーです: ${key}`);
   }
   const letter = match[1].charAt(0).toUpperCase();
-  const accidentals = match[1].slice(1).replace(/♯/g, '#').replace(/♭/g, 'b');
+  const accidentals = normalizeAccidentals(match[1].slice(1));
   return letter + accidentals;
 }
 
@@ -118,9 +168,9 @@ export function keyPrefersFlats(key: string): boolean {
  * フラット系キーならフラット、シャープ系キーならシャープを使う。
  */
 export function spellPitchClass(pc: number, key: string): string {
-  const normalized = ((pc % 12) + 12) % 12;
+  const normalized = normalizePitchClass(pc);
   const flats = keyPrefersFlats(key);
-  const names = flats ? FLAT_NAMES : SHARP_NAMES;
+  const names = namesForSpelling(flats);
   const name = names[normalized];
   if (name === undefined) {
     throw new Error(`不正なピッチクラスです: ${pc}`);
@@ -130,7 +180,7 @@ export function spellPitchClass(pc: number, key: string): string {
 
 /** キーに依らずシャープ綴りで音名(オクターブ無し)を返す。 */
 export function pitchClassToSharpName(pc: number): string {
-  const normalized = ((pc % 12) + 12) % 12;
+  const normalized = normalizePitchClass(pc);
   const name = SHARP_NAMES[normalized];
   if (name === undefined) {
     throw new Error(`不正なピッチクラスです: ${pc}`);

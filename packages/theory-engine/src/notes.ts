@@ -7,13 +7,13 @@
  * 内部の pitch.ts ヘルパを土台にしつつ、prompt 02 が要求する公開シグネチャに合わせる。
  */
 
-import { noteNameToPitchClass } from './pitch';
-
-/** シャープ綴りのピッチクラス名 (C=0)。 */
-const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
-
-/** フラット綴りのピッチクラス名 (C=0)。 */
-const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
+import {
+  FLAT_NAMES,
+  SHARP_NAMES,
+  formatMidiNoteName,
+  parsedNoteNameToMidi,
+  parsePitchNoteName,
+} from './pitch';
 
 /** parseNoteName の戻り値。octave はオクターブ表記があった場合のみ付与される。 */
 export type ParsedNoteName = {
@@ -25,11 +25,6 @@ export type ParsedNoteName = {
   octave?: number;
 };
 
-/** 臨時記号を正規化する (♯->#, ♭->b)。 */
-function normalizeAccidentals(accidentals: string): string {
-  return accidentals.replace(/♯/g, '#').replace(/♭/g, 'b');
-}
-
 /**
  * 音名文字列をパースする。
  * 受理例: "C", "F#", "Bb", "C4", "Eb3", "B#", "Cb"。
@@ -37,26 +32,11 @@ function normalizeAccidentals(accidentals: string): string {
  */
 export function parseNoteName(input: string): ParsedNoteName | null {
   if (typeof input !== 'string') return null;
-  const trimmed = input.trim();
-  const match = trimmed.match(/^([A-Ga-g])([#x♯b♭]*)(-?\d+)?$/);
-  if (!match) return null;
-
-  const [, letterRaw = '', accidentalsRaw = '', octaveStr] = match;
-  const letter = letterRaw.toUpperCase();
-  const accidentals = normalizeAccidentals(accidentalsRaw);
-  const name = letter + accidentals;
-
-  let pitchClass: number;
   try {
-    pitchClass = noteNameToPitchClass(name);
+    return parsePitchNoteName(input);
   } catch {
     return null;
   }
-
-  if (octaveStr === undefined) {
-    return { name, pitchClass };
-  }
-  return { name, pitchClass, octave: Number.parseInt(octaveStr, 10) };
 }
 
 /**
@@ -65,10 +45,7 @@ export function parseNoteName(input: string): ParsedNoteName | null {
  * 60 -> "C4"。
  */
 export function midiToNoteName(midi: number, options?: { flats?: boolean }): string {
-  const pc = ((Math.trunc(midi) % 12) + 12) % 12;
-  const octave = Math.floor(midi / 12) - 1;
-  const names = options?.flats ? FLAT_NAMES : SHARP_NAMES;
-  return `${names[pc]}${octave}`;
+  return formatMidiNoteName(midi, { flats: options?.flats, truncatePitchClass: true });
 }
 
 /**
@@ -79,10 +56,11 @@ export function midiToNoteName(midi: number, options?: { flats?: boolean }): str
  * 不正な音名では null を返す。
  */
 export function noteNameToMidi(name: string, octave = 4): number | null {
-  const parsed = parseNoteName(name);
-  if (parsed === null) return null;
-  const oct = parsed.octave ?? octave;
-  return (oct + 1) * 12 + parsed.pitchClass;
+  try {
+    return parsedNoteNameToMidi(parsePitchNoteName(name), octave);
+  } catch {
+    return null;
+  }
 }
 
 export { SHARP_NAMES, FLAT_NAMES };
