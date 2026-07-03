@@ -15,6 +15,7 @@ import type {
   Clip,
   DrumEvent,
   DrumLane,
+  EffectConfig,
   NoteEvent,
   Project,
   Track,
@@ -37,6 +38,12 @@ import { useStore } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { quantizeStart } from '../features/pianoRoll/gridMath';
+import {
+  createDefaultEffectConfig,
+  isInsertEffectType,
+  normalizeEffectConfig,
+  type InsertEffectType,
+} from '../audio/effects';
 
 /** Bar index (0-based) for a beat offset under the project's time signature. */
 function barOf(project: Project, startBeat: number): number {
@@ -80,6 +87,60 @@ function mapClip(project: Project, clipId: string, fn: (c: Clip) => Clip): Proje
     ...t,
     clips: t.clips.map((c) => (c.id === clipId ? fn(c) : c)),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Track insert effects.
+// ---------------------------------------------------------------------------
+
+/** Add a filter/delay/reverb insert effect to a non-master track. */
+export function addTrackEffect(trackId: string, type: InsertEffectType): string | null {
+  if (!isInsertEffectType(type)) return null;
+  const id = uid('fx');
+  const effect = createDefaultEffectConfig(type, id);
+  let added = false;
+  useStore.getState().applyProjectChange((project) =>
+    mapTracks(project, (track) => {
+      if (track.id !== trackId || track.type === 'master') return track;
+      added = true;
+      return { ...track, effects: [...track.effects, effect] };
+    }),
+  );
+  return added ? id : null;
+}
+
+/** Remove one insert effect from a track. */
+export function removeTrackEffect(trackId: string, effectId: string): void {
+  useStore.getState().applyProjectChange((project) =>
+    mapTracks(project, (track) =>
+      track.id === trackId
+        ? { ...track, effects: track.effects.filter((effect) => effect.id !== effectId) }
+        : track,
+    ),
+  );
+}
+
+/** Update one numeric effect parameter, clamping it into the safe normalized range. */
+export function updateTrackEffectParam(
+  trackId: string,
+  effectId: string,
+  param: string,
+  value: number,
+): void {
+  useStore.getState().applyProjectChange((project) =>
+    mapTracks(project, (track) => {
+      if (track.id !== trackId) return track;
+      const effects: EffectConfig[] = track.effects.map((effect) =>
+        effect.id === effectId
+          ? normalizeEffectConfig({
+              ...effect,
+              params: { ...effect.params, [param]: value },
+            })
+          : effect,
+      );
+      return { ...track, effects };
+    }),
+  );
 }
 
 /** Find a clip across all tracks (read-only). */

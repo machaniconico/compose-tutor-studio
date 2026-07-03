@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { BassMode, GeneratedNote, MelodyAnalysis, MelodyFinding } from '@cts/theory-engine';
 import { analyzeMelody } from '@cts/theory-engine';
 import { useStore } from '../../state/store';
@@ -9,6 +9,11 @@ import {
   generateMelodyIntoClip,
   projectBeatsPerBar,
 } from '../../state/editorActions';
+import {
+  analyzeProjectForCoaching,
+  coachCategoryLabel,
+  type CoachSeverity,
+} from '../../state/coach';
 
 const BASS_MODES: { value: BassMode; label: string; hint: string }[] = [
   { value: 'rootOnly', label: 'ルートのみ', hint: '各コードのルート音を拍頭に置きます。最もシンプルです。' },
@@ -17,13 +22,59 @@ const BASS_MODES: { value: BassMode; label: string; hint: string }[] = [
   { value: 'octavePulse', label: 'オクターブ', hint: 'ルートとオクターブ上を交互に刻み、躍動感を出します。' },
 ];
 
-/** Bass + Melody assistant. */
+/** Bass + Melody assistant, plus the local (network-free) composition coach. */
 export function AssistantPanel() {
   return (
     <div className="assistant">
+      <CoachPanel />
       <BassAssistant />
       <MelodyAssistant />
     </div>
+  );
+}
+
+const COACH_ICON: Record<CoachSeverity, string> = {
+  good: '◎',
+  tip: '💡',
+  warn: '⚠',
+};
+
+/**
+ * ローカル完結の作曲コーチ。現在のプロジェクトを解析して説明付きの日本語提案を出す。
+ * 外部ネットワークは使わず、store の project が変わるたびに再計算する。
+ */
+function CoachPanel() {
+  const project = useStore((s) => s.project);
+  // project 参照が変わったときだけ再解析(純粋関数なのでメモ化して無駄な再計算を避ける)。
+  const suggestions = useMemo(() => analyzeProjectForCoaching(project), [project]);
+
+  return (
+    <section className="panel-section">
+      <p className="panel-section__title">作曲コーチ</p>
+      <p className="assistant__hint">
+        いまの曲を見て、次の一手を提案します(この解析はすべて端末内で完結します)。
+      </p>
+      {suggestions.length > 0 ? (
+        <ul className="assistant__coach">
+          {suggestions.map((s) => (
+            <li key={s.id} className={`assistant__coach-item is-${s.severity}`}>
+              <span className="assistant__coach-icon" aria-hidden="true">
+                {COACH_ICON[s.severity]}
+              </span>
+              <div className="assistant__coach-body">
+                <p className="assistant__coach-title">
+                  <span className="assistant__coach-cat">{coachCategoryLabel(s.category)}</span>
+                  {s.title}
+                </p>
+                <p className="assistant__coach-detail">{s.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="empty-hint">いまのところ大きな改善点はありません。良い調子です。</p>
+      )}
+    </section>
   );
 }
 

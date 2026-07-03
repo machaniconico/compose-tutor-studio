@@ -1,9 +1,8 @@
 // Polyphonic subtractive synth voice.
 //
-// Each voice is: 2 detuned oscillators -> lowpass BiquadFilter -> ADSR GainNode.
-// Presets (keyed by InstrumentConfig.preset) tweak oscillator shapes, detune,
-// filter cutoff and the envelope. Voices are allocated per track with a steal
-// cap (~16) so a stuck progression cannot exhaust the audio graph.
+// Each voice is: bounded oscillator layers -> lowpass BiquadFilter -> ADSR
+// GainNode. Presets expose beginner-friendly sounds while aliases keep the
+// current project model and playback code working unchanged.
 //
 // Works with any BaseAudioContext so the same code drives live playback and the
 // OfflineAudioContext used for WAV render.
@@ -16,71 +15,226 @@ export type Envelope = {
   release: number;
 };
 
+export type AdsrPoint = {
+  time: number;
+  value: number;
+};
+
+export type AdsrCurve = readonly [AdsrPoint, AdsrPoint, AdsrPoint, AdsrPoint, AdsrPoint];
+
+export type OscillatorLayer = {
+  role: 'primary' | 'unison' | 'sub';
+  wave: OscillatorType;
+  /** Octave offset from the played MIDI note. -1 is a sub oscillator. */
+  octave: number;
+  /** Fine pitch offset, cents. */
+  detuneCents: number;
+  /** Layer gain before the filter, 0..1. */
+  gain: number;
+};
+
+export type OscillatorPlan = OscillatorLayer & {
+  frequencyHz: number;
+};
+
+export type FilterSettings = {
+  cutoffHz: number;
+  resonance: number;
+};
+
 /** Subtractive-synth preset definition. */
 export type SynthPreset = {
-  /** Oscillator waveforms for the two detuned voices. */
-  waveA: OscillatorType;
-  waveB: OscillatorType;
-  /** Detune of the second oscillator, cents. */
-  detuneCents: number;
-  /** Base lowpass cutoff, Hz. */
-  cutoffHz: number;
-  /** Filter resonance (Q). */
-  resonance: number;
+  label: string;
+  description: string;
+  oscillators: readonly OscillatorLayer[];
+  filter: FilterSettings;
   /** Per-note gain trim so presets sit at similar loudness. */
   gain: number;
   env: Envelope;
 };
 
-/**
- * Preset table. Keys cover both the canonical task names (warmPad / roundBass /
- * brightLead) and the names the default project currently ships with
- * (subBass / leadSine) so playback works without changing the project model.
- */
-const PRESETS: Record<string, SynthPreset> = {
-  // Soft attack, mellow filter — default for the Chords track.
-  warmPad: {
-    waveA: 'sawtooth',
-    waveB: 'triangle',
-    detuneCents: 8,
-    cutoffHz: 1400,
-    resonance: 0.6,
-    gain: 0.22,
-    env: { attack: 0.18, decay: 0.3, sustain: 0.7, release: 0.5 },
-  },
-  // Short attack, low filter, sine + triangle.
-  roundBass: {
-    waveA: 'sine',
-    waveB: 'triangle',
-    detuneCents: 4,
-    cutoffHz: 600,
-    resonance: 0.4,
-    gain: 0.32,
-    env: { attack: 0.005, decay: 0.12, sustain: 0.85, release: 0.12 },
-  },
-  // Saw, brighter filter — Melody.
-  brightLead: {
-    waveA: 'sawtooth',
-    waveB: 'sawtooth',
-    detuneCents: 12,
-    cutoffHz: 3200,
-    resonance: 0.9,
-    gain: 0.26,
-    env: { attack: 0.01, decay: 0.2, sustain: 0.75, release: 0.18 },
-  },
+export type SynthPatchOptions = {
+  preset?: string;
+  oscillators?: readonly OscillatorLayer[];
+  envelope?: Partial<Envelope>;
+  filter?: Partial<FilterSettings>;
+  gain?: number;
 };
 
-// Aliases for the preset names used by the current default project factory.
-PRESETS['subBass'] = PRESETS['roundBass'] as SynthPreset;
-PRESETS['leadSine'] = PRESETS['brightLead'] as SynthPreset;
+export type SynthNoteOptions = SynthPatchOptions;
+
+export type SynthOptions = SynthPatchOptions & {
+  maxVoices?: number;
+};
+
+export type SynthPresetSummary = {
+  name: string;
+  label: string;
+  description: string;
+};
+
+export const DEFAULT_ENVELOPE: Envelope = {
+  attack: 0.01,
+  decay: 0.12,
+  sustain: 0.75,
+  release: 0.16,
+};
+
+export const MAX_OSCILLATORS_PER_VOICE = 6;
+
+const DEFAULT_FILTER: FilterSettings = {
+  cutoffHz: 1800,
+  resonance: 0.7,
+};
+
+const DEFAULT_OSCILLATORS: readonly OscillatorLayer[] = [
+  { role: 'primary', wave: 'triangle', octave: 0, detuneCents: 0, gain: 1 },
+];
+
+const softPadPreset: SynthPreset = {
+  label: 'Soft Pad',
+  description: 'Slow, mellow chords for gentle harmony practice.',
+  oscillators: [
+    { role: 'primary', wave: 'triangle', octave: 0, detuneCents: 0, gain: 0.22 },
+    { role: 'unison', wave: 'sawtooth', octave: 0, detuneCents: -7, gain: 0.34 },
+    { role: 'unison', wave: 'sawtooth', octave: 0, detuneCents: 7, gain: 0.34 },
+    { role: 'sub', wave: 'sine', octave: -1, detuneCents: 0, gain: 0.1 },
+  ],
+  filter: { cutoffHz: 1250, resonance: 0.55 },
+  gain: 0.24,
+  env: { attack: 0.28, decay: 0.42, sustain: 0.72, release: 0.8 },
+};
+
+const brightPluckPreset: SynthPreset = {
+  label: 'Bright Pluck',
+  description: 'Short, clear notes for simple melodies and arpeggios.',
+  oscillators: [
+    { role: 'primary', wave: 'sawtooth', octave: 0, detuneCents: 0, gain: 0.55 },
+    { role: 'unison', wave: 'square', octave: 0, detuneCents: 9, gain: 0.25 },
+    { role: 'sub', wave: 'triangle', octave: -1, detuneCents: 0, gain: 0.2 },
+  ],
+  filter: { cutoffHz: 4200, resonance: 0.9 },
+  gain: 0.23,
+  env: { attack: 0.003, decay: 0.16, sustain: 0.18, release: 0.12 },
+};
+
+const warmBassPreset: SynthPreset = {
+  label: 'Warm Bass',
+  description: 'Rounded low notes that support a beginner chord loop.',
+  oscillators: [
+    { role: 'primary', wave: 'sine', octave: 0, detuneCents: 0, gain: 0.52 },
+    { role: 'unison', wave: 'triangle', octave: 0, detuneCents: -4, gain: 0.23 },
+    { role: 'sub', wave: 'sine', octave: -1, detuneCents: 0, gain: 0.35 },
+  ],
+  filter: { cutoffHz: 720, resonance: 0.65 },
+  gain: 0.32,
+  env: { attack: 0.006, decay: 0.13, sustain: 0.82, release: 0.15 },
+};
+
+const brightLeadPreset: SynthPreset = {
+  label: 'Bright Lead',
+  description: 'Focused lead tone for practicing memorable hooks.',
+  oscillators: [
+    { role: 'primary', wave: 'sawtooth', octave: 0, detuneCents: -9, gain: 0.42 },
+    { role: 'unison', wave: 'sawtooth', octave: 0, detuneCents: 9, gain: 0.42 },
+    { role: 'unison', wave: 'square', octave: 0, detuneCents: 0, gain: 0.12 },
+    { role: 'sub', wave: 'triangle', octave: -1, detuneCents: 0, gain: 0.04 },
+  ],
+  filter: { cutoffHz: 3400, resonance: 0.85 },
+  gain: 0.24,
+  env: { attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.18 },
+};
+
+/**
+ * Preset table. Keys cover beginner-facing names plus the existing default
+ * project names (warmPad / roundBass / brightLead / subBass / leadSine).
+ */
+export const SYNTH_PRESETS: Readonly<Record<string, SynthPreset>> = {
+  softPad: softPadPreset,
+  warmPad: softPadPreset,
+  brightPluck: brightPluckPreset,
+  warmBass: warmBassPreset,
+  roundBass: warmBassPreset,
+  subBass: warmBassPreset,
+  brightLead: brightLeadPreset,
+  leadSine: brightLeadPreset,
+};
+
+export const BEGINNER_SYNTH_PRESETS = ['softPad', 'brightPluck', 'warmBass'] as const;
 
 /** Default preset when an unknown name is requested. */
-const DEFAULT_PRESET = 'warmPad';
+export const DEFAULT_PRESET = 'warmPad';
 
 /** Resolve a preset by name, falling back to the default. */
 export function resolvePreset(preset: string | undefined): SynthPreset {
-  if (preset && PRESETS[preset]) return PRESETS[preset] as SynthPreset;
-  return PRESETS[DEFAULT_PRESET] as SynthPreset;
+  return clonePreset((preset ? SYNTH_PRESETS[preset] : undefined) ?? softPadPreset);
+}
+
+export function listSynthPresets(): readonly SynthPresetSummary[] {
+  return [
+    summary('softPad', softPadPreset),
+    summary('brightPluck', brightPluckPreset),
+    summary('warmBass', warmBassPreset),
+    summary('brightLead', brightLeadPreset),
+  ];
+}
+
+export function normalizeEnvelope(envelope: Partial<Envelope> = {}): Envelope {
+  return {
+    attack: clamp(finiteOr(envelope.attack, DEFAULT_ENVELOPE.attack), 0, 10),
+    decay: clamp(finiteOr(envelope.decay, DEFAULT_ENVELOPE.decay), 0, 10),
+    sustain: clamp(finiteOr(envelope.sustain, DEFAULT_ENVELOPE.sustain), 0, 1),
+    release: clamp(finiteOr(envelope.release, DEFAULT_ENVELOPE.release), 0, 10),
+  };
+}
+
+export function createAdsrCurve(
+  envelope: Envelope,
+  startTime: number,
+  duration: number,
+  peak: number,
+): AdsrCurve {
+  const env = normalizeEnvelope(envelope);
+  const start = finiteOr(startTime, 0);
+  const sustainStartOffset = env.attack + env.decay;
+  const releaseStart = start + Math.max(0, finiteOr(duration, 0), sustainStartOffset);
+  const peakValue = Math.max(0, finiteOr(peak, 0));
+  const sustainValue = peakValue * env.sustain;
+
+  return [
+    { time: start, value: 0 },
+    { time: start + env.attack, value: peakValue },
+    { time: start + sustainStartOffset, value: sustainValue },
+    { time: releaseStart, value: sustainValue },
+    { time: releaseStart + env.release, value: 0 },
+  ];
+}
+
+export function normalizeOscillatorLayers(
+  layers: readonly OscillatorLayer[] = DEFAULT_OSCILLATORS,
+): OscillatorLayer[] {
+  const source = layers.length > 0 ? layers : DEFAULT_OSCILLATORS;
+  return source.slice(0, MAX_OSCILLATORS_PER_VOICE).map((layer) => ({
+    role: layer.role,
+    wave: layer.wave,
+    octave: clamp(Math.round(finiteOr(layer.octave, 0)), -2, 2),
+    detuneCents: clamp(finiteOr(layer.detuneCents, 0), -100, 100),
+    gain: clamp(finiteOr(layer.gain, 1), 0, 1),
+  }));
+}
+
+export function buildOscillatorPlan(preset: SynthPreset, midi: number): OscillatorPlan[] {
+  const baseFreq = midiToFreq(midi);
+  return normalizeOscillatorLayers(preset.oscillators).map((layer) => ({
+    ...layer,
+    frequencyHz: baseFreq * Math.pow(2, layer.octave),
+  }));
+}
+
+export function resolveSynthPatch(presetOrOptions?: string | SynthOptions): SynthPreset {
+  const options = typeof presetOrOptions === 'string' ? { preset: presetOrOptions } : presetOrOptions;
+  const base = resolvePreset(options?.preset);
+  return applyPatchOptions(base, options);
 }
 
 /** Convert a MIDI note number to frequency in Hz (A4 = 69 = 440Hz). */
@@ -93,8 +247,7 @@ export const MAX_VOICES = 16;
 
 /** One sounding voice: the nodes plus when it should free itself. */
 type ActiveVoice = {
-  oscA: OscillatorNode;
-  oscB: OscillatorNode;
+  oscillators: OscillatorNode[];
   gain: GainNode;
   /** AudioContext time the voice fully finishes (after release). */
   endTime: number;
@@ -114,13 +267,14 @@ export class SynthVoiceManager {
   constructor(
     ctx: BaseAudioContext,
     output: AudioNode,
-    preset: string | undefined,
+    preset: string | SynthOptions | undefined,
     maxVoices: number = MAX_VOICES,
   ) {
+    const options = typeof preset === 'string' ? undefined : preset;
     this.ctx = ctx;
     this.output = output;
-    this.preset = resolvePreset(preset);
-    this.maxVoices = maxVoices;
+    this.preset = resolveSynthPatch(preset);
+    this.maxVoices = Math.max(1, Math.floor(options?.maxVoices ?? maxVoices));
   }
 
   /**
@@ -131,52 +285,55 @@ export class SynthVoiceManager {
    * @param duration  sounding duration in seconds (release happens after)
    * @param velocity  0..127 MIDI velocity
    */
-  noteOn(midi: number, startTime: number, duration: number, velocity: number): void {
+  noteOn(
+    midi: number,
+    startTime: number,
+    duration: number,
+    velocity: number,
+    options?: SynthNoteOptions,
+  ): void {
     this.reap(startTime);
     this.steal(startTime);
 
-    const p = this.preset;
-    const freq = midiToFreq(midi);
+    const p = options
+      ? applyPatchOptions(options.preset ? resolvePreset(options.preset) : this.preset, options)
+      : this.preset;
+    const oscillatorPlan = buildOscillatorPlan(p, midi);
     const vel = Math.min(1, Math.max(0, velocity / 127));
     const peak = p.gain * (0.3 + 0.7 * vel);
 
-    const oscA = this.ctx.createOscillator();
-    oscA.type = p.waveA;
-    oscA.frequency.setValueAtTime(freq, startTime);
-
-    const oscB = this.ctx.createOscillator();
-    oscB.type = p.waveB;
-    oscB.frequency.setValueAtTime(freq, startTime);
-    oscB.detune.setValueAtTime(p.detuneCents, startTime);
-
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(p.cutoffHz, startTime);
-    filter.Q.setValueAtTime(p.resonance, startTime);
+    filter.frequency.setValueAtTime(p.filter.cutoffHz, startTime);
+    filter.Q.setValueAtTime(p.filter.resonance, startTime);
 
     const gain = this.ctx.createGain();
-    const { attack, decay, sustain, release } = p.env;
+    const curve = createAdsrCurve(p.env, startTime, duration, peak);
+    scheduleAdsr(gain.gain, curve);
 
-    // ADSR. Sustain runs until releaseStart, then a release ramp to 0.
-    const releaseStart = startTime + Math.max(duration, attack + decay);
-    gain.gain.setValueAtTime(0, startTime);
-    gain.gain.linearRampToValueAtTime(peak, startTime + attack);
-    gain.gain.linearRampToValueAtTime(peak * sustain, startTime + attack + decay);
-    gain.gain.setValueAtTime(peak * sustain, releaseStart);
-    gain.gain.linearRampToValueAtTime(0, releaseStart + release);
+    const oscillators: OscillatorNode[] = [];
+    for (const layer of oscillatorPlan) {
+      const osc = this.ctx.createOscillator();
+      const layerGain = this.ctx.createGain();
+      osc.type = layer.wave;
+      osc.frequency.setValueAtTime(layer.frequencyHz, startTime);
+      osc.detune.setValueAtTime(layer.detuneCents, startTime);
+      layerGain.gain.setValueAtTime(layer.gain, startTime);
+      osc.connect(layerGain);
+      layerGain.connect(filter);
+      oscillators.push(osc);
+    }
 
-    oscA.connect(filter);
-    oscB.connect(filter);
     filter.connect(gain);
     gain.connect(this.output);
 
-    const stopAt = releaseStart + release + 0.02;
-    oscA.start(startTime);
-    oscB.start(startTime);
-    oscA.stop(stopAt);
-    oscB.stop(stopAt);
+    const stopAt = curve[4].time + 0.02;
+    for (const osc of oscillators) {
+      osc.start(startTime);
+      osc.stop(stopAt);
+    }
 
-    this.voices.push({ oscA, oscB, gain, endTime: stopAt });
+    this.voices.push({ oscillators, gain, endTime: stopAt });
   }
 
   /** Immediately release every voice (used on stop). */
@@ -186,8 +343,7 @@ export class SynthVoiceManager {
         v.gain.gain.cancelScheduledValues(when);
         v.gain.gain.setValueAtTime(Math.max(0.0001, v.gain.gain.value), when);
         v.gain.gain.linearRampToValueAtTime(0, when + 0.03);
-        v.oscA.stop(when + 0.05);
-        v.oscB.stop(when + 0.05);
+        stopOscillators(v.oscillators, when + 0.05);
       } catch {
         // Node may already be stopped; ignore.
       }
@@ -209,11 +365,80 @@ export class SynthVoiceManager {
         victim.gain.gain.cancelScheduledValues(when);
         victim.gain.gain.setValueAtTime(Math.max(0.0001, victim.gain.gain.value), when);
         victim.gain.gain.linearRampToValueAtTime(0, when + 0.02);
-        victim.oscA.stop(when + 0.03);
-        victim.oscB.stop(when + 0.03);
+        stopOscillators(victim.oscillators, when + 0.03);
       } catch {
         // already stopped
       }
     }
   }
+}
+
+function applyPatchOptions(base: SynthPreset, options: SynthPatchOptions = {}): SynthPreset {
+  return {
+    ...base,
+    oscillators: options.oscillators
+      ? normalizeOscillatorLayers(options.oscillators)
+      : normalizeOscillatorLayers(base.oscillators),
+    filter: normalizeFilter({ ...base.filter, ...options.filter }),
+    gain: clamp(finiteOr(options.gain, base.gain), 0, 1),
+    env: normalizeEnvelope({ ...base.env, ...options.envelope }),
+  };
+}
+
+function normalizeFilter(filter: Partial<FilterSettings> = {}): FilterSettings {
+  return {
+    cutoffHz: clamp(finiteOr(filter.cutoffHz, DEFAULT_FILTER.cutoffHz), 40, 18_000),
+    resonance: clamp(finiteOr(filter.resonance, DEFAULT_FILTER.resonance), 0.0001, 20),
+  };
+}
+
+function scheduleAdsr(param: AudioParam, curve: AdsrCurve): void {
+  param.setValueAtTime(curve[0].value, curve[0].time);
+  scheduleRamp(param, curve[0], curve[1]);
+  scheduleRamp(param, curve[1], curve[2]);
+  param.setValueAtTime(curve[3].value, curve[3].time);
+  scheduleRamp(param, curve[3], curve[4]);
+}
+
+function scheduleRamp(param: AudioParam, from: AdsrPoint, to: AdsrPoint): void {
+  if (to.time <= from.time) {
+    param.setValueAtTime(to.value, to.time);
+  } else {
+    param.linearRampToValueAtTime(to.value, to.time);
+  }
+}
+
+function stopOscillators(oscillators: readonly OscillatorNode[], when: number): void {
+  for (const osc of oscillators) {
+    try {
+      osc.stop(when);
+    } catch {
+      // Node may already be stopped; ignore.
+    }
+  }
+}
+
+function summary(name: string, preset: SynthPreset): SynthPresetSummary {
+  return {
+    name,
+    label: preset.label,
+    description: preset.description,
+  };
+}
+
+function clonePreset(preset: SynthPreset): SynthPreset {
+  return {
+    ...preset,
+    oscillators: normalizeOscillatorLayers(preset.oscillators),
+    filter: normalizeFilter(preset.filter),
+    env: normalizeEnvelope(preset.env),
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function finiteOr(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }

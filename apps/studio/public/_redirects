@@ -1,0 +1,4 @@
+# Cloudflare Pages SPA fallback.
+# Compose Tutor Studio は単一ページ (クライアントルーターなし) なので、
+# 未知のパスは常に index.html を 200 で返してアプリを起動させる。
+/*    /index.html   200

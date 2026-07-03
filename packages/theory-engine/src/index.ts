@@ -85,6 +85,7 @@ export {
   type DiatonicChord,
   type SuggestNextChordsInput,
   type ChordSuggestion,
+  type ChordSuggestionTag,
 } from './harmony';
 
 // prompt 02 関数 9: 単音解析 (公開シグネチャ)

@@ -71,9 +71,13 @@ export type SuggestNextChordsInput = {
 };
 
 /** suggestNextChords の1候補。 */
+export type ChordSuggestionTag = 'diatonic' | 'borrowed' | 'secondaryDominant';
+
 export type ChordSuggestion = {
   symbol: string;
   reason: string;
+  tag?: ChordSuggestionTag;
+  origin?: string;
 };
 
 /** キー文字列のルート部分を取り出してフラット志向か判定する。 */
@@ -276,6 +280,81 @@ function isDominantQuality(parsed: ParsedChordSymbol): boolean {
   return parsed.quality === 'dominant7';
 }
 
+/** 同主短調から借用しやすいメジャーキー用コード。 */
+type BorrowedChordTemplate = {
+  degree: 'iv' | 'bVI' | 'bVII' | 'bIII';
+  semitonesFromTonic: number;
+  quality: 'major' | 'minor';
+};
+
+const MAJOR_BORROWED_CHORDS: readonly BorrowedChordTemplate[] = [
+  { degree: 'iv', semitonesFromTonic: 5, quality: 'minor' },
+  { degree: 'bVI', semitonesFromTonic: 8, quality: 'major' },
+  { degree: 'bVII', semitonesFromTonic: 10, quality: 'major' },
+  { degree: 'bIII', semitonesFromTonic: 3, quality: 'major' },
+];
+
+const COMMON_SECONDARY_DOMINANT_TARGETS = new Set(['ii', 'iii', 'IV', 'V', 'vi']);
+
+function suggestionSymbol(rootPc: number, quality: CanonicalChordQuality, preferFlats: boolean): string {
+  return spell(rootPc, preferFlats) + QUALITY_SUFFIX[quality];
+}
+
+function borrowedSuggestions(key: string, scale: ScaleName): ChordSuggestion[] {
+  if (scale !== 'major') return [];
+
+  const keyRootPc = tonicPc(key);
+  const keyRootName = parseKeyRootName(key);
+  const keyLabel = `${keyRootName}メジャー`;
+
+  return MAJOR_BORROWED_CHORDS.map((template) => {
+    const rootPc = (keyRootPc + template.semitonesFromTonic) % 12;
+    const symbol = suggestionSymbol(rootPc, template.quality, true);
+    return {
+      symbol,
+      tag: 'borrowed' as const,
+      origin: '同主短調からの借用',
+      reason:
+        `${keyLabel}の外から同主短調の${template.degree}を借りる候補です。` +
+        '明るい進行に少し切なさや映画的な色を足せます。',
+    };
+  });
+}
+
+function secondaryDominantSuggestions(
+  key: string,
+  scale: ScaleName,
+  diatonic: readonly DiatonicChord[],
+): ChordSuggestion[] {
+  if (!HEPTATONIC.has(scale)) return [];
+
+  const keyRootName = parseKeyRootName(key);
+  const preferFlats = keyPrefersFlats(keyRootName);
+  const suggestions: ChordSuggestion[] = [];
+
+  for (const target of diatonic) {
+    if (!COMMON_SECONDARY_DOMINANT_TARGETS.has(target.degree)) continue;
+
+    const targetPc = noteNameToPitchClass(target.root);
+    const dominantRootPc = (targetPc + 7) % 12;
+    const symbol = suggestionSymbol(dominantRootPc, 'dominant7', preferFlats);
+    const analysis = analyzeChord({ symbol, key, scale });
+    if (!analysis.isSecondaryDominant || analysis.secondaryDominantOf !== target.degree) continue;
+
+    const origin = `V/${target.degree}`;
+    suggestions.push({
+      symbol,
+      tag: 'secondaryDominant',
+      origin,
+      reason:
+        `${target.symbol}（${target.degree}）へ向かう前に${origin}を置く候補です。` +
+        '一時的なドミナントなので、次の和音へ進みたい力がはっきり出ます。',
+    });
+  }
+
+  return suggestions;
+}
+
 /** 日本語の機能ラベル。 */
 const FUNCTION_LABEL: Record<HarmonicFunction, string> = {
   T: 'トニック（安定）',
@@ -392,7 +471,12 @@ export function suggestNextChords(input: SuggestNextChordsInput): ChordSuggestio
     const tonic = pick('I') ?? pick('i') ?? diatonic[0];
     if (tonic) {
       return [
-        { symbol: tonic.symbol, reason: '進行の起点として、安定する主和音（トニック）から始めましょう。' },
+        {
+          symbol: tonic.symbol,
+          reason: '進行の起点として、安定する主和音（トニック）から始めましょう。',
+          tag: 'diatonic',
+          origin: `ダイアトニック（${tonic.degree}）`,
+        },
       ];
     }
     return [];
@@ -404,7 +488,14 @@ export function suggestNextChords(input: SuggestNextChordsInput): ChordSuggestio
 
   const push = (deg: string, reason: string) => {
     const ch = pick(deg);
-    if (ch) suggestions.push({ symbol: ch.symbol, reason });
+    if (ch) {
+      suggestions.push({
+        symbol: ch.symbol,
+        reason,
+        tag: 'diatonic',
+        origin: `ダイアトニック（${deg}）`,
+      });
+    }
   };
 
   // 度数の基底 (7や/を除いた I, ii, V, ...)。
@@ -438,9 +529,15 @@ export function suggestNextChords(input: SuggestNextChordsInput): ChordSuggestio
       suggestions.push({
         symbol: tonic.symbol,
         reason: '安定する主和音（トニック）へ戻すと収まります。',
+        tag: 'diatonic',
+        origin: `ダイアトニック（${tonic.degree}）`,
       });
     }
   }
 
-  return suggestions;
+  return [
+    ...suggestions,
+    ...borrowedSuggestions(key, scale),
+    ...secondaryDominantSuggestions(key, scale, diatonic),
+  ];
 }
