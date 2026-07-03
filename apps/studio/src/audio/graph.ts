@@ -1,12 +1,13 @@
 // Per-track audio routing graph and mute/solo resolution.
 //
-// Each non-master track gets: trackGain (volume) -> panner (pan) -> master bus.
+// Each non-master track gets: trackGain (volume) -> insert effects -> panner (pan) -> master bus.
 // The master bus + soft limiter live on the AudioEngine. Mute/solo is resolved
 // by the pure `computeAudibleTracks` so the rule ("any solo => only solos; mute
 // always wins") is unit-testable without any audio nodes, then applied to the
 // live gain nodes.
 
-import type { Track } from '@cts/project-model';
+import type { EffectConfig, Track } from '@cts/project-model';
+import { buildEffectChain, effectConfigSignature, type BuiltEffectChain } from './effects';
 
 /**
  * Resolve which tracks are audible given mute/solo flags.
@@ -46,19 +47,23 @@ export function clampPan(pan: number): number {
 export class TrackGraph {
   readonly trackId: string;
   readonly input: GainNode;
+  private readonly ctx: BaseAudioContext;
   private readonly gain: GainNode;
   private readonly panner: StereoPannerNode;
+  private effectChain: BuiltEffectChain | null = null;
+  private effectSignature: string | null = null;
 
   constructor(ctx: BaseAudioContext, master: AudioNode, track: Track) {
+    this.ctx = ctx;
     this.trackId = track.id;
     this.gain = ctx.createGain();
     this.panner = ctx.createStereoPanner();
     this.gain.gain.value = clampVolume(track.volume);
     this.panner.pan.value = clampPan(track.pan);
-    // Voices connect to `input` (the gain node); gain -> panner -> master.
+    // Voices connect to `input` (the gain node); gain -> effects -> panner -> master.
     this.input = this.gain;
-    this.gain.connect(this.panner);
     this.panner.connect(master);
+    this.updateEffects(track.effects);
   }
 
   /** Apply volume/pan/mute/solo state to the live nodes. */
@@ -69,10 +74,42 @@ export class TrackGraph {
     this.panner.pan.setTargetAtTime(clampPan(track.pan), when, 0.01);
   }
 
+  /** Rebuild the insert effect nodes when the track's effect list changes. */
+  updateEffects(configs: readonly EffectConfig[]): void {
+    const nextSignature = effectConfigSignature(configs);
+    if (nextSignature === this.effectSignature) return;
+
+    try {
+      this.gain.disconnect();
+    } catch {
+      // already disconnected
+    }
+    this.effectChain?.dispose();
+    this.effectChain = buildEffectChain(this.ctx, configs);
+    this.effectSignature = nextSignature;
+
+    if (
+      this.effectChain.isBypassed ||
+      this.effectChain.input === null ||
+      this.effectChain.output === null
+    ) {
+      this.gain.connect(this.panner);
+      return;
+    }
+
+    this.gain.connect(this.effectChain.input);
+    this.effectChain.output.connect(this.panner);
+  }
+
   /** Disconnect from the graph. */
   dispose(): void {
     try {
       this.gain.disconnect();
+    } catch {
+      // already disconnected
+    }
+    this.effectChain?.dispose();
+    try {
       this.panner.disconnect();
     } catch {
       // already disconnected
@@ -111,6 +148,7 @@ export function applyMixState(
   for (const track of tracks) {
     const graph = graphs.get(track.id);
     if (!graph) continue;
+    graph.updateEffects(track.effects);
     graph.apply(track, audible.has(track.id), when);
   }
 }

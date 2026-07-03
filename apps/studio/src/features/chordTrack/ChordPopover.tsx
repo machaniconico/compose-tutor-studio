@@ -1,12 +1,48 @@
 import { useMemo, useState } from 'react';
 import type { ChordEvent, Project } from '@cts/project-model';
 import {
+  analyzeChord,
   getDiatonicChords,
   parseChord,
   suggestNextChords,
+  type ChordSuggestion,
+  type ChordSuggestionTag,
 } from '@cts/theory-engine';
 import { updateChordSymbol } from '../../state/editorActions';
 import { useStore } from '../../state/store';
+
+const SUGGESTION_GROUPS: {
+  tag: ChordSuggestionTag;
+  label: string;
+  tone: string;
+  background: string;
+}[] = [
+  {
+    tag: 'diatonic',
+    label: 'ダイアトニック',
+    tone: 'var(--accent)',
+    background: 'rgba(105, 220, 190, 0.12)',
+  },
+  {
+    tag: 'borrowed',
+    label: '借用和音',
+    tone: '#d7a7ff',
+    background: 'rgba(215, 167, 255, 0.14)',
+  },
+  {
+    tag: 'secondaryDominant',
+    label: 'セカンダリドミナント',
+    tone: '#ffbc7a',
+    background: 'rgba(255, 188, 122, 0.14)',
+  },
+];
+
+const FUNCTION_TEXT = {
+  T: '安定するトニック',
+  SD: '展開を準備するサブドミナント',
+  D: '次へ進ませるドミナント',
+  Other: '色付けの和音',
+} as const;
 
 /** Live parse feedback for the free-text input. */
 function parseFeedback(symbol: string, key: string): { ok: boolean; text: string } {
@@ -18,6 +54,64 @@ function parseFeedback(symbol: string, key: string): { ok: boolean; text: string
     return { ok: true, text: `${parsed.root} ${parsed.quality} / 構成音: ${notes}` };
   } catch {
     return { ok: false, text: 'このコード名は読み取れませんでした。綴りを確認してください。' };
+  }
+}
+
+function suggestionTag(suggestion: ChordSuggestion): ChordSuggestionTag {
+  return suggestion.tag ?? 'diatonic';
+}
+
+function beginnerSummary(suggestion: ChordSuggestion): string {
+  const tag = suggestionTag(suggestion);
+  if (tag === 'borrowed') {
+    return '同じ主音の短調から借りて、切なさや影を少し足します。';
+  }
+  if (tag === 'secondaryDominant') {
+    return '次の行き先を一時的に強く照らす、寄り道のドミナントです。';
+  }
+  return suggestion.reason;
+}
+
+function detailLines(suggestion: ChordSuggestion, project: Project): string[] {
+  const tag = suggestionTag(suggestion);
+  const origin = suggestion.origin ?? (tag === 'diatonic' ? 'キーの中の基本和音' : 'キーの外からの色');
+
+  if (tag === 'diatonic') {
+    return [`由来: ${origin}`, `機能: ${suggestion.reason}`];
+  }
+
+  try {
+    const analysis = analyzeChord({
+      symbol: suggestion.symbol,
+      key: project.key,
+      scale: project.scale,
+    });
+    const fn = analysis.function ? FUNCTION_TEXT[analysis.function] : '色付けの和音';
+    if (tag === 'borrowed') {
+      return [
+        `由来: ${origin}。同じ主音を持つ短調の色を一時的に借ります。`,
+        `機能: ${analysis.degree ? `${analysis.degree}として` : ''}${fn}の役割を持つことがあります。`,
+        '響き: 明るい流れの中に、少し切なさ・陰り・映画的な広がりを足します。',
+      ];
+    }
+    return [
+      `由来: ${origin}。ダイアトニック和音へ向かうための一時的なV7です。`,
+      `機能: ${analysis.secondaryDominantOf ?? '次の和音'}へ進みたい力を作るドミナントです。`,
+      '響き: 一瞬だけ緊張が強まり、次のコードに着いたときの納得感が増します。',
+    ];
+  } catch {
+    if (tag === 'borrowed') {
+      return [
+        `由来: ${origin}。同じ主音を持つ短調の色を一時的に借ります。`,
+        '機能: キーの外の音で、進行に新しい表情を足します。',
+        '響き: 少し切ない、影のある響きになります。',
+      ];
+    }
+    return [
+      `由来: ${origin}。次の和音へ向かうための一時的なドミナントです。`,
+      '機能: 行き先へ進みたい力を強めます。',
+      '響き: 緊張してから解決する動きがはっきりします。',
+    ];
   }
 }
 
@@ -58,6 +152,15 @@ export function ChordPopover(props: {
       return [];
     }
   }, [project.key, project.scale, project.chordTrack, chord.startBeat]);
+
+  const groupedSuggestions = useMemo(
+    () =>
+      SUGGESTION_GROUPS.map((group) => ({
+        ...group,
+        suggestions: suggestions.filter((s) => suggestionTag(s) === group.tag),
+      })).filter((group) => group.suggestions.length > 0),
+    [suggestions],
+  );
 
   const commit = (symbol: string) => {
     if (symbol.trim() === '') return;
@@ -116,16 +219,60 @@ export function ChordPopover(props: {
       {suggestions.length > 0 ? (
         <div className="chord-pop__section">
           <p className="chord-pop__label">次に進みやすいコード</p>
-          <ul className="chord-pop__suggestions">
-            {suggestions.map((s, i) => (
-              <li key={`${s.symbol}-${i}`}>
-                <button type="button" onClick={() => commit(s.symbol)}>
-                  {s.symbol}
-                </button>
-                <span className="chord-pop__reason">{s.reason}</span>
-              </li>
-            ))}
-          </ul>
+          {groupedSuggestions.map((group) => (
+            <div key={group.tag} style={{ marginTop: 'var(--sp-1)' }}>
+              <p
+                className="chord-pop__label"
+                style={{ color: group.tone, textTransform: 'none', letterSpacing: 0 }}
+              >
+                {group.label}
+              </p>
+              <ul className="chord-pop__suggestions">
+                {group.suggestions.map((s, i) => {
+                  const lines = detailLines(s, project);
+                  const advancedText = lines.join('\n');
+                  return (
+                    <li
+                      key={`${s.symbol}-${group.tag}-${i}`}
+                      style={{
+                        alignItems: 'flex-start',
+                        borderLeft: `3px solid ${group.tone}`,
+                        background: group.background,
+                        borderRadius: '6px',
+                        padding: 'var(--sp-1)',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => commit(s.symbol)}
+                        title={advancedText}
+                        style={{ borderColor: group.tone }}
+                      >
+                        {s.symbol}
+                      </button>
+                      <div className="chord-pop__reason">
+                        <span style={{ color: group.tone, fontWeight: 700 }}>
+                          {s.origin ?? group.label}
+                        </span>
+                        <br />
+                        {beginnerSummary(s)}
+                        {group.tag !== 'diatonic' ? (
+                          <details style={{ marginTop: 2 }}>
+                            <summary>由来・機能・響き</summary>
+                            {lines.map((line) => (
+                              <span key={line} style={{ display: 'block' }}>
+                                {line}
+                              </span>
+                            ))}
+                          </details>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </div>
       ) : null}
 

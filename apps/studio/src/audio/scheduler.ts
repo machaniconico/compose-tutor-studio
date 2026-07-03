@@ -10,6 +10,8 @@
 // tested without an AudioContext. The `Scheduler` class only owns the timer and
 // the "what time is it now" plumbing.
 
+import { createPrng } from '@cts/theory-engine';
+
 /** Timer wake-up interval, milliseconds. Coarse on purpose. */
 export const TICK_MS = 25;
 
@@ -38,6 +40,230 @@ export type DueEvent = {
   beat: number;
   payload: unknown;
 };
+
+export type DrumGrooveHitInput = {
+  beat: number;
+  lane: string;
+  velocity: number;
+  probability?: number;
+  swing?: number;
+  humanizeVelocity?: number;
+  seed?: number;
+  stepKey?: string;
+  stepsPerBar?: number;
+  beatsPerBar?: number;
+};
+
+export type DrumGrooveHit = {
+  beat: number;
+  velocity: number;
+};
+
+export type DrumGrooveRuntimeOptions = {
+  swing: number;
+  probability: number;
+  humanizeVelocity: number;
+  seed: number;
+  stepsPerBar: number;
+  beatsPerBar: number;
+  probabilitiesByStep: Record<string, number>;
+};
+
+const DEFAULT_DRUM_GROOVE: DrumGrooveRuntimeOptions = {
+  swing: 0,
+  probability: 1,
+  humanizeVelocity: 0,
+  seed: 1,
+  stepsPerBar: 16,
+  beatsPerBar: 4,
+  probabilitiesByStep: {},
+};
+
+let drumGrooveRuntime: DrumGrooveRuntimeOptions = DEFAULT_DRUM_GROOVE;
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function clamp01(value: number): number {
+  return clamp(value, 0, 1);
+}
+
+function clampVelocity(value: number): number {
+  return Math.round(clamp(value, 1, 127));
+}
+
+function safePositive(value: number | undefined, fallback: number): number {
+  return value !== undefined && value > 0 ? value : fallback;
+}
+
+function hashString(input: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededUnit(seed: number, salt: string): number {
+  return createPrng((seed >>> 0) ^ hashString(salt))();
+}
+
+function isDrumPayload(payload: unknown): payload is { kind: 'drum'; lane: string; velocity: number } {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const candidate = payload as { kind?: unknown; lane?: unknown; velocity?: unknown };
+  return (
+    candidate.kind === 'drum' &&
+    typeof candidate.lane === 'string' &&
+    typeof candidate.velocity === 'number'
+  );
+}
+
+function withPayloadVelocity(payload: unknown, velocity: number): unknown {
+  if (typeof payload !== 'object' || payload === null) return payload;
+  return { ...payload, velocity };
+}
+
+export function makeDrumGrooveStepKey(lane: string, beat: number): string {
+  const roundedBeat = Math.round(beat * 1_000_000) / 1_000_000;
+  return `${lane}:${roundedBeat}`;
+}
+
+/**
+ * Move every other 16th-note subdivision later by up to half a step.
+ *
+ * The function uses a zero-based step grid, so steps 1, 3, 5... are the
+ * "back side" 16ths that swing behind the beat. `swing=0` is straight timing;
+ * `swing=1` delays those off-steps by half of one grid step.
+ */
+export function applyDrumSwingToBeat(
+  beat: number,
+  swing: number,
+  stepsPerBar = 16,
+  beatsPerBar = 4,
+): number {
+  const amount = clamp01(swing);
+  if (amount <= 0) return beat;
+
+  const steps = safePositive(stepsPerBar, 16);
+  const bpb = safePositive(beatsPerBar, 4);
+  const beatsPerStep = bpb / steps;
+  if (beatsPerStep <= 0) return beat;
+
+  const stepPosition = beat / beatsPerStep;
+  const stepIndex = Math.round(stepPosition);
+  if (Math.abs(stepPosition - stepIndex) > 1e-6) return beat;
+  if (stepIndex % 2 === 0) return beat;
+  return beat + beatsPerStep * 0.5 * amount;
+}
+
+/** Deterministically decide whether a probabilistic drum step should sound. */
+export function shouldPlayDrumStep(probability: number, seed = 1, stepKey = 'step'): boolean {
+  const chance = clamp01(probability);
+  if (chance <= 0) return false;
+  if (chance >= 1) return true;
+  return seededUnit(seed, `drum-probability:${stepKey}`) < chance;
+}
+
+/**
+ * Deterministically vary MIDI velocity inside `baseVelocity +/- amount`.
+ * `amount` is expressed in MIDI velocity units, not percent.
+ */
+export function humanizeDrumVelocity(
+  baseVelocity: number,
+  amount: number,
+  seed = 1,
+  stepKey = 'step',
+): number {
+  const width = Math.round(clamp(amount, 0, 127));
+  const base = clampVelocity(baseVelocity);
+  if (width <= 0) return base;
+  const offset = Math.round((seededUnit(seed, `drum-velocity:${stepKey}`) * 2 - 1) * width);
+  return clampVelocity(base + offset);
+}
+
+/** Apply probability, swing, and velocity humanization to one drum hit. */
+export function resolveDrumGrooveHit(input: DrumGrooveHitInput): DrumGrooveHit | null {
+  const seed = Math.trunc(input.seed ?? 1);
+  const stepKey = input.stepKey ?? makeDrumGrooveStepKey(input.lane, input.beat);
+  if (!shouldPlayDrumStep(input.probability ?? 1, seed, stepKey)) return null;
+
+  return {
+    beat: applyDrumSwingToBeat(
+      input.beat,
+      input.swing ?? 0,
+      input.stepsPerBar ?? 16,
+      input.beatsPerBar ?? 4,
+    ),
+    velocity: humanizeDrumVelocity(
+      input.velocity,
+      input.humanizeVelocity ?? 0,
+      seed,
+      stepKey,
+    ),
+  };
+}
+
+/** Runtime hook used by the drum grid; pure helpers above stay independently testable. */
+export function setDrumGrooveRuntimeOptions(options: Partial<DrumGrooveRuntimeOptions>): void {
+  drumGrooveRuntime = {
+    swing: clamp01(options.swing ?? drumGrooveRuntime.swing),
+    probability: clamp01(options.probability ?? drumGrooveRuntime.probability),
+    humanizeVelocity: clamp(options.humanizeVelocity ?? drumGrooveRuntime.humanizeVelocity, 0, 127),
+    seed: Math.trunc(options.seed ?? drumGrooveRuntime.seed),
+    stepsPerBar: safePositive(options.stepsPerBar, drumGrooveRuntime.stepsPerBar),
+    beatsPerBar: safePositive(options.beatsPerBar, drumGrooveRuntime.beatsPerBar),
+    probabilitiesByStep: { ...(options.probabilitiesByStep ?? drumGrooveRuntime.probabilitiesByStep) },
+  };
+}
+
+export function getDrumGrooveRuntimeOptions(): DrumGrooveRuntimeOptions {
+  return {
+    ...drumGrooveRuntime,
+    probabilitiesByStep: { ...drumGrooveRuntime.probabilitiesByStep },
+  };
+}
+
+function resolveDueEvent(
+  ev: ScheduledEvent,
+  playheadBeat: number,
+  sourceBeat: number,
+  bpm: number,
+  anchorBeat: number,
+  anchorTime: number,
+): DueEvent | null {
+  if (!isDrumPayload(ev.payload)) {
+    return {
+      time: beatToTime(playheadBeat, bpm, anchorBeat, anchorTime),
+      beat: sourceBeat,
+      payload: ev.payload,
+    };
+  }
+
+  const sourceKey = makeDrumGrooveStepKey(ev.payload.lane, sourceBeat);
+  const playheadKey = makeDrumGrooveStepKey(ev.payload.lane, playheadBeat);
+  const hit = resolveDrumGrooveHit({
+    beat: playheadBeat,
+    lane: ev.payload.lane,
+    velocity: ev.payload.velocity,
+    probability: drumGrooveRuntime.probabilitiesByStep[sourceKey] ?? drumGrooveRuntime.probability,
+    swing: drumGrooveRuntime.swing,
+    humanizeVelocity: drumGrooveRuntime.humanizeVelocity,
+    seed: drumGrooveRuntime.seed,
+    stepKey: playheadKey,
+    stepsPerBar: drumGrooveRuntime.stepsPerBar,
+    beatsPerBar: drumGrooveRuntime.beatsPerBar,
+  });
+  if (!hit) return null;
+
+  return {
+    time: beatToTime(hit.beat, bpm, anchorBeat, anchorTime),
+    beat: sourceBeat,
+    payload: withPayloadVelocity(ev.payload, hit.velocity),
+  };
+}
 
 /** Seconds per beat for a given tempo. */
 export function secondsPerBeat(bpm: number): number {
@@ -140,11 +366,8 @@ export function nextEventsInWindow(
   if (!hasLoop) {
     for (const ev of events) {
       if (ev.beat >= windowStartBeat && ev.beat < windowEndBeat) {
-        due.push({
-          time: beatToTime(ev.beat, bpm, anchorBeat, anchorTime),
-          beat: ev.beat,
-          payload: ev.payload,
-        });
+        const resolved = resolveDueEvent(ev, ev.beat, ev.beat, bpm, anchorBeat, anchorTime);
+        if (resolved) due.push(resolved);
       }
     }
     due.sort((a, b) => a.time - b.time);
@@ -170,11 +393,8 @@ export function nextEventsInWindow(
       const playheadBeat = ev.beat + k * length;
       if (playheadBeat >= windowEndBeat) break;
       if (playheadBeat < windowStartBeat) continue;
-      due.push({
-        time: beatToTime(playheadBeat, bpm, anchorBeat, anchorTime),
-        beat: ev.beat,
-        payload: ev.payload,
-      });
+      const resolved = resolveDueEvent(ev, playheadBeat, ev.beat, bpm, anchorBeat, anchorTime);
+      if (resolved) due.push(resolved);
     }
   }
 

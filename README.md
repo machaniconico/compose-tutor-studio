@@ -39,6 +39,31 @@ pnpm typecheck
 pnpm build
 ```
 
+## Cloudflare Pages へのデプロイ
+
+studio は web-first の SPA なので Cloudflare Pages にそのまま載せられます。
+
+**ビルド設定（Pages プロジェクト作成時）:**
+
+| 項目 | 値 |
+|---|---|
+| Framework preset | None (Vite) |
+| Build command | `pnpm install && pnpm --filter @cts/studio build` |
+| Build output directory | `apps/studio/dist` |
+| Root directory | （リポジトリルートのまま） |
+| Node version | 20 以上（`NODE_VERSION=20` を環境変数に）|
+
+**ローカルでの本番ビルド確認:**
+
+```bash
+pnpm --filter @cts/studio build     # apps/studio/dist に出力
+pnpm --filter @cts/studio preview   # dist をローカル配信して確認
+```
+
+- SPA フォールバックは `apps/studio/public/_redirects`（`/* /index.html 200`）が担い、ビルド時に `dist/` 直下へコピーされます。
+- 配信はルート（`/`）想定で `base: '/'`。サブパス配信が必要な場合のみ `vite.config.ts` の `base` を変更してください。
+- 手動デプロイする場合は `wrangler pages deploy apps/studio/dist --project-name <name>`。
+
 ## 仕様書
 
 `docs/` 配下に要件定義・機能仕様・チュートリアル仕様・UI/UX・アーキテクチャ・データモデル等の一次仕様（v0.1）を同梱しています。

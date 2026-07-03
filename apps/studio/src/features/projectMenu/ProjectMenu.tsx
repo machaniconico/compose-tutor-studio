@@ -2,12 +2,13 @@
 // the saved-project list (load / delete), and inline rename of the active
 // project title.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   PROJECT_TEMPLATES,
   instantiateTemplate,
   type TemplateId,
 } from '@cts/project-model';
+import { importMidiFile } from '../../state/importMidi';
 import { useStore } from '../../state/store';
 import { pushToast } from '../../state/tutorialBridge';
 import { Dialog } from '../common/Dialog';
@@ -54,6 +55,8 @@ export function ProjectMenu() {
               />
             </label>
 
+            <MidiImportPanel onDone={() => setOpen(false)} />
+
             <div className="project-menu__tabs" role="tablist">
               <button
                 type="button"
@@ -84,6 +87,68 @@ export function ProjectMenu() {
         </Dialog>
       ) : null}
     </>
+  );
+}
+
+function MidiImportPanel({ onDone }: { onDone: () => void }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onImportFile = async (file: File) => {
+    setImporting(true);
+    setError(null);
+    try {
+      const result = await importMidiFile(file);
+      if (!result.ok) {
+        setError(result.message);
+        pushToast(result.message, 'error');
+        return;
+      }
+      onDone();
+      pushToast(
+        `MIDIを読み込みました。${result.noteCount}個の音を新しいトラックに追加しました。`,
+        'success',
+      );
+    } catch {
+      const message = 'MIDIの読み込みでエラーが起きました。別の.midファイルを試してください。';
+      setError(message);
+      pushToast(message, 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <section className="project-menu__import">
+      <p className="panel-section__title">MIDIインポート</p>
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={importing}
+      >
+        {importing ? '読み込み中…' : 'MIDIインポート'}
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".mid,.midi,audio/midi,audio/x-midi"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void onImportFile(file);
+          e.target.value = '';
+        }}
+      />
+      <p className="project-menu__hint">
+        .midファイルを選ぶと、音符を新しいMIDIトラックとして追加します。
+      </p>
+      {error ? (
+        <p className="project-menu__empty" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </section>
   );
 }
 

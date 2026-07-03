@@ -1,5 +1,63 @@
-import type { Track } from '@cts/project-model';
+import type { EffectConfig, Track } from '@cts/project-model';
 import { useStore } from '../../state/store';
+import {
+  addTrackEffect,
+  removeTrackEffect,
+  updateTrackEffectParam,
+} from '../../state/editorActions';
+import {
+  INSERT_EFFECT_TYPES,
+  isInsertEffectType,
+  normalizeEffectConfig,
+  type InsertEffectType,
+} from '../../audio/effects';
+
+type EffectInfo = {
+  label: string;
+  addLabel: string;
+  summary: string;
+};
+
+type ParamControl = {
+  key: string;
+  label: string;
+  low: string;
+  high: string;
+};
+
+const EFFECT_INFO: Record<InsertEffectType, EffectInfo> = {
+  filter: {
+    label: 'フィルター',
+    addLabel: 'フィルターを追加',
+    summary: '高い音をやわらかくします',
+  },
+  delay: {
+    label: 'ディレイ',
+    addLabel: 'やまびこを追加',
+    summary: '音を少し遅らせて重ねます',
+  },
+  reverb: {
+    label: 'リバーブ',
+    addLabel: '響きを追加',
+    summary: '部屋の残響のように広げます',
+  },
+};
+
+const PARAM_CONTROLS: Record<InsertEffectType, ParamControl[]> = {
+  filter: [
+    { key: 'cutoff', label: '明るさ', low: '丸い', high: '明るい' },
+    { key: 'resonance', label: 'くせ', low: '自然', high: '強い' },
+  ],
+  delay: [
+    { key: 'delayTime', label: '遅れ', low: '短い', high: '長い' },
+    { key: 'feedback', label: 'くり返し', low: '少ない', high: '多い' },
+    { key: 'mix', label: '混ぜる量', low: 'うすい', high: '濃い' },
+  ],
+  reverb: [
+    { key: 'wet', label: '響き', low: '近い', high: '広い' },
+    { key: 'decay', label: '余韻', low: '短い', high: '長い' },
+  ],
+};
 
 /** Convert a linear gain (0..2) to an approximate dB label for display. */
 function gainToDbLabel(gain: number): string {
@@ -113,6 +171,119 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
           </button>
         </div>
       ) : null}
+
+      {!isMaster ? <EffectRack track={track} /> : null}
+    </div>
+  );
+}
+
+function EffectRack({ track }: { track: Track }) {
+  return (
+    <div
+      className="mix-ch__effects"
+      aria-label={`${track.name} エフェクト`}
+      style={{ display: 'grid', gap: 8, minWidth: 0 }}
+    >
+      <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+        <span>音づくり</span>
+        <select
+          value=""
+          aria-label={`${track.name} エフェクト追加`}
+          onChange={(e) => {
+            const type = e.target.value;
+            if (isInsertEffectType(type)) addTrackEffect(track.id, type);
+          }}
+        >
+          <option value="">追加する効果</option>
+          {INSERT_EFFECT_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {EFFECT_INFO[type].addLabel}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {track.effects.length > 0 ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {track.effects.map((effect) => (
+            <EffectEditor key={effect.id} trackId={track.id} effect={effect} />
+          ))}
+        </div>
+      ) : (
+        <span style={{ color: 'var(--muted)', fontSize: 12 }}>効果なし</span>
+      )}
+    </div>
+  );
+}
+
+function EffectEditor(props: { trackId: string; effect: EffectConfig }) {
+  const { trackId, effect } = props;
+
+  if (!isInsertEffectType(effect.type)) {
+    return (
+      <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <strong>未対応の効果</strong>
+          <button
+            type="button"
+            className="mini-btn"
+            onClick={() => removeTrackEffect(trackId, effect.id)}
+            title="この効果を削除"
+          >
+            削除
+          </button>
+        </div>
+        <span style={{ color: 'var(--muted)' }}>この効果はまだ調整できません。</span>
+      </div>
+    );
+  }
+
+  const normalized = normalizeEffectConfig(effect);
+  const info = EFFECT_INFO[effect.type];
+
+  return (
+    <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <strong>{info.label}</strong>
+        <button
+          type="button"
+          className="mini-btn"
+          onClick={() => removeTrackEffect(trackId, effect.id)}
+          title={`${info.label}を削除`}
+        >
+          削除
+        </button>
+      </div>
+      <span style={{ color: 'var(--muted)' }}>{info.summary}</span>
+
+      {PARAM_CONTROLS[effect.type].map((control) => {
+        const value = normalized.params[control.key] ?? 0;
+        return (
+          <label key={control.key} style={{ display: 'grid', gap: 3 }}>
+            <span>
+              {control.label} {Math.round(value * 100)}%
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={value}
+              aria-label={`${info.label} ${control.label}`}
+              onChange={(e) =>
+                updateTrackEffectParam(trackId, effect.id, control.key, Number(e.target.value))
+              }
+            />
+            <span
+              aria-hidden="true"
+              style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}
+            >
+              <span>{control.low}</span>
+              <span>{control.high}</span>
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }
