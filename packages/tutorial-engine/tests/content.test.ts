@@ -6,20 +6,23 @@ import {
   BASIC_LESSONS,
   COMPOSE_COURSE,
   COMPOSE_LESSONS,
+  COMPOSE_PLUS_COURSE,
+  COMPOSE_PLUS_LESSONS,
   getLessonById,
 } from '../src/content/index.js';
 import type { TutorialLesson } from '../src/types.js';
 
 describe('content registry', () => {
-  it('ALL_COURSES contains 2 courses (basic, compose)', () => {
-    expect(ALL_COURSES).toHaveLength(2);
+  it('ALL_COURSES contains 3 courses (basic, compose, compose-plus)', () => {
+    expect(ALL_COURSES).toHaveLength(3);
     const ids = ALL_COURSES.map((c) => c.id);
     expect(ids).toContain('basic');
     expect(ids).toContain('compose');
+    expect(ids).toContain('compose-plus');
   });
 
-  it('ALL_LESSONS contains 9 lessons (4 basic + 5 compose)', () => {
-    expect(ALL_LESSONS).toHaveLength(9);
+  it('ALL_LESSONS contains 14 lessons (4 basic + 5 compose + 5 compose-plus)', () => {
+    expect(ALL_LESSONS).toHaveLength(14);
   });
 
   it('BASIC_LESSONS contains 4 lessons', () => {
@@ -28,6 +31,14 @@ describe('content registry', () => {
 
   it('COMPOSE_LESSONS contains 5 lessons', () => {
     expect(COMPOSE_LESSONS).toHaveLength(5);
+  });
+
+  it('COMPOSE_PLUS_LESSONS contains 5 lessons', () => {
+    expect(COMPOSE_PLUS_LESSONS).toHaveLength(5);
+  });
+
+  it('COMPOSE_PLUS_COURSE.lessonIds matches COMPOSE_PLUS_LESSONS ids in order', () => {
+    expect(COMPOSE_PLUS_COURSE.lessonIds).toEqual(COMPOSE_PLUS_LESSONS.map((l) => l.id));
   });
 
   it('BASIC_COURSE.lessonIds matches BASIC_LESSONS ids in order', () => {
@@ -121,6 +132,13 @@ describe('lesson level values', () => {
   it('all COMPOSE lessons have level "compose"', () => {
     for (const lesson of COMPOSE_LESSONS) {
       expect(lesson.level).toBe('compose');
+    }
+  });
+
+  it('all COMPOSE_PLUS lessons have level "compose" and courseId "compose-plus"', () => {
+    for (const lesson of COMPOSE_PLUS_LESSONS) {
+      expect(lesson.level).toBe('compose');
+      expect(lesson.courseId).toBe('compose-plus');
     }
   });
 });
