@@ -110,6 +110,14 @@ function matchesEventMatch(event: AppEvent, match: EventMatch): boolean {
     const format = p['format'] as string | undefined;
     if (format !== match.format) return false;
   }
+  if (match.effectType !== undefined) {
+    const effectType = p['effectType'] as string | undefined;
+    if (effectType !== match.effectType) return false;
+  }
+  if (match.swingAtLeast !== undefined) {
+    const swing = p['swing'] as number | undefined;
+    if (swing === undefined || swing < match.swingAtLeast) return false;
+  }
   return true;
 }
 

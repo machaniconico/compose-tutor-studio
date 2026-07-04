@@ -24,27 +24,51 @@ export function TrackList() {
     <nav className="track-list" aria-label="トラック一覧">
       {tracks.map((track) => {
         const isSelected = track.id === selectedTrackId;
+        const selectThisTrack = () => {
+          selectTrack(track.id);
+          const firstClip = track.clips[0];
+          selectClip(firstClip ? firstClip.id : null);
+        };
         return (
           <div
             key={track.id}
             className={`track-row${isSelected ? ' is-selected' : ''}`}
-            onClick={() => {
-              selectTrack(track.id);
-              const firstClip = track.clips[0];
-              selectClip(firstClip ? firstClip.id : null);
-            }}
+            onClick={selectThisTrack}
           >
-            <span
-              className="track-row__swatch"
-              style={{ background: track.color ?? 'var(--accent)' }}
-              aria-hidden="true"
-            />
-            <div>
-              <div className="track-row__name">{track.name}</div>
-              <div className="track-row__type">
-                <span className="badge">{TYPE_LABEL[track.type]}</span> {track.type}
+            <button
+              type="button"
+              aria-label={`${track.name} トラックを選択`}
+              onClick={(e) => {
+                e.stopPropagation();
+                selectThisTrack();
+              }}
+              style={{
+                gridColumn: '1 / -1',
+                display: 'grid',
+                gridTemplateColumns: '18px 1fr',
+                gap: 'var(--sp-2)',
+                alignItems: 'center',
+                padding: 0,
+                border: 0,
+                background: 'transparent',
+                color: 'inherit',
+                font: 'inherit',
+                textAlign: 'left',
+                cursor: 'pointer',
+              }}
+            >
+              <span
+                className="track-row__swatch"
+                style={{ background: track.color ?? 'var(--accent)' }}
+                aria-hidden="true"
+              />
+              <div>
+                <div className="track-row__name">{track.name}</div>
+                <div className="track-row__type">
+                  <span className="badge">{TYPE_LABEL[track.type]}</span> {track.type}
+                </div>
               </div>
-            </div>
+            </button>
 
             <div className="track-row__controls" onClick={(e) => e.stopPropagation()}>
               <input

@@ -65,6 +65,9 @@ export type EventMatch = Partial<{
   lane: DrumLane;
   trackName: string;
   format: 'midi' | 'wav';
+  effectType: string;
+  /** Numeric threshold: satisfied when payload.swing >= this value. */
+  swingAtLeast: number;
 }>;
 
 export type AppEventType =
@@ -81,7 +84,9 @@ export type AppEventType =
   | 'scale_snap.enabled'
   | 'clip.created'
   | 'section.added'
-  | 'bpm.changed';
+  | 'bpm.changed'
+  | 'effect.added'
+  | 'drum.grooveChanged';
 
 export type StepGoal =
   | { kind: 'event'; eventType: AppEventType; count?: number; match?: EventMatch }
@@ -166,6 +171,19 @@ export interface BpmChangedPayload {
   bpm: number;
 }
 
+export interface EffectAddedPayload {
+  trackId: string;
+  trackName: string;
+  effectType: string;
+}
+
+export interface DrumGrooveChangedPayload {
+  trackId: string;
+  swing: number;
+  probability: number;
+  humanizeVelocity: number;
+}
+
 export type AppEventPayloadMap = {
   'chord.added': ChordAddedPayload;
   'chord.changed': ChordChangedPayload;
@@ -181,6 +199,8 @@ export type AppEventPayloadMap = {
   'clip.created': ClipCreatedPayload;
   'section.added': SectionAddedPayload;
   'bpm.changed': BpmChangedPayload;
+  'effect.added': EffectAddedPayload;
+  'drum.grooveChanged': DrumGrooveChangedPayload;
 };
 
 export type AppEvent = {

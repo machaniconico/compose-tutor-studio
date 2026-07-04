@@ -95,6 +95,19 @@ export function ChordLane() {
     [sortedChords, project.key, project.scale],
   );
 
+  const addChordAtBar = useCallback(
+    (bar: number) => {
+      const startBeat = bar * bpb;
+      const occupied = sortedChords.some(
+        (c) => startBeat >= c.startBeat && startBeat < c.startBeat + c.durationBeats,
+      );
+      if (occupied) return false;
+      addChordWithAnalysis(smartDefaultSymbol(startBeat), startBeat, bpb);
+      return true;
+    },
+    [bpb, sortedChords, smartDefaultSymbol],
+  );
+
   const onGridClick = useCallback(
     (e: React.MouseEvent) => {
       // Only react to clicks on the empty grid (not on a chip).
@@ -103,14 +116,21 @@ export function ChordLane() {
       if (!rect) return;
       const x = e.clientX - rect.left;
       const bar = Math.floor(x / (bpb * ppb));
-      const startBeat = bar * bpb;
-      const occupied = sortedChords.some(
-        (c) => startBeat >= c.startBeat && startBeat < c.startBeat + c.durationBeats,
-      );
-      if (occupied) return;
-      addChordWithAnalysis(smartDefaultSymbol(startBeat), startBeat, bpb);
+      addChordAtBar(bar);
     },
-    [bpb, ppb, sortedChords, smartDefaultSymbol],
+    [bpb, ppb, addChordAtBar],
+  );
+
+  const onGridKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      for (let bar = 0; bar < project.lengthBars; bar += 1) {
+        if (addChordAtBar(bar)) return;
+      }
+    },
+    [project.lengthBars, addChordAtBar],
   );
 
   const onChipPointerDown = useCallback(
@@ -167,9 +187,14 @@ export function ChordLane() {
 
       <div
         ref={gridRef}
+        role="group"
+        tabIndex={0}
+        aria-label="コードグリッド。EnterまたはSpaceで空いている最初の小節にコードを追加"
+        aria-keyshortcuts="Enter Space"
         className="chord-lane__grid"
         style={{ width }}
         onClick={onGridClick}
+        onKeyDown={onGridKeyDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >
@@ -181,11 +206,18 @@ export function ChordLane() {
         {project.chordTrack.map((chord) => {
           const isSelected = chord.id === selectedChordId;
           return (
-            <div
+            <button
+              type="button"
               key={chord.id}
+              aria-label={`${chord.symbol} コードを選択`}
               className={`chord-chip ${functionClass(chord.function)}${isSelected ? ' is-selected' : ''}`}
               style={{ left: chord.startBeat * ppb, width: chord.durationBeats * ppb }}
               onPointerDown={(e) => onChipPointerDown(e, chord, 'move')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  movedRef.current = false;
+                }
+              }}
               onClick={(e) => {
                 e.stopPropagation();
                 if (movedRef.current) return;
@@ -206,7 +238,7 @@ export function ChordLane() {
                 onPointerDown={(e) => onChipPointerDown(e, chord, 'resize')}
                 aria-hidden="true"
               />
-            </div>
+            </button>
           );
         })}
       </div>

@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { metronomeBeatEvents } from '../src/audio/metronome';
 import {
   advanceBeat,
   beatToTime,
   isValidLoop,
   nextEventsInWindow,
   projectLengthBeats,
+  Scheduler,
   secondsPerBeat,
   timeToBeat,
   wrapBeat,
@@ -152,5 +154,79 @@ describe('nextEventsInWindow (loop wrap)', () => {
     // Subsequent passes: the in-region event recurs, the outside one never does.
     const secondPass = nextEventsInWindow(mixed, 4, 8, 120, 0, 0, loop);
     expect(secondPass.map((d) => d.payload)).toEqual(['inside']);
+  });
+});
+
+describe('Scheduler metronome windows', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('advances raw lookahead windows even when no musical events are due', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    let metronomeBeatFrontier = 0;
+    const frontiers: number[] = [];
+    const clicks: Array<{ beat: number; accent: boolean }> = [];
+    const dueBatches: unknown[][] = [];
+
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: (due) => dueBatches.push(due),
+      onScheduleWindow: ({ endBeat }) => {
+        clicks.push(...metronomeBeatEvents(metronomeBeatFrontier, endBeat, 4));
+        metronomeBeatFrontier = endBeat;
+        frontiers.push(metronomeBeatFrontier);
+      },
+      tickMs: 25,
+      lookaheadS: 0.51,
+    });
+
+    scheduler.start([], 120, 0, null, 8);
+    expect(dueBatches).toEqual([]);
+    expect(clicks).toEqual([
+      { beat: 0, accent: true },
+      { beat: 1, accent: false },
+    ]);
+    expect(frontiers[0]).toBeGreaterThan(1);
+
+    now = 0.5;
+    vi.advanceTimersByTime(25);
+    expect(dueBatches).toEqual([]);
+    expect(frontiers[1]).toBeGreaterThan(frontiers[0] ?? 0);
+    expect(clicks.map((click) => click.beat)).toContain(2);
+
+    scheduler.stop();
+  });
+
+  it('continues metronome windows after the final musical event', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    let metronomeBeatFrontier = 0;
+    const clicks: Array<{ beat: number; accent: boolean }> = [];
+    const duePayloads: unknown[] = [];
+
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: (due) => duePayloads.push(...due.map((event) => event.payload)),
+      onScheduleWindow: ({ endBeat }) => {
+        clicks.push(...metronomeBeatEvents(metronomeBeatFrontier, endBeat, 4));
+        metronomeBeatFrontier = endBeat;
+      },
+      tickMs: 25,
+      lookaheadS: 0.05,
+    });
+
+    scheduler.start([{ beat: 0, payload: 'final-note' }], 120, 0, null, 8);
+    expect(duePayloads).toEqual(['final-note']);
+    expect(clicks.map((click) => click.beat)).toEqual([0]);
+
+    now = 1.25;
+    vi.advanceTimersByTime(25);
+    expect(duePayloads).toEqual(['final-note']);
+    expect(clicks.some((click) => click.beat > 0)).toBe(true);
+    expect(clicks.map((click) => click.beat)).toContain(2);
+
+    scheduler.stop();
   });
 });

@@ -173,6 +173,11 @@ async function startPlayback(): Promise<void> {
   const scheduler = new Scheduler({
     clock: () => engine.now(),
     fire: (due) => fireEvents(due, context, master),
+    onScheduleWindow: (window) => {
+      if (state.metronomeOn) {
+        scheduleMetronomeForWindow(window.startBeat, window.endBeat, context, master);
+      }
+    },
     onEnd: () => {
       // Stop at project end: pause then reset the store transport to the start.
       const s = useStore.getState();
@@ -205,30 +210,27 @@ function fireEvents(due: DueEvent[], ctx: AudioContext, master: GainNode): void 
       }
     }
   }
-
-  if (state.metronomeOn) {
-    scheduleMetronomeForWindow(due, ctx, master);
-  }
 }
 
 /**
- * Schedule metronome clicks for the playhead window covered by `due`. Uses the
- * resolved audio times of the batch to bound the window so clicks line up with
- * the same lookahead the scheduler used.
+ * Schedule metronome clicks for the raw scheduler lookahead window. This is
+ * independent of note/drum due events so empty projects and silent tails still
+ * click while transport is running.
  */
-function scheduleMetronomeForWindow(due: DueEvent[], ctx: AudioContext, master: GainNode): void {
-  if (due.length === 0) return;
-  const lastTime = due[due.length - 1]?.time ?? state.anchorTime;
-  const horizonBeat =
-    state.anchorBeat + (lastTime - state.anchorTime) / secondsPerBeat(state.bpm) + 0.001;
+function scheduleMetronomeForWindow(
+  windowStartBeat: number,
+  windowEndBeat: number,
+  ctx: AudioContext,
+  master: GainNode,
+): void {
+  if (windowEndBeat <= windowStartBeat) return;
+  const horizonBeat = Math.max(windowEndBeat, state.metronomeBeatFrontier);
   const clicks = metronomeBeatEvents(state.metronomeBeatFrontier, horizonBeat, state.beatsPerBar);
   for (const click of clicks) {
     const time = beatToTime(click.beat, state.bpm, state.anchorBeat, state.anchorTime);
     scheduleMetronomeClick(ctx, master, time, click.accent);
   }
-  if (clicks.length > 0) {
-    state.metronomeBeatFrontier = horizonBeat;
-  }
+  state.metronomeBeatFrontier = horizonBeat;
 }
 
 /** Drive transport.positionBeat from the audio clock ~30fps. */

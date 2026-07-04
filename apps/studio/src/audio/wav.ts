@@ -5,10 +5,22 @@
 // function (no Web Audio) so the RIFF/WAVE header, chunk sizes and sample
 // clamping are unit testable.
 
-import type { Project } from '@cts/project-model';
-import { buildScheduleEvents, type SchedulePayload } from './events';
+import type { Clip, DrumEvent, Project } from '@cts/project-model';
+import {
+  DEFAULT_STEPS_PER_BAR,
+  buildScheduleEvents,
+  drumStepToBeat,
+  type SchedulePayload,
+} from './events';
 import { buildTrackGraphs } from './graph';
-import { beatToTime, projectLengthBeats, secondsPerBeat } from './scheduler';
+import {
+  beatToTime,
+  makeDrumGrooveStepKey,
+  projectLengthBeats,
+  resolveDrumGrooveHit,
+  secondsPerBeat,
+  type ScheduledEvent,
+} from './scheduler';
 import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
 
@@ -18,6 +30,53 @@ export const RENDER_SAMPLE_RATE = 44100;
 export const RENDER_CHANNELS = 2;
 /** Silence tail appended after the last event, seconds. */
 export const RENDER_TAIL_SECONDS = 1;
+
+type DrumGrooveSettings = {
+  swing: number;
+  probability: number;
+  humanizeVelocity: number;
+  seed: number;
+};
+
+type DrumEventWithGroove = DrumEvent & {
+  probability?: number;
+};
+
+type DrumClipWithGroove = Clip & {
+  drumGroove?: Partial<DrumGrooveSettings>;
+  drumEvents?: DrumEventWithGroove[];
+};
+
+const DEFAULT_DRUM_GROOVE: DrumGrooveSettings = {
+  swing: 0,
+  probability: 1,
+  humanizeVelocity: 0,
+  seed: 1,
+};
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function readDrumGroove(clip: Clip): DrumGrooveSettings {
+  const raw = (clip as DrumClipWithGroove).drumGroove;
+  return {
+    swing: clamp(raw?.swing ?? DEFAULT_DRUM_GROOVE.swing, 0, 1),
+    probability: clamp(raw?.probability ?? DEFAULT_DRUM_GROOVE.probability, 0, 1),
+    humanizeVelocity: Math.round(
+      clamp(raw?.humanizeVelocity ?? DEFAULT_DRUM_GROOVE.humanizeVelocity, 0, 32),
+    ),
+    seed: Math.max(1, Math.trunc(raw?.seed ?? DEFAULT_DRUM_GROOVE.seed)),
+  };
+}
+
+function readDrumEventProbability(
+  event: DrumEventWithGroove,
+  fallback: number,
+): number {
+  return clamp(event.probability ?? fallback, 0, 1);
+}
 
 /** Clamp a float sample to [-1, 1] and convert to a signed 16-bit int. */
 export function floatToInt16(sample: number): number {
@@ -101,6 +160,62 @@ function writeAscii(view: DataView, offset: number, text: string): void {
 }
 
 /**
+ * Build the exact event schedule used by offline WAV render.
+ *
+ * Notes come from the shared project flattener. Drum clips are resolved here so
+ * export reads each clip's persisted groove instead of the UI runtime groove.
+ */
+export function buildWavScheduleEvents(project: Project): ScheduledEvent[] {
+  const beatsPerBar = project.timeSignature[0] > 0 ? project.timeSignature[0] : 4;
+  const events = buildScheduleEvents(project).filter((ev) => {
+    const payload = ev.payload as Partial<SchedulePayload>;
+    return payload.kind !== 'drum';
+  });
+
+  for (const track of project.tracks) {
+    if (track.type !== 'drum') continue;
+
+    for (const clip of track.clips) {
+      const drumEvents = (clip as DrumClipWithGroove).drumEvents ?? [];
+      if (drumEvents.length === 0) continue;
+
+      const stepsPerBar = clip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR;
+      const groove = readDrumGroove(clip);
+
+      for (const drum of drumEvents) {
+        const beat = drumStepToBeat(drum.stepIndex, stepsPerBar, beatsPerBar, clip.startBeat);
+        const stepKey = makeDrumGrooveStepKey(drum.lane, beat);
+        const hit = resolveDrumGrooveHit({
+          beat,
+          lane: drum.lane,
+          velocity: drum.velocity,
+          probability: readDrumEventProbability(drum, groove.probability),
+          swing: groove.swing,
+          humanizeVelocity: groove.humanizeVelocity,
+          seed: groove.seed,
+          stepKey,
+          stepsPerBar,
+          beatsPerBar,
+        });
+        if (!hit) continue;
+
+        events.push({
+          beat: hit.beat,
+          payload: {
+            kind: 'drum',
+            trackId: track.id,
+            lane: drum.lane,
+            velocity: hit.velocity,
+          } satisfies SchedulePayload,
+        });
+      }
+    }
+  }
+
+  return events;
+}
+
+/**
  * Render a project to a WAV Blob via an OfflineAudioContext.
  *
  * Builds the per-track graph + voices, schedules every note/drum event at its
@@ -143,7 +258,7 @@ export async function renderProjectToWav(project: Project): Promise<Blob> {
   }
 
   // Schedule everything. anchorBeat=0, anchorTime=0 => beat n maps to n*spb.
-  const events = buildScheduleEvents(project);
+  const events = buildWavScheduleEvents(project);
   const spb = secondsPerBeat(project.bpm);
   for (const ev of events) {
     const time = beatToTime(ev.beat, project.bpm, 0, 0);

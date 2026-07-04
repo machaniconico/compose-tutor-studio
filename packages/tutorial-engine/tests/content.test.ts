@@ -165,3 +165,29 @@ describe('goal kinds', () => {
     }
   });
 });
+
+describe('compose-plus learning-loop integrity', () => {
+  it('compose-plus-3 gates the groove step on drum.grooveChanged (not transport.played)', () => {
+    const lesson = getLessonById('compose-plus-3');
+    expect(lesson).toBeDefined();
+    const grooveStep = lesson!.steps.find((s) => s.id === 'compose-plus-3-s2');
+    expect(grooveStep, 'compose-plus-3-s2 missing').toBeDefined();
+    expect(grooveStep!.goal.kind).toBe('event');
+    if (grooveStep!.goal.kind !== 'event') throw new Error('expected event goal');
+    expect(grooveStep!.goal.eventType).toBe('drum.grooveChanged');
+    expect(grooveStep!.goal.eventType).not.toBe('transport.played');
+    // Must gate on a real swing threshold, not merely pressing Play.
+    expect(grooveStep!.goal.match?.swingAtLeast).toBeGreaterThan(0);
+  });
+
+  it('compose-plus-4 gates the effect step on effect.added (not transport.played)', () => {
+    const lesson = getLessonById('compose-plus-4');
+    expect(lesson).toBeDefined();
+    const effectStep = lesson!.steps.find((s) => s.id === 'compose-plus-4-s2');
+    expect(effectStep, 'compose-plus-4-s2 missing').toBeDefined();
+    expect(effectStep!.goal.kind).toBe('event');
+    if (effectStep!.goal.kind !== 'event') throw new Error('expected event goal');
+    expect(effectStep!.goal.eventType).toBe('effect.added');
+    expect(effectStep!.goal.eventType).not.toBe('transport.played');
+  });
+});

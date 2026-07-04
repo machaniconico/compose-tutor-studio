@@ -18,8 +18,13 @@ const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'blues', label: 'ブルース' },
 ];
 
+type TransportBarProps = {
+  /** Re-open the first-launch onboarding / guided entry point. */
+  onOpenGuide: () => void;
+};
+
 /** Top transport + project metadata bar. */
-export function TransportBar() {
+export function TransportBar({ onOpenGuide }: TransportBarProps) {
   const project = useStore((s) => s.project);
   const transport = useStore((s) => s.transport);
   const isPlaying = transport.isPlaying;
@@ -47,6 +52,15 @@ export function TransportBar() {
     <header className="transport-bar">
       <div className="transport-bar__row">
         <ProjectMenu />
+
+        <button
+          type="button"
+          className="transport-bar__guide"
+          aria-label="はじめてガイドを開く"
+          onClick={onOpenGuide}
+        >
+          はじめてガイド
+        </button>
 
         <button
           type="button"
