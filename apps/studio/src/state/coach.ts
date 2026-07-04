@@ -67,6 +67,9 @@ function trackByName(project: Project, name: string): Track | undefined {
 /** トラックが持つノートの総数。 */
 function noteCountOf(track: Track | undefined): number {
   if (!track) return 0;
+  if (track.type === 'drum') {
+    return track.clips.reduce((sum, clip) => sum + (clip.drumEvents?.length ?? 0), 0);
+  }
   return track.clips.reduce((sum, clip) => sum + (clip.notes?.length ?? 0), 0);
 }
 

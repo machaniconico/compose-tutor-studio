@@ -41,6 +41,14 @@ export type DueEvent = {
   payload: unknown;
 };
 
+/** A raw lookahead window advanced by the scheduler tick. */
+export type ScheduleWindow = {
+  /** Half-open window start, in unwrapped playhead beats. */
+  startBeat: number;
+  /** Half-open window end, in unwrapped playhead beats. */
+  endBeat: number;
+};
+
 export type DrumGrooveHitInput = {
   beat: number;
   lane: string;
@@ -428,9 +436,13 @@ export type FireFn = (events: DueEvent[]) => void;
 /** Called once when the playhead passes the project end with loop off. */
 export type EndFn = () => void;
 
+/** Called whenever the scheduler advances its raw lookahead window. */
+export type ScheduleWindowFn = (window: ScheduleWindow) => void;
+
 export type SchedulerOptions = {
   clock: ClockFn;
   fire: FireFn;
+  onScheduleWindow?: ScheduleWindowFn;
   onEnd?: EndFn;
   /** Override timer interval (ms); defaults to {@link TICK_MS}. */
   tickMs?: number;
@@ -446,6 +458,7 @@ export type SchedulerOptions = {
 export class Scheduler {
   private readonly clock: ClockFn;
   private readonly fire: FireFn;
+  private readonly onScheduleWindow?: ScheduleWindowFn;
   private readonly onEnd?: EndFn;
   private readonly tickMs: number;
   private readonly lookaheadS: number;
@@ -467,6 +480,7 @@ export class Scheduler {
   constructor(options: SchedulerOptions) {
     this.clock = options.clock;
     this.fire = options.fire;
+    this.onScheduleWindow = options.onScheduleWindow;
     this.onEnd = options.onEnd;
     this.tickMs = options.tickMs ?? TICK_MS;
     this.lookaheadS = options.lookaheadS ?? LOOKAHEAD_S;
@@ -536,9 +550,11 @@ export class Scheduler {
     const effectiveHorizon = this.loop ? horizonBeat : Math.min(horizonBeat, this.endBeat);
 
     if (effectiveHorizon > this.scheduledBeat) {
+      const windowStartBeat = this.scheduledBeat;
+      this.onScheduleWindow?.({ startBeat: windowStartBeat, endBeat: effectiveHorizon });
       const due = nextEventsInWindow(
         this.events,
-        this.scheduledBeat,
+        windowStartBeat,
         effectiveHorizon,
         this.bpm,
         this.anchorBeat,

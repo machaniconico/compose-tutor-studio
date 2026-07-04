@@ -99,13 +99,21 @@ export function addTrackEffect(trackId: string, type: InsertEffectType): string 
   const id = uid('fx');
   const effect = createDefaultEffectConfig(type, id);
   let added = false;
+  let trackName = '';
   useStore.getState().applyProjectChange((project) =>
     mapTracks(project, (track) => {
       if (track.id !== trackId || track.type === 'master') return track;
       added = true;
+      trackName = track.name;
       return { ...track, effects: [...track.effects, effect] };
     }),
   );
+  if (added) {
+    publishAppEvent({
+      type: 'effect.added',
+      payload: { trackId, trackName, effectType: type },
+    });
+  }
   return added ? id : null;
 }
 

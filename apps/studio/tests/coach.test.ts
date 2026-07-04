@@ -84,6 +84,37 @@ describe('analyzeProjectForCoaching', () => {
     expect(ids(suggestions)).toContain('melody-empty');
   });
 
+  it('suggests adding drums when the drum track is truly empty', () => {
+    const project = clone(createDefaultProject());
+    const drumTrack = project.tracks.find((t) => t.type === 'drum');
+    expect(drumTrack).toBeTruthy();
+    if (drumTrack) {
+      drumTrack.clips = drumTrack.clips.map((c) => ({ ...c, notes: [], drumEvents: [] }));
+    }
+
+    const suggestions = analyzeProjectForCoaching(project);
+    expect(ids(suggestions)).toContain('arr-drums');
+  });
+
+  it('does not suggest empty drums when drum clips contain drumEvents', () => {
+    const project = clone(createDefaultProject());
+    const drumTrack = project.tracks.find((t) => t.type === 'drum');
+    expect(drumTrack).toBeTruthy();
+    if (drumTrack) {
+      drumTrack.clips = drumTrack.clips.map((c, index) => ({
+        ...c,
+        notes: [],
+        drumEvents:
+          index === 0
+            ? [{ id: 'kick-1', lane: 'kick', stepIndex: 0, velocity: 96 }]
+            : [],
+      }));
+    }
+
+    const suggestions = analyzeProjectForCoaching(project);
+    expect(ids(suggestions)).not.toContain('arr-drums');
+  });
+
   it('never throws on unknown chord symbols', () => {
     const project = clone(createDefaultProject());
     project.chordTrack = [chord('??', 0), chord('Xyz7', 4), chord('C', 8)];

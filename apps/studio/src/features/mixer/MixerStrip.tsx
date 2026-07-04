@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { EffectConfig, Track } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import {
@@ -7,10 +8,16 @@ import {
 } from '../../state/editorActions';
 import {
   INSERT_EFFECT_TYPES,
+  compressorAttackToSeconds,
+  compressorRatioToValue,
+  compressorReleaseToSeconds,
+  compressorThresholdToDb,
+  eqGainToDb,
   isInsertEffectType,
   normalizeEffectConfig,
   type InsertEffectType,
 } from '../../audio/effects';
+import { readMeterLevel, type MeterLevel } from '../../audio/graph';
 
 type EffectInfo = {
   label: string;
@@ -41,6 +48,16 @@ const EFFECT_INFO: Record<InsertEffectType, EffectInfo> = {
     addLabel: '響きを追加',
     summary: '部屋の残響のように広げます',
   },
+  eq: {
+    label: 'イコライザー',
+    addLabel: 'イコライザーを追加',
+    summary: '低音・中音・高音の明るさを調整します',
+  },
+  compressor: {
+    label: 'コンプ',
+    addLabel: 'コンプを追加',
+    summary: '大きすぎる音をおさえて音量を揃えます',
+  },
 };
 
 const PARAM_CONTROLS: Record<InsertEffectType, ParamControl[]> = {
@@ -57,6 +74,17 @@ const PARAM_CONTROLS: Record<InsertEffectType, ParamControl[]> = {
     { key: 'wet', label: '響き', low: '近い', high: '広い' },
     { key: 'decay', label: '余韻', low: '短い', high: '長い' },
   ],
+  eq: [
+    { key: 'lowGain', label: '低音', low: 'へらす', high: 'ふやす' },
+    { key: 'midGain', label: '中音', low: 'へらす', high: 'ふやす' },
+    { key: 'highGain', label: '高音', low: 'やわらかい', high: '明るい' },
+  ],
+  compressor: [
+    { key: 'threshold', label: 'かかり始め', low: '小さい音から', high: '大きい音だけ' },
+    { key: 'ratio', label: 'そろえる強さ', low: '自然', high: '強い' },
+    { key: 'attack', label: '反応', low: '速い', high: 'ゆっくり' },
+    { key: 'release', label: '戻り', low: '短い', high: '長い' },
+  ],
 };
 
 /** Convert a linear gain (0..2) to an approximate dB label for display. */
@@ -72,6 +100,69 @@ function panLabel(pan: number): string {
   if (Math.abs(pan) < 0.02) return 'C';
   const amount = Math.round(Math.abs(pan) * 100);
   return pan < 0 ? `L${amount}` : `R${amount}`;
+}
+
+function dbControlLabel(db: number): string {
+  if (Math.abs(db) < 0.05) return '0.0 dB';
+  return `${db > 0 ? '+' : ''}${db.toFixed(1)} dB`;
+}
+
+function formatEffectParam(type: InsertEffectType, key: string, value: number): string {
+  if (type === 'eq') return dbControlLabel(eqGainToDb(value));
+  if (type === 'compressor' && key === 'threshold') {
+    return `${Math.round(compressorThresholdToDb(value))} dB`;
+  }
+  if (type === 'compressor' && key === 'ratio') {
+    return `${compressorRatioToValue(value).toFixed(1)}:1`;
+  }
+  if (type === 'compressor' && key === 'attack') {
+    return `${Math.round(compressorAttackToSeconds(value) * 1_000)} ms`;
+  }
+  if (type === 'compressor' && key === 'release') {
+    return `${Math.round(compressorReleaseToSeconds(value) * 1_000)} ms`;
+  }
+  return `${Math.round(value * 100)}%`;
+}
+
+function meterDbLabel(level: number): string {
+  if (level <= 0.0001) return '-∞ dB';
+  const db = 20 * Math.log10(level);
+  return `${db > 0 ? '+' : ''}${db.toFixed(1)} dB`;
+}
+
+function useMeterLevel(trackId: string): MeterLevel {
+  const [level, setLevel] = useState<MeterLevel>(() => readMeterLevel(trackId));
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      setLevel(readMeterLevel(trackId));
+      return;
+    }
+
+    let raf = 0;
+    let mounted = true;
+    const tick = () => {
+      if (!mounted) return;
+      // readMeterLevel returns a fresh object each frame; only re-render when the
+      // value actually changed so an idle/silent mixer doesn't churn at 60fps.
+      setLevel((prev) => {
+        const next = readMeterLevel(trackId);
+        if (prev.peak === next.peak && prev.rms === next.rms && prev.clipping === next.clipping) {
+          return prev;
+        }
+        return next;
+      });
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    raf = window.requestAnimationFrame(tick);
+    return () => {
+      mounted = false;
+      window.cancelAnimationFrame(raf);
+    };
+  }, [trackId]);
+
+  return level;
 }
 
 /**
@@ -102,6 +193,7 @@ export function MixerStrip() {
 
 function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
   const { track, isMaster = false } = props;
+  const meter = useMeterLevel(track.id);
   const setTrackVolume = useStore((s) => s.setTrackVolume);
   const setTrackPan = useStore((s) => s.setTrackPan);
   const toggleMute = useStore((s) => s.toggleMute);
@@ -121,6 +213,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
       </div>
 
       <div className="mix-ch__fader">
+        <LevelMeter level={meter} trackName={isMaster ? 'マスター' : track.name} />
         <input
           className="mix-ch__volume"
           type="range"
@@ -173,6 +266,69 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
       ) : null}
 
       {!isMaster ? <EffectRack track={track} /> : null}
+    </div>
+  );
+}
+
+function LevelMeter(props: { level: MeterLevel; trackName: string }) {
+  const { level, trackName } = props;
+  const rmsPercent = Math.min(100, Math.max(0, level.rms * 100));
+  const peakPercent = Math.min(100, Math.max(0, level.peak * 100));
+  const fillColor = level.clipping ? '#dc2626' : '#22c55e';
+  const label = `${trackName} レベル RMS ${meterDbLabel(level.rms)} / Peak ${meterDbLabel(level.peak)}`;
+
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      <div
+        role="meter"
+        aria-label={label}
+        aria-valuemin={-60}
+        aria-valuemax={0}
+        aria-valuenow={Math.max(-60, Math.min(0, Math.round(20 * Math.log10(level.rms || 0.0001))))}
+        style={{
+          position: 'relative',
+          height: 8,
+          overflow: 'hidden',
+          borderRadius: 4,
+          background: 'rgba(148, 163, 184, 0.25)',
+          boxShadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.3)',
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'block',
+            width: `${rmsPercent}%`,
+            height: '100%',
+            background: fillColor,
+            transition: 'width 70ms linear, background-color 120ms linear',
+          }}
+        />
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: `${peakPercent}%`,
+            width: 2,
+            transform: 'translateX(-1px)',
+            background: level.clipping ? '#ef4444' : '#f59e0b',
+          }}
+        />
+      </div>
+      {level.clipping ? (
+        <span
+          role="alert"
+          style={{ color: '#dc2626', fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}
+        >
+          音が大きすぎます
+        </span>
+      ) : (
+        <span aria-hidden="true" style={{ color: 'var(--muted)', fontSize: 11, lineHeight: 1.2 }}>
+          Peak {meterDbLabel(level.peak)}
+        </span>
+      )}
     </div>
   );
 }
@@ -261,7 +417,7 @@ function EffectEditor(props: { trackId: string; effect: EffectConfig }) {
         return (
           <label key={control.key} style={{ display: 'grid', gap: 3 }}>
             <span>
-              {control.label} {Math.round(value * 100)}%
+              {control.label} {formatEffectParam(effect.type, control.key, value)}
             </span>
             <input
               type="range"

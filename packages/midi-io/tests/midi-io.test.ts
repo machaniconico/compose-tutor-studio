@@ -10,6 +10,95 @@ import type { MidiMessage } from '../src/smf.js';
 import { exportProjectToMidi, exportNotesToMidi } from '../src/export.js';
 import type { Project, NoteEvent } from '@cts/project-model';
 
+type ParsedMidiEvent = {
+  tick: number;
+  status: number;
+  data: number[];
+};
+
+function readVarLenAt(bytes: Uint8Array, offset: number): { value: number; offset: number } {
+  let value = 0;
+  let cursor = offset;
+  while (cursor < bytes.length) {
+    const byte = bytes[cursor++] ?? 0;
+    value = (value << 7) | (byte & 0x7f);
+    if ((byte & 0x80) === 0) break;
+  }
+  return { value, offset: cursor };
+}
+
+function midiTracks(midi: Uint8Array): Uint8Array[] {
+  const view = new DataView(midi.buffer, midi.byteOffset, midi.byteLength);
+  const tracks: Uint8Array[] = [];
+  let offset = 14;
+  while (offset < midi.length) {
+    const length = view.getUint32(offset + 4, false);
+    tracks.push(midi.slice(offset + 8, offset + 8 + length));
+    offset += 8 + length;
+  }
+  return tracks;
+}
+
+function parseTrackEvents(track: Uint8Array): ParsedMidiEvent[] {
+  const events: ParsedMidiEvent[] = [];
+  let offset = 0;
+  let tick = 0;
+  let runningStatus = 0;
+
+  while (offset < track.length) {
+    const delta = readVarLenAt(track, offset);
+    tick += delta.value;
+    offset = delta.offset;
+
+    let status = track[offset++] ?? 0;
+    if (status < 0x80) {
+      offset--;
+      status = runningStatus;
+    } else if (status < 0xf0) {
+      runningStatus = status;
+    }
+
+    if (status === 0xff) {
+      const type = track[offset++] ?? 0;
+      const length = readVarLenAt(track, offset);
+      offset = length.offset + length.value;
+      if (type === 0x2f) break;
+      continue;
+    }
+
+    if (status === 0xf0 || status === 0xf7) {
+      const length = readVarLenAt(track, offset);
+      offset = length.offset + length.value;
+      continue;
+    }
+
+    const dataLength = (status & 0xf0) === 0xc0 || (status & 0xf0) === 0xd0 ? 1 : 2;
+    const data = Array.from(track.slice(offset, offset + dataLength));
+    offset += dataLength;
+    events.push({ tick, status, data });
+  }
+
+  return events;
+}
+
+function noteOnTicks(midi: Uint8Array, status: number, pitch: number): number[] {
+  return midiTracks(midi)
+    .flatMap((track) => parseTrackEvents(track))
+    .filter((event) => event.status === status && event.data[0] === pitch && (event.data[1] ?? 0) > 0)
+    .map((event) => event.tick);
+}
+
+function drumStepToBeat(
+  stepIndex: number,
+  stepsPerBar: number,
+  beatsPerBar: number,
+  clipStartBeat: number,
+): number {
+  const steps = stepsPerBar > 0 ? stepsPerBar : 16;
+  const bpb = beatsPerBar > 0 ? beatsPerBar : 4;
+  return clipStartBeat + stepIndex * (bpb / steps);
+}
+
 // ---------------------------------------------------------------------------
 // writeVarLen
 // ---------------------------------------------------------------------------
@@ -320,5 +409,123 @@ describe('exportProjectToMidi', () => {
     const midi = exportProjectToMidi(project, { ppq: 960 });
     const view = new DataView(midi.buffer);
     expect(view.getUint16(12, false)).toBe(960);
+  });
+
+  it('exports 3/4 drum steps at the same beats as drumStepToBeat', () => {
+    const drumProject: Project = {
+      ...project,
+      timeSignature: [3, 4],
+      lengthBars: 2,
+      tracks: [
+        {
+          id: 'track-drums',
+          name: 'Drums',
+          type: 'drum',
+          clips: [
+            {
+              id: 'clip-drums',
+              trackId: 'track-drums',
+              type: 'drum',
+              startBeat: 3,
+              lengthBeats: 6,
+              loop: false,
+              stepsPerBar: 16,
+              drumEvents: [
+                { id: 'd1', lane: 'kick', stepIndex: 0, velocity: 100 },
+                { id: 'd2', lane: 'kick', stepIndex: 8, velocity: 100 },
+                { id: 'd3', lane: 'kick', stepIndex: 16, velocity: 100 },
+              ],
+            },
+          ],
+          volume: 1,
+          pan: 0,
+          mute: false,
+          solo: false,
+          effects: [],
+        },
+      ],
+      chordTrack: [],
+    };
+
+    const midi = exportProjectToMidi(drumProject);
+    const expectedBeats = [0, 8, 16].map((stepIndex) => drumStepToBeat(stepIndex, 16, 3, 3));
+    expect(noteOnTicks(midi, 0x99, 36)).toEqual(expectedBeats.map((beat) => Math.round(beat * PPQ)));
+  });
+
+  it('uses the playback fallback when 3/4 drum stepsPerBar is invalid', () => {
+    const drumProject: Project = {
+      ...project,
+      timeSignature: [3, 4],
+      lengthBars: 2,
+      tracks: [
+        {
+          id: 'track-drums',
+          name: 'Drums',
+          type: 'drum',
+          clips: [
+            {
+              id: 'clip-drums',
+              trackId: 'track-drums',
+              type: 'drum',
+              startBeat: 3,
+              lengthBeats: 6,
+              loop: false,
+              stepsPerBar: 0,
+              drumEvents: [
+                { id: 'd1', lane: 'kick', stepIndex: 8, velocity: 100 },
+              ],
+            },
+          ],
+          volume: 1,
+          pan: 0,
+          mute: false,
+          solo: false,
+          effects: [],
+        },
+      ],
+      chordTrack: [],
+    };
+
+    const midi = exportProjectToMidi(drumProject);
+    const expectedBeat = drumStepToBeat(8, 0, 3, 3);
+    expect(noteOnTicks(midi, 0x99, 36)).toEqual([Math.round(expectedBeat * PPQ)]);
+  });
+
+  it('keeps 4/4 drum step export timing unchanged', () => {
+    const drumProject: Project = {
+      ...project,
+      tracks: [
+        {
+          id: 'track-drums',
+          name: 'Drums',
+          type: 'drum',
+          clips: [
+            {
+              id: 'clip-drums',
+              trackId: 'track-drums',
+              type: 'drum',
+              startBeat: 0,
+              lengthBeats: 4,
+              loop: false,
+              stepsPerBar: 16,
+              drumEvents: [
+                { id: 'd1', lane: 'kick', stepIndex: 0, velocity: 100 },
+                { id: 'd2', lane: 'kick', stepIndex: 8, velocity: 100 },
+                { id: 'd3', lane: 'kick', stepIndex: 16, velocity: 100 },
+              ],
+            },
+          ],
+          volume: 1,
+          pan: 0,
+          mute: false,
+          solo: false,
+          effects: [],
+        },
+      ],
+      chordTrack: [],
+    };
+
+    const midi = exportProjectToMidi(drumProject);
+    expect(noteOnTicks(midi, 0x99, 36)).toEqual([0, 2 * PPQ, 4 * PPQ]);
   });
 });

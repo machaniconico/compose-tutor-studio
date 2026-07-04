@@ -3,6 +3,7 @@ import { useStore } from '../../state/store';
 import type { Clip, DrumEvent, DrumLane, Track } from '@cts/project-model';
 import { DRUM_PATTERNS, applyDrumPattern, setDrumStepVelocity } from '../../state/editorActions';
 import { makeDrumGrooveStepKey, setDrumGrooveRuntimeOptions } from '../../audio/scheduler';
+import { publishAppEvent } from '../../state/appEvents';
 
 /** Six lanes shown top-to-bottom, with Japanese labels. */
 const LANES: { lane: DrumLane; label: string }[] = [
@@ -169,6 +170,9 @@ export function DrumGrid() {
       : (byKey.get(`${selectedStep.lane}:${selectedStep.stepIndex}`) as DrumEventWithGroove | undefined);
   const selectedLaneLabel = LANES.find((lane) => lane.lane === selectedStep?.lane)?.label;
 
+  const ownerTrackId =
+    tracks.find((track) => track.clips.some((c) => c.id === clip.id))?.id ?? '';
+
   const updateGroove = (patch: Partial<DrumGrooveSettings>): void => {
     applyProjectChange((project) => ({
       ...project,
@@ -184,6 +188,16 @@ export function DrumGrid() {
         }),
       })),
     }));
+    const merged = { ...groove, ...patch };
+    publishAppEvent({
+      type: 'drum.grooveChanged',
+      payload: {
+        trackId: ownerTrackId,
+        swing: merged.swing,
+        probability: merged.probability,
+        humanizeVelocity: merged.humanizeVelocity,
+      },
+    });
   };
 
   const updateSelectedProbability = (probability: number): void => {

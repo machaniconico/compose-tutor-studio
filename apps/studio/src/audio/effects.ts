@@ -1,10 +1,17 @@
 import type { EffectConfig, EffectType } from '@cts/project-model';
 
-export type InsertEffectType = Extract<EffectType, 'filter' | 'delay' | 'reverb'>;
+export type InsertEffectType = Extract<EffectType, 'filter' | 'delay' | 'reverb' | 'eq' | 'compressor'>;
 type FilterEffectConfig = EffectConfig & { type: 'filter' };
 type DelayEffectConfig = EffectConfig & { type: 'delay' };
 type ReverbEffectConfig = EffectConfig & { type: 'reverb' };
-type InsertEffectConfig = FilterEffectConfig | DelayEffectConfig | ReverbEffectConfig;
+type EqEffectConfig = EffectConfig & { type: 'eq' };
+type CompressorEffectConfig = EffectConfig & { type: 'compressor' };
+type InsertEffectConfig =
+  | FilterEffectConfig
+  | DelayEffectConfig
+  | ReverbEffectConfig
+  | EqEffectConfig
+  | CompressorEffectConfig;
 
 export type BuiltEffectChain = {
   input: AudioNode | null;
@@ -20,12 +27,20 @@ type EffectStage = {
   nodes: AudioNode[];
 };
 
-export const INSERT_EFFECT_TYPES: readonly InsertEffectType[] = ['filter', 'delay', 'reverb'];
+export const INSERT_EFFECT_TYPES: readonly InsertEffectType[] = [
+  'filter',
+  'delay',
+  'reverb',
+  'eq',
+  'compressor',
+];
 
 export const DEFAULT_EFFECT_PARAMS = {
   filter: { cutoff: 0.7, resonance: 0.15 },
   delay: { delayTime: 0.25, feedback: 0.25, mix: 0.25 },
   reverb: { wet: 0.25, decay: 0.45 },
+  eq: { lowGain: 0.5, midGain: 0.5, highGain: 0.5 },
+  compressor: { threshold: 0.55, ratio: 0.35, attack: 0.12, release: 0.35 },
 } as const satisfies Record<InsertEffectType, Record<string, number>>;
 
 const FILTER_MIN_HZ = 80;
@@ -37,9 +52,29 @@ const DELAY_MAX_SECONDS = 0.75;
 const DELAY_MAX_FEEDBACK = 0.85;
 const REVERB_MIN_SECONDS = 0.15;
 const REVERB_MAX_SECONDS = 3;
+const EQ_MIN_DB = -12;
+const EQ_MAX_DB = 12;
+const EQ_LOW_HZ = 160;
+const EQ_MID_HZ = 1_000;
+const EQ_HIGH_HZ = 5_000;
+const EQ_MID_Q = 1.1;
+const COMPRESSOR_MIN_THRESHOLD_DB = -48;
+const COMPRESSOR_MAX_THRESHOLD_DB = -6;
+const COMPRESSOR_MIN_RATIO = 1;
+const COMPRESSOR_MAX_RATIO = 12;
+const COMPRESSOR_MIN_ATTACK_SECONDS = 0.003;
+const COMPRESSOR_MAX_ATTACK_SECONDS = 0.08;
+const COMPRESSOR_MIN_RELEASE_SECONDS = 0.05;
+const COMPRESSOR_MAX_RELEASE_SECONDS = 0.8;
 
 export function isInsertEffectType(type: string): type is InsertEffectType {
-  return type === 'filter' || type === 'delay' || type === 'reverb';
+  return (
+    type === 'filter' ||
+    type === 'delay' ||
+    type === 'reverb' ||
+    type === 'eq' ||
+    type === 'compressor'
+  );
 }
 
 /** Clamp normalized effect controls into 0..1. Non-finite values use fallback. */
@@ -120,6 +155,30 @@ export function decayToSeconds(decay: number): number {
     (REVERB_MAX_SECONDS - REVERB_MIN_SECONDS);
 }
 
+export function eqGainToDb(gain: number): number {
+  return EQ_MIN_DB + clamp01(gain, 0.5) * (EQ_MAX_DB - EQ_MIN_DB);
+}
+
+export function compressorThresholdToDb(threshold: number): number {
+  return COMPRESSOR_MIN_THRESHOLD_DB + clamp01(threshold, DEFAULT_EFFECT_PARAMS.compressor.threshold) *
+    (COMPRESSOR_MAX_THRESHOLD_DB - COMPRESSOR_MIN_THRESHOLD_DB);
+}
+
+export function compressorRatioToValue(ratio: number): number {
+  return COMPRESSOR_MIN_RATIO + clamp01(ratio, DEFAULT_EFFECT_PARAMS.compressor.ratio) *
+    (COMPRESSOR_MAX_RATIO - COMPRESSOR_MIN_RATIO);
+}
+
+export function compressorAttackToSeconds(attack: number): number {
+  return COMPRESSOR_MIN_ATTACK_SECONDS + clamp01(attack, DEFAULT_EFFECT_PARAMS.compressor.attack) *
+    (COMPRESSOR_MAX_ATTACK_SECONDS - COMPRESSOR_MIN_ATTACK_SECONDS);
+}
+
+export function compressorReleaseToSeconds(release: number): number {
+  return COMPRESSOR_MIN_RELEASE_SECONDS + clamp01(release, DEFAULT_EFFECT_PARAMS.compressor.release) *
+    (COMPRESSOR_MAX_RELEASE_SECONDS - COMPRESSOR_MIN_RELEASE_SECONDS);
+}
+
 export function buildEffectChain(
   ctx: BaseAudioContext,
   configs: readonly EffectConfig[],
@@ -168,7 +227,9 @@ function createStage(
 ): EffectStage {
   if (config.type === 'filter') return createFilterStage(ctx, config);
   if (config.type === 'delay') return createDelayStage(ctx, config);
-  return createReverbStage(ctx, config);
+  if (config.type === 'reverb') return createReverbStage(ctx, config);
+  if (config.type === 'eq') return createEqStage(ctx, config);
+  return createCompressorStage(ctx, config);
 }
 
 function createFilterStage(
@@ -251,6 +312,64 @@ function createReverbStage(
     input,
     output,
     nodes: [input, dry, convolver, wet, output],
+  };
+}
+
+function createEqStage(
+  ctx: BaseAudioContext,
+  config: EqEffectConfig,
+): EffectStage {
+  const low = ctx.createBiquadFilter();
+  const mid = ctx.createBiquadFilter();
+  const high = ctx.createBiquadFilter();
+
+  low.type = 'lowshelf';
+  low.frequency.value = EQ_LOW_HZ;
+  low.gain.value = eqGainToDb(config.params.lowGain ?? DEFAULT_EFFECT_PARAMS.eq.lowGain);
+
+  mid.type = 'peaking';
+  mid.frequency.value = EQ_MID_HZ;
+  mid.Q.value = EQ_MID_Q;
+  mid.gain.value = eqGainToDb(config.params.midGain ?? DEFAULT_EFFECT_PARAMS.eq.midGain);
+
+  high.type = 'highshelf';
+  high.frequency.value = EQ_HIGH_HZ;
+  high.gain.value = eqGainToDb(config.params.highGain ?? DEFAULT_EFFECT_PARAMS.eq.highGain);
+
+  low.connect(mid);
+  mid.connect(high);
+
+  return {
+    input: low,
+    output: high,
+    nodes: [low, mid, high],
+  };
+}
+
+function createCompressorStage(
+  ctx: BaseAudioContext,
+  config: CompressorEffectConfig,
+): EffectStage {
+  const compressor = ctx.createDynamicsCompressor();
+
+  compressor.threshold.value = compressorThresholdToDb(
+    config.params.threshold ?? DEFAULT_EFFECT_PARAMS.compressor.threshold,
+  );
+  compressor.knee.value = 24;
+  compressor.ratio.value = compressorRatioToValue(
+    config.params.ratio ?? DEFAULT_EFFECT_PARAMS.compressor.ratio,
+  );
+  compressor.attack.value = compressorAttackToSeconds(
+    config.params.attack ?? DEFAULT_EFFECT_PARAMS.compressor.attack,
+  );
+  compressor.release.value = compressorReleaseToSeconds(
+    config.params.release ?? DEFAULT_EFFECT_PARAMS.compressor.release,
+  );
+
+  return {
+    input: compressor,
+    output: compressor,
+    nodes: [compressor],
   };
 }
 

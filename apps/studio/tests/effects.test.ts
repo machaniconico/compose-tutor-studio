@@ -3,8 +3,14 @@ import type { EffectConfig, Track } from '@cts/project-model';
 import {
   buildEffectChain,
   clamp01,
+  compressorAttackToSeconds,
+  compressorRatioToValue,
+  compressorReleaseToSeconds,
+  compressorThresholdToDb,
+  createDefaultEffectConfig,
   decayToSeconds,
   delayTimeToSeconds,
+  eqGainToDb,
   feedbackToGain,
   normalizeEffectConfig,
 } from '../src/audio/effects';
@@ -45,10 +51,19 @@ class FakeBiquadFilter extends FakeAudioNode {
   type: BiquadFilterType = 'lowpass';
   readonly frequency = new FakeAudioParam();
   readonly Q = new FakeAudioParam();
+  readonly gain = new FakeAudioParam();
 }
 
 class FakeDelay extends FakeAudioNode {
   readonly delayTime = new FakeAudioParam();
+}
+
+class FakeDynamicsCompressor extends FakeAudioNode {
+  readonly threshold = new FakeAudioParam();
+  readonly knee = new FakeAudioParam();
+  readonly ratio = new FakeAudioParam();
+  readonly attack = new FakeAudioParam();
+  readonly release = new FakeAudioParam();
 }
 
 class FakeConvolver extends FakeAudioNode {
@@ -79,6 +94,7 @@ class FakeContext {
   readonly panners: FakeStereoPanner[] = [];
   readonly filters: FakeBiquadFilter[] = [];
   readonly delays: FakeDelay[] = [];
+  readonly compressors: FakeDynamicsCompressor[] = [];
   readonly convolvers: FakeConvolver[] = [];
 
   createGain(): FakeGain {
@@ -102,6 +118,12 @@ class FakeContext {
   createDelay(): FakeDelay {
     const node = new FakeDelay();
     this.delays.push(node);
+    return node;
+  }
+
+  createDynamicsCompressor(): FakeDynamicsCompressor {
+    const node = new FakeDynamicsCompressor();
+    this.compressors.push(node);
     return node;
   }
 
@@ -167,6 +189,43 @@ describe('effect parameter clamps', () => {
     expect(reverb.params.wet).toBe(0.8);
     expect(reverb.params.decay).toBe(0);
   });
+
+  it('normalizes eq/compressor params with safe defaults', () => {
+    const eq = normalizeEffectConfig(
+      effect('eq', { lowGain: -1, midGain: Number.NaN, highGain: 2 }),
+    );
+    expect(eq.params.lowGain).toBe(0);
+    expect(eq.params.midGain).toBe(0.5);
+    expect(eq.params.highGain).toBe(1);
+
+    const compressor = normalizeEffectConfig(
+      effect('compressor', {
+        threshold: Number.POSITIVE_INFINITY,
+        ratio: 2,
+        attack: -1,
+        release: Number.NaN,
+      }),
+    );
+    expect(compressor.params.threshold).toBe(0.55);
+    expect(compressor.params.ratio).toBe(1);
+    expect(compressor.params.attack).toBe(0);
+    expect(compressor.params.release).toBe(0.35);
+  });
+
+  it('creates default eq/compressor configs', () => {
+    expect(createDefaultEffectConfig('eq', 'eq-1')).toEqual({
+      id: 'eq-1',
+      type: 'eq',
+      enabled: true,
+      params: { lowGain: 0.5, midGain: 0.5, highGain: 0.5 },
+    });
+    expect(createDefaultEffectConfig('compressor', 'comp-1')).toEqual({
+      id: 'comp-1',
+      type: 'compressor',
+      enabled: true,
+      params: { threshold: 0.55, ratio: 0.35, attack: 0.12, release: 0.35 },
+    });
+  });
 });
 
 describe('buildEffectChain', () => {
@@ -202,6 +261,49 @@ describe('buildEffectChain', () => {
       Math.floor(fake.sampleRate * decayToSeconds(0.2)),
     );
     expect(fake.filters[0]?.connections[0]).toBe(fake.gains[0]);
+  });
+
+  it('creates eq and compressor stages with clamped Web Audio values', () => {
+    const context = ctx();
+    const fake = asFakeContext(context);
+    const chain = buildEffectChain(context, [
+      effect('eq', { lowGain: -1, midGain: 0.5, highGain: 2 }),
+      effect('compressor', {
+        threshold: Number.NaN,
+        ratio: 2,
+        attack: -1,
+        release: Number.POSITIVE_INFINITY,
+      }),
+    ]);
+
+    expect(chain.isBypassed).toBe(false);
+    expect(fake.filters.slice(0, 3).map((filter) => filter.type)).toEqual([
+      'lowshelf',
+      'peaking',
+      'highshelf',
+    ]);
+    expect(fake.filters[0]?.gain.value).toBe(eqGainToDb(0));
+    expect(fake.filters[1]?.gain.value).toBe(eqGainToDb(0.5));
+    expect(fake.filters[2]?.gain.value).toBe(eqGainToDb(1));
+    expect(fake.filters[0]?.connections[0]).toBe(fake.filters[1]);
+    expect(fake.filters[1]?.connections[0]).toBe(fake.filters[2]);
+    expect(fake.filters[2]?.connections[0]).toBe(fake.compressors[0]);
+
+    expect(fake.compressors[0]?.threshold.value).toBe(compressorThresholdToDb(0.55));
+    expect(fake.compressors[0]?.ratio.value).toBe(compressorRatioToValue(1));
+    expect(fake.compressors[0]?.attack.value).toBe(compressorAttackToSeconds(0));
+    expect(fake.compressors[0]?.release.value).toBe(compressorReleaseToSeconds(0.35));
+  });
+
+  it('builds eq/compressor stages from empty params without throwing', () => {
+    const context = ctx();
+    const fake = asFakeContext(context);
+
+    expect(() =>
+      buildEffectChain(context, [effect('eq', {}), effect('compressor', {})]),
+    ).not.toThrow();
+    expect(fake.filters).toHaveLength(3);
+    expect(fake.compressors).toHaveLength(1);
   });
 });
 
