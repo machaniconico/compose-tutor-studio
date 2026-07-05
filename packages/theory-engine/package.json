@@ -5,9 +5,9 @@
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit"
+    "test": "node ./node_modules/vitest/vitest.mjs run",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "build": "node ./node_modules/typescript/bin/tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

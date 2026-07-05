@@ -61,6 +61,7 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 
 - エラーなし
 - 書き出しファイルが存在
+- Windows 予約名や記号を含むプロジェクト名でも、書き出しファイル名が安全になる
 - プロジェクトのノート/コード数が保存前後で一致
 
 ## 5. 音声テスト
@@ -93,9 +94,14 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 
 ## 8. 手動QAチェックリスト
 
+配布前の Windows インストーラ確認は `docs/11_release_gate.md` を正とし、候補ビルドごとの結果は `docs/12_release_qa_log.md` をコピーして記録する。手動 QA 記入後は `pnpm release:qa-log:verify -- --path <qa-log-path>` で未記入や未承認のまま配布しないことを確認する。ユーザー向け配布ページまたはリリースノートは `docs/13_distribution_release_notes.md` を元に作成し、公開前に `pnpm release:notes:verify -- --path <release-notes-path>` で草稿文や空欄が残っていないことを確認する。インストーラメタデータは `pnpm release:installers:verify` で生成・検証し、製品名、バージョン、MSI UpgradeCode が候補ビルドと一致していることを確認する。インストーラ手動QAの実施時は `pnpm release:installers:smoke:plan` と `pnpm release:installers:smoke:verify` で生成・検証した `release-installer-smoke-plan.md` を使い、クリーンな Windows 環境で NSIS/MSI のインストール、起動、アンインストール結果を QA ログへ記録する。署名状態は `pnpm release:signing` と `pnpm release:signing:verify` で生成・検証し、`release-signing-report.json` と配布ページの説明を一致させる。サードパーティ NOTICE は `pnpm release:notices` と `pnpm release:notices:verify` で生成・検証する。隠れた通信や自動送信がないことは `docs/15_privacy_network_policy.md` と `pnpm check:privacy` で確認する。署名鍵や証明書secretの混入がないことは `pnpm check:secrets` で確認する。許可済みアプリアイコン以外の画像、音声、動画、archive、署名素材ファイルが source tree に混入していないことは `pnpm check:assets` で確認する。署名または updater を有効化したリリースでは `docs/14_signing_and_update_plan.md` の追加チェックも実施する。
+
 - 初心者が説明なしでStart Screenから再生まで到達できる
 - Learn Panelを閉じても作業できる
 - スケール外音の警告が邪魔すぎない
 - 既存DAWのUI模倣に見えない
 - 音が鳴らない時の原因表示が分かりやすい
 - 書き出し前チェックリストが役に立つ
+- 上部のサポート画面から診断情報をコピーできる
+- クリップボード拒否時も手動コピー用診断情報を確認できる
+- コピーした診断レポートにアプリバージョン、生成時刻、user agent、診断IDが含まれる

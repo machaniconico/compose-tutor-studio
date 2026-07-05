@@ -38,6 +38,17 @@
   color: var(--text-dim);
 }
 
+.start-screen__recovery {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  background: rgba(216, 116, 63, 0.12);
+  border: 1px solid rgba(216, 116, 63, 0.42);
+  border-radius: var(--radius);
+}
+
 .start-menu {
   display: flex;
   flex-direction: column;

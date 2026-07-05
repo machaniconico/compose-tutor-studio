@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm --filter @cts/studio run install:browsers
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Privacy and network policy
+        run: pnpm check:privacy
+
+      - name: Release secret policy
+        run: pnpm check:secrets
+
+      - name: Source asset policy
+        run: pnpm check:assets
+
+      - name: Build
+        run: pnpm build
+
+      - name: Web size budget
+        run: pnpm check:size
+
+      - name: E2E smoke
+        run: pnpm test:e2e
+
+      - name: Desktop build
+        run: pnpm build:desktop
+
+      - name: Desktop size budget
+        run: pnpm check:size:desktop
+
+      - name: Release manifest
+        run: pnpm release:manifest
+
+      - name: Release source status
+        run: pnpm release:source-status
+
+      - name: Verify release source status
+        run: pnpm release:source-status:verify
+
+      - name: Verify release artifacts
+        run: pnpm release:verify
+
+      - name: Verify publish source state
+        run: pnpm release:verify:publish
+
+      - name: Verify installer metadata
+        run: pnpm release:installers:verify
+
+      - name: Installer smoke plan
+        run: pnpm release:installers:smoke:plan
+
+      - name: Verify installer smoke plan
+        run: pnpm release:installers:smoke:verify
+
+      - name: Release signing report
+        run: pnpm release:signing
+
+      - name: Verify release signing report
+        run: pnpm release:signing:verify
+
+      - name: Third-party notices
+        run: pnpm release:notices
+
+      - name: Verify third-party notices
+        run: pnpm release:notices:verify
+
+      - name: Release QA log draft
+        run: pnpm release:qa-log
+
+      - name: Verify release QA log draft
+        run: pnpm release:qa-log:verify:draft
+
+      - name: Release notes draft
+        run: pnpm release:notes
+
+      - name: Verify release notes draft
+        run: pnpm release:notes:verify:draft
+
+      - name: Release readiness
+        run: pnpm check:release
+
+      - name: Upload Windows release candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: cts-windows-release-candidate-${{ github.sha }}
+          path: |
+            apps/studio/src-tauri/target/release/cts-studio.exe
+            apps/studio/src-tauri/target/release/bundle/msi/*.msi
+            apps/studio/src-tauri/target/release/bundle/nsis/*.exe
+            apps/studio/src-tauri/target/release/release/**
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+          include-hidden-files: false

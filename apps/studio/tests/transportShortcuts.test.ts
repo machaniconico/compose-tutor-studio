@@ -3,6 +3,7 @@ import {
   getTransportShortcut,
   handleTransportShortcutKeyDown,
   isEditableShortcutTarget,
+  saveIndicatorText,
   type TransportShortcutEvent,
 } from '../src/features/transport/TransportBar';
 
@@ -180,5 +181,19 @@ describe('transport shortcut keydown handler', () => {
     expect(stopImmediatePropagation).not.toHaveBeenCalled();
     expect(actions.undo).not.toHaveBeenCalled();
     expect(actions.play).not.toHaveBeenCalled();
+  });
+});
+
+describe('save indicator text', () => {
+  it('exposes clear Japanese save states for the transport bar', () => {
+    expect(saveIndicatorText({ status: 'idle', lastSavedAt: null, errorMessage: null })).toBe('未保存');
+    expect(saveIndicatorText({ status: 'saving', lastSavedAt: null, errorMessage: null })).toBe('保存中...');
+    expect(
+      saveIndicatorText({
+        status: 'error',
+        lastSavedAt: null,
+        errorMessage: '保存に失敗しました。',
+      }),
+    ).toBe('保存失敗: 保存に失敗しました。');
   });
 });

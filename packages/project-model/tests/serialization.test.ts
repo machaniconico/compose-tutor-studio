@@ -17,6 +17,12 @@ describe('serialization', () => {
     expect(restored).toEqual(project);
   });
 
+  it('deserializes JSON with a UTF-8 BOM', () => {
+    const project = createEmptyProject({ clock });
+    const restored = deserializeProject(`\uFEFF${serializeProject(project)}`);
+    expect(restored).toEqual(project);
+  });
+
   it('round-trips a template project including chords and drums', () => {
     const project = instantiateTemplate('8bar-pop', clock);
     const restored = deserializeProject(serializeProject(project));

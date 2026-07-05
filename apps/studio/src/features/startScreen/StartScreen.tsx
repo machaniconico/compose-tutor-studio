@@ -11,8 +11,14 @@ import {
   type TemplateId,
 } from '@cts/project-model';
 import { useStore } from '../../state/store';
+import { listProjectRecoveryIssues } from '../../state/persistence';
 import { createSampleProject } from '../../state/sampleProject';
 import { pushToast } from '../../state/tutorialBridge';
+import { recordDiagnostic } from '../../platform/diagnostics';
+import {
+  templateLoadDiagnosticMessage,
+  templateLoadFailureMessage,
+} from '../projectMenu/projectFailureMessages';
 import './startScreen.css';
 
 type View = 'menu' | 'templates';
@@ -38,6 +44,7 @@ function StartScreenDialog() {
   // Saved projects are read once per render; the start screen is short-lived.
   const summaries = useStore.getState().listSavedProjects();
   const latest = summaries[0];
+  const recoveryIssues = listProjectRecoveryIssues();
 
   const close = () => setStartScreenOpen(false);
 
@@ -52,8 +59,9 @@ function StartScreenDialog() {
       replaceProject(instantiateTemplate(id));
       close();
       pushToast(`テンプレート「${PROJECT_TEMPLATES[id].name}」で作成しました。`, 'success');
-    } catch {
-      pushToast('テンプレートの読み込みに失敗しました。', 'error');
+    } catch (error) {
+      recordDiagnostic('template-load', templateLoadDiagnosticMessage(id, error));
+      pushToast(templateLoadFailureMessage(), 'error');
     }
   };
 
@@ -103,6 +111,12 @@ function StartScreenDialog() {
         <p className="start-screen__lead">
           作りながら音楽のしくみを学べる作曲アプリです。今日はどこから始めますか？
         </p>
+
+        {recoveryIssues.length > 0 ? (
+          <p className="start-screen__recovery" role="status" aria-live="polite">
+            一部の保存プロジェクトを復元できませんでした。元データは削除していません。サポート画面から診断情報をコピーできます。
+          </p>
+        ) : null}
 
         {view === 'menu' ? (
           <div className="start-menu">

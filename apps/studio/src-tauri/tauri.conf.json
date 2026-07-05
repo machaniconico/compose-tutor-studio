@@ -24,7 +24,13 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/icon.png"
-    ]
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "upgradeCode": "a776024f-6b69-5d06-8534-15426c9c632a"
+      }
+    }
   }
 }

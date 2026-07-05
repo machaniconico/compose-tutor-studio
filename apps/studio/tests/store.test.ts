@@ -9,6 +9,7 @@ import { projectKey } from '../src/state/persistence';
 // The store reads localStorage at module-import time, so install the stub
 // BEFORE importing it. We import dynamically inside beforeAll for that reason.
 let useStore: typeof import('../src/state/store')['useStore'];
+let installProjectSaveGuards: typeof import('../src/state/projectSaveGuard')['installProjectSaveGuards'];
 let storage: MemoryStorage;
 
 class FailingStorage extends MemoryStorage {
@@ -25,9 +26,41 @@ function waitNextMs(): void {
   }
 }
 
+function makeBeforeUnloadTarget() {
+  const listeners = new Map<string, Set<() => void>>();
+  const addListener = (type: string, listener: () => void): void => {
+    const typeListeners = listeners.get(type) ?? new Set<() => void>();
+    typeListeners.add(listener);
+    listeners.set(type, typeListeners);
+  };
+  const removeListener = (type: string, listener: () => void): void => {
+    listeners.get(type)?.delete(listener);
+  };
+  const dispatch = (type: string): void => {
+    for (const listener of listeners.get(type) ?? []) listener();
+  };
+  return {
+    target: {
+      addEventListener(type: string, listener: () => void): void {
+        addListener(type, listener);
+      },
+      removeEventListener(type: string, listener: () => void): void {
+        removeListener(type, listener);
+      },
+    } as Window,
+    dispatchBeforeUnload(): void {
+      dispatch('beforeunload');
+    },
+    dispatchPageHide(): void {
+      dispatch('pagehide');
+    },
+  };
+}
+
 beforeAll(async () => {
   storage = installLocalStorage();
   ({ useStore } = await import('../src/state/store'));
+  ({ installProjectSaveGuards } = await import('../src/state/projectSaveGuard'));
 });
 
 beforeEach(() => {
@@ -241,6 +274,32 @@ describe('persistence integration', () => {
     const afterFlush = storage.getItem(projectKey(id));
     expect(afterFlush ? JSON.parse(afterFlush).title : null).toBe('リロード直前の編集');
     expect(useStore.getState().save.status).toBe('saved');
+  });
+
+  it('registers app-level lifecycle guards that flush pending saves', () => {
+    const { target, dispatchBeforeUnload, dispatchPageHide } = makeBeforeUnloadTarget();
+    const id = useStore.getState().project.id;
+    useStore.getState().setTitle('閉じる直前の編集');
+
+    const dispose = installProjectSaveGuards(target);
+    dispatchBeforeUnload();
+
+    const saved = storage.getItem(projectKey(id));
+    expect(saved ? JSON.parse(saved).title : null).toBe('閉じる直前の編集');
+
+    useStore.getState().setTitle('ページ退避直前の編集');
+    dispatchPageHide();
+
+    const pageHidden = storage.getItem(projectKey(id));
+    expect(pageHidden ? JSON.parse(pageHidden).title : null).toBe('ページ退避直前の編集');
+
+    useStore.getState().setTitle('登録解除後の編集');
+    dispose();
+    dispatchBeforeUnload();
+    dispatchPageHide();
+
+    const afterDispose = storage.getItem(projectKey(id));
+    expect(afterDispose ? JSON.parse(afterDispose).title : null).toBe('ページ退避直前の編集');
   });
 
   it('reports a Japanese user-facing message when saving fails', () => {

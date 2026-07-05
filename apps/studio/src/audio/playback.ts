@@ -15,6 +15,8 @@
 // the actual audio lifecycle.
 
 import { useStore } from '../state/store';
+import { recordDiagnostic } from '../platform/diagnostics';
+import { pushToast } from '../state/tutorialBridge';
 import { getAudioEngine } from './engine';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import { applyMixState, buildTrackGraphs, type TrackGraph } from './graph';
@@ -87,7 +89,7 @@ export function initAudioBridge(): () => void {
   const unsubPlaying = useStore.subscribe((s, prev) => {
     if (s.transport.isPlaying === prev.transport.isPlaying) return;
     if (s.transport.isPlaying) {
-      void startPlayback();
+      void startPlayback().catch(handlePlaybackStartFailure);
     } else {
       stopAudio();
     }
@@ -109,6 +111,35 @@ export function initAudioBridge(): () => void {
     state.installed = false;
     stopAudio();
   };
+}
+
+export function audioPlaybackFailureMessage(error: unknown): string {
+  const detail =
+    error instanceof Error
+      ? `${error.name} ${error.message}`
+      : typeof error === 'string'
+        ? error
+        : '';
+
+  if (/notallowed|gesture|permission/i.test(detail)) {
+    return '音声の開始が許可されませんでした。再生ボタンをもう一度押してください。';
+  }
+
+  if (/audiocontext|not supported|not defined/i.test(detail)) {
+    return 'この環境では音声機能を開始できません。OSの音声出力とWebView2を確認してください。';
+  }
+
+  return '音を開始できませんでした。出力先とOSの音量を確認し、続く場合はサポートから診断情報をコピーしてください。';
+}
+
+function handlePlaybackStartFailure(error: unknown): void {
+  stopAudio();
+  const store = useStore.getState();
+  if (store.transport.isPlaying) {
+    store.stop();
+  }
+  recordDiagnostic('audio-playback', error);
+  pushToast(audioPlaybackFailureMessage(error), 'error');
 }
 
 /** Build (or rebuild) the per-track graph + voice managers for a render pass. */

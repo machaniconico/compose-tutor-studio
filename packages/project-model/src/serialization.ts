@@ -7,6 +7,8 @@
 import { CURRENT_SCHEMA_VERSION } from './factories';
 import type { Project } from './types';
 
+const UTF8_BOM = '\uFEFF';
+
 /**
  * A migration upgrades a raw project object from `from` to `to`.
  * Migrations operate on loosely-typed records because older shapes may differ
@@ -62,10 +64,14 @@ export function migrateProject(raw: Record<string, unknown>): Record<string, unk
  * Throws if the JSON is invalid or the schema version is unsupported.
  */
 export function deserializeProject(json: string): Project {
-  const parsed: unknown = JSON.parse(json);
+  const parsed: unknown = JSON.parse(stripLeadingBom(json));
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error('Invalid project JSON: expected an object');
   }
   const migrated = migrateProject(parsed as Record<string, unknown>);
   return migrated as unknown as Project;
+}
+
+function stripLeadingBom(json: string): string {
+  return json.startsWith(UTF8_BOM) ? json.slice(UTF8_BOM.length) : json;
 }

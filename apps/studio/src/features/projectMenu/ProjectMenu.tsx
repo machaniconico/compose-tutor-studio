@@ -11,8 +11,17 @@ import {
 import { parseMidi } from '@cts/midi-io';
 import { useStore } from '../../state/store';
 import { importMidiTracks } from '../../state/editorActions';
+import { listProjectRecoveryIssues } from '../../state/persistence';
 import { pushToast } from '../../state/tutorialBridge';
+import { recordDiagnostic } from '../../platform/diagnostics';
 import { Dialog } from '../common/Dialog';
+import { canUseNativeFileDialogs, openBinaryFileFromDialog } from '../../platform/fileDialogs';
+import { fileTransferFailureMessage } from '../export/exportFailureMessages';
+import { requestSupportMenuOpen } from '../support/supportEvents';
+import {
+  templateLoadDiagnosticMessage,
+  templateLoadFailureMessage,
+} from './projectFailureMessages';
 
 /** Human-readable ja date for a saved project. */
 function formatJaDate(iso: string): string {
@@ -115,15 +124,15 @@ function NewProjectGallery({ onDone }: { onDone: () => void }) {
       replaceProject(instantiateTemplate(id));
       onDone();
       pushToast(`テンプレート「${PROJECT_TEMPLATES[id].name}」で作成しました。`, 'success');
-    } catch {
-      pushToast('テンプレートの読み込みに失敗しました。', 'error');
+    } catch (error) {
+      recordDiagnostic('template-load', templateLoadDiagnosticMessage(id, error));
+      pushToast(templateLoadFailureMessage(), 'error');
     }
   };
 
-  const importMidi = async (file: File): Promise<void> => {
+  const importMidiBytes = (bytes: Uint8Array): void => {
     setImportError(null);
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
       const result = importMidiTracks(parseMidi(bytes));
       onDone();
       pushToast(
@@ -131,10 +140,37 @@ function NewProjectGallery({ onDone }: { onDone: () => void }) {
         'success',
       );
     } catch (error) {
-      const message = midiImportErrorMessage(error);
-      setImportError(message);
-      pushToast(message, 'error');
+      handleMidiImportFailure(error);
     }
+  };
+
+  const importMidi = async (file: File): Promise<void> => {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      importMidiBytes(bytes);
+    } catch (error) {
+      handleMidiImportFailure(error);
+    }
+  };
+
+  const importMidiFromDesktop = async (): Promise<void> => {
+    setImportError(null);
+    try {
+      const bytes = await openBinaryFileFromDialog([
+        { name: 'MIDI', extensions: ['mid', 'midi'] },
+      ]);
+      if (bytes === null) return;
+      importMidiBytes(bytes);
+    } catch (error) {
+      handleMidiImportFailure(error);
+    }
+  };
+
+  const handleMidiImportFailure = (error: unknown): void => {
+    recordDiagnostic('import-midi', error);
+    const message = fileTransferFailureMessage('import-midi');
+    setImportError(message);
+    pushToast(message, 'error');
   };
 
   const handleMidiFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -158,7 +194,13 @@ function NewProjectGallery({ onDone }: { onDone: () => void }) {
         <button
           type="button"
           className="template-card"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            if (canUseNativeFileDialogs()) {
+              void importMidiFromDesktop();
+            } else {
+              fileInputRef.current?.click();
+            }
+          }}
         >
           <span className="template-card__name">MIDIを読み込む</span>
           <span className="template-card__desc">
@@ -199,13 +241,6 @@ function NewProjectGallery({ onDone }: { onDone: () => void }) {
   );
 }
 
-function midiImportErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return `MIDIファイルを読み込めませんでした。${error.message}`;
-  }
-  return 'MIDIファイルを読み込めませんでした。Standard MIDI File（.mid）を書き出してからもう一度試してください。';
-}
-
 function SavedProjectList({ onDone }: { onDone: () => void }) {
   const listSavedProjects = useStore((s) => s.listSavedProjects);
   const loadProjectById = useStore((s) => s.loadProjectById);
@@ -215,6 +250,30 @@ function SavedProjectList({ onDone }: { onDone: () => void }) {
   const [version, setVersion] = useState(0);
 
   const summaries = listSavedProjects();
+  const recoveryIssueCount = listProjectRecoveryIssues().length;
+
+  const openSupport = (): void => {
+    onDone();
+    if (!requestSupportMenuOpen()) {
+      pushToast('サポート画面を開けませんでした。上部のサポートから診断情報を確認してください。', 'error');
+    }
+  };
+
+  const recoveryNotice =
+    recoveryIssueCount > 0 ? (
+      <section className="saved-recovery-notice" role="status" aria-live="polite">
+        <div>
+          <strong>復元できない保存データがあります</strong>
+          <p>
+            {recoveryIssueCount}
+            件は一覧に出さず、端末内に残しています。
+          </p>
+        </div>
+        <button type="button" onClick={openSupport}>
+          サポートで確認
+        </button>
+      </section>
+    ) : null;
 
   const load = (id: string) => {
     const hasHistory = useStore.getState().past.length > 0;
@@ -238,30 +297,36 @@ function SavedProjectList({ onDone }: { onDone: () => void }) {
 
   if (summaries.length === 0) {
     return (
-      <p className="project-menu__empty" data-version={version}>
-        保存済みのプロジェクトはまだありません。
-      </p>
+      <>
+        {recoveryNotice}
+        <p className="project-menu__empty" data-version={version}>
+          保存済みのプロジェクトはまだありません。
+        </p>
+      </>
     );
   }
 
   return (
-    <ul className="saved-list" data-version={version}>
-      {summaries.map((s) => (
-        <li key={s.id} className={`saved-item${s.id === activeId ? ' is-active' : ''}`}>
-          <button type="button" className="saved-item__main" onClick={() => load(s.id)}>
-            <span className="saved-item__title">{s.title}</span>
-            <span className="saved-item__date">更新: {formatJaDate(s.updatedAt)}</span>
-          </button>
-          <button
-            type="button"
-            className="saved-item__delete"
-            aria-label={`${s.title}を削除`}
-            onClick={() => remove(s.id, s.title)}
-          >
-            削除
-          </button>
-        </li>
-      ))}
-    </ul>
+    <>
+      {recoveryNotice}
+      <ul className="saved-list" data-version={version}>
+        {summaries.map((s) => (
+          <li key={s.id} className={`saved-item${s.id === activeId ? ' is-active' : ''}`}>
+            <button type="button" className="saved-item__main" onClick={() => load(s.id)}>
+              <span className="saved-item__title">{s.title}</span>
+              <span className="saved-item__date">更新: {formatJaDate(s.updatedAt)}</span>
+            </button>
+            <button
+              type="button"
+              className="saved-item__delete"
+              aria-label={`${s.title}を削除`}
+              onClick={() => remove(s.id, s.title)}
+            >
+              削除
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }

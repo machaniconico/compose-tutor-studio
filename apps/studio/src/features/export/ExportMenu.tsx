@@ -6,16 +6,21 @@
 import { useRef, useState } from 'react';
 import { projectToMidi } from '@cts/midi-io';
 import {
-  deserializeProject,
   serializeProject,
-  validateProject,
 } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import { publishAppEvent } from '../../state/appEvents';
 import { pushToast } from '../../state/tutorialBridge';
+import { recordDiagnostic } from '../../platform/diagnostics';
 import { renderProjectToWav } from '../../audio/wav';
 import { Dialog } from '../common/Dialog';
-import { downloadBlob, safeFileStem } from './download';
+import { safeFileStem } from './download';
+import { parseProjectFileImport } from './projectFileImport';
+import {
+  canUseNativeFileDialogs,
+  openTextFileFromDialog,
+  saveBlob,
+} from '../../platform/fileDialogs';
 import {
   clearExportHistory,
   formatExportKindJa,
@@ -30,6 +35,7 @@ import {
   hasExportChecklistWarnings,
   type ExportChecklistItem,
 } from './exportChecklist';
+import { fileTransferFailureMessage } from './exportFailureMessages';
 import './exportChecklist.css';
 
 /** 書き出し前チェックの対象になる形式。 */
@@ -59,18 +65,35 @@ export function ExportMenu() {
     setOpen(true);
   };
 
-  const exportMidi = () => {
+  const importProjectFromText = (text: string): boolean => {
+    const result = parseProjectFileImport(text);
+    if (!result.ok) {
+      recordDiagnostic('project-import', result.diagnosticMessage);
+      pushToast(result.userMessage, 'error');
+      return false;
+    }
+    replaceProject(result.project);
+    setOpen(false);
+    pushToast('プロジェクトを読み込みました。', 'success');
+    return true;
+  };
+
+  const exportMidi = async () => {
     try {
       const bytes = projectToMidi(project);
       // Copy into a fresh ArrayBuffer so the Blob owns a plain ArrayBuffer.
       const buffer = bytes.slice().buffer;
       const fileName = `${stem}.mid`;
-      downloadBlob(new Blob([buffer], { type: 'audio/midi' }), fileName);
+      const result = await saveBlob(new Blob([buffer], { type: 'audio/midi' }), fileName, [
+        { name: 'MIDI', extensions: ['mid', 'midi'] },
+      ]);
+      if (result === 'cancelled') return;
       publishAppEvent({ type: 'export.midi', payload: { format: 'midi' } });
       setHistory(recordExportHistory({ kind: 'midi', fileName, projectId: project.id }));
       pushToast('MIDIファイルを書き出しました。', 'success');
-    } catch {
-      pushToast('MIDIの書き出しに失敗しました。', 'error');
+    } catch (error) {
+      recordDiagnostic('export-midi', error);
+      pushToast(fileTransferFailureMessage('export-midi'), 'error');
     }
   };
 
@@ -79,29 +102,34 @@ export function ExportMenu() {
     try {
       const blob = await renderProjectToWav(project);
       const fileName = `${stem}.wav`;
-      downloadBlob(blob, fileName);
+      const result = await saveBlob(blob, fileName, [
+        { name: 'WAV audio', extensions: ['wav'] },
+      ]);
+      if (result === 'cancelled') return;
       publishAppEvent({ type: 'export.wav', payload: { format: 'wav' } });
       setHistory(recordExportHistory({ kind: 'wav', fileName, projectId: project.id }));
       pushToast('WAVファイルを書き出しました。', 'success');
-    } catch {
-      pushToast('WAVの書き出しに失敗しました。', 'error');
+    } catch (error) {
+      recordDiagnostic('export-wav', error);
+      pushToast(fileTransferFailureMessage('export-wav'), 'error');
     } finally {
       setRendering(false);
     }
   };
 
-  const exportProjectFile = () => {
+  const exportProjectFile = async () => {
     try {
       const json = serializeProject(project);
       const fileName = `${stem}.ctsproj.json`;
-      downloadBlob(
-        new Blob([json], { type: 'application/json' }),
-        fileName,
-      );
+      const result = await saveBlob(new Blob([json], { type: 'application/json' }), fileName, [
+        { name: 'Compose Tutor project', extensions: ['json'] },
+      ]);
+      if (result === 'cancelled') return;
       setHistory(recordExportHistory({ kind: 'project', fileName, projectId: project.id }));
       pushToast('プロジェクトを書き出しました。', 'success');
-    } catch {
-      pushToast('プロジェクトの書き出しに失敗しました。', 'error');
+    } catch (error) {
+      recordDiagnostic('project-export', error);
+      pushToast(fileTransferFailureMessage('project-export'), 'error');
     }
   };
 
@@ -121,7 +149,7 @@ export function ExportMenu() {
     const kind = checklist.kind;
     setChecklist(null);
     if (kind === 'midi') {
-      exportMidi();
+      void exportMidi();
     } else {
       void exportWav();
     }
@@ -132,20 +160,26 @@ export function ExportMenu() {
     setHistory([]);
   };
 
+  const importProjectFromDesktop = async () => {
+    try {
+      const text = await openTextFileFromDialog([
+        { name: 'Compose Tutor project', extensions: ['json'] },
+      ]);
+      if (text === null) return;
+      importProjectFromText(text);
+    } catch (error) {
+      recordDiagnostic('project-import', error);
+      pushToast(fileTransferFailureMessage('project-import'), 'error');
+    }
+  };
+
   const onImportFile = async (file: File) => {
     try {
       const text = await file.text();
-      const loaded = deserializeProject(text);
-      const result = validateProject(loaded);
-      if (!result.ok) {
-        pushToast('プロジェクトファイルが正しくありません。', 'error');
-        return;
-      }
-      replaceProject(loaded);
-      setOpen(false);
-      pushToast('プロジェクトを読み込みました。', 'success');
-    } catch {
-      pushToast('プロジェクトの読み込みに失敗しました。', 'error');
+      importProjectFromText(text);
+    } catch (error) {
+      recordDiagnostic('project-import', error);
+      pushToast(fileTransferFailureMessage('project-import'), 'error');
     }
   };
 
@@ -192,7 +226,16 @@ export function ExportMenu() {
                 <button type="button" onClick={exportProjectFile}>
                   プロジェクト書き出し
                 </button>
-                <button type="button" onClick={() => fileInputRef.current?.click()}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (canUseNativeFileDialogs()) {
+                      void importProjectFromDesktop();
+                    } else {
+                      fileInputRef.current?.click();
+                    }
+                  }}
+                >
                   プロジェクト読み込み
                 </button>
               </div>

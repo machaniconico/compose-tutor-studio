@@ -5,7 +5,7 @@ import { formatPosition } from '../timeline';
 import { initAudioBridge } from '../../audio/playback';
 import { ProjectMenu } from '../projectMenu/ProjectMenu';
 import { ExportMenu } from '../export/ExportMenu';
-import { installBeforeUnloadFlush } from '../../state/persistence';
+import { SupportMenu } from '../support/SupportMenu';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -119,7 +119,7 @@ function formatSaveTime(value: string | null): string {
   });
 }
 
-function saveIndicatorText(save: SaveState): string {
+export function saveIndicatorText(save: SaveState): string {
   if (save.status === 'saving') return '保存中...';
   if (save.status === 'error') return `保存失敗: ${save.errorMessage ?? 'もう一度保存してください。'}`;
   if (save.status === 'saved') return `保存済み ${formatSaveTime(save.lastSavedAt)}`;
@@ -151,8 +151,6 @@ export function TransportBar() {
   // Connect the store to the audio engine once. The bridge subscribes to
   // transport.isPlaying so the play/stop buttons below only touch store state.
   useEffect(() => initAudioBridge(), []);
-
-  useEffect(() => installBeforeUnloadFlush(() => useStore.getState().flushPendingSave()), []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -300,6 +298,8 @@ export function TransportBar() {
         </button>
 
         <ExportMenu />
+
+        <SupportMenu />
 
         <span
           className={`save-indicator save-indicator--${save.status}`}
