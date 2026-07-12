@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-claim-close-request"
+description = "Enables the app_claim_close_request command without any pre-configured scope."
+commands.allow = ["app_claim_close_request"]
+
+[[permission]]
+identifier = "deny-app-claim-close-request"
+description = "Denies the app_claim_close_request command without any pre-configured scope."
+commands.deny = ["app_claim_close_request"]

@@ -1,20 +1,30 @@
-// Tracks how many modal dialogs are currently open so global keyboard shortcuts
-// (e.g. the piano-roll handler) can be suppressed while a dialog has focus.
+// Tracks modal ordering so global shortcuts stay suppressed and only the topmost
+// dialog owns document-level focus/Escape handling.
 
-let openCount = 0;
+const stack: symbol[] = [];
 
-/** Register an open dialog. Returns a disposer that unregisters it. */
-export function registerDialog(): () => void {
-  openCount += 1;
+export type DialogRegistration = Readonly<{
+  unregister: () => void;
+  isTopmost: () => boolean;
+}>;
+
+/** Register an open dialog and expose whether it currently owns the modal stack. */
+export function registerDialog(): DialogRegistration {
+  const token = Symbol('modal-dialog');
+  stack.push(token);
   let disposed = false;
-  return () => {
-    if (disposed) return;
-    disposed = true;
-    openCount = Math.max(0, openCount - 1);
+  return {
+    unregister: () => {
+      if (disposed) return;
+      disposed = true;
+      const index = stack.lastIndexOf(token);
+      if (index >= 0) stack.splice(index, 1);
+    },
+    isTopmost: () => !disposed && stack[stack.length - 1] === token,
   };
 }
 
 /** True while at least one modal dialog is open. */
 export function isAnyDialogOpen(): boolean {
-  return openCount > 0;
+  return stack.length > 0;
 }

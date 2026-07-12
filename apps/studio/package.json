@@ -5,21 +5,29 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build --config vite.config.ts && node ../desktop/scripts/release-preflight.mjs renderer-assets --input dist --profile production",
+    "build:e2e": "tsc --noEmit && vite build --config vite.config.ts --mode e2e && node ../desktop/scripts/release-preflight.mjs renderer-assets --input test-results/e2e-build --profile e2e",
+    "e2e": "playwright test && pnpm e2e:fatal",
+    "e2e:fatal": "pnpm build:e2e && playwright test --config playwright.fatal.config.ts",
+    "e2e:ui": "playwright test --ui",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.e2e.json --noEmit"
   },
   "dependencies": {
-    "@cts/theory-engine": "workspace:*",
-    "@cts/project-model": "workspace:*",
     "@cts/midi-io": "workspace:*",
+    "@cts/project-persistence": "workspace:*",
+    "@cts/project-model": "workspace:*",
+    "@cts/theory-engine": "workspace:*",
     "@cts/tutorial-engine": "workspace:*",
+    "@tauri-apps/api": "2.11.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "^20.19.43",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",

@@ -101,25 +101,33 @@
 
 ### 4.1 イベント駆動
 
-アプリ内の操作はイベントとして記録し、レッスン進行判定に使う。
+レッスン目標は、確定操作を表すAppEventと、Storeへ採用済みのProject/UI状態の2経路で評価する。
 
 | Event | Payload例 | 用途 |
 |---|---|---|
 | `project.created` | templateId, key, bpm | 初回導線 |
 | `chord.added` | bar, chordSymbol, degree | コード課題判定 |
-| `note.added` | pitch, start, duration, trackId | ピアノロール課題 |
+| `note.added` | pitch, startBeat, durationBeats, trackId | ピアノロール課題 |
 | `scale_snap.enabled` | key, scale | 操作理解 |
-| `clip.created` | type, bars | パターン作成課題 |
-| `export.completed` | format | 最終課題 |
+| `clip.created` | type, bars, trackId | パターン作成課題 |
+| `export.midi` / `export.wav` | format | 最終課題 |
 
-### 4.2 判定関数
+プロジェクト編集を表すイベントは、候補が検証を通りStoreへ採用された後に、採用済みの値から発行する。対象が存在しない操作、同値変更、保存可能範囲を外れて拒否された候補では発行しない。生成IDを持つ`effect.added`等は、そのIDが採用済みProjectに実在することも確認する。これにより、画面に反映されなかった操作で教材だけが進む状態を禁止する。
 
-- `hasChordProgression(project, degrees, startBar)`
-- `hasNotesWithinScale(track, key, scale, ratio)`
-- `hasDrumPattern(track, patternType)`
-- `hasBassRootOnDownbeat(track, chordTrack, ratio)`
-- `hasMelodyChordToneOnStrongBeat(track, chordTrack, ratio)`
-- `hasExported(format)`
+状態を条件にする目標は、操作を見逃して到達不能にならないよう次の契約にする。
+
+- `kind: "project"`はレッスン開始・再開、採用済みProject参照の更新（イベントを伴わない編集、Undo/Redo、Project切替・読込を含む）、および直前手順の完了直後に、最新の確定Projectで再照合する
+- 1つの状態目標が成立したら、次も状態目標（Project predicateまたは現在有効な`scale_snap.enabled`）である間だけ同じ最新状態で順に再照合し、最初の未成立目標・通常イベント目標・演習目標で止める
+- 同じ同期的なcommitでProject更新とpost-commit AppEventが生じる場合、そのEventは操作時点の手順にだけ適用し、直後の手順へ再利用しない。Project再照合は同一ターン内でまとめ、レッスンの中断・再開始時には古い予約を無効化する
+- 状態再照合はAppEvent busへ人工イベントを再配信しない。成立して進んだ最終stepと進捗を即時反映・保存し、表示中だった前stepのhintを消去する
+- 値を指定する目標は完全一致で判定する。Cメジャーの`scale_snap.enabled`は`key: "C"`かつ`scale: "major"`で、スナップが現在オンのときだけ成立する
+- `noteCountAtLeast`と`drumLaneActive`は各timeline Clip instanceの解決済みpayloadを数える。正本と各valid direct aliasは配置ごとに1回数え、dangling/unresolved aliasは0件とする。`Clip.loop`の反復は教材上の編集event数を増やさない
+
+### 4.2 判定DSL
+
+- Project predicate: `chordCountAtLeast`、`progressionEquals`、`drumLaneActive`、`noteCountAtLeast`、`hasSection`、`bpmInRange`、`trackVolumeInRange`
+- Event goal: `AppEventType`、任意の一致条件（`swingAtLeast`だけは下限判定）、必要event数
+- Exercise goal: 選択、並べ替え、音名・コード等の回答を採点し、正解時だけ進行
 
 ### 4.3 フィードバック設計
 

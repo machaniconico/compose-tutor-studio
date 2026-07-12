@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persistence-load-most-recent"
+description = "Enables the persistence_load_most_recent command without any pre-configured scope."
+commands.allow = ["persistence_load_most_recent"]
+
+[[permission]]
+identifier = "deny-persistence-load-most-recent"
+description = "Denies the persistence_load_most_recent command without any pre-configured scope."
+commands.deny = ["persistence_load_most_recent"]

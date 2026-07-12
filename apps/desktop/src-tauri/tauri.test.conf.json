@@ -1,0 +1,20 @@
+{
+  "productName": "Compose Tutor Studio Test",
+  "identifier": "com.composetutor.studio.test",
+  "app": {
+    "security": {
+      "capabilities": [
+        "main",
+        {
+          "identifier": "main-test",
+          "description": "Test-only embedded WebDriver layered on the production repository capability.",
+          "windows": ["main"],
+          "permissions": ["wdio-webdriver:default"]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

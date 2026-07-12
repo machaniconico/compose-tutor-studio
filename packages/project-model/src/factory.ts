@@ -1,9 +1,13 @@
 // High-level factory helpers. All timestamps default to a fixed placeholder so
 // callers that need deterministic output do not have to inject a clock.
-// No Math.random() or Date.now() here — ids come from makeId().
+// Persistable ids come from makeId(), which namespaces counters per JS realm.
 
 import { makeId } from './ids';
-import { createMidiClip, createDrumClip } from './factories';
+import {
+  CURRENT_SCHEMA_VERSION,
+  createMidiClip,
+  createDrumClip,
+} from './factories';
 import type {
   ChordEvent,
   MusicalKey,
@@ -122,7 +126,7 @@ export function createDefaultProject(opts: CreateDefaultProjectOpts = {}): Proje
 
   return {
     id: makeId('project'),
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title,
     bpm,
     timeSignature,

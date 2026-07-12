@@ -86,8 +86,29 @@ describe('snapPitchToPitchClasses', () => {
     expect(cMajor.has(((snapped % 12) + 12) % 12)).toBe(true);
   });
 
+  it('uses the requested direction to break an equal-distance tie', () => {
+    expect(snapPitchToPitchClasses(61, cMajor, 36, 84, 'up')).toBe(62);
+    expect(snapPitchToPitchClasses(61, cMajor, 36, 84, 'down')).toBe(60);
+  });
+
+  it('never reverses a strict direction at the editable pitch boundary', () => {
+    const dMajor = new Set([1, 2, 4, 6, 7, 9, 11]);
+    expect(snapPitchToPitchClasses(PIANO_LOW_MIDI, dMajor, 36, 84, 'down')).toBe(
+      PIANO_LOW_MIDI,
+    );
+    expect(snapPitchToPitchClasses(PIANO_HIGH_MIDI, dMajor, 36, 84, 'up')).toBe(
+      PIANO_HIGH_MIDI,
+    );
+  });
+
   it('returns the pitch when the set is empty', () => {
     expect(snapPitchToPitchClasses(61, new Set())).toBe(61);
+  });
+
+  it('searches only inside the editable pitch range at its boundaries', () => {
+    const dMajor = new Set([1, 2, 4, 6, 7, 9, 11]);
+    expect(snapPitchToPitchClasses(PIANO_HIGH_MIDI, dMajor)).toBe(83);
+    expect(snapPitchToPitchClasses(PIANO_LOW_MIDI, dMajor)).toBe(37);
   });
 });
 

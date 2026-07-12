@@ -1,0 +1,849 @@
+name: Signed desktop release candidate
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      confirm_signed_release:
+        description: Build a signed commercial release candidate from this tag
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  preflight:
+    name: protected tag preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      version: ${{ steps.identity.outputs.version }}
+      sha: ${{ steps.identity.outputs.sha }}
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+
+      - name: Validate tag, source versions, and manual confirmation
+        id: identity
+        env:
+          CONFIRMED: ${{ inputs.confirm_signed_release }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          RESOLVED_HEAD="$(git rev-parse 'HEAD^{commit}')"
+          RESOLVED_TAG="$(git rev-parse "${RELEASE_REF}^{commit}")"
+          RESOLVED_EVENT="$(git rev-parse "${RELEASE_SHA}^{commit}")"
+          if [ "$RESOLVED_HEAD" != "$RESOLVED_TAG" ] || [ "$RESOLVED_HEAD" != "$RESOLVED_EVENT" ]; then
+            echo "Release ref, event SHA, and checked-out commit do not resolve to the same commit" >&2
+            exit 1
+          fi
+          node apps/desktop/scripts/release-preflight.mjs preflight \
+            --tag "$RELEASE_TAG" \
+            --sha "$RESOLVED_HEAD" \
+            --ref "$RELEASE_REF" \
+            --event "$EVENT_NAME" \
+            --confirmed "${CONFIRMED:-false}"
+          {
+            echo "tag=$RELEASE_TAG"
+            echo "version=${RELEASE_TAG#v}"
+            echo "sha=$RESOLVED_HEAD"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Require release commit to be on main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor HEAD origin/main
+
+  quality:
+    name: immutable source and dependency gate
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            patchelf \
+            xvfb \
+            xdg-utils
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: ./apps/desktop/src-tauri -> target
+
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: apps/desktop/src-tauri
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Audit JavaScript dependencies
+        run: pnpm audit --audit-level high
+
+      - name: Run source gates
+        run: |
+          node --test apps/desktop/scripts/release-preflight.test.mjs
+          pnpm typecheck
+          pnpm test
+          pnpm build
+          pnpm desktop:lint
+          pnpm desktop:test
+          pnpm desktop:typecheck:native
+          pnpm desktop:test:size
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/studio exec playwright install --with-deps chromium
+
+      - name: Run browser and native release smoke gates
+        run: |
+          pnpm e2e
+          xvfb-run -a pnpm desktop:e2e:native
+          pnpm desktop:build:smoke
+          pnpm desktop:size:check
+
+      - name: Generate deterministic SBOM and runtime license inventory
+        env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          node apps/desktop/scripts/release-preflight.mjs metadata \
+            --out "$RUNNER_TEMP/release-stage/metadata" \
+            --tag "$RELEASE_TAG" \
+            --sha "$RELEASE_SHA" \
+            --repository "$RELEASE_REPOSITORY"
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata-${{ needs.preflight.outputs.tag }}
+          path: ${{ runner.temp }}/release-stage/
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    name: signed and notarized macOS universal DMG
+    needs: [preflight, quality]
+    runs-on: macos-15
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    environment:
+      name: commercial-release
+    env:
+      APPLE_API_ISSUER: ${{ vars.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ vars.APPLE_API_KEY }}
+      APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Rust targets
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: ./apps/desktop/src-tauri -> target
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Revalidate pristine release source after install
+        run: |
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          node --test apps/desktop/scripts/release-preflight.test.mjs
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Require all Apple credentials
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
+        run: |
+          node apps/desktop/scripts/release-preflight.mjs require-env \
+            APPLE_API_ISSUER APPLE_API_KEY APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD APPLE_API_PRIVATE_KEY_BASE64 \
+            APPLE_SIGNING_IDENTITY APPLE_TEAM_ID
+
+      - name: Import Developer ID certificate and notarization key
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$APPLE_API_KEY" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "APPLE_API_KEY must be a 10-character App Store Connect key ID" >&2
+            exit 1
+          fi
+          if ! [[ "$APPLE_API_ISSUER" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
+            echo "APPLE_API_ISSUER must be a canonical UUID" >&2
+            exit 1
+          fi
+          if ! [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "APPLE_TEAM_ID must be a 10-character Apple Team ID" >&2
+            exit 1
+          fi
+          case "$APPLE_SIGNING_IDENTITY" in
+            "Developer ID Application: "*"($APPLE_TEAM_ID)") ;;
+            *)
+              echo "APPLE_SIGNING_IDENTITY must be a Developer ID Application identity for APPLE_TEAM_ID" >&2
+              exit 1
+              ;;
+          esac
+          CERTIFICATE_PATH="$RUNNER_TEMP/release-certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/release-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
+          printf '%s' "$APPLE_API_PRIVATE_KEY_BASE64" | base64 --decode > "$API_KEY_PATH"
+          chmod 600 "$CERTIFICATE_PATH" "$API_KEY_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          IDENTITY_COUNT="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep -F -c -- "\"${APPLE_SIGNING_IDENTITY}\"" || true)"
+          test "$IDENTITY_COUNT" = 1
+          {
+            echo "APPLE_API_KEY_PATH=$API_KEY_PATH"
+            echo "RELEASE_KEYCHAIN_PATH=$KEYCHAIN_PATH"
+            echo "RELEASE_CERTIFICATE_PATH=$CERTIFICATE_PATH"
+          } >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, and staple universal DMG
+        run: >-
+          pnpm --dir apps/desktop exec tauri build --ci
+          --target universal-apple-darwin --bundles app,dmg
+
+      - name: Verify signed macOS renderer security boundary
+        run: node apps/desktop/scripts/release-preflight.mjs renderer-assets --input apps/studio/dist --profile production
+
+      - name: Verify Apple signature, universal binary, Gatekeeper, and tickets
+        run: |
+          set -euo pipefail
+          BUNDLE_ROOT="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle"
+          APP_COUNT="$(find "$BUNDLE_ROOT/macos" -maxdepth 1 -type d -name '*.app' -print | wc -l | tr -d ' ')"
+          DMG_COUNT="$(find "$BUNDLE_ROOT/dmg" -maxdepth 1 -type f -name '*.dmg' -print | wc -l | tr -d ' ')"
+          test "$APP_COUNT" = 1 && test "$DMG_COUNT" = 1
+          APP_PATH="$(find "$BUNDLE_ROOT/macos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          DMG_PATH="$(find "$BUNDLE_ROOT/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$APP_PATH" && test -n "$DMG_PATH"
+          EXECUTABLE_COUNT="$(find "$APP_PATH/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print | wc -l | tr -d ' ')"
+          test "$EXECUTABLE_COUNT" = 1
+          APP_EXECUTABLE="$(find "$APP_PATH/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print -quit)"
+          test -n "$APP_EXECUTABLE"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          SIGNATURE_DETAILS="$(codesign -dvvv "$APP_PATH" 2>&1)"
+          printf '%s\n' "$SIGNATURE_DETAILS" | grep -F "TeamIdentifier=$APPLE_TEAM_ID"
+          printf '%s\n' "$SIGNATURE_DETAILS" | grep -E '^Timestamp='
+          ARCHITECTURES="$(lipo -archs "$APP_EXECUTABLE")"
+          printf '%s\n' "$ARCHITECTURES" | grep -qw arm64
+          printf '%s\n' "$ARCHITECTURES" | grep -qw x86_64
+          DMG_NOTARIZATION_RESULT="$RUNNER_TEMP/dmg-notarization-result.json"
+          xcrun notarytool submit "$DMG_PATH" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait \
+            --output-format json > "$DMG_NOTARIZATION_RESULT"
+          DMG_NOTARIZATION_STATUS="$(node -e \
+            'const r=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.stdout.write(String(r.status??""))' \
+            "$DMG_NOTARIZATION_RESULT")"
+          DMG_NOTARIZATION_ID="$(node -e \
+            'const r=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.stdout.write(String(r.id??"unknown"))' \
+            "$DMG_NOTARIZATION_RESULT")"
+          if [ "$DMG_NOTARIZATION_STATUS" != Accepted ]; then
+            echo "DMG notarization failed: status=$DMG_NOTARIZATION_STATUS submission=$DMG_NOTARIZATION_ID" >&2
+            exit 1
+          fi
+          rm -f "$DMG_NOTARIZATION_RESULT"
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler staple "$DMG_PATH"
+          xcrun stapler validate "$APP_PATH"
+          xcrun stapler validate "$DMG_PATH"
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+          hdiutil verify "$DMG_PATH"
+          codesign --verify --strict --verbose=2 "$DMG_PATH"
+          DMG_SIGNATURE_DETAILS="$(codesign -dvvv "$DMG_PATH" 2>&1)"
+          printf '%s\n' "$DMG_SIGNATURE_DETAILS" | grep -F "TeamIdentifier=$APPLE_TEAM_ID"
+          printf '%s\n' "$DMG_SIGNATURE_DETAILS" | grep -E '^Timestamp='
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
+
+          MOUNT_POINT="$RUNNER_TEMP/compose-tutor-studio-release-dmg"
+          rm -rf "$MOUNT_POINT"
+          mkdir -p "$MOUNT_POINT"
+          DMG_MOUNTED=false
+          cleanup_dmg_mount() {
+            if [ "$DMG_MOUNTED" = true ]; then
+              hdiutil detach "$MOUNT_POINT" || true
+            fi
+            rm -rf "$MOUNT_POINT"
+          }
+          trap cleanup_dmg_mount EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH" >/dev/null
+          DMG_MOUNTED=true
+          PACKAGED_APP_COUNT="$(find "$MOUNT_POINT" -maxdepth 1 -type d -name '*.app' -print | wc -l | tr -d ' ')"
+          test "$PACKAGED_APP_COUNT" = 1
+          PACKAGED_APP="$(find "$MOUNT_POINT" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          PACKAGED_EXECUTABLE_COUNT="$(find "$PACKAGED_APP/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print | wc -l | tr -d ' ')"
+          test "$PACKAGED_EXECUTABLE_COUNT" = 1
+          PACKAGED_EXECUTABLE="$(find "$PACKAGED_APP/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print -quit)"
+          codesign --verify --deep --strict --verbose=2 "$PACKAGED_APP"
+          PACKAGED_SIGNATURE_DETAILS="$(codesign -dvvv "$PACKAGED_APP" 2>&1)"
+          printf '%s\n' "$PACKAGED_SIGNATURE_DETAILS" | grep -F "TeamIdentifier=$APPLE_TEAM_ID"
+          printf '%s\n' "$PACKAGED_SIGNATURE_DETAILS" | grep -E '^Timestamp='
+          spctl --assess --type execute --verbose=4 "$PACKAGED_APP"
+          PACKAGED_ARCHITECTURES="$(lipo -archs "$PACKAGED_EXECUTABLE")"
+          printf '%s\n' "$PACKAGED_ARCHITECTURES" | grep -qw arm64
+          printf '%s\n' "$PACKAGED_ARCHITECTURES" | grep -qw x86_64
+          SOURCE_EXECUTABLE_HASH="$(shasum -a 256 "$APP_EXECUTABLE" | awk '{print $1}')"
+          PACKAGED_EXECUTABLE_HASH="$(shasum -a 256 "$PACKAGED_EXECUTABLE" | awk '{print $1}')"
+          test "$SOURCE_EXECUTABLE_HASH" = "$PACKAGED_EXECUTABLE_HASH"
+          hdiutil detach "$MOUNT_POINT"
+          DMG_MOUNTED=false
+          rm -rf "$MOUNT_POINT"
+          trap - EXIT
+
+      - name: Stage verified macOS artifact
+        env:
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          node apps/desktop/scripts/release-preflight.mjs stage \
+            --platform macos \
+            --out "$RUNNER_TEMP/release-stage" \
+            --tag "$RELEASE_TAG" \
+            --sha "$RELEASE_SHA" \
+            --verification signed-notarized-stapled-universal
+
+      - name: Upload verified macOS artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos-${{ needs.preflight.outputs.tag }}
+          path: ${{ runner.temp }}/release-stage/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Remove Apple credentials and temporary keychain
+        if: ${{ always() }}
+        run: |
+          rm -f "$RUNNER_TEMP/release-certificate.p12"
+          rm -f "$RUNNER_TEMP/dmg-notarization-result.json"
+          if [[ "$APPLE_API_KEY" =~ ^[A-Z0-9]{10}$ ]]; then
+            rm -f "$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          fi
+          security delete-keychain "$RUNNER_TEMP/release-signing.keychain-db" || true
+
+  windows:
+    name: Authenticode-signed Windows NSIS
+    needs: [preflight, quality]
+    runs-on: windows-2025
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    environment:
+      name: commercial-release
+    env:
+      WINDOWS_CERTIFICATE_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
+      WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: ./apps/desktop/src-tauri -> target
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Revalidate pristine release source after install
+        shell: pwsh
+        run: |
+          $changes = @(git status --porcelain=v1 --untracked-files=all)
+          if ($changes.Count -ne 0) { throw "Release checkout changed during install: $($changes -join '; ')" }
+          node --test apps/desktop/scripts/release-preflight.test.mjs
+          $changes = @(git status --porcelain=v1 --untracked-files=all)
+          if ($changes.Count -ne 0) { throw "Release policy changed the checkout: $($changes -join '; ')" }
+
+      - name: Require all Windows credentials
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: >-
+          node apps/desktop/scripts/release-preflight.mjs require-env
+          WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD
+          WINDOWS_CERTIFICATE_THUMBPRINT WINDOWS_TIMESTAMP_URL
+
+      - name: Import Authenticode certificate and create ephemeral Tauri config
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'release-certificate.pfx'
+          $preImportThumbprintsPath = Join-Path $env:RUNNER_TEMP 'release-pre-import-thumbprints.txt'
+          $importedThumbprintsPath = Join-Path $env:RUNNER_TEMP 'release-imported-thumbprints.txt'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          [string[]]$preImportThumbprints = @(Get-ChildItem Cert:\CurrentUser\My | ForEach-Object {
+            $_.Thumbprint.ToUpperInvariant()
+          })
+          [IO.File]::WriteAllLines($preImportThumbprintsPath, $preImportThumbprints)
+          $importedCertificates = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
+          $importedCertificates.Thumbprint | Set-Content -LiteralPath $importedThumbprintsPath -Encoding ascii
+          $expected = ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
+          if ($expected.Length -ne 40) { throw 'WINDOWS_CERTIFICATE_THUMBPRINT must contain 40 hexadecimal characters' }
+          $certificate = Get-Item "Cert:\CurrentUser\My\$expected"
+          if (-not $certificate.HasPrivateKey) { throw 'Imported certificate has no private key' }
+          if ($certificate.NotAfter -le (Get-Date)) { throw 'Imported certificate is expired' }
+          if ($certificate.EnhancedKeyUsageList.ObjectId.Value -notcontains '1.3.6.1.5.5.7.3.3') {
+            throw 'Imported certificate is not valid for code signing'
+          }
+          $timestamp = [Uri]$env:WINDOWS_TIMESTAMP_URL
+          if (-not $timestamp.IsAbsoluteUri -or $timestamp.Scheme -notin @('http', 'https')) {
+            throw 'WINDOWS_TIMESTAMP_URL must be an absolute HTTP(S) RFC 3161 endpoint'
+          }
+          $configPath = Join-Path $env:RUNNER_TEMP 'tauri.release.windows.json'
+          @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $expected
+                digestAlgorithm = 'sha256'
+                timestampUrl = $timestamp.AbsoluteUri
+                tsp = $true
+              }
+            }
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding utf8NoBOM
+          "IMPORTED_CERTIFICATE_THUMBPRINT=$expected" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "WINDOWS_RELEASE_CONFIG=$configPath" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "WINDOWS_PFX_PATH=$pfxPath" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build and Authenticode-sign NSIS installer
+        shell: pwsh
+        run: >-
+          pnpm --dir apps/desktop exec tauri build --ci --bundles nsis
+          --config $env:WINDOWS_RELEASE_CONFIG
+
+      - name: Verify signed Windows renderer security boundary
+        shell: pwsh
+        run: node apps/desktop/scripts/release-preflight.mjs renderer-assets --input apps/studio/dist --profile production
+
+      - name: Verify Authenticode chain, signer, and RFC 3161 timestamp
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+          Add-Type -AssemblyName System.Formats.Asn1
+          function Get-PeAuthenticodeMetadata([string]$Path) {
+            [byte[]]$bytes = [IO.File]::ReadAllBytes($Path)
+            if ($bytes.Length -lt 512 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
+              throw "$Path is not a valid PE file"
+            }
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+            if ($peOffset -lt 0 -or $peOffset + 256 -gt $bytes.Length) {
+              throw "$Path has an invalid PE header offset"
+            }
+            if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or
+                $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) {
+              throw "$Path has no PE signature"
+            }
+            $optionalHeader = $peOffset + 24
+            $optionalMagic = [BitConverter]::ToUInt16($bytes, $optionalHeader)
+            $dataDirectories = switch ($optionalMagic) {
+              0x10b { $optionalHeader + 96 }
+              0x20b { $optionalHeader + 112 }
+              default { throw "$Path has an unsupported PE optional header" }
+            }
+            $securityDirectory = $dataDirectories + (4 * 8)
+            $certificateOffset = [int64][BitConverter]::ToUInt32($bytes, $securityDirectory)
+            $certificateTableSize = [int64][BitConverter]::ToUInt32($bytes, $securityDirectory + 4)
+            if ($certificateOffset -le 0 -or $certificateTableSize -lt 8 -or
+                $certificateOffset + $certificateTableSize -gt $bytes.LongLength) {
+              throw "$Path has no bounded Authenticode certificate table"
+            }
+            $certificateLength = [int64][BitConverter]::ToUInt32($bytes, [int]$certificateOffset)
+            $certificateType = [BitConverter]::ToUInt16($bytes, [int]$certificateOffset + 6)
+            if ($certificateType -ne 2 -or $certificateLength -lt 9 -or
+                $certificateLength -gt $certificateTableSize -or
+                $certificateOffset + $certificateLength -gt $bytes.LongLength) {
+              throw "$Path has an invalid WIN_CERTIFICATE record"
+            }
+            [byte[]]$cmsBytes = [byte[]]::new([int]$certificateLength - 8)
+            [Array]::Copy($bytes, [int]$certificateOffset + 8, $cmsBytes, 0, $cmsBytes.Length)
+            $cms = [System.Security.Cryptography.Pkcs.SignedCms]::new()
+            $cms.Decode($cmsBytes)
+            if ($cms.SignerInfos.Count -ne 1) {
+              throw "$Path must contain exactly one primary Authenticode signer"
+            }
+            $signer = $cms.SignerInfos[0]
+            $contentMemory = [System.ReadOnlyMemory[byte]]::new([byte[]]$cms.ContentInfo.Content)
+            $indirectReader = [System.Formats.Asn1.AsnReader]::new(
+              $contentMemory,
+              [System.Formats.Asn1.AsnEncodingRules]::DER
+            )
+            $indirectData = $indirectReader.ReadSequence()
+            $dataValue = $indirectData.ReadSequence()
+            while ($dataValue.HasData) { $null = $dataValue.ReadEncodedValue() }
+            $digestInfo = $indirectData.ReadSequence()
+            $digestAlgorithm = $digestInfo.ReadSequence()
+            $fileDigestOid = $digestAlgorithm.ReadObjectIdentifier()
+            while ($digestAlgorithm.HasData) { $null = $digestAlgorithm.ReadEncodedValue() }
+            $fileDigest = $digestInfo.ReadOctetString()
+            $digestInfo.ThrowIfNotEmpty()
+            $indirectData.ThrowIfNotEmpty()
+            $indirectReader.ThrowIfNotEmpty()
+            $rfc3161 = @($signer.UnsignedAttributes | Where-Object {
+              $_.Oid.Value -eq '1.3.6.1.4.1.311.3.3.1'
+            })
+            [PSCustomObject]@{
+              SignerDigestOid = $signer.DigestAlgorithm.Value
+              FileDigestOid = $fileDigestOid
+              FileDigestLength = $fileDigest.Length
+              HasRfc3161Timestamp = $rfc3161.Count -gt 0
+            }
+          }
+          $binary = Get-Item 'apps/desktop/src-tauri/target/release/compose-tutor-studio-desktop.exe'
+          $installers = @(Get-ChildItem 'apps/desktop/src-tauri/target/release/bundle/nsis/*.exe')
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)" }
+          $files = @($binary, $installers[0])
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw 'SignTool was not found in the Windows SDK' }
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($signature.Status -ne 'Valid') { throw "$($file.Name) Authenticode status is $($signature.Status)" }
+            if ($signature.SignerCertificate.Thumbprint -ne $env:IMPORTED_CERTIFICATE_THUMBPRINT) {
+              throw "$($file.Name) was signed by an unexpected certificate"
+            }
+            if (-not $signature.TimeStamperCertificate) { throw "$($file.Name) has no trusted timestamp" }
+            $metadata = Get-PeAuthenticodeMetadata -Path $file.FullName
+            if ($metadata.SignerDigestOid -ne '2.16.840.1.101.3.4.2.1') {
+              throw "$($file.Name) Authenticode signer digest is not SHA-256"
+            }
+            if ($metadata.FileDigestOid -ne '2.16.840.1.101.3.4.2.1' -or
+                $metadata.FileDigestLength -ne 32) {
+              throw "$($file.Name) Authenticode file digest is not SHA-256"
+            }
+            if (-not $metadata.HasRfc3161Timestamp) {
+              throw "$($file.Name) does not contain an RFC 3161 counter-signature"
+            }
+            & $signtool verify /pa /all /tw /v $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "SignTool verification failed for $($file.Name): $LASTEXITCODE" }
+          }
+
+      - name: Stage verified Windows artifact
+        env:
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: >-
+          node apps/desktop/scripts/release-preflight.mjs stage
+          --platform windows --out "$env:RUNNER_TEMP/release-stage"
+          --tag "$env:RELEASE_TAG" --sha "$env:RELEASE_SHA"
+          --verification authenticode-sha256-rfc3161
+
+      - name: Upload verified Windows artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-windows-${{ needs.preflight.outputs.tag }}
+          path: ${{ runner.temp }}/release-stage/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Remove Windows signing material
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $preImportThumbprintsPath = Join-Path $env:RUNNER_TEMP 'release-pre-import-thumbprints.txt'
+          $importedThumbprintsPath = Join-Path $env:RUNNER_TEMP 'release-imported-thumbprints.txt'
+          if (Test-Path -LiteralPath $preImportThumbprintsPath) {
+            [string[]]$preImportThumbprints = @(Get-Content -LiteralPath $preImportThumbprintsPath |
+              ForEach-Object { ([string]$_).ToUpperInvariant() })
+            [string[]]$currentThumbprints = @(Get-ChildItem Cert:\CurrentUser\My |
+              ForEach-Object { $_.Thumbprint.ToUpperInvariant() })
+            foreach ($thumbprint in $currentThumbprints) {
+              if ($preImportThumbprints -notcontains $thumbprint) {
+                Remove-Item "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'release-certificate.pfx') -Force -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'tauri.release.windows.json') -Force -ErrorAction SilentlyContinue
+          Remove-Item $preImportThumbprintsPath -Force -ErrorAction SilentlyContinue
+          Remove-Item $importedThumbprintsPath -Force -ErrorAction SilentlyContinue
+
+  linux:
+    name: Linux AppImage
+    needs: [preflight, quality]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    environment:
+      name: commercial-release
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            file \
+            libayatana-appindicator3-dev \
+            libfuse2 \
+            libgtk-3-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: ./apps/desktop/src-tauri -> target
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Revalidate pristine release source after install
+        run: |
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          node --test apps/desktop/scripts/release-preflight.test.mjs
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Build AppImage
+        run: pnpm --dir apps/desktop exec tauri build --ci --no-sign --bundles appimage
+
+      - name: Verify Linux renderer security boundary
+        run: node apps/desktop/scripts/release-preflight.mjs renderer-assets --input apps/studio/dist --profile production
+
+      - name: Enforce executable size budget
+        run: pnpm desktop:size:check
+
+      - name: Verify executable AppImage format and extractability
+        run: |
+          set -euo pipefail
+          APPIMAGE_ROOT="apps/desktop/src-tauri/target/release/bundle/appimage"
+          APPIMAGE_COUNT="$(find "$APPIMAGE_ROOT" -maxdepth 1 -type f -name '*.AppImage' -print | wc -l | tr -d ' ')"
+          test "$APPIMAGE_COUNT" = 1
+          APPIMAGE_PATH="$(realpath "$(find "$APPIMAGE_ROOT" -maxdepth 1 -type f -name '*.AppImage' -print -quit)")"
+          test -x "$APPIMAGE_PATH"
+          FILE_DESCRIPTION="$(file --brief "$APPIMAGE_PATH")"
+          printf '%s\n' "$FILE_DESCRIPTION" | grep -Eq '^ELF .*executable'
+
+          EXTRACT_ROOT="$RUNNER_TEMP/compose-tutor-studio-appimage-extract"
+          rm -rf "$EXTRACT_ROOT"
+          mkdir -p "$EXTRACT_ROOT"
+          cleanup_appimage_extract() {
+            rm -rf "$EXTRACT_ROOT"
+          }
+          trap cleanup_appimage_extract EXIT
+          if ! (cd "$EXTRACT_ROOT" && "$APPIMAGE_PATH" --appimage-extract >extract.log 2>&1); then
+            tail -n 100 "$EXTRACT_ROOT/extract.log" >&2 || true
+            exit 1
+          fi
+          test -x "$EXTRACT_ROOT/squashfs-root/AppRun"
+          EXTRACTED_BINARY_COUNT="$(find "$EXTRACT_ROOT/squashfs-root/usr/bin" -maxdepth 1 \
+            -type f -name 'compose-tutor-studio-desktop' -perm -111 -print | wc -l | tr -d ' ')"
+          test "$EXTRACTED_BINARY_COUNT" = 1
+          rm -rf "$EXTRACT_ROOT"
+          trap - EXIT
+
+      - name: Verify packaged executable identity and stage Linux artifact
+        env:
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          node apps/desktop/scripts/release-preflight.mjs stage \
+            --platform linux \
+            --out "$RUNNER_TEMP/release-stage" \
+            --tag "$RELEASE_TAG" \
+            --sha "$RELEASE_SHA" \
+            --verification appimage-executable-sha256-identical
+
+      - name: Upload verified Linux artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-linux-${{ needs.preflight.outputs.tag }}
+          path: ${{ runner.temp }}/release-stage/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  candidate:
+    name: checksum and assemble release candidate
+    needs: [preflight, macos, windows, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+
+      - name: Download verified platform artifacts and metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*-${{ needs.preflight.outputs.tag }}
+          path: ${{ runner.temp }}/release-candidate
+          merge-multiple: true
+
+      - name: Validate candidate and create SHA-256 manifest
+        env:
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          node apps/desktop/scripts/release-preflight.mjs finalize \
+            --input "$RUNNER_TEMP/release-candidate" \
+            --tag "$RELEASE_TAG" \
+            --sha "$RELEASE_SHA"
+
+      - name: Upload commercial release candidate without publishing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: commercial-release-candidate-${{ needs.preflight.outputs.tag }}
+          path: ${{ runner.temp }}/release-candidate/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

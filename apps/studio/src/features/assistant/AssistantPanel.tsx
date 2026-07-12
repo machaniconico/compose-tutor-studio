@@ -12,6 +12,7 @@ import {
 import {
   analyzeProjectForCoaching,
   coachCategoryLabel,
+  melodyNotesOnProjectTimeline,
   type CoachSeverity,
 } from '../../state/coach';
 
@@ -88,6 +89,7 @@ function BassAssistant() {
   const onGenerate = () => {
     if (!clip) return;
     const generated = generateBassIntoClip(clip.id, mode);
+    if (generated === null) return;
     setReasons(generated);
   };
 
@@ -96,12 +98,13 @@ function BassAssistant() {
       <p className="panel-section__title">ベース生成</p>
       {clip ? (
         <>
-          <div className="assistant__modes">
+          <div className="assistant__modes" role="group" aria-label="ベース生成モード">
             {BASS_MODES.map((m) => (
               <button
                 key={m.value}
                 type="button"
                 className={`assistant__mode${mode === m.value ? ' is-active' : ''}`}
+                aria-pressed={mode === m.value}
                 onClick={() => setMode(m.value)}
                 title={m.hint}
               >
@@ -144,23 +147,19 @@ function MelodyAssistant() {
     if (!clip) return;
     // Seed = note count + project length so repeat clicks vary deterministically.
     const nextSeed = seed + project.lengthBars;
-    generateMelodyIntoClip(clip.id, nextSeed);
+    const generated = generateMelodyIntoClip(clip.id, nextSeed);
+    if (generated === null) return;
     setSeed(nextSeed);
     setAnalysis(null);
   };
 
   const onReview = () => {
     if (!clip) return;
-    const liveClip = useStore
-      .getState()
-      .project.tracks.flatMap((t) => t.clips)
-      .find((c) => c.id === clip.id);
-    const notes = (liveClip?.notes ?? []).map((n) => ({
-      pitch: n.pitch,
-      startBeat: n.startBeat,
-      durationBeats: n.durationBeats,
-    }));
     const current = useStore.getState().project;
+    const melodyTrack = current.tracks.find(
+      (track) => track.name.toLowerCase() === 'melody',
+    );
+    const notes = melodyNotesOnProjectTimeline(current, melodyTrack);
     try {
       const result = analyzeMelody({
         key: current.key,

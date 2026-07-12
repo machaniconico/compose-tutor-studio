@@ -1,273 +1,65 @@
-// Project menu in the top bar: create-from-template gallery (incl. まっさら),
-// the saved-project list (load / delete), and inline rename of the active
-// project title.
-
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
-  PROJECT_TEMPLATES,
-  instantiateTemplate,
-  type TemplateId,
-} from '@cts/project-model';
-import { importMidiFile } from '../../state/importMidi';
-import { useStore } from '../../state/store';
-import { pushToast } from '../../state/tutorialBridge';
+  DeferredFeature,
+  type DeferredFeatureLoader,
+} from '../common/DeferredFeature';
 import { Dialog } from '../common/Dialog';
 
-/** Human-readable ja date for a saved project. */
-function formatJaDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('ja-JP', {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+type ProjectMenuContentProps = {
+  onDone: () => void;
+  onMidiImportBusyChange?: (busy: boolean) => void;
+};
 
-type Tab = 'new' | 'saved';
+const loadProjectMenuContent: DeferredFeatureLoader<ProjectMenuContentProps> = () =>
+  import('./ProjectMenuContent').then((module) => ({
+    default: module.ProjectMenuContent,
+  }));
 
-/** Top-bar project menu button + dialog. */
+/** Lightweight trigger; project management code is fetched only when opened. */
 export function ProjectMenu() {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<Tab>('new');
+  const [midiImportBusy, setMidiImportBusy] = useState(false);
 
-  const title = useStore((s) => s.project.title);
-  const setTitle = useStore((s) => s.setTitle);
+  const preload = (): void => {
+    void loadProjectMenuContent().catch(() => undefined);
+  };
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} title="プロジェクトメニュー">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        onFocus={preload}
+        onPointerEnter={preload}
+        title="プロジェクトメニュー"
+      >
         ☰ プロジェクト
       </button>
 
       {open ? (
-        <Dialog title="プロジェクト" onClose={() => setOpen(false)} className="dialog--wide">
-          <div className="project-menu">
-            <label className="project-menu__rename">
-              <span>プロジェクト名</span>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                aria-label="プロジェクト名を変更"
-              />
-            </label>
-
-            <MidiImportPanel onDone={() => setOpen(false)} />
-
-            <div className="project-menu__tabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'new'}
-                className={tab === 'new' ? 'is-active' : ''}
-                onClick={() => setTab('new')}
-              >
-                新規プロジェクト
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'saved'}
-                className={tab === 'saved' ? 'is-active' : ''}
-                onClick={() => setTab('saved')}
-              >
-                保存済み
-              </button>
-            </div>
-
-            {tab === 'new' ? (
-              <NewProjectGallery onDone={() => setOpen(false)} />
-            ) : (
-              <SavedProjectList onDone={() => setOpen(false)} />
-            )}
-          </div>
+        <Dialog
+          title="プロジェクト"
+          onClose={() => setOpen(false)}
+          className="dialog--wide"
+          closeDisabled={midiImportBusy}
+        >
+          <fieldset
+            className="project-menu__operation-lock"
+            disabled={midiImportBusy}
+          >
+            <legend className="visually-hidden">プロジェクト操作</legend>
+            <DeferredFeature
+              load={loadProjectMenuContent}
+              componentProps={{
+                onDone: () => setOpen(false),
+                onMidiImportBusyChange: setMidiImportBusy,
+              }}
+              loadingLabel="プロジェクトメニューを読み込んでいます…"
+              errorLabel="プロジェクトメニューを読み込めませんでした。アプリを再読み込んでください。"
+            />
+          </fieldset>
         </Dialog>
       ) : null}
     </>
-  );
-}
-
-function MidiImportPanel({ onDone }: { onDone: () => void }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const onImportFile = async (file: File) => {
-    setImporting(true);
-    setError(null);
-    try {
-      const result = await importMidiFile(file);
-      if (!result.ok) {
-        setError(result.message);
-        pushToast(result.message, 'error');
-        return;
-      }
-      onDone();
-      pushToast(
-        `MIDIを読み込みました。${result.noteCount}個の音を新しいトラックに追加しました。`,
-        'success',
-      );
-    } catch {
-      const message = 'MIDIの読み込みでエラーが起きました。別の.midファイルを試してください。';
-      setError(message);
-      pushToast(message, 'error');
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  return (
-    <section className="project-menu__import">
-      <p className="panel-section__title">MIDIインポート</p>
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={importing}
-      >
-        {importing ? '読み込み中…' : 'MIDIインポート'}
-      </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".mid,.midi,audio/midi,audio/x-midi"
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void onImportFile(file);
-          e.target.value = '';
-        }}
-      />
-      <p className="project-menu__hint">
-        .midファイルを選ぶと、音符を新しいMIDIトラックとして追加します。
-      </p>
-      {error ? (
-        <p className="project-menu__empty" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-function NewProjectGallery({ onDone }: { onDone: () => void }) {
-  const createNewProject = useStore((s) => s.createNewProject);
-  const replaceProject = useStore((s) => s.replaceProject);
-
-  /** Confirm before discarding edits when history is non-empty. */
-  const confirmDiscard = (): boolean => {
-    const hasHistory = useStore.getState().past.length > 0;
-    if (!hasHistory) return true;
-    return window.confirm('現在の編集内容は失われます。新しいプロジェクトを作成しますか？');
-  };
-
-  const startBlank = () => {
-    if (!confirmDiscard()) return;
-    createNewProject('新しい曲');
-    onDone();
-    pushToast('まっさらなプロジェクトを作成しました。', 'success');
-  };
-
-  const startTemplate = (id: TemplateId) => {
-    if (!confirmDiscard()) return;
-    try {
-      replaceProject(instantiateTemplate(id));
-      onDone();
-      pushToast(`テンプレート「${PROJECT_TEMPLATES[id].name}」で作成しました。`, 'success');
-    } catch {
-      pushToast('テンプレートの読み込みに失敗しました。', 'error');
-    }
-  };
-
-  const templateIds = Object.keys(PROJECT_TEMPLATES) as TemplateId[];
-
-  return (
-    <div className="template-gallery">
-      <button type="button" className="template-card template-card--blank" onClick={startBlank}>
-        <span className="template-card__name">まっさら</span>
-        <span className="template-card__desc">
-          空のプロジェクトから自由に作り始めます。
-        </span>
-      </button>
-      {templateIds.map((id) => {
-        const t = PROJECT_TEMPLATES[id];
-        return (
-          <button
-            key={id}
-            type="button"
-            className="template-card"
-            onClick={() => startTemplate(id)}
-          >
-            <span className="template-card__name">{t.name}</span>
-            <span className="template-card__desc">{t.description}</span>
-            <span className="template-card__meta">
-              {t.bpm} BPM ・ {t.key} ・ {t.lengthBars}小節
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function SavedProjectList({ onDone }: { onDone: () => void }) {
-  const listSavedProjects = useStore((s) => s.listSavedProjects);
-  const loadProjectById = useStore((s) => s.loadProjectById);
-  const deleteProject = useStore((s) => s.deleteProject);
-  const activeId = useStore((s) => s.project.id);
-  // Re-render trigger after delete.
-  const [version, setVersion] = useState(0);
-
-  const summaries = listSavedProjects();
-
-  const load = (id: string) => {
-    const hasHistory = useStore.getState().past.length > 0;
-    if (hasHistory && !window.confirm('現在の編集内容は失われます。読み込みますか？')) {
-      return;
-    }
-    if (loadProjectById(id)) {
-      onDone();
-      pushToast('プロジェクトを読み込みました。', 'success');
-    } else {
-      pushToast('プロジェクトの読み込みに失敗しました。', 'error');
-    }
-  };
-
-  const remove = (id: string, title: string) => {
-    if (!window.confirm(`「${title}」を削除しますか？この操作は元に戻せません。`)) return;
-    deleteProject(id);
-    setVersion((v) => v + 1);
-    pushToast('プロジェクトを削除しました。', 'info');
-  };
-
-  if (summaries.length === 0) {
-    return (
-      <p className="project-menu__empty" data-version={version}>
-        保存済みのプロジェクトはまだありません。
-      </p>
-    );
-  }
-
-  return (
-    <ul className="saved-list" data-version={version}>
-      {summaries.map((s) => (
-        <li key={s.id} className={`saved-item${s.id === activeId ? ' is-active' : ''}`}>
-          <button type="button" className="saved-item__main" onClick={() => load(s.id)}>
-            <span className="saved-item__title">{s.title}</span>
-            <span className="saved-item__date">更新: {formatJaDate(s.updatedAt)}</span>
-          </button>
-          <button
-            type="button"
-            className="saved-item__delete"
-            aria-label={`${s.title}を削除`}
-            onClick={() => remove(s.id, s.title)}
-          >
-            削除
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }

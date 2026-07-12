@@ -167,6 +167,25 @@ describe('goal kinds', () => {
 });
 
 describe('compose-plus learning-loop integrity', () => {
+  it('compose-plus-5 gates exports on matching successful export events', () => {
+    const lesson = getLessonById('compose-plus-5');
+    expect(lesson).toBeDefined();
+
+    const midiStep = lesson!.steps.find((step) => step.id === 'compose-plus-5-s2');
+    expect(midiStep?.goal).toEqual({
+      kind: 'event',
+      eventType: 'export.midi',
+      match: { format: 'midi' },
+    });
+
+    const wavStep = lesson!.steps.find((step) => step.id === 'compose-plus-5-s3');
+    expect(wavStep?.goal).toEqual({
+      kind: 'event',
+      eventType: 'export.wav',
+      match: { format: 'wav' },
+    });
+  });
+
   it('compose-plus-3 gates the groove step on drum.grooveChanged (not transport.played)', () => {
     const lesson = getLessonById('compose-plus-3');
     expect(lesson).toBeDefined();
@@ -189,5 +208,48 @@ describe('compose-plus learning-loop integrity', () => {
     if (effectStep!.goal.kind !== 'event') throw new Error('expected event goal');
     expect(effectStep!.goal.eventType).toBe('effect.added');
     expect(effectStep!.goal.eventType).not.toBe('transport.played');
+    expect(effectStep!.hints.join('\n')).toContain('「音づくり」');
+    expect(effectStep!.hints.join('\n')).toContain('「追加する効果」');
+    expect(effectStep!.hints.join('\n')).not.toContain('「エフェクトを追加」');
   });
+
+  it('compose-plus-5 export hints use the visible Studio control labels', () => {
+    const lesson = getLessonById('compose-plus-5');
+    const midiStep = lesson?.steps.find((step) => step.id === 'compose-plus-5-s2');
+    const wavStep = lesson?.steps.find((step) => step.id === 'compose-plus-5-s3');
+
+    expect(midiStep?.hints.join('\n')).toContain('「書き出し」');
+    expect(midiStep?.hints.join('\n')).toContain('「MIDIエクスポート」');
+    expect(wavStep?.hints.join('\n')).toContain('「WAVエクスポート」');
+    expect([...(midiStep?.hints ?? []), ...(wavStep?.hints ?? [])].join('\n'))
+      .not.toContain('エクスポートメニュー');
+  });
+});
+
+describe('scale-snap learning-loop integrity', () => {
+  const scaleSnapStepIds = ['basic-2-s2', 'compose-4-s1'] as const;
+
+  for (const stepId of scaleSnapStepIds) {
+    it(`${stepId} requires C major and explains the exact snap behavior`, () => {
+      const step = ALL_LESSONS.flatMap((lesson) => lesson.steps).find(
+        (candidate) => candidate.id === stepId,
+      );
+      expect(step, `${stepId} missing`).toBeDefined();
+      expect(step!.goal).toEqual({
+        kind: 'event',
+        eventType: 'scale_snap.enabled',
+        count: 1,
+        match: { key: 'C', scale: 'major' },
+      });
+
+      const copy = [step!.instruction, step!.explanation, ...step!.hints].join('\n');
+      expect(copy).toMatch(/キー.*C/);
+      expect(copy).toMatch(/スケール.*メジャー/);
+      expect(copy).toContain('スケールスナップ');
+      expect(copy).toMatch(/すでに.*オン.*自動で完了/);
+      expect(copy).toContain('新しく追加した音');
+      expect(copy).toContain('移動した音');
+      expect(copy).toMatch(/すでに置かれている音は変わりません/);
+    });
+  }
 });

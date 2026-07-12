@@ -252,7 +252,7 @@ export const COMPOSE_PLUS_LESSON_4: TutorialLesson = {
         'Reverb は空間の“響き”を足して音を遠く・広く感じさせます。Delay は音を繰り返す“やまびこ”で、メロディに広がりを出せます。Filter は高音・低音を削って音の“明るさ”を調整します。かけすぎると濁るので、うっすらから始めるのがコツです。トラックにエフェクトを1つ追加すると、このステップはクリアです。追加したあと再生して、原音との違いを聴いてみましょう。',
       goal: { kind: 'event', eventType: 'effect.added', count: 1 },
       hints: [
-        'ミキサーのトラックで「エフェクトを追加」から Reverb か Delay か Filter を選びましょう。',
+        'ミキサーのトラックで「音づくり」を見つけ、「追加する効果」から Reverb か Delay か Filter を選びましょう。',
         '追加できたら wet（かかり具合）を少しだけ上げて、原音とのバランスを聴きましょう。',
       ],
     },
@@ -305,11 +305,12 @@ export const COMPOSE_PLUS_LESSON_5: TutorialLesson = {
       explanation:
         'MIDI は「どの音をいつ鳴らすか」の情報を保存する形式です。他の DAW に読み込んで音色を差し替えたり、続きを編集したりできます。作った曲を“素材”として残せます。',
       goal: {
-        kind: 'project',
-        predicate: { type: 'exportCompleted', format: 'midi' },
+        kind: 'event',
+        eventType: 'export.midi',
+        match: { format: 'midi' },
       },
       hints: [
-        'エクスポートメニューから「MIDI」を選びましょう。',
+        '上部の「書き出し」を開き、「MIDIエクスポート」を選びましょう。',
         '書き出した .mid は、このアプリの MIDIインポートで読み戻すこともできます。',
       ],
     },
@@ -320,11 +321,12 @@ export const COMPOSE_PLUS_LESSON_5: TutorialLesson = {
       explanation:
         'WAV は実際に鳴っている“音そのもの”を保存する形式です。動画のBGMにしたり、そのまま共有したりできます。ここまでできたら、あなたのオリジナル曲が完成です！おめでとうございます。',
       goal: {
-        kind: 'project',
-        predicate: { type: 'exportCompleted', format: 'wav' },
+        kind: 'event',
+        eventType: 'export.wav',
+        match: { format: 'wav' },
       },
       hints: [
-        'エクスポートメニューから「WAV」を選びましょう。',
+        '上部の「書き出し」を開き、「WAVエクスポート」を選びましょう。',
         'WAV はファイルサイズが大きめですが、そのまま再生・共有できます。',
       ],
     },

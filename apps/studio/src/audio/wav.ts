@@ -5,77 +5,105 @@
 // function (no Web Audio) so the RIFF/WAVE header, chunk sizes and sample
 // clamping are unit testable.
 
-import type { Clip, DrumEvent, Project } from '@cts/project-model';
 import {
-  DEFAULT_STEPS_PER_BAR,
-  buildScheduleEvents,
-  drumStepToBeat,
-  type SchedulePayload,
-} from './events';
-import { buildTrackGraphs } from './graph';
+  assertScheduleEventBudget,
+  beatsPerBar as beatsPerBarForTimeSignature,
+  MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
+  RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
+  type Project,
+} from '@cts/project-model';
+import { buildScheduleEvents, type SchedulePayload } from './events';
+import { buildTrackGraphs, type TrackGraph } from './graph';
+import { buildMasterBus } from './masterBus';
+import { applyMasterMix } from './mixState';
 import {
   beatToTime,
-  makeDrumGrooveStepKey,
   projectLengthBeats,
-  resolveDrumGrooveHit,
+  resolveDrumOccurrence,
   secondsPerBeat,
   type ScheduledEvent,
 } from './scheduler';
-import { DrumVoiceManager } from './drums';
+import { createNoiseBuffer, DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
+import { planAudioTail } from './tail';
 
 /** Render sample rate (Hz). */
 export const RENDER_SAMPLE_RATE = 44100;
 /** Render channel count. */
 export const RENDER_CHANNELS = 2;
-/** Silence tail appended after the last event, seconds. */
-export const RENDER_TAIL_SECONDS = 1;
+/** Browser-safe ceiling for an offline render before allocating audio buffers. */
+export const MAX_WAV_RENDER_SECONDS = 5 * 60;
+export const MAX_WAV_RENDER_ESTIMATED_BYTES = 192 * 1024 * 1024;
+/** Offline rendering eagerly creates every source node for the whole song. */
+export const MAX_WAV_SCHEDULE_EVENTS = 10_000;
 
-type DrumGrooveSettings = {
-  swing: number;
-  probability: number;
-  humanizeVelocity: number;
-  seed: number;
-};
+export class WavRenderLimitError extends Error {
+  readonly code = 'render-limit-exceeded' as const;
 
-type DrumEventWithGroove = DrumEvent & {
-  probability?: number;
-};
-
-type DrumClipWithGroove = Clip & {
-  drumGroove?: Partial<DrumGrooveSettings>;
-  drumEvents?: DrumEventWithGroove[];
-};
-
-const DEFAULT_DRUM_GROOVE: DrumGrooveSettings = {
-  swing: 0,
-  probability: 1,
-  humanizeVelocity: 0,
-  seed: 1,
-};
-
-function clamp(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
+  constructor(
+    readonly songSeconds: number,
+    readonly estimatedBytes: number,
+  ) {
+    super(`WAV render exceeds the ${MAX_WAV_RENDER_SECONDS}-second browser limit`);
+    this.name = 'WavRenderLimitError';
+  }
 }
 
-function readDrumGroove(clip: Clip): DrumGrooveSettings {
-  const raw = (clip as DrumClipWithGroove).drumGroove;
+export type WavRenderPlan = Readonly<{
+  lengthBeats: number;
+  songSeconds: number;
+  uncappedTailSeconds: number;
+  tailSeconds: number;
+  totalSeconds: number;
+  postLimiterTailSeconds: number;
+  fadeStartSeconds: number | null;
+  fadeEndSeconds: number | null;
+  tailCapped: boolean;
+  frames: number;
+  estimatedBytes: number;
+}>;
+
+/** Compute and bound all large allocations before constructing OfflineAudioContext. */
+export function planWavRender(
+  project: Project,
+  resolvedEvents: readonly ScheduledEvent[] = buildWavScheduleEvents(project),
+): WavRenderPlan {
+  const barBeats = beatsPerBarForTimeSignature(project.timeSignature);
+  const lengthBeats = projectLengthBeats(project.lengthBars, barBeats);
+  const songSeconds = lengthBeats * secondsPerBeat(project.bpm);
+  const tail = planAudioTail(
+    project,
+    resolvedEvents,
+    0,
+    lengthBeats,
+    RENDER_SAMPLE_RATE,
+  );
+  const totalSeconds = tail.totalSeconds;
+  const frames = Math.max(1, Math.ceil(totalSeconds * RENDER_SAMPLE_RATE));
+  // Offline float buffers plus the final interleaved 16-bit PCM payload.
+  const estimatedBytes = frames * RENDER_CHANNELS * (Float32Array.BYTES_PER_ELEMENT + 2);
+  if (
+    !Number.isFinite(songSeconds) ||
+    !Number.isFinite(totalSeconds) ||
+    !Number.isSafeInteger(frames) ||
+    songSeconds > MAX_WAV_RENDER_SECONDS ||
+    estimatedBytes > MAX_WAV_RENDER_ESTIMATED_BYTES
+  ) {
+    throw new WavRenderLimitError(songSeconds, estimatedBytes);
+  }
   return {
-    swing: clamp(raw?.swing ?? DEFAULT_DRUM_GROOVE.swing, 0, 1),
-    probability: clamp(raw?.probability ?? DEFAULT_DRUM_GROOVE.probability, 0, 1),
-    humanizeVelocity: Math.round(
-      clamp(raw?.humanizeVelocity ?? DEFAULT_DRUM_GROOVE.humanizeVelocity, 0, 32),
-    ),
-    seed: Math.max(1, Math.trunc(raw?.seed ?? DEFAULT_DRUM_GROOVE.seed)),
+    lengthBeats,
+    songSeconds,
+    uncappedTailSeconds: tail.uncappedTailSeconds,
+    tailSeconds: tail.tailSeconds,
+    totalSeconds,
+    postLimiterTailSeconds: tail.postLimiterTailSeconds,
+    fadeStartSeconds: tail.fadeStartSeconds,
+    fadeEndSeconds: tail.fadeEndSeconds,
+    tailCapped: tail.capped,
+    frames,
+    estimatedBytes,
   };
-}
-
-function readDrumEventProbability(
-  event: DrumEventWithGroove,
-  fallback: number,
-): number {
-  return clamp(event.probability ?? fallback, 0, 1);
 }
 
 /** Clamp a float sample to [-1, 1] and convert to a signed 16-bit int. */
@@ -162,56 +190,28 @@ function writeAscii(view: DataView, offset: number, text: string): void {
 /**
  * Build the exact event schedule used by offline WAV render.
  *
- * Notes come from the shared project flattener. Drum clips are resolved here so
- * export reads each clip's persisted groove instead of the UI runtime groove.
+ * The shared project flattener embeds each drum clip's persisted groove. The
+ * same pure occurrence resolver used by live scheduling resolves every event.
  */
 export function buildWavScheduleEvents(project: Project): ScheduledEvent[] {
-  const beatsPerBar = project.timeSignature[0] > 0 ? project.timeSignature[0] : 4;
-  const events = buildScheduleEvents(project).filter((ev) => {
-    const payload = ev.payload as Partial<SchedulePayload>;
-    return payload.kind !== 'drum';
+  assertScheduleEventBudget(project, {
+    limit: MAX_WAV_SCHEDULE_EVENTS,
+    projection: 'audible',
+    density: {
+      windowBeats: RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
+      maxEventsPerWindow: MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
+    },
   });
-
-  for (const track of project.tracks) {
-    if (track.type !== 'drum') continue;
-
-    for (const clip of track.clips) {
-      const drumEvents = (clip as DrumClipWithGroove).drumEvents ?? [];
-      if (drumEvents.length === 0) continue;
-
-      const stepsPerBar = clip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR;
-      const groove = readDrumGroove(clip);
-
-      for (const drum of drumEvents) {
-        const beat = drumStepToBeat(drum.stepIndex, stepsPerBar, beatsPerBar, clip.startBeat);
-        const stepKey = makeDrumGrooveStepKey(drum.lane, beat);
-        const hit = resolveDrumGrooveHit({
-          beat,
-          lane: drum.lane,
-          velocity: drum.velocity,
-          probability: readDrumEventProbability(drum, groove.probability),
-          swing: groove.swing,
-          humanizeVelocity: groove.humanizeVelocity,
-          seed: groove.seed,
-          stepKey,
-          stepsPerBar,
-          beatsPerBar,
-        });
-        if (!hit) continue;
-
-        events.push({
-          beat: hit.beat,
-          payload: {
-            kind: 'drum',
-            trackId: track.id,
-            lane: drum.lane,
-            velocity: hit.velocity,
-          } satisfies SchedulePayload,
-        });
-      }
-    }
+  const events: ScheduledEvent[] = [];
+  for (const event of buildScheduleEvents(project)) {
+    const resolved = resolveDrumOccurrence(event, event.beat);
+    if (resolved) events.push(resolved);
   }
-
+  // Offline voices are allocated for the whole song in one pass. Their
+  // reap/steal logic assumes nondecreasing start times, so normalize the
+  // otherwise-unsorted project traversal here. Array#sort is stable, retaining
+  // deterministic source order for events that share an onset.
+  events.sort((left, right) => left.beat - right.beat);
   return events;
 }
 
@@ -223,60 +223,94 @@ export function buildWavScheduleEvents(project: Project): ScheduledEvent[] {
  * of an exported render (the song plays once, no click).
  */
 export async function renderProjectToWav(project: Project): Promise<Blob> {
-  const beatsPerBar = project.timeSignature[0] > 0 ? project.timeSignature[0] : 4;
-  const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
-  const songSeconds = lengthBeats * secondsPerBeat(project.bpm);
-  const totalSeconds = songSeconds + RENDER_TAIL_SECONDS;
-  const frames = Math.max(1, Math.ceil(totalSeconds * RENDER_SAMPLE_RATE));
+  const events = buildWavScheduleEvents(project);
+  const plan = planWavRender(project, events);
 
-  const ctx = new OfflineAudioContext(RENDER_CHANNELS, frames, RENDER_SAMPLE_RATE);
+  const ctx = new OfflineAudioContext(RENDER_CHANNELS, plan.frames, RENDER_SAMPLE_RATE);
 
-  // Master bus + soft limiter (mirrors AudioEngine routing).
-  const master = ctx.createGain();
-  master.gain.value = 1;
-  const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -3;
-  limiter.knee.value = 6;
-  limiter.ratio.value = 12;
-  limiter.attack.value = 0.002;
-  limiter.release.value = 0.12;
-  master.connect(limiter);
-  limiter.connect(ctx.destination);
-
-  // Per-track graphs + voice managers.
-  const graphs = buildTrackGraphs(ctx, master, project.tracks, 0);
+  // Master bus topology and gain policy are shared with live playback.
+  const { master, limiter } = buildMasterBus(ctx, ctx.destination);
+  let graphs = new Map<string, TrackGraph>();
   const synths = new Map<string, SynthVoiceManager>();
   const drums = new Map<string, DrumVoiceManager>();
-  for (const track of project.tracks) {
-    const graph = graphs.get(track.id);
-    if (!graph) continue;
-    if (track.type === 'drum') {
-      drums.set(track.id, new DrumVoiceManager(ctx, graph.input));
-    } else {
-      synths.set(track.id, new SynthVoiceManager(ctx, graph.input, track.instrument?.preset));
+  let renderOutput: GainNode | null = null;
+  try {
+    applyMasterMix(master, project.tracks, 0, 'immediate');
+
+    let graphDestination: AudioNode = master;
+    if (plan.fadeStartSeconds !== null) {
+      // This render-owned post-effect bus makes the final fade sample-accurate
+      // without changing the persisted Master fader or the live engine graph.
+      renderOutput = ctx.createGain();
+      renderOutput.gain.value = 1;
+      renderOutput.connect(master);
+      scheduleWavFinalFade(renderOutput.gain, plan);
+      graphDestination = renderOutput;
+    }
+
+    // Offline exports deliberately omit UI meters. Registering their analysers
+    // would replace the live meter registry and retain the offline context.
+    graphs = buildTrackGraphs(ctx, graphDestination, project.tracks, 0, 'disabled');
+    let sharedDrumNoise: AudioBuffer | undefined;
+    for (const track of project.tracks) {
+      const graph = graphs.get(track.id);
+      if (!graph) continue;
+      if (track.type === 'drum') {
+        sharedDrumNoise ??= createNoiseBuffer(ctx);
+        drums.set(
+          track.id,
+          new DrumVoiceManager(ctx, graph.input, sharedDrumNoise),
+        );
+      } else {
+        synths.set(track.id, new SynthVoiceManager(ctx, graph.input, track.instrument?.preset));
+      }
+    }
+
+    // Schedule everything. anchorBeat=0, anchorTime=0 => beat n maps to n*spb.
+    const spb = secondsPerBeat(project.bpm);
+    for (const ev of events) {
+      const time = beatToTime(ev.beat, project.bpm, 0, 0);
+      const payload = ev.payload as SchedulePayload;
+      if (payload.kind === 'note') {
+        const synth = synths.get(payload.trackId);
+        if (synth) {
+          synth.noteOn(payload.pitch, time, payload.durationBeats * spb, payload.velocity);
+        }
+      } else {
+        const drum = drums.get(payload.trackId);
+        if (drum) {
+          drum.trigger(payload.lane, time, payload.velocity, payload.voiceSeed);
+        }
+      }
+    }
+
+    const rendered = await ctx.startRendering();
+    const wav = encodeWav(rendered);
+    return new Blob([wav], { type: 'audio/wav' });
+  } finally {
+    for (const synth of synths.values()) synth.dispose();
+    for (const drum of drums.values()) drum.dispose();
+    for (const graph of graphs.values()) graph.dispose();
+    try {
+      renderOutput?.disconnect();
+    } catch {
+      // The output bus may have failed before it connected to the master.
+    }
+    try {
+      master.disconnect();
+    } catch {
+      // The offline graph may already have been torn down after a render error.
+    }
+    try {
+      limiter.disconnect();
+    } catch {
+      // The offline graph may already have been torn down after a render error.
     }
   }
+}
 
-  // Schedule everything. anchorBeat=0, anchorTime=0 => beat n maps to n*spb.
-  const events = buildWavScheduleEvents(project);
-  const spb = secondsPerBeat(project.bpm);
-  for (const ev of events) {
-    const time = beatToTime(ev.beat, project.bpm, 0, 0);
-    const payload = ev.payload as SchedulePayload;
-    if (payload.kind === 'note') {
-      const synth = synths.get(payload.trackId);
-      if (synth) {
-        synth.noteOn(payload.pitch, time, payload.durationBeats * spb, payload.velocity);
-      }
-    } else {
-      const drum = drums.get(payload.trackId);
-      if (drum) {
-        drum.trigger(payload.lane, time, payload.velocity);
-      }
-    }
-  }
-
-  const rendered = await ctx.startRendering();
-  const wav = encodeWav(rendered);
-  return new Blob([wav], { type: 'audio/wav' });
+export function scheduleWavFinalFade(param: AudioParam, plan: WavRenderPlan): void {
+  if (plan.fadeStartSeconds === null || plan.fadeEndSeconds === null) return;
+  param.setValueAtTime(1, plan.fadeStartSeconds);
+  param.linearRampToValueAtTime(0, plan.fadeEndSeconds);
 }

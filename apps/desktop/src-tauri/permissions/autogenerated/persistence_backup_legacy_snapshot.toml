@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persistence-backup-legacy-snapshot"
+description = "Enables the persistence_backup_legacy_snapshot command without any pre-configured scope."
+commands.allow = ["persistence_backup_legacy_snapshot"]
+
+[[permission]]
+identifier = "deny-persistence-backup-legacy-snapshot"
+description = "Denies the persistence_backup_legacy_snapshot command without any pre-configured scope."
+commands.deny = ["persistence_backup_legacy_snapshot"]

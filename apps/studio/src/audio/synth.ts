@@ -7,6 +7,8 @@
 // Works with any BaseAudioContext so the same code drives live playback and the
 // OfflineAudioContext used for WAV render.
 
+import { SYNTH_OSCILLATOR_STOP_PAD_SECONDS } from './voiceTiming';
+
 /** ADSR envelope, seconds for A/D/R, 0..1 for sustain. */
 export type Envelope = {
   attack: number;
@@ -245,12 +247,17 @@ export function midiToFreq(midi: number): number {
 /** Default per-voice steal cap (max simultaneous voices per track). */
 export const MAX_VOICES = 16;
 
-/** One sounding voice: the nodes plus when it should free itself. */
+/** One scheduled voice and every node exclusively owned by that voice. */
 type ActiveVoice = {
   oscillators: OscillatorNode[];
+  layerGains: GainNode[];
+  filter: BiquadFilterNode;
   gain: GainNode;
-  /** AudioContext time the voice fully finishes (after release). */
-  endTime: number;
+  curve: AdsrCurve;
+  /** Earliest currently scheduled source stop on the audio timeline. */
+  stopAt: number;
+  remainingEnded: number;
+  disposed: boolean;
 };
 
 /**
@@ -262,7 +269,11 @@ export class SynthVoiceManager {
   private readonly output: AudioNode;
   private readonly preset: SynthPreset;
   private readonly maxVoices: number;
-  private voices: ActiveVoice[] = [];
+  /** Voices that can still overlap a subsequently scheduled note. */
+  private scheduledVoices: ActiveVoice[] = [];
+  /** Every voice graph that has not yet been physically disconnected. */
+  private readonly ownedVoices = new Set<ActiveVoice>();
+  private disposed = false;
 
   constructor(
     ctx: BaseAudioContext,
@@ -292,6 +303,7 @@ export class SynthVoiceManager {
     velocity: number,
     options?: SynthNoteOptions,
   ): void {
+    if (this.disposed) return;
     this.reap(startTime);
     this.steal(startTime);
 
@@ -302,74 +314,157 @@ export class SynthVoiceManager {
     const vel = Math.min(1, Math.max(0, velocity / 127));
     const peak = p.gain * (0.3 + 0.7 * vel);
 
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(p.filter.cutoffHz, startTime);
-    filter.Q.setValueAtTime(p.filter.resonance, startTime);
-
-    const gain = this.ctx.createGain();
-    const curve = createAdsrCurve(p.env, startTime, duration, peak);
-    scheduleAdsr(gain.gain, curve);
-
     const oscillators: OscillatorNode[] = [];
-    for (const layer of oscillatorPlan) {
-      const osc = this.ctx.createOscillator();
-      const layerGain = this.ctx.createGain();
-      osc.type = layer.wave;
-      osc.frequency.setValueAtTime(layer.frequencyHz, startTime);
-      osc.detune.setValueAtTime(layer.detuneCents, startTime);
-      layerGain.gain.setValueAtTime(layer.gain, startTime);
-      osc.connect(layerGain);
-      layerGain.connect(filter);
-      oscillators.push(osc);
-    }
+    const layerGains: GainNode[] = [];
+    let filter: BiquadFilterNode | null = null;
+    let gain: GainNode | null = null;
+    let voice: ActiveVoice | null = null;
 
-    filter.connect(gain);
-    gain.connect(this.output);
+    try {
+      filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(p.filter.cutoffHz, startTime);
+      filter.Q.setValueAtTime(p.filter.resonance, startTime);
 
-    const stopAt = curve[4].time + 0.02;
-    for (const osc of oscillators) {
-      osc.start(startTime);
-      osc.stop(stopAt);
-    }
+      gain = this.ctx.createGain();
+      const curve = createAdsrCurve(p.env, startTime, duration, peak);
+      scheduleAdsr(gain.gain, curve);
 
-    this.voices.push({ oscillators, gain, endTime: stopAt });
-  }
-
-  /** Immediately release every voice (used on stop). */
-  releaseAll(when: number): void {
-    for (const v of this.voices) {
-      try {
-        v.gain.gain.cancelScheduledValues(when);
-        v.gain.gain.setValueAtTime(Math.max(0.0001, v.gain.gain.value), when);
-        v.gain.gain.linearRampToValueAtTime(0, when + 0.03);
-        stopOscillators(v.oscillators, when + 0.05);
-      } catch {
-        // Node may already be stopped; ignore.
+      for (const layer of oscillatorPlan) {
+        const osc = this.ctx.createOscillator();
+        oscillators.push(osc);
+        const layerGain = this.ctx.createGain();
+        layerGains.push(layerGain);
+        osc.type = layer.wave;
+        osc.frequency.setValueAtTime(layer.frequencyHz, startTime);
+        osc.detune.setValueAtTime(layer.detuneCents, startTime);
+        layerGain.gain.setValueAtTime(layer.gain, startTime);
       }
+
+      voice = {
+        oscillators,
+        layerGains,
+        filter,
+        gain,
+        curve,
+        stopAt: curve[4].time + SYNTH_OSCILLATOR_STOP_PAD_SECONDS,
+        remainingEnded: oscillators.length,
+        disposed: false,
+      };
+      this.ownedVoices.add(voice);
+      const activeVoice = voice;
+
+      for (const [index, osc] of oscillators.entries()) {
+        const layerGain = layerGains[index];
+        if (!layerGain) throw new Error('Synth layer allocation became inconsistent.');
+        let ended = false;
+        osc.onended = () => {
+          if (ended || activeVoice.disposed) return;
+          ended = true;
+          activeVoice.remainingEnded -= 1;
+          if (activeVoice.remainingEnded === 0) this.disposeVoice(activeVoice);
+        };
+        osc.connect(layerGain);
+        layerGain.connect(filter);
+      }
+      filter.connect(gain);
+      gain.connect(this.output);
+
+      for (const osc of oscillators) {
+        osc.start(startTime);
+        osc.stop(activeVoice.stopAt);
+      }
+      if (!activeVoice.disposed) this.scheduledVoices.push(activeVoice);
+    } catch (error) {
+      stopOscillators(oscillators, this.ctx.currentTime);
+      if (voice) {
+        this.disposeVoice(voice);
+      } else {
+        disconnectVoiceNodes(oscillators, layerGains, filter, gain);
+      }
+      throw error;
     }
-    this.voices = [];
   }
 
-  /** Drop voices that have finished before `now`. */
-  private reap(now: number): void {
-    this.voices = this.voices.filter((v) => v.endTime > now);
+  /** Request a short release without disconnecting before the sources end. */
+  releaseAll(when: number): void {
+    if (this.disposed) return;
+    this.reap(when);
+    for (const voice of [...this.ownedVoices]) this.requestSoftStop(voice, when, 0.03, 0.05);
+    this.scheduledVoices = [];
+  }
+
+  /** Cancel and synchronously disconnect every owned voice. Idempotent. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.scheduledVoices = [];
+    for (const voice of [...this.ownedVoices]) {
+      stopOscillators(voice.oscillators, this.ctx.currentTime);
+      this.disposeVoice(voice);
+    }
+  }
+
+  /**
+   * Prune overlap accounting by schedule time, but only disconnect a missed
+   * `ended` callback after the real audio clock has passed its stop. Offline
+   * rendering schedules future voices while `currentTime` is still zero.
+   */
+  private reap(scheduledStartTime: number): void {
+    this.scheduledVoices = this.scheduledVoices.filter(
+      (voice) => !voice.disposed && voice.stopAt > scheduledStartTime,
+    );
+    for (const voice of [...this.ownedVoices]) {
+      if (voice.stopAt <= this.ctx.currentTime) this.disposeVoice(voice);
+    }
   }
 
   /** Enforce the voice cap by stealing the oldest voice. */
   private steal(when: number): void {
-    while (this.voices.length >= this.maxVoices) {
-      const victim = this.voices.shift();
+    while (this.scheduledVoices.length >= this.maxVoices) {
+      const victim = this.scheduledVoices.shift();
       if (!victim) break;
-      try {
-        victim.gain.gain.cancelScheduledValues(when);
-        victim.gain.gain.setValueAtTime(Math.max(0.0001, victim.gain.gain.value), when);
-        victim.gain.gain.linearRampToValueAtTime(0, when + 0.02);
-        stopOscillators(victim.oscillators, when + 0.03);
-      } catch {
-        // already stopped
-      }
+      this.requestSoftStop(victim, when, 0.02, 0.03);
     }
+  }
+
+  private requestSoftStop(
+    voice: ActiveVoice,
+    when: number,
+    fadeSeconds: number,
+    stopDelaySeconds: number,
+  ): void {
+    if (voice.disposed) return;
+    if (voice.stopAt <= this.ctx.currentTime) {
+      this.disposeVoice(voice);
+      return;
+    }
+
+    const stopAt = Math.min(voice.stopAt, when + stopDelaySeconds);
+    if (stopAt >= voice.stopAt) return;
+    try {
+      holdAudioParamAtCurveValue(voice.gain.gain, voice.curve, when);
+      const fadeAt = Math.min(stopAt, when + fadeSeconds);
+      if (fadeAt > when) voice.gain.gain.linearRampToValueAtTime(0, fadeAt);
+      else voice.gain.gain.setValueAtTime(0, when);
+    } catch {
+      // A closed context cannot automate, but the source can still be stopped.
+    }
+    stopOscillators(voice.oscillators, stopAt);
+    voice.stopAt = stopAt;
+  }
+
+  private disposeVoice(voice: ActiveVoice): void {
+    if (voice.disposed) return;
+    voice.disposed = true;
+    this.ownedVoices.delete(voice);
+    this.scheduledVoices = this.scheduledVoices.filter((candidate) => candidate !== voice);
+    disconnectVoiceNodes(
+      voice.oscillators,
+      voice.layerGains,
+      voice.filter,
+      voice.gain,
+    );
   }
 }
 
@@ -408,6 +503,33 @@ function scheduleRamp(param: AudioParam, from: AdsrPoint, to: AdsrPoint): void {
   }
 }
 
+function holdAudioParamAtCurveValue(
+  param: AudioParam,
+  curve: AdsrCurve,
+  when: number,
+): void {
+  if (typeof param.cancelAndHoldAtTime === 'function') {
+    param.cancelAndHoldAtTime(when);
+    return;
+  }
+  const heldValue = adsrValueAtTime(curve, when);
+  param.cancelScheduledValues(when);
+  param.setValueAtTime(heldValue, when);
+}
+
+function adsrValueAtTime(curve: AdsrCurve, time: number): number {
+  if (time <= curve[0].time) return curve[0].value;
+  for (let index = 1; index < curve.length; index += 1) {
+    const from = curve[index - 1]!;
+    const to = curve[index]!;
+    if (time > to.time) continue;
+    if (to.time <= from.time) return to.value;
+    const ratio = Math.max(0, Math.min(1, (time - from.time) / (to.time - from.time)));
+    return from.value + (to.value - from.value) * ratio;
+  }
+  return curve[4].value;
+}
+
 function stopOscillators(oscillators: readonly OscillatorNode[], when: number): void {
   for (const osc of oscillators) {
     try {
@@ -415,6 +537,29 @@ function stopOscillators(oscillators: readonly OscillatorNode[], when: number): 
     } catch {
       // Node may already be stopped; ignore.
     }
+  }
+}
+
+function disconnectVoiceNodes(
+  oscillators: readonly OscillatorNode[],
+  layerGains: readonly GainNode[],
+  filter: BiquadFilterNode | null,
+  gain: GainNode | null,
+): void {
+  for (const oscillator of oscillators) {
+    oscillator.onended = null;
+    disconnectNode(oscillator);
+  }
+  for (const layerGain of layerGains) disconnectNode(layerGain);
+  if (filter) disconnectNode(filter);
+  if (gain) disconnectNode(gain);
+}
+
+function disconnectNode(node: AudioNode): void {
+  try {
+    node.disconnect();
+  } catch {
+    // Cleanup is idempotent and must continue across already-disconnected nodes.
   }
 }
 

@@ -230,3 +230,162 @@ describe('Scheduler metronome windows', () => {
     scheduler.stop();
   });
 });
+
+describe('Scheduler delayed tick recovery', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('drops a no-loop backlog and schedules only the future lookahead', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const fired: unknown[] = [];
+    const windows: Array<{ startBeat: number; endBeat: number }> = [];
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: (events) => fired.push(...events.map((event) => event.payload)),
+      onScheduleWindow: (window) => windows.push(window),
+      tickMs: 25,
+      lookaheadS: 0.1,
+    });
+
+    scheduler.start([
+      { beat: 1, payload: 'missed-one' },
+      { beat: 2, payload: 'missed-two' },
+      { beat: 6.1, payload: 'future' },
+    ], 120, 0, null, 8);
+    now = 3; // beat 6; simulate a throttled timer/device resume.
+    vi.advanceTimersByTime(25);
+
+    expect(fired).toEqual(['future']);
+    expect(windows).toHaveLength(2);
+    expect(windows[1]?.startBeat).toBeCloseTo(6, 10);
+    expect(windows[1]?.endBeat).toBeCloseTo(6.2, 10);
+    scheduler.stop();
+  });
+
+  it('does not replay missed loop passes after a clock jump', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const fired: unknown[] = [];
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: (events) => fired.push(...events.map((event) => event.payload)),
+      tickMs: 25,
+      lookaheadS: 0.1,
+    });
+
+    scheduler.start([
+      { beat: 2, payload: 'missed-loop-hit' },
+      { beat: 2.2, payload: 'future-loop-hit' },
+    ], 120, 0, { startBeat: 0, endBeat: 4 }, Infinity);
+    now = 5.05; // beat 10.1: occurrence@10 is past; occurrence@10.2 is future.
+    vi.advanceTimersByTime(25);
+
+    expect(fired).toEqual(['future-loop-hit']);
+    scheduler.stop();
+  });
+
+  it('skips historical metronome clicks when resuming a delayed window', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const clicks: number[] = [];
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: () => {},
+      onScheduleWindow: ({ startBeat, endBeat }) => {
+        clicks.push(...metronomeBeatEvents(startBeat, endBeat, 4).map((click) => click.beat));
+      },
+      tickMs: 25,
+      lookaheadS: 0.2,
+    });
+
+    scheduler.start([], 120, 0, null, 8);
+    now = 3; // beat 6
+    vi.advanceTimersByTime(25);
+
+    expect(clicks).toEqual([0, 6]);
+    scheduler.stop();
+  });
+
+  it('fires no missed notes and ends once when a jump passes the song end', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const fired: unknown[] = [];
+    const onEnd = vi.fn();
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: (events) => fired.push(...events.map((event) => event.payload)),
+      onEnd,
+      tickMs: 25,
+      lookaheadS: 0.1,
+    });
+
+    scheduler.start([{ beat: 3.9, payload: 'missed-tail' }], 120, 0, null, 4);
+    now = 3; // beat 6, beyond the 4-beat song.
+    vi.advanceTimersByTime(25);
+    vi.advanceTimersByTime(100);
+
+    expect(fired).toEqual([]);
+    expect(onEnd).toHaveBeenCalledOnce();
+    expect(scheduler.isRunning).toBe(false);
+  });
+});
+
+describe('Scheduler failure boundary', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('rethrows a first-window failure and never starts its interval', () => {
+    vi.useFakeTimers();
+    const failure = new Error('initial voice allocation failed');
+    const fire = vi.fn(() => {
+      throw failure;
+    });
+    const onError = vi.fn();
+    const scheduler = new Scheduler({
+      clock: () => 0,
+      fire,
+      onError,
+      tickMs: 25,
+      lookaheadS: 0.1,
+    });
+
+    expect(() => scheduler.start([{ beat: 0, payload: 'note' }], 120, 0, null, 4))
+      .toThrow(failure);
+    expect(scheduler.isRunning).toBe(false);
+    vi.advanceTimersByTime(100);
+    expect(fire).toHaveBeenCalledOnce();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('stops and reports an interval failure exactly once without retrying its window', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const failure = new Error('later voice allocation failed');
+    const fire = vi.fn(() => {
+      throw failure;
+    });
+    const onError = vi.fn();
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire,
+      onError,
+      tickMs: 25,
+      lookaheadS: 0.1,
+    });
+
+    scheduler.start([{ beat: 1.1, payload: 'note' }], 120, 0, null, 4);
+    now = 0.5;
+    vi.advanceTimersByTime(25);
+
+    expect(scheduler.isRunning).toBe(false);
+    expect(fire).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(failure);
+    vi.advanceTimersByTime(100);
+    expect(fire).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledOnce();
+  });
+});

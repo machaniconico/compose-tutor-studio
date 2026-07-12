@@ -68,19 +68,36 @@ export function clampPitch(
  * Snap a candidate MIDI pitch to the nearest member of a set of pitch classes
  * (used for scale-snapped vertical moves). `allowedPcs` is a set of 0-11
  * pitch classes. Returns the nearest pitch whose pitch-class is allowed,
- * preferring the candidate itself, then searching outward.
+ * preferring the candidate itself, then searching outward. `up` and `down`
+ * are strict directions: if no allowed pitch exists that way, the bounded
+ * candidate is returned so the caller can treat the edit as a no-op.
  */
-export function snapPitchToPitchClasses(pitch: number, allowedPcs: ReadonlySet<number>): number {
-  if (allowedPcs.size === 0) return pitch;
-  const pc = ((pitch % 12) + 12) % 12;
-  if (allowedPcs.has(pc)) return pitch;
-  for (let delta = 1; delta <= 6; delta += 1) {
-    const up = pitch + delta;
-    if (allowedPcs.has(((up % 12) + 12) % 12)) return up;
-    const down = pitch - delta;
-    if (allowedPcs.has(((down % 12) + 12) % 12)) return down;
+export function snapPitchToPitchClasses(
+  pitch: number,
+  allowedPcs: ReadonlySet<number>,
+  low = PIANO_LOW_MIDI,
+  high = PIANO_HIGH_MIDI,
+  preference: 'nearest' | 'up' | 'down' = 'nearest',
+): number {
+  const bounded = Math.max(low, Math.min(high, pitch));
+  if (allowedPcs.size === 0) return bounded;
+  const pc = ((bounded % 12) + 12) % 12;
+  if (allowedPcs.has(pc)) return bounded;
+  for (let delta = 1; delta <= high - low; delta += 1) {
+    const up = bounded + delta;
+    const down = bounded - delta;
+    const upAllowed = up <= high && allowedPcs.has(((up % 12) + 12) % 12);
+    const downAllowed = down >= low && allowedPcs.has(((down % 12) + 12) % 12);
+    if (preference === 'down') {
+      if (downAllowed) return down;
+    } else if (preference === 'up') {
+      if (upAllowed) return up;
+    } else {
+      if (upAllowed) return up;
+      if (downAllowed) return down;
+    }
   }
-  return pitch;
+  return bounded;
 }
 
 /** True when two axis-aligned rectangles overlap (for marquee selection). */

@@ -192,6 +192,73 @@ describe('noteCountAtLeast', () => {
       ),
     ).toBe(true);
   });
+
+  it('counts linked MIDI content once per timeline instance', () => {
+    const track = makeMelodyTrack([makeNote(60), makeNote(64)]);
+    const source = track.clips[0]!;
+    source.trackId = track.id;
+    track.clips.push({
+      id: 'linked-melody',
+      trackId: track.id,
+      type: 'midi',
+      startBeat: 16,
+      lengthBeats: source.lengthBeats,
+      loop: false,
+      aliasOf: source.id,
+    });
+    const project = makeProject({ schemaVersion: 2, tracks: [track] });
+
+    expect(evaluateProjectPredicate(
+      { type: 'noteCountAtLeast', trackName: 'Melody', value: 4 },
+      project,
+    )).toBe(true);
+  });
+
+  it('does not count a dangling linked MIDI instance', () => {
+    const track = makeMelodyTrack([makeNote(60), makeNote(64)]);
+    track.clips[0]!.trackId = track.id;
+    track.clips.push({
+      id: 'dangling-melody',
+      trackId: track.id,
+      type: 'midi',
+      startBeat: 16,
+      lengthBeats: 16,
+      loop: false,
+      aliasOf: 'missing-source',
+    });
+    const project = makeProject({ schemaVersion: 2, tracks: [track] });
+
+    expect(evaluateProjectPredicate(
+      { type: 'noteCountAtLeast', trackName: 'Melody', value: 3 },
+      project,
+    )).toBe(false);
+  });
+});
+
+describe('linked drum predicates', () => {
+  it('counts active linked drum steps once per timeline instance', () => {
+    const track = makeDrumTrack([
+      makeDrumEvent('kick', 0),
+      makeDrumEvent('kick', 8),
+    ]);
+    const source = track.clips[0]!;
+    source.trackId = track.id;
+    track.clips.push({
+      id: 'linked-drums',
+      trackId: track.id,
+      type: 'drum',
+      startBeat: 16,
+      lengthBeats: source.lengthBeats,
+      loop: false,
+      aliasOf: source.id,
+    });
+    const project = makeProject({ schemaVersion: 2, tracks: [track] });
+
+    expect(evaluateProjectPredicate(
+      { type: 'drumLaneActive', lane: 'kick', minSteps: 4 },
+      project,
+    )).toBe(true);
+  });
 });
 
 // ─── hasSection ───────────────────────────────────────────────────────────────
@@ -326,6 +393,32 @@ describe('checkGoalOnEvent — event kind', () => {
     };
     expect(checkGoalOnEvent(goal, rightEvent, project, 0).satisfied).toBe(true);
   });
+
+  it.each([
+    { key: 'C', scale: 'major', satisfied: true },
+    { key: 'C', scale: 'naturalMinor', satisfied: false },
+    { key: 'G', scale: 'major', satisfied: false },
+    { key: 'G', scale: 'naturalMinor', satisfied: false },
+  ] as const)(
+    'matches scale snap only for the exact key/scale pair: $key $scale',
+    ({ key, scale, satisfied }) => {
+      const event: AppEvent = {
+        type: 'scale_snap.enabled',
+        payload: { key, scale },
+      };
+      const goal = {
+        kind: 'event' as const,
+        eventType: 'scale_snap.enabled' as const,
+        count: 1,
+        match: { key: 'C', scale: 'major' } as const,
+      };
+
+      expect(checkGoalOnEvent(goal, event, project, 0)).toEqual({
+        satisfied,
+        newEventCount: satisfied ? 1 : 0,
+      });
+    },
+  );
 
   it('exercise goal never satisfied by events', () => {
     const event: AppEvent = { type: 'chord.added', payload: { bar: 0, chordSymbol: 'C' } };

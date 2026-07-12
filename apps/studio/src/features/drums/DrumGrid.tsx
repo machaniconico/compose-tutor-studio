@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from '../../state/store';
-import type { Clip, DrumEvent, DrumLane, Track } from '@cts/project-model';
+import type {
+  Clip,
+  DrumEvent,
+  DrumGrooveSettings,
+  DrumLane,
+  Track,
+} from '@cts/project-model';
+import {
+  beatsPerBar,
+  clipContentOwnerId,
+  resolveClipContent,
+} from '@cts/project-model';
 import { DRUM_PATTERNS, applyDrumPattern, setDrumStepVelocity } from '../../state/editorActions';
-import { makeDrumGrooveStepKey, setDrumGrooveRuntimeOptions } from '../../audio/scheduler';
 import { publishAppEvent } from '../../state/appEvents';
 
 /** Six lanes shown top-to-bottom, with Japanese labels. */
@@ -18,21 +28,8 @@ const LANES: { lane: DrumLane; label: string }[] = [
 /** Velocity cycle for repeated clicks: strong -> medium -> soft -> off. */
 const VELOCITY_CYCLE = [100, 70, 40, 0] as const;
 
-type DrumGrooveSettings = {
-  swing: number;
-  probability: number;
-  humanizeVelocity: number;
-  seed: number;
-};
-
-type DrumEventWithGroove = DrumEvent & {
-  probability?: number;
-};
-
-type DrumClipWithGroove = Clip & {
-  drumGroove?: Partial<DrumGrooveSettings>;
-  drumEvents?: DrumEventWithGroove[];
-};
+type DrumEventWithGroove = DrumEvent;
+type DrumClipWithGroove = Clip;
 
 type SelectedStep = {
   lane: DrumLane;
@@ -56,20 +53,9 @@ function readGroove(clip: Clip | null): DrumGrooveSettings {
   return {
     swing: clamp(raw?.swing ?? DEFAULT_GROOVE.swing, 0, 1),
     probability: clamp(raw?.probability ?? DEFAULT_GROOVE.probability, 0, 1),
-    humanizeVelocity: Math.round(clamp(raw?.humanizeVelocity ?? DEFAULT_GROOVE.humanizeVelocity, 0, 32)),
+    humanizeVelocity: Math.round(clamp(raw?.humanizeVelocity ?? DEFAULT_GROOVE.humanizeVelocity, 0, 127)),
     seed: Math.max(1, Math.trunc(raw?.seed ?? DEFAULT_GROOVE.seed)),
   };
-}
-
-function stepBeat(
-  clip: Clip,
-  stepIndex: number,
-  stepsPerBar: number,
-  beatsPerBar: number,
-): number {
-  const steps = stepsPerBar > 0 ? stepsPerBar : 16;
-  const bpb = beatsPerBar > 0 ? beatsPerBar : 4;
-  return clip.startBeat + stepIndex * (bpb / steps);
 }
 
 function eventProbability(event: DrumEventWithGroove, fallback: number): number {
@@ -92,15 +78,74 @@ function velocityClass(velocity: number): string {
 }
 
 /** Find the drum clip (selected one, else first). */
-function findDrumClip(tracks: readonly Track[], selectedClipId: string | null): Clip | null {
+export function findDrumClip(
+  tracks: readonly Track[],
+  selectedClipId: string | null,
+): Clip | null {
+  if (selectedClipId) {
+    for (const track of tracks) {
+      if (track.type !== 'drum') continue;
+      const selected = track.clips.find(
+        (clip) => clip.id === selectedClipId && clip.type === 'drum',
+      );
+      if (selected) return selected;
+    }
+  }
   for (const track of tracks) {
     if (track.type !== 'drum') continue;
-    const selected = track.clips.find((c) => c.id === selectedClipId && c.type === 'drum');
-    if (selected) return selected;
-    const first = track.clips.find((c) => c.type === 'drum');
+    const first = track.clips.find((clip) => clip.type === 'drum');
     if (first) return first;
   }
   return null;
+}
+
+/** Include a final partial bar so every persisted drum step remains editable. */
+export function drumClipBarCount(lengthBeats: number, beatsInBar: number): number {
+  if (!Number.isFinite(lengthBeats) || !Number.isFinite(beatsInBar) || beatsInBar <= 0) {
+    return 1;
+  }
+  return Math.max(1, Math.ceil(lengthBeats / beatsInBar));
+}
+
+/** Match project validation: a drum step is editable only before the clip end. */
+export function isDrumStepWithinClip(
+  stepIndex: number,
+  stepsPerBar: number,
+  beatsInBar: number,
+  lengthBeats: number,
+): boolean {
+  return Number.isSafeInteger(stepIndex)
+    && stepIndex >= 0
+    && Number.isSafeInteger(stepsPerBar)
+    && stepsPerBar > 0
+    && Number.isFinite(beatsInBar)
+    && beatsInBar > 0
+    && Number.isFinite(lengthBeats)
+    && stepIndex * (beatsInBar / stepsPerBar) < lengthBeats;
+}
+
+/** Last enabled zero-based cell in one visible bar, including partial final bars. */
+export function lastDrumStepInBar(
+  barIndex: number,
+  stepsPerBar: number,
+  beatsInBar: number,
+  lengthBeats: number,
+): number {
+  if (!Number.isSafeInteger(barIndex) || barIndex < 0) return 0;
+  let last = 0;
+  for (let stepInBar = 0; stepInBar < stepsPerBar; stepInBar += 1) {
+    if (
+      isDrumStepWithinClip(
+        barIndex * stepsPerBar + stepInBar,
+        stepsPerBar,
+        beatsInBar,
+        lengthBeats,
+      )
+    ) {
+      last = stepInBar;
+    }
+  }
+  return last;
 }
 
 /**
@@ -109,58 +154,49 @@ function findDrumClip(tracks: readonly Track[], selectedClipId: string | null): 
  * the grid when the clip spans multiple bars.
  */
 export function DrumGrid() {
-  const tracks = useStore((s) => s.project.tracks);
+  const project = useStore((s) => s.project);
+  const tracks = project.tracks;
   const selectedClipId = useStore((s) => s.editor.selectedClipId);
-  const timeSignature = useStore((s) => s.project.timeSignature);
+  const timeSignature = project.timeSignature;
   const applyProjectChange = useStore((s) => s.applyProjectChange);
 
   const [bar, setBar] = useState(0);
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
+  const [focusedCell, setFocusedCell] = useState<{ lane: DrumLane; stepInBar: number }>({
+    lane: LANES[0]?.lane ?? 'kick',
+    stepInBar: 0,
+  });
+  const cellRefs = useRef(new Map<string, HTMLButtonElement>());
 
-  const clip = findDrumClip(tracks, selectedClipId);
+  const instance = findDrumClip(tracks, selectedClipId);
+  const clip = instance ? resolveClipContent(project, instance) : null;
   const groove = readGroove(clip);
   const stepsPerBar = clip?.stepsPerBar ?? 16;
-  const bpb = timeSignature[0];
+  const bpb = beatsPerBar(timeSignature);
   const events = ((clip as DrumClipWithGroove | null)?.drumEvents ?? []) as DrumEventWithGroove[];
-  const probabilityMap = useMemo(() => {
-    if (!clip) return {};
-    const map: Record<string, number> = {};
-    for (const event of events) {
-      const beat = stepBeat(clip, event.stepIndex, stepsPerBar, bpb);
-      map[makeDrumGrooveStepKey(event.lane, beat)] = eventProbability(event, groove.probability);
-    }
-    return map;
-  }, [bpb, clip, events, groove.probability, stepsPerBar]);
-
-  useEffect(() => {
-    if (!clip) return;
-    setDrumGrooveRuntimeOptions({
-      swing: groove.swing,
-      probability: groove.probability,
-      humanizeVelocity: groove.humanizeVelocity,
-      seed: groove.seed,
-      stepsPerBar,
-      beatsPerBar: bpb,
-      probabilitiesByStep: probabilityMap,
-    });
-  }, [
-    bpb,
-    clip,
-    groove.humanizeVelocity,
-    groove.probability,
-    groove.seed,
-    groove.swing,
-    probabilityMap,
-    stepsPerBar,
-  ]);
 
   if (!clip) {
     return <div className="empty-hint">ドラムクリップがありません。</div>;
   }
 
-  const totalBars = Math.max(1, Math.round(clip.lengthBeats / bpb));
+  const totalBars = drumClipBarCount(clip.lengthBeats, bpb);
   const activeBar = Math.min(bar, totalBars - 1);
   const barOffset = activeBar * stepsPerBar;
+  const lastEnabledStep = lastDrumStepInBar(
+    activeBar,
+    stepsPerBar,
+    bpb,
+    clip.lengthBeats,
+  );
+  const focusedStepInBar = Math.min(focusedCell.stepInBar, lastEnabledStep);
+
+  const moveCellFocus = (laneIndex: number, stepInBar: number): void => {
+    const lane = LANES[Math.max(0, Math.min(LANES.length - 1, laneIndex))]?.lane;
+    if (!lane) return;
+    const boundedStep = Math.max(0, Math.min(lastEnabledStep, stepInBar));
+    setFocusedCell({ lane, stepInBar: boundedStep });
+    cellRefs.current.get(`${lane}:${boundedStep}`)?.focus();
+  };
 
   const byKey = new Map<string, DrumEvent>();
   for (const e of events) byKey.set(`${e.lane}:${e.stepIndex}`, e);
@@ -174,21 +210,32 @@ export function DrumGrid() {
     tracks.find((track) => track.clips.some((c) => c.id === clip.id))?.id ?? '';
 
   const updateGroove = (patch: Partial<DrumGrooveSettings>): void => {
-    applyProjectChange((project) => ({
-      ...project,
-      tracks: project.tracks.map((track) => ({
-        ...track,
-        clips: track.clips.map((candidate) => {
-          if (candidate.id !== clip.id) return candidate;
-          const nextClip: DrumClipWithGroove = {
-            ...(candidate as DrumClipWithGroove),
-            drumGroove: { ...readGroove(candidate), ...patch },
-          };
-          return nextClip;
-        }),
-      })),
-    }));
-    const merged = { ...groove, ...patch };
+    const committed = applyProjectChange((currentProject) => {
+      const ownerId = clipContentOwnerId(currentProject, clip.id);
+      if (!ownerId) return currentProject;
+      return {
+        ...currentProject,
+        tracks: currentProject.tracks.map((track) => ({
+          ...track,
+          clips: track.clips.map((candidate) => {
+            if (candidate.id !== ownerId) return candidate;
+            const nextClip: DrumClipWithGroove = {
+              ...(candidate as DrumClipWithGroove),
+              drumGroove: { ...readGroove(candidate), ...patch },
+            };
+            return nextClip;
+          }),
+        })),
+      };
+    });
+    if (!committed) return;
+    const committedProject = useStore.getState().project;
+    const committedInstance = committedProject.tracks
+      .flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clip.id);
+    const merged = committedInstance
+      ? readGroove(resolveClipContent(committedProject, committedInstance) ?? committedInstance)
+      : { ...groove, ...patch };
     publishAppEvent({
       type: 'drum.grooveChanged',
       payload: {
@@ -202,30 +249,34 @@ export function DrumGrid() {
 
   const updateSelectedProbability = (probability: number): void => {
     if (!selectedStep) return;
-    applyProjectChange((project) => ({
-      ...project,
-      tracks: project.tracks.map((track) => ({
-        ...track,
-        clips: track.clips.map((candidate) => {
-          if (candidate.id !== clip.id) return candidate;
-          const nextEvents = ((candidate as DrumClipWithGroove).drumEvents ?? []).map((event) => {
-            if (event.lane !== selectedStep.lane || event.stepIndex !== selectedStep.stepIndex) {
-              return event;
-            }
-            const nextEvent: DrumEventWithGroove = {
-              ...event,
-              probability: clamp(probability, 0, 1),
+    applyProjectChange((currentProject) => {
+      const ownerId = clipContentOwnerId(currentProject, clip.id);
+      if (!ownerId) return currentProject;
+      return {
+        ...currentProject,
+        tracks: currentProject.tracks.map((track) => ({
+          ...track,
+          clips: track.clips.map((candidate) => {
+            if (candidate.id !== ownerId) return candidate;
+            const nextEvents = ((candidate as DrumClipWithGroove).drumEvents ?? []).map((event) => {
+              if (event.lane !== selectedStep.lane || event.stepIndex !== selectedStep.stepIndex) {
+                return event;
+              }
+              const nextEvent: DrumEventWithGroove = {
+                ...event,
+                probability: clamp(probability, 0, 1),
+              };
+              return nextEvent;
+            });
+            const nextClip: DrumClipWithGroove = {
+              ...(candidate as DrumClipWithGroove),
+              drumEvents: nextEvents,
             };
-            return nextEvent;
-          });
-          const nextClip: DrumClipWithGroove = {
-            ...(candidate as DrumClipWithGroove),
-            drumEvents: nextEvents,
-          };
-          return nextClip;
-        }),
-      })),
-    }));
+            return nextClip;
+          }),
+        })),
+      };
+    });
   };
 
   return (
@@ -258,6 +309,7 @@ export function DrumGrid() {
                 key={b}
                 type="button"
                 className={b === activeBar ? 'is-active' : ''}
+                aria-pressed={b === activeBar}
                 onClick={() => setBar(b)}
               >
                 {b + 1}
@@ -296,7 +348,7 @@ export function DrumGrid() {
             <input
               type="range"
               min="0"
-              max="32"
+              max="127"
               step="1"
               value={groove.humanizeVelocity}
               onChange={(event) =>
@@ -318,40 +370,113 @@ export function DrumGrid() {
         </div>
       </div>
 
-      <div className="drum-grid" style={{ ['--steps' as string]: String(stepsPerBar) }}>
-        {LANES.map(({ lane, label }) => (
-          <div className="drum-grid__row" key={lane}>
-            <span className="drum-grid__lane-label">{label}</span>
+      <div
+        className="drum-grid"
+        role="grid"
+        aria-label={`ドラムステップ、小節 ${activeBar + 1} / ${totalBars}`}
+        aria-describedby="drum-grid-keyboard-help"
+        aria-rowcount={LANES.length}
+        aria-colcount={stepsPerBar + 1}
+        style={{ ['--steps' as string]: String(stepsPerBar) }}
+      >
+        {LANES.map(({ lane, label }, laneIndex) => (
+          <div className="drum-grid__row" role="row" aria-rowindex={laneIndex + 1} key={lane}>
+            <span className="drum-grid__lane-label" role="rowheader" aria-colindex={1}>
+              {label}
+            </span>
             {Array.from({ length: stepsPerBar }, (_, stepInBar) => {
               const stepIndex = barOffset + stepInBar;
+              const isWithinClip = isDrumStepWithinClip(
+                stepIndex,
+                stepsPerBar,
+                bpb,
+                clip.lengthBeats,
+              );
               const event = byKey.get(`${lane}:${stepIndex}`) as DrumEventWithGroove | undefined;
               const isOn = event !== undefined;
               const isBeatStart = stepInBar % 4 === 0;
               const shade = isOn ? velocityClass(event.velocity) : '';
               const probability = event ? eventProbability(event, groove.probability) : null;
               return (
-                <button
-                  type="button"
+                <span
+                  className="drum-grid__cell"
+                  role="gridcell"
+                  aria-colindex={stepInBar + 2}
                   key={stepInBar}
-                  className={`drum-cell${isOn ? ' is-on' : ''}${shade}${isBeatStart ? ' is-beat-start' : ''}`}
-                  aria-pressed={isOn}
-                  aria-label={`${label} ステップ ${stepInBar + 1}${
-                    isOn
-                      ? ` 強さ ${event.velocity} 確率 ${Math.round((probability ?? 1) * 100)}%`
-                      : ''
-                  }`}
-                  title={
-                    isOn
-                      ? `${label} ${stepInBar + 1}: 強さ ${event.velocity} / 確率 ${Math.round(
-                          (probability ?? 1) * 100,
-                        )}%`
-                      : `${label} ${stepInBar + 1}`
-                  }
-                  onClick={() => {
-                    setSelectedStep({ lane, stepIndex });
-                    setDrumStepVelocity(clip.id, lane, stepIndex, nextVelocity(event?.velocity ?? null));
-                  }}
-                />
+                >
+                  <button
+                    type="button"
+                    ref={(button) => {
+                      const key = `${lane}:${stepInBar}`;
+                      if (button) cellRefs.current.set(key, button);
+                      else cellRefs.current.delete(key);
+                    }}
+                    className={`drum-cell${isOn ? ' is-on' : ''}${shade}${isBeatStart ? ' is-beat-start' : ''}`}
+                    disabled={!isWithinClip}
+                    tabIndex={
+                      isWithinClip &&
+                      focusedCell.lane === lane &&
+                      focusedStepInBar === stepInBar
+                        ? 0
+                        : -1
+                    }
+                    aria-pressed={isOn}
+                    aria-label={`小節 ${activeBar + 1}、${label} ステップ ${stepInBar + 1}${
+                      !isWithinClip
+                        ? ' クリップ範囲外'
+                        : isOn
+                        ? ` 強さ ${event.velocity} 確率 ${Math.round((probability ?? 1) * 100)}%`
+                        : ''
+                    }`}
+                    title={
+                      !isWithinClip
+                        ? `小節 ${activeBar + 1}、${label} ${stepInBar + 1}: クリップ範囲外`
+                        : isOn
+                        ? `小節 ${activeBar + 1}、${label} ${stepInBar + 1}: 強さ ${event.velocity} / 確率 ${Math.round(
+                            (probability ?? 1) * 100,
+                          )}%`
+                        : `小節 ${activeBar + 1}、${label} ${stepInBar + 1}`
+                    }
+                    onClick={() => {
+                      const committed = setDrumStepVelocity(
+                        clip.id,
+                        lane,
+                        stepIndex,
+                        nextVelocity(event?.velocity ?? null),
+                      );
+                      if (committed) setSelectedStep({ lane, stepIndex });
+                    }}
+                    onFocus={() => setFocusedCell({ lane, stepInBar })}
+                    onKeyDown={(event) => {
+                      let nextLane = laneIndex;
+                      let nextStep = stepInBar;
+                      switch (event.key) {
+                        case 'ArrowLeft':
+                          nextStep -= 1;
+                          break;
+                        case 'ArrowRight':
+                          nextStep += 1;
+                          break;
+                        case 'ArrowUp':
+                          nextLane -= 1;
+                          break;
+                        case 'ArrowDown':
+                          nextLane += 1;
+                          break;
+                        case 'Home':
+                          nextStep = 0;
+                          break;
+                        case 'End':
+                          nextStep = lastEnabledStep;
+                          break;
+                        default:
+                          return;
+                      }
+                      event.preventDefault();
+                      moveCellFocus(nextLane, nextStep);
+                    }}
+                  />
+                </span>
               );
             })}
           </div>
@@ -375,7 +500,9 @@ export function DrumGrid() {
           <span>セルを選ぶと、その音だけの発音確率を調整できます。</span>
         )}
       </div>
-      <p className="drums__hint">セルを繰り返しクリックすると 強 → 中 → 弱 → オフ と切り替わります。</p>
+      <p id="drum-grid-keyboard-help" className="drums__hint">
+        矢印キーでセルを移動し、Home / Endで小節の先頭 / 末尾へ移動できます。EnterまたはSpaceで 強 → 中 → 弱 → オフ と切り替わります。
+      </p>
     </div>
   );
 }

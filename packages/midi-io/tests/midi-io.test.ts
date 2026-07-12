@@ -293,6 +293,29 @@ describe('exportNotesToMidi', () => {
     );
     expect(hasNoteOff).toBe(true);
   });
+
+  it('keeps a positive note at least one tick long with very low PPQ', () => {
+    const note: NoteEvent = {
+      id: 'short',
+      pitch: 60,
+      startBeat: 0,
+      durationBeats: 0.25,
+      velocity: 100,
+    };
+    const midi = exportNotesToMidi([note], 120, { ppq: 1 });
+    const track = midiTracks(midi)[0];
+    expect(track).toBeDefined();
+    const noteEvents = parseTrackEvents(track!).filter(
+      (event) =>
+        ((event.status & 0xf0) === 0x80 || (event.status & 0xf0) === 0x90) &&
+        event.data[0] === note.pitch,
+    );
+
+    expect(noteEvents).toEqual([
+      { tick: 0, status: 0x90, data: [60, 100] },
+      { tick: 1, status: 0x80, data: [60, 0] },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -450,6 +473,42 @@ describe('exportProjectToMidi', () => {
     const midi = exportProjectToMidi(drumProject);
     const expectedBeats = [0, 8, 16].map((stepIndex) => drumStepToBeat(stepIndex, 16, 3, 3));
     expect(noteOnTicks(midi, 0x99, 36)).toEqual(expectedBeats.map((beat) => Math.round(beat * PPQ)));
+  });
+
+  it('exports 6/8 drum steps in quarter-note beats', () => {
+    const drumProject: Project = {
+      ...project,
+      timeSignature: [6, 8],
+      lengthBars: 1,
+      tracks: [
+        {
+          id: 'track-six-eight',
+          name: 'Six Eight Drums',
+          type: 'drum',
+          clips: [
+            {
+              id: 'clip-six-eight',
+              trackId: 'track-six-eight',
+              type: 'drum',
+              startBeat: 0,
+              lengthBeats: 3,
+              loop: false,
+              stepsPerBar: 16,
+              drumEvents: [{ id: 'middle', lane: 'kick', stepIndex: 8, velocity: 100 }],
+            },
+          ],
+          volume: 1,
+          pan: 0,
+          mute: false,
+          solo: false,
+          effects: [],
+        },
+      ],
+      chordTrack: [],
+    };
+
+    const midi = exportProjectToMidi(drumProject);
+    expect(noteOnTicks(midi, 0x99, 36)).toEqual([Math.round(1.5 * PPQ)]);
   });
 
   it('uses the playback fallback when 3/4 drum stepsPerBar is invalid', () => {

@@ -1,9 +1,8 @@
-// Lightweight modal dialog: backdrop + centered panel. Closes on Escape and on
-// backdrop click. While open it registers in dialogState so global keyboard
-// shortcuts are suppressed.
+// Accessible modal dialog: backdrop + centered panel. Focus is contained while
+// open and restored to the invoking control after close.
 
-import { useEffect, type ReactNode } from 'react';
-import { registerDialog } from './dialogState';
+import { useId, type ReactNode } from 'react';
+import { useModalDialog } from './useModalDialog';
 
 type DialogProps = {
   title: string;
@@ -11,45 +10,59 @@ type DialogProps = {
   children: ReactNode;
   /** Optional extra class on the panel for width variations. */
   className?: string;
+  /**
+   * Keep an atomic operation on screen. Every dismiss path is disabled.
+   */
+  closeDisabled?: boolean;
+  /** Announce that the dialog contents are being updated by an operation. */
+  busy?: boolean;
 };
 
-/** A focus-trapping-free but Escape/backdrop-dismissible modal. */
-export function Dialog({ title, onClose, children, className }: DialogProps) {
-  useEffect(() => {
-    const unregister = registerDialog();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      window.removeEventListener('keydown', onKey, true);
-      unregister();
-    };
-  }, [onClose]);
+/** Escape/backdrop-dismissible modal with shared focus and background isolation. */
+export function Dialog({
+  title,
+  onClose,
+  children,
+  className,
+  closeDisabled = false,
+  busy = closeDisabled,
+}: DialogProps) {
+  const titleId = useId();
+  const requestClose = (): void => {
+    if (!closeDisabled) onClose();
+  };
+  const dialogRef = useModalDialog({
+    onEscape: requestClose,
+    escapeDisabled: closeDisabled,
+  });
 
   return (
     <div
       className="dialog-backdrop"
-      onClick={onClose}
+      data-modal-layer
+      onClick={requestClose}
       role="presentation"
     >
       <div
+        ref={dialogRef}
         className={`dialog${className ? ` ${className}` : ''}`}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
+        aria-busy={busy || undefined}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="dialog__header">
-          <h2 className="dialog__title">{title}</h2>
+          <h2 className="dialog__title" id={titleId}>
+            {title}
+          </h2>
           <button
             type="button"
             className="dialog__close"
             aria-label="閉じる"
-            onClick={onClose}
+            disabled={closeDisabled}
+            onClick={requestClose}
           >
             ×
           </button>

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "e2e",
+    "src/build.d.ts",
+    "playwright.config.ts",
+    "playwright.fatal.config.ts"
+  ]
+}

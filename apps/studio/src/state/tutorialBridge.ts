@@ -29,6 +29,7 @@ import {
 } from '@cts/tutorial-engine';
 import { subscribeAppEvents } from './appEvents';
 import { useStore } from './store';
+import { areRendererStorageWritesFenced } from '../platform/rendererStorageFence';
 
 const PROGRESS_PREFIX = 'cts.tutorial.';
 
@@ -87,6 +88,9 @@ function setSnapshot(patch: Partial<BridgeSnapshot>): void {
 let engine: TutorialEngine | null = null;
 let activeLessonId: string | null = null;
 let unsubscribeEvents: (() => void) | null = null;
+let unsubscribeProject: (() => void) | null = null;
+let reconciliationEpoch = 0;
+let queuedReconciliationEpoch: number | null = null;
 
 /** Refresh the snapshot's engineState from the live engine. */
 function syncEngineState(): void {
@@ -131,6 +135,7 @@ export function loadProgress(lessonId: string): SavedProgress | null {
 
 /** Persist the current engine progress for the active lesson. */
 export function saveProgress(): void {
+  if (areRendererStorageWritesFenced()) return;
   if (!engine) return;
   const progress = engine.toProgress();
   if (!progress) return;
@@ -175,18 +180,94 @@ export function dismissToast(id: string): void {
 
 // ─── Event handling ───────────────────────────────────────────────────────────
 
-function applyFeedback(result: FeedbackResult): void {
+function applyFeedback(result: FeedbackResult, announcement?: string | null): void {
+  const message = announcement === undefined ? result.message : announcement;
   if (result.completedLesson) {
-    if (result.message) pushToast(`🎉 ${result.message}`, 'success');
+    setSnapshot({ hint: null });
+    if (message) pushToast(`🎉 ${message}`, 'success');
     saveProgress();
     syncEngineState();
     return;
   }
   if (result.advanced) {
-    if (result.message) pushToast(result.message, 'info');
+    setSnapshot({ hint: null });
+    if (message) pushToast(message, 'info');
     saveProgress();
     syncEngineState();
   }
+}
+
+/**
+ * Satisfy the one editor-state-backed goal from the current committed state.
+ * This does not publish an AppEvent: it reconciles a state that may have become
+ * true before the lesson started or while the preceding step was active.
+ */
+function reconcileScaleSnapGoal(): FeedbackResult | null {
+  if (!engine) return null;
+  const engineState = engine.getState();
+  const goal = engineState.currentStep?.goal;
+  if (
+    engineState.status !== 'inProgress' ||
+    goal?.kind !== 'event' ||
+    goal.eventType !== 'scale_snap.enabled'
+  ) {
+    return null;
+  }
+
+  const state = useStore.getState();
+  if (!state.editor.scaleSnap) return null;
+  const result = engine.handleEvent(
+    {
+      type: 'scale_snap.enabled',
+      payload: { key: state.project.key, scale: state.project.scale },
+    },
+    state.project,
+  );
+  return result.advanced ? result : null;
+}
+
+/** Reconcile consecutive project/editor-state goals from adopted store state. */
+function reconcileStateBackedGoals(): boolean {
+  if (!engine) return false;
+  let finalResult: FeedbackResult | null = null;
+  let announcement: string | null | undefined;
+
+  while (engine.getState().status === 'inProgress') {
+    const projectResult = engine.reconcileProject(useStore.getState().project);
+    if (projectResult.advanced) {
+      finalResult = projectResult;
+      announcement = undefined;
+      if (projectResult.completedLesson) break;
+      continue;
+    }
+
+    const scaleSnapResult = reconcileScaleSnapGoal();
+    if (!scaleSnapResult) break;
+    finalResult = scaleSnapResult;
+    announcement =
+      'スケールスナップは現在の設定ですでにオンのため、この手順は完了しました。';
+    if (scaleSnapResult.completedLesson) break;
+  }
+
+  if (!finalResult) return false;
+  applyFeedback(finalResult, announcement);
+  return true;
+}
+
+/**
+ * Store mutation listeners run before the action's post-commit AppEvent.
+ * Reconcile in a microtask so that event is consumed by the step that was
+ * active when the action occurred, never by the following step.
+ */
+function queueProjectReconciliation(): void {
+  const epoch = reconciliationEpoch;
+  if (queuedReconciliationEpoch === epoch) return;
+  queuedReconciliationEpoch = epoch;
+  queueMicrotask(() => {
+    if (queuedReconciliationEpoch === epoch) queuedReconciliationEpoch = null;
+    if (epoch !== reconciliationEpoch || !engine) return;
+    reconcileStateBackedGoals();
+  });
 }
 
 /** Forward an app event into the active engine (exported for tests). */
@@ -194,7 +275,9 @@ export function handleAppEvent(event: AppEvent, project: Project): FeedbackResul
   if (!engine) return { advanced: false, completedLesson: false };
   const before = engine.getState();
   const result = engine.handleEvent(event, project);
-  applyFeedback(result);
+  const reconciled =
+    result.advanced && !result.completedLesson ? reconcileStateBackedGoals() : false;
+  if (!reconciled) applyFeedback(result);
   // Persist event-count progress even when a step did not advance, so the
   // progress bar / counts survive a reload mid-step.
   if (!result.advanced && before.status === 'inProgress') {
@@ -205,13 +288,18 @@ export function handleAppEvent(event: AppEvent, project: Project): FeedbackResul
 
 // ─── Lesson lifecycle ─────────────────────────────────────────────────────────
 
-/** Start (or resume) a lesson by id. Restores saved progress when present. */
-export function startLesson(lessonId: string): void {
+export type StartLessonOptions = Readonly<{
+  /** Ignore saved progress and start again at step 1. */
+  restart?: boolean;
+}>;
+
+/** Start (or resume) a lesson by id. Restores saved progress unless restarted. */
+export function startLesson(lessonId: string, options: StartLessonOptions = {}): void {
   const lesson = getLessonById(lessonId);
   if (!lesson) return;
 
   engine = new TutorialEngine();
-  const saved = loadProgress(lessonId);
+  const saved = options.restart ? null : loadProgress(lessonId);
   // A completed lesson restarts fresh so the user can replay it.
   if (saved && saved.status !== 'completed') {
     engine.loadLesson(lesson, saved);
@@ -219,16 +307,22 @@ export function startLesson(lessonId: string): void {
     engine.loadLesson(lesson);
   }
   activeLessonId = lessonId;
+  reconciliationEpoch += 1;
 
-  // (Re)subscribe to app events.
+  // (Re)subscribe to app events and adopted Project changes.
   if (unsubscribeEvents) unsubscribeEvents();
+  if (unsubscribeProject) unsubscribeProject();
   unsubscribeEvents = subscribeAppEvents((event) => {
     handleAppEvent(event, useStore.getState().project);
+  });
+  unsubscribeProject = useStore.subscribe((next, previous) => {
+    if (next.project !== previous.project) queueProjectReconciliation();
   });
 
   saveProgress();
   setSnapshot({ hint: null });
   syncEngineState();
+  reconcileStateBackedGoals();
 }
 
 /** Stop the active lesson and return to the browser (中断). Progress is kept. */
@@ -238,6 +332,12 @@ export function stopLesson(): void {
     unsubscribeEvents();
     unsubscribeEvents = null;
   }
+  if (unsubscribeProject) {
+    unsubscribeProject();
+    unsubscribeProject = null;
+  }
+  reconciliationEpoch += 1;
+  queuedReconciliationEpoch = null;
   engine = null;
   activeLessonId = null;
   setSnapshot({ engineState: null, hint: null });
@@ -266,14 +366,20 @@ export function answerExercise(answer: ExerciseAnswer): GradeResult & FeedbackRe
     };
   }
   const result = engine.answerExercise(answer);
-  applyFeedback(result);
+  const reconciled =
+    result.advanced && !result.completedLesson ? reconcileStateBackedGoals() : false;
+  if (!reconciled) applyFeedback(result);
   return result;
 }
 
 /** Reset bridge state — used by tests to isolate cases. */
 export function __resetBridgeForTest(): void {
   if (unsubscribeEvents) unsubscribeEvents();
+  if (unsubscribeProject) unsubscribeProject();
   unsubscribeEvents = null;
+  unsubscribeProject = null;
+  reconciliationEpoch += 1;
+  queuedReconciliationEpoch = null;
   engine = null;
   activeLessonId = null;
   snapshot = { engineState: null, toasts: [], hint: null };

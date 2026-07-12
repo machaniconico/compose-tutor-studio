@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import type { NoteEvent } from '@cts/project-model';
+import { useMemo, type Ref } from 'react';
+import { resolveClipContent, type NoteEvent } from '@cts/project-model';
 import {
   analyzeChord,
   analyzeNoteAgainstChordAndScale,
@@ -10,8 +10,28 @@ import {
 import { useStore } from '../../state/store';
 import { appendChordAfterLast } from '../../state/editorActions';
 import { useScaleInfo } from '../pianoRoll/useScaleInfo';
-import { AssistantPanel } from '../assistant/AssistantPanel';
-import { TutorialPanel } from '../tutorial/TutorialPanel';
+import {
+  DeferredFeature,
+  type DeferredFeatureLoader,
+} from '../common/DeferredFeature';
+import { handleTabKeyDown } from '../common/tabs';
+
+type EmptyProps = Record<string, never>;
+
+const loadAssistantPanel: DeferredFeatureLoader<EmptyProps> = () =>
+  import('../assistant/AssistantPanel').then((module) => ({
+    default: module.AssistantPanel,
+  }));
+
+const loadTutorialPanel: DeferredFeatureLoader<EmptyProps> = () =>
+  import('../tutorial/TutorialPanel').then((module) => ({
+    default: module.TutorialPanel,
+  }));
+
+function preloadRightTab(tab: RightTab): void {
+  if (tab === 'assistant') void loadAssistantPanel().catch(() => undefined);
+  if (tab === 'tutorial') void loadTutorialPanel().catch(() => undefined);
+}
 
 const FUNCTION_LABEL: Record<HarmonicFunction, string> = {
   T: 'トニック（安定）',
@@ -20,7 +40,7 @@ const FUNCTION_LABEL: Record<HarmonicFunction, string> = {
   Other: 'その他',
 };
 
-type RightTab = 'inspector' | 'assistant' | 'tutorial';
+export type RightTab = 'inspector' | 'assistant' | 'tutorial';
 
 const TABS: { id: RightTab; label: string }[] = [
   { id: 'inspector', label: 'インスペクター' },
@@ -28,32 +48,96 @@ const TABS: { id: RightTab; label: string }[] = [
   { id: 'tutorial', label: 'チュートリアル' },
 ];
 
-/** Right column tab host: inspector / assistant / tutorial. */
-export function InspectorPanel() {
-  const [tab, setTab] = useState<RightTab>('inspector');
+const TAB_ORDER = TABS.map(({ id }) => id);
+const rightTabId = (tab: RightTab): string => `right-tab-${tab}`;
+const rightTabPanelId = (tab: RightTab): string =>
+  `right-tabpanel-${tab}`;
 
+type InspectorPanelProps = {
+  activeTab: RightTab;
+  onTabChange: (tab: RightTab) => void;
+  /** Lets the onboarding flow focus the tutorial destination after its dialog closes. */
+  tutorialTabRef?: Ref<HTMLButtonElement>;
+};
+
+/** Controlled right column tab host: inspector / assistant / tutorial. */
+export function InspectorPanel({
+  activeTab,
+  onTabChange,
+  tutorialTabRef,
+}: InspectorPanelProps) {
   return (
     <aside className="inspector-panel" aria-label="インスペクタ">
-      <div className="right-tabs" role="tablist" aria-label="右パネル切替">
+      <div
+        className="right-tabs"
+        role="tablist"
+        aria-label="右パネル切替"
+        onFocusCapture={() => {
+          preloadRightTab('assistant');
+          preloadRightTab('tutorial');
+        }}
+      >
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             role="tab"
-            aria-selected={tab === t.id}
-            className={tab === t.id ? 'is-active' : ''}
-            onClick={() => setTab(t.id)}
+            id={rightTabId(t.id)}
+            aria-controls={rightTabPanelId(t.id)}
+            aria-selected={activeTab === t.id}
+            tabIndex={activeTab === t.id ? 0 : -1}
+            className={activeTab === t.id ? 'is-active' : ''}
+            ref={t.id === 'tutorial' ? tutorialTabRef : undefined}
+            onClick={() => onTabChange(t.id)}
+            onKeyDown={(event) =>
+              handleTabKeyDown(
+                event,
+                TAB_ORDER,
+                t.id,
+                onTabChange,
+                rightTabId,
+              )
+            }
+            onFocus={() => preloadRightTab(t.id)}
+            onPointerEnter={() => preloadRightTab(t.id)}
           >
             {t.label}
           </button>
         ))}
       </div>
 
-      <div className="right-tabs__body" role="tabpanel">
-        {tab === 'inspector' ? <InspectorContent /> : null}
-        {tab === 'assistant' ? <AssistantPanel /> : null}
-        {tab === 'tutorial' ? <TutorialPanel /> : null}
-      </div>
+      {TABS.map(({ id }) => {
+        const active = activeTab === id;
+        return (
+          <div
+            key={id}
+            className="right-tabs__body"
+            id={rightTabPanelId(id)}
+            role="tabpanel"
+            aria-labelledby={rightTabId(id)}
+            hidden={!active}
+            tabIndex={active ? 0 : -1}
+          >
+            {active && id === 'inspector' ? <InspectorContent /> : null}
+            {active && id === 'assistant' ? (
+              <DeferredFeature
+                load={loadAssistantPanel}
+                componentProps={{}}
+                loadingLabel="アシスタントを読み込んでいます…"
+                errorLabel="アシスタントを読み込めませんでした。アプリを再読み込んでください。"
+              />
+            ) : null}
+            {active && id === 'tutorial' ? (
+              <DeferredFeature
+                load={loadTutorialPanel}
+                componentProps={{}}
+                loadingLabel="チュートリアルを読み込んでいます…"
+                errorLabel="チュートリアルを読み込めませんでした。アプリを再読み込んでください。"
+              />
+            ) : null}
+          </div>
+        );
+      })}
     </aside>
   );
 }
@@ -92,7 +176,8 @@ function useSelectedNote(
     if (selectedNoteIds.length === 0) return null;
     const id = selectedNoteIds[selectedNoteIds.length - 1];
     for (const track of project.tracks) {
-      const clip = track.clips.find((c) => c.id === selectedClipId);
+      const instance = track.clips.find((c) => c.id === selectedClipId);
+      const clip = instance ? resolveClipContent(project, instance) : null;
       const found = clip?.notes?.find((n) => n.id === id);
       if (found) return { note: found, startBeat: found.startBeat };
     }

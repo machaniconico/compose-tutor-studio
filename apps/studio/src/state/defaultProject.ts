@@ -1,9 +1,9 @@
-// Local default-project factory for the studio skeleton.
+// First-launch preview fixture for the studio.
 //
-// A later pass swaps this for the @cts/project-model `createEmptyProject`
-// factory (being implemented in parallel). For now we build a fully-typed
-// Project locally so the UI has real state to render. Only TYPES are imported
-// from the package.
+// This intentionally contains a playable C-G-Am-F backing so the unsaved
+// canvas is useful before a user chooses a workflow. User-requested blank
+// projects use the canonical @cts/project-model `createEmptyProject` factory;
+// composition templates use `instantiateTemplate`.
 
 import type {
   ChordEvent,
@@ -11,6 +11,7 @@ import type {
   Project,
   Track,
 } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION } from '@cts/project-model';
 import { PITCH_CLASS } from './music';
 import { nowIso, uid } from './ids';
 
@@ -189,7 +190,7 @@ export function createDefaultProject(title = '最初の1曲'): Project {
   const now = nowIso();
   return {
     id: uid('project'),
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title,
     bpm: 120,
     timeSignature: [4, 4],

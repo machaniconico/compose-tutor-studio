@@ -8,6 +8,15 @@
 
 import type { EffectConfig, Track } from '@cts/project-model';
 import { buildEffectChain, effectConfigSignature, type BuiltEffectChain } from './effects';
+import {
+  applyAudioParam,
+  clampPan,
+  clampVolume,
+  resolveTrackMix,
+  type MixUpdateMode,
+} from './mixState';
+
+export { clampPan, clampVolume } from './mixState';
 
 export type MeterLevel = {
   /** Highest absolute sample in the analyser window, where 1.0 is 0 dBFS. */
@@ -30,6 +39,37 @@ let masterMeter:
       sink: GainNode | null;
     }
   | null = null;
+
+function clearMasterMeter(): void {
+  const current = masterMeter;
+  if (!current) return;
+  masterMeter = null;
+  meterAnalysers.delete(current.trackId);
+  try {
+    current.source.disconnect(current.analyser);
+  } catch {
+    // already disconnected
+  }
+  try {
+    current.analyser.disconnect();
+  } catch {
+    // already disconnected
+  }
+  try {
+    current.sink?.disconnect();
+  } catch {
+    // already disconnected
+  }
+}
+
+/**
+ * Release the live master meter only when the caller still owns its source.
+ * Offline graphs never install meters, so exporting cannot disturb this state.
+ */
+export function disposeMasterMeter(source: AudioNode): void {
+  if (masterMeter?.source !== source) return;
+  clearMasterMeter();
+}
 
 function createMeterAnalyser(ctx: BaseAudioContext): AnalyserNode | null {
   const maybeContext = ctx as BaseAudioContext & {
@@ -64,10 +104,7 @@ function connectMeter(analyser: AnalyserNode, source: AudioNode, destination: Au
 
 function installMasterMeter(ctx: BaseAudioContext, source: AudioNode, trackId: string | null): void {
   if (trackId === null) {
-    if (masterMeter) {
-      meterAnalysers.delete(masterMeter.trackId);
-    }
-    masterMeter = null;
+    clearMasterMeter();
     return;
   }
 
@@ -80,24 +117,7 @@ function installMasterMeter(ctx: BaseAudioContext, source: AudioNode, trackId: s
     return;
   }
 
-  if (masterMeter) {
-    meterAnalysers.delete(masterMeter.trackId);
-    try {
-      masterMeter.source.disconnect(masterMeter.analyser);
-    } catch {
-      // already disconnected
-    }
-    try {
-      masterMeter.analyser.disconnect();
-    } catch {
-      // already disconnected
-    }
-    try {
-      masterMeter.sink?.disconnect();
-    } catch {
-      // already disconnected
-    }
-  }
+  clearMasterMeter();
 
   const analyser = createMeterAnalyser(ctx);
   if (!analyser) {
@@ -179,18 +199,6 @@ export function computeAudibleTracks(tracks: readonly Track[]): Set<string> {
   return audible;
 }
 
-/** Clamp a volume into the supported 0..2 range. */
-export function clampVolume(volume: number): number {
-  if (!Number.isFinite(volume)) return 0;
-  return Math.min(2, Math.max(0, volume));
-}
-
-/** Clamp a pan into the -1..1 range. */
-export function clampPan(pan: number): number {
-  if (!Number.isFinite(pan)) return 0;
-  return Math.min(1, Math.max(-1, pan));
-}
-
 /** Live node chain for one track. */
 export class TrackGraph {
   readonly trackId: string;
@@ -202,30 +210,72 @@ export class TrackGraph {
   private effectChain: BuiltEffectChain | null = null;
   private effectSignature: string | null = null;
 
-  constructor(ctx: BaseAudioContext, master: AudioNode, track: Track) {
+  constructor(
+    ctx: BaseAudioContext,
+    master: AudioNode,
+    track: Track,
+    metering: 'live' | 'disabled',
+  ) {
     this.ctx = ctx;
     this.trackId = track.id;
-    this.gain = ctx.createGain();
-    this.panner = ctx.createStereoPanner();
-    this.meter = createMeterAnalyser(ctx);
-    this.gain.gain.value = clampVolume(track.volume);
-    this.panner.pan.value = clampPan(track.pan);
-    // Voices connect to `input` (the gain node); gain -> effects -> panner -> master.
-    this.input = this.gain;
-    if (!this.meter) {
-      this.panner.connect(master);
-    } else if (connectMeter(this.meter, this.panner, master)) {
-      meterAnalysers.set(this.trackId, this.meter);
+    const gain = ctx.createGain();
+    let panner: StereoPannerNode | null = null;
+    let meter: AnalyserNode | null = null;
+    try {
+      panner = ctx.createStereoPanner();
+      meter = metering === 'live' ? createMeterAnalyser(ctx) : null;
+      // Fail silent until buildTrackGraphs applies the resolved initial mix.
+      gain.gain.value = 0;
+      panner.pan.value = clampPan(track.pan);
+      if (!meter) {
+        panner.connect(master);
+      } else if (connectMeter(meter, panner, master)) {
+        meterAnalysers.set(this.trackId, meter);
+      }
+    } catch (error) {
+      try {
+        gain.disconnect();
+      } catch {
+        // never connected
+      }
+      try {
+        panner?.disconnect();
+      } catch {
+        // never connected
+      }
+      try {
+        meter?.disconnect();
+      } catch {
+        // never connected
+      }
+      if (meter && meterAnalysers.get(this.trackId) === meter) {
+        meterAnalysers.delete(this.trackId);
+      }
+      throw error;
     }
-    this.updateEffects(track.effects);
+    this.gain = gain;
+    this.panner = panner;
+    this.meter = meter;
+    // Voices connect to `input` (the gain node); gain -> effects -> panner -> master.
+    this.input = gain;
+    try {
+      this.updateEffects(track.effects);
+    } catch (error) {
+      this.dispose();
+      throw error;
+    }
   }
 
   /** Apply volume/pan/mute/solo state to the live nodes. */
-  apply(track: Track, audible: boolean, when: number): void {
-    const target = audible ? clampVolume(track.volume) : 0;
-    // Short ramp avoids zipper noise on live changes.
-    this.gain.gain.setTargetAtTime(target, when, 0.01);
-    this.panner.pan.setTargetAtTime(clampPan(track.pan), when, 0.01);
+  apply(
+    track: Track,
+    audible: boolean,
+    when: number,
+    mode: MixUpdateMode,
+  ): void {
+    const mix = resolveTrackMix(track, audible);
+    applyAudioParam(this.gain.gain, mix.gain, when, mode);
+    applyAudioParam(this.panner.pan, mix.pan, when, mode);
   }
 
   /** Rebuild the insert effect nodes when the track's effect list changes. */
@@ -233,26 +283,37 @@ export class TrackGraph {
     const nextSignature = effectConfigSignature(configs);
     if (nextSignature === this.effectSignature) return;
 
+    // Build first so allocation failures leave the currently audible chain
+    // untouched. Only replace ownership after every new connection succeeds.
+    const nextChain = buildEffectChain(this.ctx, configs);
+    const previousChain = this.effectChain;
     try {
       this.gain.disconnect();
-    } catch {
-      // already disconnected
+      this.connectEffectChain(nextChain);
+    } catch (error) {
+      nextChain.dispose();
+      try {
+        this.gain.disconnect();
+        if (previousChain) this.connectEffectChain(previousChain);
+      } catch {
+        // Preserve the new-chain failure. The caller will surface it and a full
+        // session rebuild remains available on the next play request.
+      }
+      throw error;
     }
-    this.effectChain?.dispose();
-    this.effectChain = buildEffectChain(this.ctx, configs);
-    this.effectSignature = nextSignature;
 
-    if (
-      this.effectChain.isBypassed ||
-      this.effectChain.input === null ||
-      this.effectChain.output === null
-    ) {
+    previousChain?.dispose();
+    this.effectChain = nextChain;
+    this.effectSignature = nextSignature;
+  }
+
+  private connectEffectChain(chain: BuiltEffectChain): void {
+    if (chain.isBypassed || chain.input === null || chain.output === null) {
       this.gain.connect(this.panner);
       return;
     }
-
-    this.gain.connect(this.effectChain.input);
-    this.effectChain.output.connect(this.panner);
+    this.gain.connect(chain.input);
+    chain.output.connect(this.panner);
   }
 
   /** Disconnect from the graph. */
@@ -290,21 +351,31 @@ export function buildTrackGraphs(
   master: AudioNode,
   tracks: readonly Track[],
   when: number,
+  metering: 'live' | 'disabled',
 ): Map<string, TrackGraph> {
   const graphs = new Map<string, TrackGraph>();
   const audible = computeAudibleTracks(tracks);
-  installMasterMeter(
-    ctx,
-    master,
-    tracks.find((track) => track.type === 'master')?.id ?? null,
-  );
-  for (const track of tracks) {
-    if (track.type === 'master') continue;
-    const graph = new TrackGraph(ctx, master, track);
-    graph.apply(track, audible.has(track.id), when);
-    graphs.set(track.id, graph);
+  if (metering === 'live') {
+    installMasterMeter(
+      ctx,
+      master,
+      tracks.find((track) => track.type === 'master')?.id ?? null,
+    );
   }
-  return graphs;
+  try {
+    for (const track of tracks) {
+      if (track.type === 'master') continue;
+      const graph = new TrackGraph(ctx, master, track, metering);
+      graphs.set(track.id, graph);
+      graph.apply(track, audible.has(track.id), when, 'immediate');
+    }
+    return graphs;
+  } catch (error) {
+    for (const graph of graphs.values()) graph.dispose();
+    graphs.clear();
+    if (metering === 'live') disposeMasterMeter(master);
+    throw error;
+  }
 }
 
 /** Apply current mute/solo/volume/pan state to existing graphs. */
@@ -318,6 +389,6 @@ export function applyMixState(
     const graph = graphs.get(track.id);
     if (!graph) continue;
     graph.updateEffects(track.effects);
-    graph.apply(track, audible.has(track.id), when);
+    graph.apply(track, audible.has(track.id), when, 'smoothed');
   }
 }

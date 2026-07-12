@@ -4,13 +4,18 @@
  */
 
 export const PPQ = 480;
+export const MAX_MIDI_VAR_LEN = 0x0fff_ffff;
 
 /**
  * Encode a non-negative integer as a MIDI variable-length quantity (VLQ).
  * Each byte uses 7 bits of data; the MSB of every byte except the last is 1.
  */
 export function writeVarLen(value: number): number[] {
-  if (value < 0) throw new RangeError(`writeVarLen: value must be >= 0, got ${value}`);
+  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_MIDI_VAR_LEN) {
+    throw new RangeError(
+      `writeVarLen: value must be a safe integer in 0..${MAX_MIDI_VAR_LEN}, got ${value}`,
+    );
+  }
   if (value === 0) return [0x00];
 
   const bytes: number[] = [];
@@ -34,22 +39,35 @@ export type MidiMessage = {
 
 /**
  * Build an MTrk chunk from a list of absolute-tick MIDI messages.
- * - Sorts by tick (stable sort).
+ * - Sorts by tick, with note-off before note-on at the same tick so repeated
+ *   pitches are retriggered instead of immediately silenced.
  * - Converts to delta times.
  * - Appends end-of-track meta event (FF 2F 00).
  * - Wraps with "MTrk" + 4-byte big-endian length.
  */
 export function buildTrackChunk(messages: MidiMessage[]): Uint8Array {
-  // Stable sort by tick
-  const sorted = [...messages].sort((a, b) => a.tick - b.tick);
+  const noteOrder = (message: MidiMessage): number => {
+    const status = (message.bytes[0] ?? 0) & 0xf0;
+    if (status === 0x80 || (status === 0x90 && message.bytes[2] === 0)) return 0;
+    if (status === 0x90) return 2;
+    return 1;
+  };
+  const sorted = [...messages].sort(
+    (a, b) => a.tick - b.tick || noteOrder(a) - noteOrder(b),
+  );
 
   const trackData: number[] = [];
   let prevTick = 0;
 
   for (const msg of sorted) {
+    if (!Number.isSafeInteger(msg.tick) || msg.tick < prevTick || msg.tick > MAX_MIDI_VAR_LEN) {
+      throw new RangeError(
+        `buildTrackChunk: tick must be a safe integer in ${prevTick}..${MAX_MIDI_VAR_LEN}, got ${msg.tick}`,
+      );
+    }
     const delta = msg.tick - prevTick;
-    trackData.push(...writeVarLen(delta));
-    trackData.push(...msg.bytes);
+    for (const byte of writeVarLen(delta)) trackData.push(byte);
+    for (const byte of msg.bytes) trackData.push(byte);
     prevTick = msg.tick;
   }
 

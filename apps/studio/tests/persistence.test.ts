@@ -1,63 +1,76 @@
 import { describe, expect, it } from 'vitest';
-import {
-  deleteProject,
-  listSavedProjects,
-  loadMostRecentProject,
-  loadProject,
-  projectKey,
-  saveProject,
-} from '../src/state/persistence';
+import { decodeProjectJson } from '@cts/project-model';
 import { createDefaultProject } from '../src/state/defaultProject';
+import {
+  createBrowserProjectRepository,
+  projectKey,
+  toSaveFailure,
+} from '../src/state/persistence';
 import { MemoryStorage } from './localStorageStub';
 
-describe('persistence', () => {
-  it('round-trips a project through storage', () => {
+describe('studio persistence composition', () => {
+  it('wires browser storage through the versioned repository and legacy mirror', async () => {
     const storage = new MemoryStorage();
-    const project = createDefaultProject('テスト曲');
+    const repository = createBrowserProjectRepository(storage);
+    const project = createDefaultProject('保存結果');
 
-    expect(saveProject(project, storage)).toBe(true);
-    const loaded = loadProject(project.id, storage);
+    const saved = await repository.save({
+      project,
+      activationId: 'activation',
+      revision: 1,
+      writeId: 'write-1',
+      expectedHeadVersion: null,
+    });
 
-    expect(loaded).not.toBeNull();
-    expect(loaded?.id).toBe(project.id);
-    expect(loaded?.title).toBe('テスト曲');
-    expect(loaded?.tracks.length).toBe(project.tracks.length);
-    expect(loaded?.chordTrack.length).toBe(project.chordTrack.length);
+    expect(saved.ok).toBe(true);
+    const legacy = storage.getItem(projectKey(project.id));
+    expect(legacy).not.toBeNull();
+    const decoded = decodeProjectJson(legacy ?? '');
+    expect(decoded.ok && decoded.project).toEqual(project);
+    await expect(repository.load(project.id)).resolves.toMatchObject({
+      ok: true,
+      value: { project: { title: '保存結果' }, recovered: false },
+    });
   });
 
-  it('uses the cts.project.<id> key format', () => {
-    const storage = new MemoryStorage();
-    const project = createDefaultProject();
-    saveProject(project, storage);
-    expect(storage.getItem(projectKey(project.id))).not.toBeNull();
-    expect(projectKey(project.id)).toBe(`cts.project.${project.id}`);
+  it('resolves the current global storage lazily instead of capturing it at import', async () => {
+    const repository = createBrowserProjectRepository();
+    const first = new MemoryStorage();
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: first,
+      configurable: true,
+      writable: true,
+    });
+    expect((await repository.initialize()).ok).toBe(true);
+
+    const second = new MemoryStorage();
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: second,
+      configurable: true,
+      writable: true,
+    });
+    const project = createDefaultProject('遅延解決');
+    const saved = await repository.save({
+      project,
+      activationId: 'activation',
+      revision: 0,
+      writeId: 'write-lazy',
+      expectedHeadVersion: null,
+    });
+
+    expect(saved.ok).toBe(true);
+    expect(first.length).toBe(0);
+    expect(second.getItem(projectKey(project.id))).not.toBeNull();
   });
 
-  it('lists saved projects newest first', () => {
-    const storage = new MemoryStorage();
-    const older = { ...createDefaultProject('古い'), updatedAt: '2020-01-01T00:00:00.000Z' };
-    const newer = { ...createDefaultProject('新しい'), updatedAt: '2030-01-01T00:00:00.000Z' };
-    saveProject(older, storage);
-    saveProject(newer, storage);
-
-    const list = listSavedProjects(storage);
-    expect(list.length).toBe(2);
-    expect(list[0]?.title).toBe('新しい');
-    expect(loadMostRecentProject(storage)?.id).toBe(newer.id);
-  });
-
-  it('returns null for corrupt JSON without throwing', () => {
-    const storage = new MemoryStorage();
-    storage.setItem('cts.project.broken', '{ this is not json');
-    expect(loadProject('broken', storage)).toBeNull();
-    expect(listSavedProjects(storage)).toEqual([]);
-  });
-
-  it('deletes a project', () => {
-    const storage = new MemoryStorage();
-    const project = createDefaultProject();
-    saveProject(project, storage);
-    expect(deleteProject(project.id, storage)).toBe(true);
-    expect(loadProject(project.id, storage)).toBeNull();
+  it('preserves repository retry policy for the save UI', () => {
+    expect(
+      toSaveFailure({
+        operation: 'save',
+        code: 'quota-exceeded',
+        retry: 'manual',
+        projectId: 'project',
+      }),
+    ).toEqual({ code: 'quota-exceeded', retry: 'manual' });
   });
 });

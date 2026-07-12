@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persistence-save"
+description = "Enables the persistence_save command without any pre-configured scope."
+commands.allow = ["persistence_save"]
+
+[[permission]]
+identifier = "deny-persistence-save"
+description = "Denies the persistence_save command without any pre-configured scope."
+commands.deny = ["persistence_save"]

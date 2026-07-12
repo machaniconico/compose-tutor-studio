@@ -1,0 +1,20 @@
+CREATE TABLE project_crash_drafts (
+  project_id TEXT NOT NULL,
+  activation_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK (revision >= 0),
+  write_id TEXT NOT NULL,
+  base_head_known INTEGER NOT NULL CHECK (base_head_known IN (0, 1)),
+  base_head_version TEXT,
+  predecessor_write_id TEXT,
+  saved_at TEXT NOT NULL,
+  payload_json BLOB NOT NULL,
+  payload_crc32 TEXT NOT NULL,
+  payload_bytes INTEGER NOT NULL CHECK (payload_bytes > 0),
+  title TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  format_version INTEGER NOT NULL CHECK (format_version = 1),
+  record_crc32 TEXT NOT NULL,
+  PRIMARY KEY (project_id, activation_id),
+  UNIQUE (project_id, write_id),
+  CHECK (base_head_known = 1 OR base_head_version IS NULL)
+) STRICT;

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persistence-load-branch"
+description = "Enables the persistence_load_branch command without any pre-configured scope."
+commands.allow = ["persistence_load_branch"]
+
+[[permission]]
+identifier = "deny-persistence-load-branch"
+description = "Denies the persistence_load_branch command without any pre-configured scope."
+commands.deny = ["persistence_load_branch"]

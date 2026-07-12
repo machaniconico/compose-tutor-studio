@@ -1,6 +1,14 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { AppEvent } from '@cts/tutorial-engine';
+import {
+  MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS,
+  duplicateClip,
+  findClip,
+  resolveClipContent,
+} from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 import { createDefaultProject } from '../src/state/defaultProject';
+import { subscribeAppEvents } from '../src/state/appEvents';
 
 // The store reads localStorage at module-import time, so install the stub
 // BEFORE importing it. We import dynamically inside beforeAll for that reason.
@@ -11,10 +19,11 @@ beforeAll(async () => {
   ({ useStore } = await import('../src/state/store'));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Reset to a clean project + history before each test.
+  await useStore.getState().flushPendingSave();
   installLocalStorage();
-  useStore.getState().createNewProject('テスト');
+  expect(await useStore.getState().createNewProject('テスト')).toBe(true);
 });
 
 describe('default project', () => {
@@ -92,6 +101,7 @@ describe('chord actions', () => {
   });
 
   it('updates a chord', () => {
+    useStore.getState().addChord('C', 0, 4);
     const id = useStore.getState().project.chordTrack[0]?.id ?? '';
     useStore.getState().updateChord(id, { symbol: 'Cmaj7' });
     expect(useStore.getState().project.chordTrack[0]?.symbol).toBe('Cmaj7');
@@ -113,6 +123,45 @@ describe('note actions', () => {
     useStore.getState().removeNote(clipId, noteId);
     expect(clip()?.notes?.length).toBe(0);
   });
+
+  it('edits the canonical payload when a linked clip is selected', () => {
+    const sourceId = useStore.getState().project.tracks[0]?.clips[0]?.id ?? '';
+    expect(
+      useStore.getState().applyProjectChange((project) => ({
+        ...project,
+        tracks: project.tracks.map((track) => ({
+          ...track,
+          clips: track.clips.map((clip) =>
+            clip.id === sourceId ? { ...clip, lengthBeats: 4 } : clip,
+          ),
+        })),
+      })),
+    ).toBe(true);
+    expect(
+      useStore.getState().applyProjectChange((project) => {
+        const result = duplicateClip(project, sourceId, {
+          id: 'linked-store-clip',
+          startBeat: 4,
+          linked: true,
+        });
+        return result.ok ? result.project : project;
+      }),
+    ).toBe(true);
+
+    useStore.getState().addNote('linked-store-clip', {
+      pitch: 60,
+      startBeat: 0,
+      durationBeats: 1,
+      velocity: 100,
+    });
+
+    const project = useStore.getState().project;
+    const source = findClip(project, sourceId)?.clip;
+    const alias = findClip(project, 'linked-store-clip')?.clip;
+    expect(source?.notes).toHaveLength(1);
+    expect(alias?.notes).toBeUndefined();
+    expect(alias && resolveClipContent(project, alias)?.notes).toEqual(source?.notes);
+  });
 });
 
 describe('drum actions', () => {
@@ -120,14 +169,103 @@ describe('drum actions', () => {
     const drumTrack = useStore.getState().project.tracks.find((t) => t.type === 'drum');
     const clipId = drumTrack?.clips[0]?.id ?? '';
 
-    useStore.getState().toggleDrumStep(clipId, 'kick', 0);
+    expect(useStore.getState().toggleDrumStep(clipId, 'kick', 0)).toBe(true);
     const drumClip = () =>
       useStore.getState().project.tracks.find((t) => t.type === 'drum')?.clips[0];
     expect(drumClip()?.drumEvents?.length).toBe(1);
     expect(drumClip()?.drumEvents?.[0]?.lane).toBe('kick');
 
-    useStore.getState().toggleDrumStep(clipId, 'kick', 0);
+    expect(useStore.getState().toggleDrumStep(clipId, 'kick', 0)).toBe(true);
     expect(drumClip()?.drumEvents?.length).toBe(0);
+  });
+
+  it('does not publish success when a linked-source edit exceeds the persisted schedule budget', () => {
+    const linkedInstanceCount = 1_000;
+    const eventsPerSource = MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS / linkedInstanceCount;
+    expect(Number.isSafeInteger(eventsPerSource)).toBe(true);
+
+    const setupCommitted = useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => {
+        if (track.type !== 'drum') return track;
+        const source = track.clips[0];
+        if (!source) return track;
+        const drumEvents = Array.from({ length: eventsPerSource }, (_, index) => ({
+          id: `budget-drum-${index}`,
+          lane: 'closedHat' as const,
+          stepIndex: 0,
+          velocity: 100,
+        }));
+        const aliases = Array.from({ length: linkedInstanceCount - 1 }, (_, index) => ({
+          id: `budget-alias-${index}`,
+          trackId: track.id,
+          type: 'drum' as const,
+          startBeat: 0,
+          lengthBeats: source.lengthBeats,
+          loop: source.loop,
+          aliasOf: source.id,
+        }));
+        return {
+          ...track,
+          clips: [{ ...source, drumEvents }, ...aliases],
+        };
+      }),
+    }));
+    expect(setupCommitted).toBe(true);
+
+    const projectBeforeRejectedEdit = useStore.getState().project;
+    const source = projectBeforeRejectedEdit.tracks.find((track) => track.type === 'drum')?.clips[0];
+    if (!source) throw new Error('drum source fixture missing');
+    const events: AppEvent[] = [];
+    const unsubscribe = subscribeAppEvents((event) => events.push(event));
+    let committed = true;
+    try {
+      committed = useStore.getState().toggleDrumStep(source.id, 'kick', 1);
+    } finally {
+      unsubscribe();
+    }
+
+    expect(committed).toBe(false);
+    expect(useStore.getState().project).toBe(projectBeforeRejectedEdit);
+    expect(source.drumEvents).toHaveLength(eventsPerSource);
+    expect(events).toEqual([]);
+    expect(useStore.getState().persistenceNotice?.kind).toBe('warning');
+  });
+
+  it('accepts groove and per-step probability as durable project data', () => {
+    const drumClip = useStore.getState().project.tracks.find((track) => track.type === 'drum')?.clips[0];
+    if (!drumClip) throw new Error('drum fixture missing');
+    useStore.getState().toggleDrumStep(drumClip.id, 'kick', 0);
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) =>
+          clip.id === drumClip.id
+            ? {
+                ...clip,
+                drumGroove: {
+                  swing: 0.4,
+                  probability: 0.8,
+                  humanizeVelocity: 10,
+                  seed: 7,
+                },
+                drumEvents: clip.drumEvents?.map((event) => ({
+                  ...event,
+                  probability: 0.65,
+                })),
+              }
+            : clip,
+        ),
+      })),
+    }));
+
+    const updated = useStore
+      .getState()
+      .project.tracks.find((track) => track.type === 'drum')?.clips[0];
+    expect(updated?.drumGroove?.swing).toBe(0.4);
+    expect(updated?.drumEvents?.[0]?.probability).toBe(0.65);
+    expect(useStore.getState().saveState.phase).not.toBe('error');
   });
 });
 
@@ -145,9 +283,89 @@ describe('mixer actions', () => {
     expect(track?.mute).toBe(true);
     expect(track?.solo).toBe(true);
   });
+
+  it('publishes one volume event with the adopted committed value', () => {
+    const track = useStore.getState().project.tracks[0];
+    if (!track) throw new Error('mixer track fixture missing');
+    const events: AppEvent[] = [];
+    const unsubscribe = subscribeAppEvents((event) => events.push(event));
+
+    try {
+      useStore.getState().setTrackVolume(track.id, 1.5);
+    } finally {
+      unsubscribe();
+    }
+
+    expect(useStore.getState().project.tracks[0]?.volume).toBe(1.5);
+    expect(events).toEqual([
+      {
+        type: 'track.volumeChanged',
+        payload: {
+          trackId: track.id,
+          trackName: track.name,
+          volume: 1.5,
+        },
+      },
+    ]);
+  });
+
+  it('does not publish or create history for missing, invalid, or unchanged volumes', () => {
+    const track = useStore.getState().project.tracks[0];
+    if (!track) throw new Error('mixer track fixture missing');
+    const before = useStore.getState();
+    const events: AppEvent[] = [];
+    const unsubscribe = subscribeAppEvents((event) => events.push(event));
+
+    try {
+      useStore.getState().setTrackVolume(track.id, track.volume);
+      useStore.getState().setTrackVolume('missing-track', 0.5);
+      useStore.getState().setTrackVolume(track.id, Number.NaN);
+      useStore.getState().setTrackVolume(track.id, Number.POSITIVE_INFINITY);
+      useStore.getState().setTrackVolume(track.id, -0.01);
+      useStore.getState().setTrackVolume(track.id, 2.01);
+    } finally {
+      unsubscribe();
+    }
+
+    const after = useStore.getState();
+    expect(after.project).toBe(before.project);
+    expect(after.saveState.revision).toBe(before.saveState.revision);
+    expect(after.past).toBe(before.past);
+    expect(events).toEqual([]);
+  });
+
+  it('does not publish when a valid volume cannot be committed', () => {
+    const track = useStore.getState().project.tracks[0];
+    if (!track) throw new Error('mixer track fixture missing');
+    const events: AppEvent[] = [];
+    const unsubscribe = subscribeAppEvents((event) => events.push(event));
+    useStore.setState({ projectOperationBusy: true });
+
+    try {
+      useStore.getState().setTrackVolume(track.id, 1.5);
+    } finally {
+      useStore.setState({ projectOperationBusy: false });
+      unsubscribe();
+    }
+
+    expect(useStore.getState().project.tracks[0]?.volume).toBe(track.volume);
+    expect(events).toEqual([]);
+  });
 });
 
 describe('undo / redo', () => {
+  it('does not create history or a save revision for a referential no-op', () => {
+    const before = useStore.getState();
+
+    expect(useStore.getState().applyProjectChange((project) => project)).toBe(true);
+
+    const after = useStore.getState();
+    expect(after.project).toBe(before.project);
+    expect(after.project.updatedAt).toBe(before.project.updatedAt);
+    expect(after.past).toEqual([]);
+    expect(after.saveState.revision).toBe(before.saveState.revision);
+  });
+
   it('undoes and redoes a project mutation', () => {
     expect(useStore.getState().canUndo()).toBe(false);
 
@@ -179,6 +397,38 @@ describe('undo / redo', () => {
     }
     expect(useStore.getState().past.length).toBeLessThanOrEqual(100);
   });
+
+  it('clears a duplicated clip selection when undo removes that clip', () => {
+    const sourceId = useStore.getState().project.tracks[0]?.clips[0]?.id ?? '';
+    expect(
+      useStore.getState().applyProjectChange((project) => ({
+        ...project,
+        tracks: project.tracks.map((track) => ({
+          ...track,
+          clips: track.clips.map((clip) =>
+            clip.id === sourceId ? { ...clip, lengthBeats: 4 } : clip,
+          ),
+        })),
+      })),
+    ).toBe(true);
+    expect(
+      useStore.getState().applyProjectChange((project) => {
+        const result = duplicateClip(project, sourceId, {
+          id: 'undo-linked-clip',
+          startBeat: 4,
+          linked: true,
+        });
+        return result.ok ? result.project : project;
+      }),
+    ).toBe(true);
+    useStore.getState().selectClip('undo-linked-clip');
+
+    useStore.getState().undo();
+
+    expect(findClip(useStore.getState().project, 'undo-linked-clip')).toBeNull();
+    expect(useStore.getState().editor.selectedClipId).toBeNull();
+    expect(useStore.getState().editor.selectedNoteIds).toEqual([]);
+  });
 });
 
 describe('selection (no history)', () => {
@@ -191,19 +441,33 @@ describe('selection (no history)', () => {
 });
 
 describe('persistence integration', () => {
-  it('createNewProject persists and is listable', () => {
-    useStore.getState().createNewProject('保存テスト');
+  it('creates a genuinely blank project instead of silently adding a progression', async () => {
+    await useStore.getState().createNewProject('まっさら');
+    const project = useStore.getState().project;
+
+    expect(project.title).toBe('まっさら');
+    expect(project.chordTrack).toEqual([]);
+    expect(project.sections).toEqual([]);
+    expect(project.tracks.flatMap((track) => track.clips).flatMap((clip) => clip.notes ?? []))
+      .toEqual([]);
+    expect(
+      project.tracks.flatMap((track) => track.clips).flatMap((clip) => clip.drumEvents ?? []),
+    ).toEqual([]);
+  });
+
+  it('createNewProject persists and is listable', async () => {
+    await useStore.getState().createNewProject('保存テスト');
     const id = useStore.getState().project.id;
     const list = useStore.getState().listSavedProjects();
     expect(list.some((p) => p.id === id)).toBe(true);
   });
 
-  it('saveToLocalStorage writes synchronously and survives reload', () => {
+  it('saveToLocalStorage writes and refreshes the cached project list', async () => {
     useStore.getState().setTitle('永続化');
-    useStore.getState().saveToLocalStorage();
+    await useStore.getState().saveToLocalStorage();
     const id = useStore.getState().project.id;
     const list = useStore.getState().listSavedProjects();
     const found = list.find((p) => p.id === id);
-    expect(found?.title).toBe('永続化');
+    expect(found?.status === 'ready' ? found.title : undefined).toBe('永続化');
   });
 });

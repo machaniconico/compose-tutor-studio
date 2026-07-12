@@ -10,7 +10,7 @@ const TYPE_LABEL: Record<TrackType, string> = {
   master: '主',
 };
 
-/** Left column listing tracks with volume + mute/solo controls. */
+/** Left column listing tracks with volume plus sound-track mute/solo controls. */
 export function TrackList() {
   const tracks = useStore((s) => s.project.tracks);
   const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
@@ -38,6 +38,7 @@ export function TrackList() {
             <button
               type="button"
               aria-label={`${track.name} トラックを選択`}
+              aria-pressed={isSelected}
               onClick={(e) => {
                 e.stopPropagation();
                 selectThisTrack();
@@ -74,30 +75,36 @@ export function TrackList() {
               <input
                 type="range"
                 min={0}
-                max={1}
+                max={2}
                 step={0.01}
                 value={track.volume}
                 aria-label={`${track.name} 音量`}
                 onChange={(e) => setTrackVolume(track.id, Number(e.target.value))}
               />
-              <button
-                type="button"
-                className={`mini-btn${track.mute ? ' is-active' : ''}`}
-                aria-pressed={track.mute}
-                onClick={() => toggleMute(track.id)}
-                title="ミュート"
-              >
-                M
-              </button>
-              <button
-                type="button"
-                className={`mini-btn${track.solo ? ' is-active' : ''}`}
-                aria-pressed={track.solo}
-                onClick={() => toggleSolo(track.id)}
-                title="ソロ"
-              >
-                S
-              </button>
+              {track.type !== 'master' ? (
+                <>
+                  <button
+                    type="button"
+                    className={`mini-btn${track.mute ? ' is-active' : ''}`}
+                    aria-pressed={track.mute}
+                    aria-label={`${track.name} ミュート`}
+                    onClick={() => toggleMute(track.id)}
+                    title="ミュート"
+                  >
+                    M
+                  </button>
+                  <button
+                    type="button"
+                    className={`mini-btn${track.solo ? ' is-active' : ''}`}
+                    aria-pressed={track.solo}
+                    aria-label={`${track.name} ソロ`}
+                    onClick={() => toggleSolo(track.id)}
+                    title="ソロ"
+                  >
+                    S
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
         );

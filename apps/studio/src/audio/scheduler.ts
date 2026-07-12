@@ -49,6 +49,51 @@ export type ScheduleWindow = {
   endBeat: number;
 };
 
+/** One immutable source-event entry in a beat-sorted schedule index. */
+export type ScheduleEventIndexEntry = Readonly<{
+  event: Readonly<ScheduledEvent>;
+  sourceOrdinal: number;
+  /** Effective onset for one-shot playback, or loop-normalized onset phase. */
+  indexedBeat: number;
+  /** Loop cycles crossed by deterministic swing before the first occurrence. */
+  passShift: number;
+}>;
+
+/** Immutable, loop-specific index built once when transport playback starts. */
+export type ScheduleEventIndex = Readonly<{
+  sourceEventCount: number;
+  loop: Readonly<LoopRegion> | null;
+  entries: readonly ScheduleEventIndexEntry[];
+}>;
+
+/** Deterministic query-work counters used by load and regression tests. */
+export type ScheduleQueryStats = Readonly<{
+  sourceEventCount: number;
+  indexedEventCount: number;
+  rangeCount: number;
+  lowerBoundComparisons: number;
+  candidatesVisited: number;
+  emitted: number;
+}>;
+
+export type ScheduleQueryResult = Readonly<{
+  events: DueEvent[];
+  stats: ScheduleQueryStats;
+}>;
+
+export type ScheduleDensityBudgetResult =
+  | Readonly<{
+      ok: true;
+      observed: number;
+      limit: number;
+    }>
+  | Readonly<{
+      ok: false;
+      observed: number;
+      limit: number;
+      windowStartBeat: number;
+    }>;
+
 export type DrumGrooveHitInput = {
   beat: number;
   lane: string;
@@ -58,6 +103,7 @@ export type DrumGrooveHitInput = {
   humanizeVelocity?: number;
   seed?: number;
   stepKey?: string;
+  sourceStepIndex?: number;
   stepsPerBar?: number;
   beatsPerBar?: number;
 };
@@ -67,27 +113,27 @@ export type DrumGrooveHit = {
   velocity: number;
 };
 
-export type DrumGrooveRuntimeOptions = {
-  swing: number;
-  probability: number;
-  humanizeVelocity: number;
-  seed: number;
+type DrumPayload = {
+  kind: 'drum';
+  trackId?: string;
+  lane: string;
+  velocity: number;
+  voiceSeed?: number;
+};
+
+type SelfContainedDrumPayload = DrumPayload & {
+  trackId: string;
+  clipId: string;
+  eventId: string;
+  sourceStepIndex: number;
+  clipEndBeat: number;
   stepsPerBar: number;
   beatsPerBar: number;
-  probabilitiesByStep: Record<string, number>;
+  probability: number;
+  swing: number;
+  humanizeVelocity: number;
+  seed: number;
 };
-
-const DEFAULT_DRUM_GROOVE: DrumGrooveRuntimeOptions = {
-  swing: 0,
-  probability: 1,
-  humanizeVelocity: 0,
-  seed: 1,
-  stepsPerBar: 16,
-  beatsPerBar: 4,
-  probabilitiesByStep: {},
-};
-
-let drumGrooveRuntime: DrumGrooveRuntimeOptions = DEFAULT_DRUM_GROOVE;
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -103,7 +149,7 @@ function clampVelocity(value: number): number {
 }
 
 function safePositive(value: number | undefined, fallback: number): number {
-  return value !== undefined && value > 0 ? value : fallback;
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function hashString(input: string): number {
@@ -119,7 +165,7 @@ function seededUnit(seed: number, salt: string): number {
   return createPrng((seed >>> 0) ^ hashString(salt))();
 }
 
-function isDrumPayload(payload: unknown): payload is { kind: 'drum'; lane: string; velocity: number } {
+function isDrumPayload(payload: unknown): payload is DrumPayload {
   if (typeof payload !== 'object' || payload === null) return false;
   const candidate = payload as { kind?: unknown; lane?: unknown; velocity?: unknown };
   return (
@@ -129,9 +175,30 @@ function isDrumPayload(payload: unknown): payload is { kind: 'drum'; lane: strin
   );
 }
 
-function withPayloadVelocity(payload: unknown, velocity: number): unknown {
+function isSelfContainedDrumPayload(payload: DrumPayload): payload is SelfContainedDrumPayload {
+  const candidate = payload as Partial<SelfContainedDrumPayload>;
+  return (
+    typeof candidate.trackId === 'string' &&
+    typeof candidate.clipId === 'string' &&
+    typeof candidate.eventId === 'string' &&
+    Number.isSafeInteger(candidate.sourceStepIndex) &&
+    typeof candidate.clipEndBeat === 'number' &&
+    typeof candidate.stepsPerBar === 'number' &&
+    typeof candidate.beatsPerBar === 'number' &&
+    typeof candidate.probability === 'number' &&
+    typeof candidate.swing === 'number' &&
+    typeof candidate.humanizeVelocity === 'number' &&
+    typeof candidate.seed === 'number'
+  );
+}
+
+function withResolvedDrumVoice(
+  payload: unknown,
+  velocity: number,
+  voiceSeed: number,
+): unknown {
   if (typeof payload !== 'object' || payload === null) return payload;
-  return { ...payload, velocity };
+  return { ...payload, velocity, voiceSeed };
 }
 
 export function makeDrumGrooveStepKey(lane: string, beat: number): string {
@@ -167,6 +234,23 @@ export function applyDrumSwingToBeat(
   return beat + beatsPerStep * 0.5 * amount;
 }
 
+/** Apply swing from the source clip step parity, independent of clip placement. */
+export function applyDrumSwingToOccurrenceBeat(
+  playheadBeat: number,
+  sourceStepIndex: number,
+  swing: number,
+  stepsPerBar = 16,
+  beatsPerBar = 4,
+): number {
+  const amount = clamp01(swing);
+  if (amount <= 0 || !Number.isSafeInteger(sourceStepIndex) || sourceStepIndex % 2 === 0) {
+    return playheadBeat;
+  }
+  const steps = safePositive(stepsPerBar, 16);
+  const bpb = safePositive(beatsPerBar, 4);
+  return playheadBeat + (bpb / steps) * 0.5 * amount;
+}
+
 /** Deterministically decide whether a probabilistic drum step should sound. */
 export function shouldPlayDrumStep(probability: number, seed = 1, stepKey = 'step'): boolean {
   const chance = clamp01(probability);
@@ -199,12 +283,20 @@ export function resolveDrumGrooveHit(input: DrumGrooveHitInput): DrumGrooveHit |
   if (!shouldPlayDrumStep(input.probability ?? 1, seed, stepKey)) return null;
 
   return {
-    beat: applyDrumSwingToBeat(
-      input.beat,
-      input.swing ?? 0,
-      input.stepsPerBar ?? 16,
-      input.beatsPerBar ?? 4,
-    ),
+    beat: input.sourceStepIndex === undefined
+      ? applyDrumSwingToBeat(
+          input.beat,
+          input.swing ?? 0,
+          input.stepsPerBar ?? 16,
+          input.beatsPerBar ?? 4,
+        )
+      : applyDrumSwingToOccurrenceBeat(
+          input.beat,
+          input.sourceStepIndex,
+          input.swing ?? 0,
+          input.stepsPerBar ?? 16,
+          input.beatsPerBar ?? 4,
+        ),
     velocity: humanizeDrumVelocity(
       input.velocity,
       input.humanizeVelocity ?? 0,
@@ -214,23 +306,122 @@ export function resolveDrumGrooveHit(input: DrumGrooveHitInput): DrumGrooveHit |
   };
 }
 
-/** Runtime hook used by the drum grid; pure helpers above stay independently testable. */
-export function setDrumGrooveRuntimeOptions(options: Partial<DrumGrooveRuntimeOptions>): void {
-  drumGrooveRuntime = {
-    swing: clamp01(options.swing ?? drumGrooveRuntime.swing),
-    probability: clamp01(options.probability ?? drumGrooveRuntime.probability),
-    humanizeVelocity: clamp(options.humanizeVelocity ?? drumGrooveRuntime.humanizeVelocity, 0, 127),
-    seed: Math.trunc(options.seed ?? drumGrooveRuntime.seed),
-    stepsPerBar: safePositive(options.stepsPerBar, drumGrooveRuntime.stepsPerBar),
-    beatsPerBar: safePositive(options.beatsPerBar, drumGrooveRuntime.beatsPerBar),
-    probabilitiesByStep: { ...(options.probabilitiesByStep ?? drumGrooveRuntime.probabilitiesByStep) },
-  };
+function roundedBeatKey(beat: number): number {
+  return Math.round(beat * 1_000_000) / 1_000_000;
 }
 
-export function getDrumGrooveRuntimeOptions(): DrumGrooveRuntimeOptions {
+function occurrenceSalt(payload: SelfContainedDrumPayload, playheadBeat: number): string {
+  return JSON.stringify([
+    payload.trackId,
+    payload.clipId,
+    payload.eventId,
+    payload.lane,
+    payload.sourceStepIndex,
+    roundedBeatKey(playheadBeat),
+  ]);
+}
+
+/** Stable voice identity; bump the domain tag only for an intentional sound change. */
+function occurrenceVoiceSeed(
+  payload: SelfContainedDrumPayload,
+  playheadBeat: number,
+): number {
+  const persistedSeed =
+    Number.isSafeInteger(payload.seed) && payload.seed > 0 ? payload.seed : 1;
+  return hashString(JSON.stringify([
+    'cts-drum-voice-v1',
+    persistedSeed,
+    payload.trackId,
+    payload.clipId,
+    payload.eventId,
+    payload.lane,
+    payload.sourceStepIndex,
+    roundedBeatKey(playheadBeat),
+  ]));
+}
+
+/** Deterministic fallback for pre-groove payloads that lack clip/event identity. */
+function legacyOccurrenceVoiceSeed(payload: DrumPayload, playheadBeat: number): number {
+  return hashString(JSON.stringify([
+    'cts-drum-legacy-voice-v1',
+    payload.trackId ?? '',
+    payload.lane,
+    roundedBeatKey(playheadBeat),
+  ]));
+}
+
+function occurrenceSwingLookback(payload: unknown): number {
+  if (!isDrumPayload(payload) || !isSelfContainedDrumPayload(payload)) return 0;
+  if (payload.sourceStepIndex % 2 === 0) return 0;
+  const steps = safePositive(payload.stepsPerBar, 16);
+  const beatsPerBar = safePositive(payload.beatsPerBar, 4);
+  return (beatsPerBar / steps) * 0.5 * clamp01(payload.swing);
+}
+
+function effectiveOnsetBeat(event: ScheduledEvent): number {
+  return event.beat + occurrenceSwingLookback(event.payload);
+}
+
+function canReachAnyScheduleWindow(event: ScheduledEvent): boolean {
+  if (!isDrumPayload(event.payload) || !isSelfContainedDrumPayload(event.payload)) {
+    return true;
+  }
+  const clipEndBeat = Number.isFinite(event.payload.clipEndBeat)
+    ? event.payload.clipEndBeat
+    : Number.POSITIVE_INFINITY;
+  return effectiveOnsetBeat(event) < clipEndBeat;
+}
+
+/** Resolve one raw scheduled occurrence for both live playback and offline WAV. */
+export function resolveDrumOccurrence(
+  event: ScheduledEvent,
+  playheadBeat: number = event.beat,
+): ScheduledEvent | null {
+  if (!isDrumPayload(event.payload)) {
+    return { beat: playheadBeat, payload: event.payload };
+  }
+
+  // Legacy raw drum payloads had no clip identity or persisted groove. Preserve
+  // their old neutral schedule without consulting any process-global UI state.
+  if (!isSelfContainedDrumPayload(event.payload)) {
+    return {
+      beat: playheadBeat,
+      payload: withResolvedDrumVoice(
+        event.payload,
+        clampVelocity(event.payload.velocity),
+        legacyOccurrenceVoiceSeed(event.payload, playheadBeat),
+      ),
+    };
+  }
+
+  const payload = event.payload;
+  const seed = Number.isSafeInteger(payload.seed) && payload.seed > 0 ? payload.seed : 1;
+  const hit = resolveDrumGrooveHit({
+    beat: playheadBeat,
+    lane: payload.lane,
+    velocity: payload.velocity,
+    probability: clamp01(payload.probability),
+    swing: clamp01(payload.swing),
+    humanizeVelocity: clamp(payload.humanizeVelocity, 0, 127),
+    seed,
+    stepKey: occurrenceSalt(payload, playheadBeat),
+    sourceStepIndex: payload.sourceStepIndex,
+    stepsPerBar: safePositive(payload.stepsPerBar, 16),
+    beatsPerBar: safePositive(payload.beatsPerBar, 4),
+  });
+  if (!hit) return null;
+  const sourceClipEnd = Number.isFinite(payload.clipEndBeat)
+    ? payload.clipEndBeat
+    : Number.POSITIVE_INFINITY;
+  const occurrenceClipEnd = sourceClipEnd + (playheadBeat - event.beat);
+  if (hit.beat >= occurrenceClipEnd) return null;
   return {
-    ...drumGrooveRuntime,
-    probabilitiesByStep: { ...drumGrooveRuntime.probabilitiesByStep },
+    beat: hit.beat,
+    payload: withResolvedDrumVoice(
+      payload,
+      hit.velocity,
+      occurrenceVoiceSeed(payload, playheadBeat),
+    ),
   };
 }
 
@@ -241,35 +432,20 @@ function resolveDueEvent(
   bpm: number,
   anchorBeat: number,
   anchorTime: number,
+  windowStartBeat: number,
+  windowEndBeat: number,
 ): DueEvent | null {
-  if (!isDrumPayload(ev.payload)) {
-    return {
-      time: beatToTime(playheadBeat, bpm, anchorBeat, anchorTime),
-      beat: sourceBeat,
-      payload: ev.payload,
-    };
-  }
-
-  const sourceKey = makeDrumGrooveStepKey(ev.payload.lane, sourceBeat);
-  const playheadKey = makeDrumGrooveStepKey(ev.payload.lane, playheadBeat);
-  const hit = resolveDrumGrooveHit({
-    beat: playheadBeat,
-    lane: ev.payload.lane,
-    velocity: ev.payload.velocity,
-    probability: drumGrooveRuntime.probabilitiesByStep[sourceKey] ?? drumGrooveRuntime.probability,
-    swing: drumGrooveRuntime.swing,
-    humanizeVelocity: drumGrooveRuntime.humanizeVelocity,
-    seed: drumGrooveRuntime.seed,
-    stepKey: playheadKey,
-    stepsPerBar: drumGrooveRuntime.stepsPerBar,
-    beatsPerBar: drumGrooveRuntime.beatsPerBar,
-  });
-  if (!hit) return null;
+  const occurrence = resolveDrumOccurrence(ev, playheadBeat);
+  if (
+    !occurrence ||
+    occurrence.beat < windowStartBeat ||
+    occurrence.beat >= windowEndBeat
+  ) return null;
 
   return {
-    time: beatToTime(hit.beat, bpm, anchorBeat, anchorTime),
+    time: beatToTime(occurrence.beat, bpm, anchorBeat, anchorTime),
     beat: sourceBeat,
-    payload: withPayloadVelocity(ev.payload, hit.velocity),
+    payload: occurrence.payload,
   };
 }
 
@@ -345,9 +521,431 @@ export function advanceBeat(
   return wrapBeat(next, loop);
 }
 
+type MutableScheduleQueryStats = {
+  sourceEventCount: number;
+  indexedEventCount: number;
+  rangeCount: number;
+  lowerBoundComparisons: number;
+  candidatesVisited: number;
+  emitted: number;
+};
+
+type IndexedDueEvent = {
+  due: DueEvent;
+  sourceOrdinal: number;
+};
+
+function finiteBeat(value: number, label: string): number {
+  if (!Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite beat`);
+  }
+  return value;
+}
+
 /**
- * Select the events whose beat falls inside the half-open window
- * `[windowStartBeat, windowEndBeat)` and resolve them to absolute audio times.
+ * Snapshot and sort a schedule once for repeated half-open range queries.
+ *
+ * A loop uses normalized effective-onset phases. `passShift` records how many
+ * loop cycles a deterministic swing delay crosses, including delays longer
+ * than the loop itself.
+ */
+export function createScheduleEventIndex(
+  events: readonly ScheduledEvent[],
+  loop: LoopRegion | null = null,
+): ScheduleEventIndex {
+  let normalizedLoop: Readonly<LoopRegion> | null = null;
+  if (isValidLoop(loop)) {
+    const startBeat = finiteBeat(loop.startBeat, 'loop.startBeat');
+    const endBeat = finiteBeat(loop.endBeat, 'loop.endBeat');
+    normalizedLoop = Object.freeze({ startBeat, endBeat });
+  }
+
+  const entries: ScheduleEventIndexEntry[] = [];
+  const loopLength = normalizedLoop
+    ? normalizedLoop.endBeat - normalizedLoop.startBeat
+    : 0;
+
+  events.forEach((sourceEvent, sourceOrdinal) => {
+    const beat = finiteBeat(sourceEvent.beat, `events[${sourceOrdinal}].beat`);
+    if (
+      normalizedLoop &&
+      (beat < normalizedLoop.startBeat || beat >= normalizedLoop.endBeat)
+    ) {
+      return;
+    }
+
+    // Effective onset depends on persisted drum-groove scalars. Snapshot that
+    // flat payload together with the beat so later caller mutation cannot make
+    // the immutable index disagree with occurrence resolution.
+    const payload = isDrumPayload(sourceEvent.payload) &&
+      isSelfContainedDrumPayload(sourceEvent.payload)
+      ? Object.freeze({ ...sourceEvent.payload })
+      : sourceEvent.payload;
+    const event = Object.freeze({ beat, payload });
+    const onsetBeat = finiteBeat(
+      effectiveOnsetBeat(event),
+      `events[${sourceOrdinal}] effective onset`,
+    );
+    let indexedBeat = onsetBeat;
+    let passShift = 0;
+
+    if (normalizedLoop) {
+      passShift = Math.floor((onsetBeat - normalizedLoop.startBeat) / loopLength);
+      indexedBeat = onsetBeat - passShift * loopLength;
+
+      // Absorb floating-point edge drift while preserving the corresponding
+      // unwrapped occurrence represented by passShift.
+      if (indexedBeat < normalizedLoop.startBeat) {
+        indexedBeat += loopLength;
+        passShift -= 1;
+      } else if (indexedBeat >= normalizedLoop.endBeat) {
+        indexedBeat -= loopLength;
+        passShift += 1;
+      }
+    }
+
+    entries.push(Object.freeze({
+      event,
+      sourceOrdinal,
+      indexedBeat,
+      passShift,
+    }));
+  });
+
+  entries.sort(
+    (left, right) =>
+      left.indexedBeat - right.indexedBeat || left.sourceOrdinal - right.sourceOrdinal,
+  );
+
+  return Object.freeze({
+    sourceEventCount: events.length,
+    loop: normalizedLoop,
+    entries: Object.freeze(entries),
+  });
+}
+
+function lowerBoundIndexedBeat(
+  entries: readonly ScheduleEventIndexEntry[],
+  targetBeat: number,
+  stats: MutableScheduleQueryStats | null,
+): number {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (stats) stats.lowerBoundComparisons += 1;
+    if ((entries[middle]?.indexedBeat ?? Number.POSITIVE_INFINITY) < targetBeat) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+function appendIndexedRange(
+  index: ScheduleEventIndex,
+  rangeStartBeat: number,
+  rangeEndBeat: number,
+  searchPaddingBeats: number,
+  cycle: number,
+  bpm: number,
+  anchorBeat: number,
+  anchorTime: number,
+  windowStartBeat: number,
+  windowEndBeat: number,
+  due: IndexedDueEvent[],
+  stats: MutableScheduleQueryStats | null,
+): void {
+  if (rangeEndBeat <= rangeStartBeat) return;
+  if (stats) stats.rangeCount += 1;
+  const startIndex = lowerBoundIndexedBeat(
+    index.entries,
+    rangeStartBeat - searchPaddingBeats,
+    stats,
+  );
+  const endIndex = lowerBoundIndexedBeat(
+    index.entries,
+    rangeEndBeat + searchPaddingBeats,
+    stats,
+  );
+  const loopLength = index.loop ? index.loop.endBeat - index.loop.startBeat : 0;
+
+  for (let position = startIndex; position < endIndex; position += 1) {
+    const indexed = index.entries[position];
+    if (!indexed) continue;
+    if (stats) stats.candidatesVisited += 1;
+
+    let playheadBeat = indexed.event.beat;
+    if (index.loop) {
+      if (cycle < indexed.passShift) continue;
+      playheadBeat += (cycle - indexed.passShift) * loopLength;
+    }
+
+    const resolved = resolveDueEvent(
+      indexed.event,
+      playheadBeat,
+      indexed.event.beat,
+      bpm,
+      anchorBeat,
+      anchorTime,
+      windowStartBeat,
+      windowEndBeat,
+    );
+    if (resolved) {
+      due.push({ due: resolved, sourceOrdinal: indexed.sourceOrdinal });
+    }
+  }
+}
+
+function selectIndexedEventsInWindow(
+  index: ScheduleEventIndex,
+  windowStartBeat: number,
+  windowEndBeat: number,
+  bpm: number,
+  anchorBeat: number,
+  anchorTime: number,
+  stats: MutableScheduleQueryStats | null,
+): DueEvent[] {
+  if (
+    !Number.isFinite(windowStartBeat) ||
+    !Number.isFinite(windowEndBeat) ||
+    windowEndBeat <= windowStartBeat
+  ) {
+    return [];
+  }
+
+  const due: IndexedDueEvent[] = [];
+  const region = index.loop;
+
+  if (!region) {
+    appendIndexedRange(
+      index,
+      windowStartBeat,
+      windowEndBeat,
+      0,
+      0,
+      bpm,
+      anchorBeat,
+      anchorTime,
+      windowStartBeat,
+      windowEndBeat,
+      due,
+      stats,
+    );
+  } else {
+    const loopLength = region.endBeat - region.startBeat;
+    // Mapping an unwrapped decimal beat back to its loop phase subtracts a
+    // cycle offset. Widen only the binary-search bounds by a few ULPs so a
+    // mathematically exact boundary occurrence cannot be omitted; the exact
+    // resolver guard below remains the authoritative half-open filter.
+    const firstCycle = Math.floor((windowStartBeat - region.startBeat) / loopLength);
+    const endCycle = Math.ceil((windowEndBeat - region.startBeat) / loopLength);
+
+    for (let cycle = firstCycle; cycle < endCycle; cycle += 1) {
+      const cycleOffset = cycle * loopLength;
+      const phaseSearchPadding =
+        Number.EPSILON *
+        Math.max(
+          1,
+          Math.abs(region.startBeat),
+          Math.abs(region.endBeat),
+          loopLength,
+          Math.abs(windowStartBeat),
+          Math.abs(windowEndBeat),
+          Math.abs(cycleOffset),
+        ) *
+        8;
+      const rangeStartBeat = Math.max(
+        region.startBeat,
+        windowStartBeat - cycleOffset,
+      );
+      const rangeEndBeat = Math.min(region.endBeat, windowEndBeat - cycleOffset);
+      appendIndexedRange(
+        index,
+        rangeStartBeat,
+        rangeEndBeat,
+        phaseSearchPadding,
+        cycle,
+        bpm,
+        anchorBeat,
+        anchorTime,
+        windowStartBeat,
+        windowEndBeat,
+        due,
+        stats,
+      );
+    }
+  }
+
+  due.sort(
+    (left, right) =>
+      left.due.time - right.due.time || left.sourceOrdinal - right.sourceOrdinal,
+  );
+  if (stats) stats.emitted = due.length;
+  return due.map((entry) => entry.due);
+}
+
+/** Query a prebuilt schedule index without rebuilding or scanning all events. */
+export function nextIndexedEventsInWindow(
+  index: ScheduleEventIndex,
+  windowStartBeat: number,
+  windowEndBeat: number,
+  bpm: number,
+  anchorBeat: number,
+  anchorTime: number,
+): DueEvent[] {
+  return selectIndexedEventsInWindow(
+    index,
+    windowStartBeat,
+    windowEndBeat,
+    bpm,
+    anchorBeat,
+    anchorTime,
+    null,
+  );
+}
+
+/** Query a prebuilt index and return deterministic work counters for tests. */
+export function queryScheduleEventIndex(
+  index: ScheduleEventIndex,
+  windowStartBeat: number,
+  windowEndBeat: number,
+  bpm: number,
+  anchorBeat: number,
+  anchorTime: number,
+): ScheduleQueryResult {
+  const stats: MutableScheduleQueryStats = {
+    sourceEventCount: index.sourceEventCount,
+    indexedEventCount: index.entries.length,
+    rangeCount: 0,
+    lowerBoundComparisons: 0,
+    candidatesVisited: 0,
+    emitted: 0,
+  };
+  const events = selectIndexedEventsInWindow(
+    index,
+    windowStartBeat,
+    windowEndBeat,
+    bpm,
+    anchorBeat,
+    anchorTime,
+    stats,
+  );
+  return { events, stats };
+}
+
+function saturatingProduct(left: number, right: number): number {
+  if (
+    !Number.isSafeInteger(left) ||
+    left < 0 ||
+    !Number.isSafeInteger(right) ||
+    right < 0 ||
+    left > Math.floor(Number.MAX_SAFE_INTEGER / Math.max(1, right))
+  ) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return left * right;
+}
+
+function saturatingCountSum(left: number, right: number): number {
+  if (left > Number.MAX_SAFE_INTEGER - right) return Number.MAX_SAFE_INTEGER;
+  return left + right;
+}
+
+/**
+ * Check the steady-state density of a periodic loop without unrolling it.
+ *
+ * Every complete loop inside the density window contributes every indexed
+ * onset once. A two-pointer scan over one duplicated phase cycle finds the
+ * maximum contribution from the remaining partial loop in O(N).
+ */
+export function preflightLoopScheduleDensity(
+  index: ScheduleEventIndex,
+  windowBeats: number,
+  maxEventsPerWindow: number,
+): ScheduleDensityBudgetResult {
+  if (!Number.isFinite(windowBeats) || windowBeats <= 0) {
+    throw new RangeError('schedule density window must be a positive finite beat count');
+  }
+  if (!Number.isSafeInteger(maxEventsPerWindow) || maxEventsPerWindow <= 0) {
+    throw new RangeError('schedule density limit must be a positive safe integer');
+  }
+
+  const region = index.loop;
+  const phases = index.entries
+    .filter((entry) => canReachAnyScheduleWindow(entry.event))
+    .map((entry) => entry.indexedBeat);
+  if (!region || phases.length === 0) {
+    return { ok: true, observed: 0, limit: maxEventsPerWindow };
+  }
+
+  const loopLength = region.endBeat - region.startBeat;
+  const rawFullCycles = Math.floor(windowBeats / loopLength);
+  if (!Number.isSafeInteger(rawFullCycles)) {
+    return {
+      ok: false,
+      observed: Number.MAX_SAFE_INTEGER,
+      limit: maxEventsPerWindow,
+      windowStartBeat: region.startBeat,
+    };
+  }
+
+  let fullCycles = rawFullCycles;
+  let remainder = windowBeats - fullCycles * loopLength;
+  const remainderTolerance =
+    Number.EPSILON *
+    Math.max(1, windowBeats, loopLength, Math.abs(fullCycles * loopLength)) *
+    8;
+  if (Math.abs(remainder) <= remainderTolerance) {
+    remainder = 0;
+  } else if (Math.abs(loopLength - remainder) <= remainderTolerance) {
+    fullCycles += 1;
+    remainder = 0;
+  }
+
+  const fullCycleEvents = saturatingProduct(fullCycles, phases.length);
+  let maxPartialEvents = 0;
+  let densestWindowStart = region.startBeat;
+
+  if (remainder > 0) {
+    const duplicated = [
+      ...phases,
+      ...phases.map((phase) => phase + loopLength),
+    ];
+    let right = 0;
+    for (let left = 0; left < phases.length; left += 1) {
+      if (right < left) right = left;
+      while (
+        right < left + phases.length &&
+        (duplicated[right] ?? Number.POSITIVE_INFINITY) -
+          (duplicated[left] ?? Number.NEGATIVE_INFINITY) <
+          remainder
+      ) {
+        right += 1;
+      }
+      const partialEvents = right - left;
+      if (partialEvents > maxPartialEvents) {
+        maxPartialEvents = partialEvents;
+        densestWindowStart = phases[left] ?? region.startBeat;
+      }
+    }
+  }
+
+  const observed = saturatingCountSum(fullCycleEvents, maxPartialEvents);
+  return observed > maxEventsPerWindow
+    ? {
+        ok: false,
+        observed,
+        limit: maxEventsPerWindow,
+        windowStartBeat: densestWindowStart,
+      }
+    : { ok: true, observed, limit: maxEventsPerWindow };
+}
+
+/**
+ * Select occurrences whose resolved onset falls inside the half-open window
+ * `[windowStartBeat, windowEndBeat)` and convert them to absolute audio times.
  *
  * When a loop is active, the window is interpreted as a contiguous run of
  * *playhead* beats that may cross the loop boundary; each window beat is mapped
@@ -366,48 +964,14 @@ export function nextEventsInWindow(
   anchorTime: number,
   loop: LoopRegion | null,
 ): DueEvent[] {
-  if (windowEndBeat <= windowStartBeat) return [];
-
-  const due: DueEvent[] = [];
-  const hasLoop = isValidLoop(loop);
-
-  if (!hasLoop) {
-    for (const ev of events) {
-      if (ev.beat >= windowStartBeat && ev.beat < windowEndBeat) {
-        const resolved = resolveDueEvent(ev, ev.beat, ev.beat, bpm, anchorBeat, anchorTime);
-        if (resolved) due.push(resolved);
-      }
-    }
-    due.sort((a, b) => a.time - b.time);
-    return due;
-  }
-
-  // Looping: each source event inside the region recurs once per loop pass.
-  const region = loop;
-  const length = region.endBeat - region.startBeat;
-
-  for (const ev of events) {
-    // Events outside the loop region are unreachable once looping: the playhead
-    // wraps at endBeat and never advances to them. Skip them entirely.
-    if (ev.beat < region.startBeat || ev.beat >= region.endBeat) {
-      continue;
-    }
-
-    // The event recurs at ev.beat + k*length for every integer k >= 0 such that
-    // the recurrence lands in the window.
-    const firstK = Math.ceil((windowStartBeat - ev.beat) / length);
-    const startK = Math.max(0, firstK);
-    for (let k = startK; ; k += 1) {
-      const playheadBeat = ev.beat + k * length;
-      if (playheadBeat >= windowEndBeat) break;
-      if (playheadBeat < windowStartBeat) continue;
-      const resolved = resolveDueEvent(ev, playheadBeat, ev.beat, bpm, anchorBeat, anchorTime);
-      if (resolved) due.push(resolved);
-    }
-  }
-
-  due.sort((a, b) => a.time - b.time);
-  return due;
+  return nextIndexedEventsInWindow(
+    createScheduleEventIndex(events, loop),
+    windowStartBeat,
+    windowEndBeat,
+    bpm,
+    anchorBeat,
+    anchorTime,
+  );
 }
 
 /**
@@ -436,6 +1000,9 @@ export type FireFn = (events: DueEvent[]) => void;
 /** Called once when the playhead passes the project end with loop off. */
 export type EndFn = () => void;
 
+/** Called once after an interval-time scheduling failure stops the scheduler. */
+export type SchedulerErrorFn = (error: unknown) => void;
+
 /** Called whenever the scheduler advances its raw lookahead window. */
 export type ScheduleWindowFn = (window: ScheduleWindow) => void;
 
@@ -444,6 +1011,7 @@ export type SchedulerOptions = {
   fire: FireFn;
   onScheduleWindow?: ScheduleWindowFn;
   onEnd?: EndFn;
+  onError?: SchedulerErrorFn;
   /** Override timer interval (ms); defaults to {@link TICK_MS}. */
   tickMs?: number;
   /** Override lookahead window (s); defaults to {@link LOOKAHEAD_S}. */
@@ -460,11 +1028,12 @@ export class Scheduler {
   private readonly fire: FireFn;
   private readonly onScheduleWindow?: ScheduleWindowFn;
   private readonly onEnd?: EndFn;
+  private readonly onError?: SchedulerErrorFn;
   private readonly tickMs: number;
   private readonly lookaheadS: number;
 
   private timer: ReturnType<typeof setInterval> | null = null;
-  private events: readonly ScheduledEvent[] = [];
+  private eventIndex: ScheduleEventIndex = createScheduleEventIndex([]);
   private bpm = 120;
   private loop: LoopRegion | null = null;
   private endBeat = Infinity;
@@ -482,6 +1051,7 @@ export class Scheduler {
     this.fire = options.fire;
     this.onScheduleWindow = options.onScheduleWindow;
     this.onEnd = options.onEnd;
+    this.onError = options.onError;
     this.tickMs = options.tickMs ?? TICK_MS;
     this.lookaheadS = options.lookaheadS ?? LOOKAHEAD_S;
   }
@@ -506,18 +1076,34 @@ export class Scheduler {
     loop: LoopRegion | null,
     endBeat: number,
   ): void {
+    this.startIndexed(
+      createScheduleEventIndex(events, isValidLoop(loop) ? loop : null),
+      bpm,
+      startBeat,
+      endBeat,
+    );
+  }
+
+  /** Start from an already-built index after caller-side safety preflight. */
+  startIndexed(
+    eventIndex: ScheduleEventIndex,
+    bpm: number,
+    startBeat: number,
+    endBeat: number,
+  ): void {
     this.stop();
-    this.events = events;
     this.bpm = bpm;
-    this.loop = isValidLoop(loop) ? loop : null;
+    this.eventIndex = eventIndex;
+    this.loop = eventIndex.loop;
     this.endBeat = Number.isFinite(endBeat) ? endBeat : Infinity;
     this.anchorBeat = startBeat;
     this.scheduledBeat = startBeat;
     this.anchorTime = this.clock();
     this.running = true;
-    // Schedule the first window immediately, then on each tick.
-    this.tick();
-    this.timer = setInterval(() => this.tick(), this.tickMs);
+    // Surface a synchronous first-window failure to startup. Later timer
+    // failures stop once and cross the session's interruption boundary.
+    this.tick(true);
+    if (this.running) this.timer = setInterval(() => this.tick(false), this.tickMs);
   }
 
   /** Stop the timer. Does not release any already-scheduled audio. */
@@ -539,35 +1125,52 @@ export class Scheduler {
     return raw;
   }
 
-  private tick(): void {
+  private tick(rethrow: boolean): void {
     if (!this.running) return;
+    try {
+      this.scheduleTick();
+    } catch (error) {
+      this.stop();
+      if (rethrow) throw error;
+      try {
+        this.onError?.(error);
+      } catch {
+        // A reporting failure must not restart or escape the stopped timer.
+      }
+    }
+  }
+
+  private scheduleTick(): void {
     const now = this.clock();
     const horizonTime = now + this.lookaheadS;
+    const playheadBeat = timeToBeat(now, this.bpm, this.anchorBeat, this.anchorTime);
     // Convert the time horizon into a playhead-beat horizon.
     const horizonBeat = timeToBeat(horizonTime, this.bpm, this.anchorBeat, this.anchorTime);
 
     // Stop-at-end: clamp the horizon to the project end when not looping.
     const effectiveHorizon = this.loop ? horizonBeat : Math.min(horizonBeat, this.endBeat);
 
-    if (effectiveHorizon > this.scheduledBeat) {
-      const windowStartBeat = this.scheduledBeat;
+    // A throttled timer or resumed device may wake after the prior frontier.
+    // Past AudioContext times cannot be recovered faithfully and scheduling
+    // them now would replay the entire backlog as a burst, so resume from the
+    // current playhead while retaining the normal ahead-of-playhead frontier.
+    const windowStartBeat = Math.max(this.scheduledBeat, playheadBeat);
+    if (effectiveHorizon > windowStartBeat) {
       this.onScheduleWindow?.({ startBeat: windowStartBeat, endBeat: effectiveHorizon });
-      const due = nextEventsInWindow(
-        this.events,
+      const due = nextIndexedEventsInWindow(
+        this.eventIndex,
         windowStartBeat,
         effectiveHorizon,
         this.bpm,
         this.anchorBeat,
         this.anchorTime,
-        this.loop,
       );
       if (due.length > 0) this.fire(due);
-      this.scheduledBeat = effectiveHorizon;
     }
+    this.scheduledBeat = Math.max(this.scheduledBeat, effectiveHorizon);
 
     // End handling (loop off): once the playhead itself has reached the end.
     if (!this.loop && this.scheduledBeat >= this.endBeat) {
-      const playheadBeat = timeToBeat(now, this.bpm, this.anchorBeat, this.anchorTime);
       if (playheadBeat >= this.endBeat) {
         this.stop();
         this.onEnd?.();

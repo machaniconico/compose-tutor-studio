@@ -13,6 +13,8 @@ import {
   eqGainToDb,
   feedbackToGain,
   normalizeEffectConfig,
+  resolveEqBiquadSettings,
+  resolveFilterBiquadSettings,
 } from '../src/audio/effects';
 import { TrackGraph } from '../src/audio/graph';
 
@@ -96,6 +98,8 @@ class FakeContext {
   readonly delays: FakeDelay[] = [];
   readonly compressors: FakeDynamicsCompressor[] = [];
   readonly convolvers: FakeConvolver[] = [];
+  failBiquadAt: number | null = null;
+  failCreateDelay = false;
 
   createGain(): FakeGain {
     const node = new FakeGain();
@@ -110,12 +114,16 @@ class FakeContext {
   }
 
   createBiquadFilter(): FakeBiquadFilter {
+    if (this.failBiquadAt === this.filters.length + 1) {
+      throw new Error('biquad allocation failed');
+    }
     const node = new FakeBiquadFilter();
     this.filters.push(node);
     return node;
   }
 
   createDelay(): FakeDelay {
+    if (this.failCreateDelay) throw new Error('delay allocation failed');
     const node = new FakeDelay();
     this.delays.push(node);
     return node;
@@ -253,8 +261,12 @@ describe('buildEffectChain', () => {
 
     expect(chain.isBypassed).toBe(false);
     expect(fake.filters[0]?.type).toBe('lowpass');
-    expect(fake.filters[0]?.Q.value).toBe(0.2);
-    expect(fake.filters[0]?.frequency.value).toBeLessThanOrEqual(16_000);
+    const filterSettings = resolveFilterBiquadSettings(
+      effect('filter', { cutoff: 2, resonance: -1 }),
+      fake.sampleRate,
+    );
+    expect(fake.filters[0]?.Q.value).toBe(filterSettings.q);
+    expect(fake.filters[0]?.frequency.value).toBe(filterSettings.frequencyHz);
     expect(fake.delays[0]?.delayTime.value).toBe(delayTimeToSeconds(0.5));
     expect(fake.gains.some((gain) => gain.gain.value === feedbackToGain(1))).toBe(true);
     expect(fake.convolvers[0]?.buffer?.length).toBe(
@@ -282,6 +294,12 @@ describe('buildEffectChain', () => {
       'peaking',
       'highshelf',
     ]);
+    const eqSettings = resolveEqBiquadSettings(
+      effect('eq', { lowGain: -1, midGain: 0.5, highGain: 2 }),
+    );
+    expect(fake.filters.slice(0, 3).map((filter) => filter.frequency.value)).toEqual(
+      eqSettings.map(({ frequencyHz }) => frequencyHz),
+    );
     expect(fake.filters[0]?.gain.value).toBe(eqGainToDb(0));
     expect(fake.filters[1]?.gain.value).toBe(eqGainToDb(0.5));
     expect(fake.filters[2]?.gain.value).toBe(eqGainToDb(1));
@@ -305,6 +323,29 @@ describe('buildEffectChain', () => {
     expect(fake.filters).toHaveLength(3);
     expect(fake.compressors).toHaveLength(1);
   });
+
+  it('disconnects earlier stages and partial nodes when a later allocation fails', () => {
+    const context = ctx();
+    const fake = asFakeContext(context);
+    fake.failBiquadAt = 3;
+
+    expect(() =>
+      buildEffectChain(context, [
+        effect('filter', { cutoff: 0.5 }),
+        effect('eq', { lowGain: 0.5, midGain: 0.5, highGain: 0.5 }),
+      ]),
+    ).toThrow('biquad allocation failed');
+    expect(fake.filters.map((node) => node.disconnectCalls)).toEqual([1, 1]);
+
+    const delayContext = ctx();
+    const delayFake = asFakeContext(delayContext);
+    delayFake.failCreateDelay = true;
+    expect(() => buildEffectChain(delayContext, [effect('delay', {})])).toThrow(
+      'delay allocation failed',
+    );
+    expect(delayFake.gains).toHaveLength(4);
+    expect(delayFake.gains.every((node) => node.disconnectCalls === 1)).toBe(true);
+  });
 });
 
 describe('TrackGraph effects routing', () => {
@@ -312,7 +353,7 @@ describe('TrackGraph effects routing', () => {
     const context = ctx();
     const fake = asFakeContext(context);
     const master = new FakeAudioNode();
-    const graph = new TrackGraph(context, master as unknown as AudioNode, track());
+    const graph = new TrackGraph(context, master as unknown as AudioNode, track(), 'disabled');
     const input = graph.input as unknown as FakeGain;
 
     expect(input.connections[0]).toBe(fake.panners[0]);
@@ -323,7 +364,7 @@ describe('TrackGraph effects routing', () => {
     const context = ctx();
     const fake = asFakeContext(context);
     const master = new FakeAudioNode();
-    const graph = new TrackGraph(context, master as unknown as AudioNode, track());
+    const graph = new TrackGraph(context, master as unknown as AudioNode, track(), 'disabled');
     const input = graph.input as unknown as FakeGain;
 
     graph.updateEffects([effect('filter', { cutoff: 0.5, resonance: 0.2 })]);
@@ -332,6 +373,20 @@ describe('TrackGraph effects routing', () => {
 
     graph.updateEffects([]);
     expect(fake.filters[0]?.disconnectCalls).toBeGreaterThan(0);
+    expect(input.connections[0]).toBe(fake.panners[0]);
+  });
+
+  it('keeps the previous live route when a replacement effect cannot be built', () => {
+    const context = ctx();
+    const fake = asFakeContext(context);
+    const master = new FakeAudioNode();
+    const graph = new TrackGraph(context, master as unknown as AudioNode, track(), 'disabled');
+    const input = graph.input as unknown as FakeGain;
+    fake.failBiquadAt = 1;
+
+    expect(() =>
+      graph.updateEffects([effect('filter', { cutoff: 0.5, resonance: 0.2 })]),
+    ).toThrow('biquad allocation failed');
     expect(input.connections[0]).toBe(fake.panners[0]);
   });
 });

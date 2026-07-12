@@ -229,108 +229,354 @@ components:
             - type: integer
     Project:
       type: object
-      required: [id, schemaVersion, title, bpm, timeSignature, key, scale, tracks, chordTrack]
+      description: >-
+        Schema-v2 aggregate. Across non-Master clips, resolved stored MIDI-note
+        and drum-event occurrences (linked source payload multiplied by clip
+        instances) must not exceed 200000. Runtime additionally limits the
+        audible projection, including realized chord notes, to 20000 for live
+        playback and 10000 for WAV, with at most 256 occurrences in any rolling
+        0.75-beat window, before schedule arrays and per-track/per-event nodes
+        (and WAV OfflineAudioContext) are allocated.
+      additionalProperties: false
+      required: [id, schemaVersion, title, bpm, timeSignature, key, scale, lengthBars, tracks, chordTrack, sections, createdAt, updatedAt]
       properties:
         id:
           type: string
+          minLength: 1
+          maxLength: 4096
         schemaVersion:
           type: integer
+          const: 2
         title:
           type: string
+          maxLength: 4096
         bpm:
           type: number
+          minimum: 20
+          maximum: 300
         timeSignature:
           type: array
-          items:
-            type: integer
+          minItems: 2
+          maxItems: 2
+          prefixItems:
+            - type: integer
+              minimum: 1
+              maximum: 32
+            - type: integer
+              enum: [2, 4, 8, 16]
         key:
           type: string
+          enum: [C, 'C#', Db, D, 'D#', Eb, E, F, 'F#', Gb, G, 'G#', Ab, A, 'A#', Bb, B]
         scale:
           type: string
+          enum: [major, naturalMinor, harmonicMinor, melodicMinor, majorPentatonic, minorPentatonic, blues]
+        lengthBars:
+          type: integer
+          minimum: 1
+          maximum: 256
         tracks:
           type: array
+          maxItems: 128
           items:
             $ref: '#/components/schemas/Track'
         chordTrack:
           type: array
+          maxItems: 4096
           items:
             $ref: '#/components/schemas/ChordEvent'
+        sections:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/Section'
+        createdAt:
+          type: string
+          format: date-time
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
+        updatedAt:
+          type: string
+          format: date-time
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
     Track:
       type: object
-      required: [id, name, type, clips, volume, pan, mute, solo]
+      additionalProperties: false
+      required: [id, name, type, clips, volume, pan, mute, solo, effects]
       properties:
         id:
           type: string
+          minLength: 1
+          maxLength: 4096
         name:
           type: string
+          maxLength: 4096
         type:
           enum: [instrument, drum, audio, bus, master]
+        color:
+          type: string
+          maxLength: 9
+          pattern: '^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$'
         clips:
           type: array
+          maxItems: 1024
           items:
             $ref: '#/components/schemas/Clip'
         volume:
           type: number
+          minimum: 0
+          maximum: 2
         pan:
           type: number
+          minimum: -1
+          maximum: 1
         mute:
           type: boolean
         solo:
           type: boolean
-    Clip:
+        instrument:
+          $ref: '#/components/schemas/InstrumentConfig'
+        effects:
+          type: array
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/EffectConfig'
+    InstrumentConfig:
       type: object
-      required: [id, type, startBeat, lengthBeats]
+      additionalProperties: false
+      required: [type, preset]
+      properties:
+        type:
+          enum: [synth, drumkit]
+        preset:
+          type: string
+          maxLength: 4096
+        params:
+          type: object
+          maxProperties: 2048
+          additionalProperties:
+            type: number
+    EffectConfig:
+      type: object
+      additionalProperties: false
+      required: [id, type, enabled, params]
       properties:
         id:
           type: string
+          minLength: 1
+          maxLength: 4096
+        type:
+          enum: [filter, delay, reverb, compressor, eq]
+        enabled:
+          type: boolean
+        params:
+          type: object
+          maxProperties: 2048
+          additionalProperties:
+            type: number
+    Clip:
+      type: object
+      additionalProperties: false
+      required: [id, trackId, type, startBeat, lengthBeats, loop]
+      allOf:
+        - if:
+            required: [aliasOf]
+          then:
+            properties:
+              type:
+                enum: [midi, drum]
+            not:
+              anyOf:
+                - required: [notes]
+                - required: [drumEvents]
+                - required: [stepsPerBar]
+                - required: [drumGroove]
+                - required: [audioAssetId]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        trackId:
+          type: string
+          minLength: 1
+          maxLength: 4096
         type:
           enum: [midi, drum, audio, automation]
         startBeat:
           type: number
+          minimum: 0
+          maximum: 8192
         lengthBeats:
           type: number
+          minimum: 0.001041666666667
+          maximum: 8192
         loop:
           type: boolean
+          description: >-
+            Per-instance projection flag. For MIDI clips, notes repeat to the
+            half-open clip end using their natural max(start + duration)
+            pattern length; the final partial note is shortened. Linked clips
+            share source notes but retain this instance-local flag. Drum loop
+            expansion is not implemented in the current playback/MIDI contract.
+        aliasOf:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            schema v2 linked-clip source id. MIDI/drum only; the source must be
+            a direct same-track, same-type non-alias clip of identical length.
+            Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and
+            audioAssetId. Version 1 aliasOf values are removed during migration
+            to preserve their formerly independent playback behaviour.
         notes:
           type: array
+          maxItems: 20000
           items:
             $ref: '#/components/schemas/NoteEvent'
+        drumEvents:
+          type: array
+          maxItems: 20000
+          items:
+            $ref: '#/components/schemas/DrumEvent'
+        stepsPerBar:
+          type: integer
+          minimum: 1
+          maximum: 128
+        drumGroove:
+          $ref: '#/components/schemas/DrumGrooveSettings'
+        audioAssetId:
+          type: string
+          maxLength: 4096
     NoteEvent:
       type: object
+      additionalProperties: false
       required: [id, pitch, startBeat, durationBeats, velocity]
       properties:
         id:
           type: string
+          minLength: 1
+          maxLength: 4096
         pitch:
           type: integer
           minimum: 0
           maximum: 127
         startBeat:
           type: number
+          minimum: 0
+          maximum: 8192
         durationBeats:
           type: number
+          minimum: 0.001041666666667
+          maximum: 8192
         velocity:
           type: integer
           minimum: 1
           maximum: 127
-    ChordEvent:
+    DrumGrooveSettings:
       type: object
-      required: [id, startBeat, durationBeats, symbol]
+      additionalProperties: false
+      required: [swing, probability, humanizeVelocity, seed]
+      properties:
+        swing:
+          type: number
+          minimum: 0
+          maximum: 1
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+        humanizeVelocity:
+          type: integer
+          minimum: 0
+          maximum: 127
+        seed:
+          type: integer
+          minimum: 1
+    DrumEvent:
+      type: object
+      additionalProperties: false
+      required: [id, lane, stepIndex, velocity]
       properties:
         id:
           type: string
+          minLength: 1
+          maxLength: 4096
+        lane:
+          enum: [kick, snare, closedHat, openHat, clap, perc]
+        stepIndex:
+          type: integer
+          minimum: 0
+        velocity:
+          type: integer
+          minimum: 1
+          maximum: 127
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+    ChordEvent:
+      type: object
+      additionalProperties: false
+      required: [id, startBeat, durationBeats, symbol, root, quality, notes]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
         startBeat:
           type: number
+          minimum: 0
+          maximum: 8192
         durationBeats:
           type: number
+          minimum: 0.001041666666667
+          maximum: 8192
         symbol:
           type: string
+          maxLength: 4096
+        root:
+          type: string
+          maxLength: 4096
+        quality:
+          type: string
+          maxLength: 4096
+        notes:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 127
         degree:
           type: string
+          maxLength: 4096
         function:
+          enum: [T, SD, D, Other]
+        tags:
+          type: array
+          items:
+            type: string
+            maxLength: 4096
+    Section:
+      type: object
+      additionalProperties: false
+      required: [id, name, type, startBar, lengthBars]
+      properties:
+        id:
           type: string
-        explanation:
+          minLength: 1
+          maxLength: 4096
+        name:
           type: string
+          maxLength: 4096
+        type:
+          enum: [intro, verse, preChorus, chorus, bridge, outro]
+        startBar:
+          type: integer
+          minimum: 0
+          maximum: 255
+        lengthBars:
+          type: integer
+          minimum: 1
+          maximum: 256
     AnalyzeChordRequest:
       type: object
       required: [symbol, key, scale]

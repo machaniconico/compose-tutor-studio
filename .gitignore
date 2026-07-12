@@ -28,8 +28,9 @@ coverage/
 playwright-report/
 test-results/
 
-# Tauri (future)
-src-tauri/target/
+# Tauri
+**/src-tauri/target/
+**/src-tauri/gen/schemas/
 
 # OMC state
 .omc/

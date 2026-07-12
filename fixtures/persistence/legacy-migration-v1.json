@@ -1,0 +1,772 @@
+{
+  "version": 2,
+  "createdAt": "2026-07-10T00:00:00.000Z",
+  "cases": [
+    {
+      "name": "mirror-only",
+      "projectId": "fixture-mirror",
+      "storageEntries": [
+        {
+          "key": "cts.project.fixture-mirror",
+          "value": "{\"id\":\"fixture-mirror\",\"schemaVersion\":1,\"title\":\"Mirror only\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-mirror\",\"schemaVersion\":2,\"title\":\"Mirror only\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "recoveryReason": "legacy-project",
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-mirror\",\"schemaVersion\":2,\"title\":\"Mirror only\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "canonical-head",
+      "projectId": "fixture-head",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-head.gen.000000000001.write-head",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-head\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-head\",\"activationId\":\"activation-head\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":257,\"projectJson\":\"{\\\"id\\\":\\\"fixture-head\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Canonical head\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:9b9dc9d4\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-head.head",
+          "value": "{\"storageVersion\":1,\"state\":\"active\",\"projectId\":\"fixture-head\",\"ordinal\":1,\"generationKey\":\"cts.persistence.v1.project.fixture-head.gen.000000000001.write-head\",\"operationId\":\"write-head\",\"parentHeadVersion\":null,\"payloadChecksum\":\"crc32:d46aad34\",\"committedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:f41f3742\"}"
+        },
+        {
+          "key": "cts.project.fixture-head",
+          "value": "{\"id\":\"fixture-head\",\"schemaVersion\":1,\"title\":\"Canonical head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-head\",\"schemaVersion\":2,\"title\":\"Canonical head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "recoveryReason": null,
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-head\",\"schemaVersion\":2,\"title\":\"Canonical head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "legacy-head-without-payload-checksum",
+      "projectId": "fixture-old-head",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-old-head.gen.000000000001.write-old",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-old-head\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-old\",\"activationId\":\"activation-old\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":255,\"projectJson\":\"{\\\"id\\\":\\\"fixture-old-head\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Old head\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:344f2a8b\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-old-head.head",
+          "value": "{\"storageVersion\":1,\"state\":\"active\",\"projectId\":\"fixture-old-head\",\"ordinal\":1,\"generationKey\":\"cts.persistence.v1.project.fixture-old-head.gen.000000000001.write-old\",\"operationId\":\"write-old\",\"parentHeadVersion\":null,\"committedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:6d867065\"}"
+        },
+        {
+          "key": "cts.project.fixture-old-head",
+          "value": "{\"id\":\"fixture-old-head\",\"schemaVersion\":1,\"title\":\"Old head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-old-head\",\"schemaVersion\":2,\"title\":\"Old head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "recoveryReason": null,
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-old-head\",\"schemaVersion\":2,\"title\":\"Old head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "normal-pagehide-recovery",
+      "projectId": "fixture-pagehide",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-pagehide.gen.000000000001.write-head",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-pagehide\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-head\",\"activationId\":\"activation-head\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":256,\"projectJson\":\"{\\\"id\\\":\\\"fixture-pagehide\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Committed\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:9d0764b6\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-pagehide.head",
+          "value": "{\"storageVersion\":1,\"state\":\"active\",\"projectId\":\"fixture-pagehide\",\"ordinal\":1,\"generationKey\":\"cts.persistence.v1.project.fixture-pagehide.gen.000000000001.write-head\",\"operationId\":\"write-head\",\"parentHeadVersion\":null,\"payloadChecksum\":\"crc32:025133f6\",\"committedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:b6bd8976\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-pagehide.recovery.activation-pagehide",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-pagehide\",\"baseHeadKnown\":true,\"baseHeadVersion\":\"1:active:write-head\",\"activationId\":\"activation-pagehide\",\"revision\":2,\"writeId\":\"write-pagehide\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":264,\"projectJson\":\"{\\\"id\\\":\\\"fixture-pagehide\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Pagehide recovery\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:02.000Z\\\"}\",\"checksum\":\"crc32:22a9b89a\"}"
+        },
+        {
+          "key": "cts.project.fixture-pagehide",
+          "value": "{\"id\":\"fixture-pagehide\",\"schemaVersion\":1,\"title\":\"Committed\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-pagehide\",\"schemaVersion\":2,\"title\":\"Pagehide recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "recoveryReason": "recovery-journal",
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-pagehide\",\"schemaVersion\":2,\"title\":\"Pagehide recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "active-interrupted-intent",
+      "projectId": "fixture-intent",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-intent.gen.000000000001.write-head",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-intent\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-head\",\"activationId\":\"activation-head\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":254,\"projectJson\":\"{\\\"id\\\":\\\"fixture-intent\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Committed\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:89fbd3b9\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-intent.gen.000000000002.write-next",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-intent\",\"ordinal\":2,\"parentHeadVersion\":\"1:active:write-head\",\"writeId\":\"write-next\",\"activationId\":\"activation-next\",\"revision\":2,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":261,\"projectJson\":\"{\\\"id\\\":\\\"fixture-intent\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Interrupted save\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:02.000Z\\\"}\",\"checksum\":\"crc32:787c5196\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-intent.head",
+          "value": "{\"storageVersion\":1,\"state\":\"active\",\"projectId\":\"fixture-intent\",\"ordinal\":1,\"generationKey\":\"cts.persistence.v1.project.fixture-intent.gen.000000000001.write-head\",\"operationId\":\"write-head\",\"parentHeadVersion\":null,\"payloadChecksum\":\"crc32:3f5583e4\",\"committedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:0416b97b\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-intent.intent",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-intent\",\"kind\":\"project\",\"generationKey\":\"cts.persistence.v1.project.fixture-intent.gen.000000000002.write-next\",\"operationId\":\"write-next\",\"parentHeadVersion\":\"1:active:write-head\",\"checksum\":\"crc32:46566478\"}"
+        },
+        {
+          "key": "cts.project.fixture-intent",
+          "value": "{\"id\":\"fixture-intent\",\"schemaVersion\":1,\"title\":\"Committed\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-intent\",\"schemaVersion\":2,\"title\":\"Interrupted save\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "recoveryReason": "head-stale",
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-intent\",\"schemaVersion\":2,\"title\":\"Interrupted save\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "known-empty-first-save",
+      "projectId": "fixture-first-save",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-first-save.recovery.activation-first",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-first-save\",\"baseHeadKnown\":true,\"baseHeadVersion\":null,\"activationId\":\"activation-first\",\"revision\":1,\"writeId\":\"write-first\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":268,\"projectJson\":\"{\\\"id\\\":\\\"fixture-first-save\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"First save recovery\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:8c5c3250\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-first-save\",\"schemaVersion\":2,\"title\":\"First save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "recoveryReason": "recovery-journal",
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-first-save\",\"schemaVersion\":2,\"title\":\"First save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "corrupt-pointed-generation-with-causal-recovery",
+      "projectId": "fixture-corrupt-pointed",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-corrupt-pointed.gen.000000000001.write-head",
+          "value": "{corrupt"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-corrupt-pointed.head",
+          "value": "{\"storageVersion\":1,\"state\":\"active\",\"projectId\":\"fixture-corrupt-pointed\",\"ordinal\":1,\"generationKey\":\"cts.persistence.v1.project.fixture-corrupt-pointed.gen.000000000001.write-head\",\"operationId\":\"write-head\",\"parentHeadVersion\":null,\"payloadChecksum\":\"crc32:e43f3fdc\",\"committedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:91d91b21\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-corrupt-pointed.recovery.activation-next",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-corrupt-pointed\",\"baseHeadKnown\":true,\"baseHeadVersion\":\"1:active:write-head\",\"activationId\":\"activation-next\",\"revision\":2,\"writeId\":\"write-next\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":287,\"projectJson\":\"{\\\"id\\\":\\\"fixture-corrupt-pointed\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Recovered from corrupt generation\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:02.000Z\\\"}\",\"checksum\":\"crc32:7a686950\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-corrupt-pointed\",\"schemaVersion\":2,\"title\":\"Recovered from corrupt generation\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "recoveryReason": "recovery-journal",
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-corrupt-pointed\",\"schemaVersion\":2,\"title\":\"Recovered from corrupt generation\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "conflicting-recovery-activations",
+      "projectId": "fixture-conflict",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-conflict.recovery.activation-a",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-conflict\",\"baseHeadKnown\":true,\"baseHeadVersion\":null,\"activationId\":\"activation-a\",\"revision\":1,\"writeId\":\"write-a\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":254,\"projectJson\":\"{\\\"id\\\":\\\"fixture-conflict\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Draft A\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:a5ad5856\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-conflict.recovery.activation-b",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-conflict\",\"baseHeadKnown\":true,\"baseHeadVersion\":null,\"activationId\":\"activation-b\",\"revision\":2,\"writeId\":\"write-b\",\"savedAt\":\"2026-07-10T00:00:02.000Z\",\"bytes\":254,\"projectJson\":\"{\\\"id\\\":\\\"fixture-conflict\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Draft B\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:02.000Z\\\"}\",\"checksum\":\"crc32:da953ada\"}"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "conflict",
+        "recoveryReason": null,
+        "branchCount": 2
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "conflict"
+        },
+        {
+          "kind": "branch",
+          "projectJson": "{\"id\":\"fixture-conflict\",\"schemaVersion\":2,\"title\":\"Draft A\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+          "source": "recovery-journal",
+          "activationId": "activation-a",
+          "revision": 1,
+          "writeId": "write-a",
+          "savedAt": "2026-07-10T00:00:00.000Z"
+        },
+        {
+          "kind": "branch",
+          "projectJson": "{\"id\":\"fixture-conflict\",\"schemaVersion\":2,\"title\":\"Draft B\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+          "source": "recovery-journal",
+          "activationId": "activation-b",
+          "revision": 2,
+          "writeId": "write-b",
+          "savedAt": "2026-07-10T00:00:02.000Z"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 2
+      }
+    },
+    {
+      "name": "deleted-head-without-tombstone",
+      "projectId": "fixture-deleted",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-deleted.head",
+          "value": "{\"storageVersion\":1,\"state\":\"deleted\",\"projectId\":\"fixture-deleted\",\"ordinal\":1,\"generationKey\":\"cts.persistence.v1.project.fixture-deleted.gen.000000000001.delete-1\",\"operationId\":\"delete-1\",\"parentHeadVersion\":null,\"payloadChecksum\":null,\"committedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:85c3f112\"}"
+        }
+      ],
+      "expected": {
+        "status": "deleted",
+        "recoveryReason": null,
+        "branchCount": 0
+      },
+      "expectedImports": [],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "future-mirror-diagnostic",
+      "projectId": "fixture-future",
+      "storageEntries": [
+        {
+          "key": "cts.project.fixture-future",
+          "value": "{\"id\":\"fixture-future\",\"schemaVersion\":999}"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "unsupported-version",
+        "recoveryReason": null,
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "unsupported-version"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "corrupt-mirror-diagnostic",
+      "projectId": "fixture-corrupt",
+      "storageEntries": [
+        {
+          "key": "cts.project.fixture-corrupt",
+          "value": "{broken"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "corrupt-data",
+        "recoveryReason": null,
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "corrupt-data"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "missing-head-intent-generation",
+      "projectId": "fixture-no-head-intent",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-no-head-intent.gen.000000000001.write-intent",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-no-head-intent\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-intent\",\"activationId\":\"activation-intent\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":267,\"projectJson\":\"{\\\"id\\\":\\\"fixture-no-head-intent\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"No-head intent\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:56d5e848\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-no-head-intent.intent",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-no-head-intent\",\"kind\":\"project\",\"generationKey\":\"cts.persistence.v1.project.fixture-no-head-intent.gen.000000000001.write-intent\",\"operationId\":\"write-intent\",\"parentHeadVersion\":null,\"checksum\":\"crc32:98f1100c\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-no-head-intent\",\"schemaVersion\":2,\"title\":\"No-head intent\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "recoveryReason": "head-missing",
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-no-head-intent\",\"schemaVersion\":2,\"title\":\"No-head intent\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "corrupt-head-historical-recovery",
+      "projectId": "fixture-historical-recovery",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-historical-recovery.gen.000000000001.write-history",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-historical-recovery\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-history\",\"activationId\":\"activation-history\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":268,\"projectJson\":\"{\\\"id\\\":\\\"fixture-historical-recovery\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Historical\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:bdffcb63\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-historical-recovery.head",
+          "value": "{corrupt"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-historical-recovery.recovery.activation-next",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-historical-recovery\",\"baseHeadKnown\":true,\"baseHeadVersion\":\"1:active:write-history\",\"activationId\":\"activation-next\",\"revision\":2,\"writeId\":\"write-next\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":277,\"projectJson\":\"{\\\"id\\\":\\\"fixture-historical-recovery\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Historical recovery\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:02.000Z\\\"}\",\"checksum\":\"crc32:6fd64c6d\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-historical-recovery\",\"schemaVersion\":2,\"title\":\"Historical recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "recoveryReason": "recovery-journal",
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-historical-recovery\",\"schemaVersion\":2,\"title\":\"Historical recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "corrupt-pointed-parent-chain-fallback",
+      "projectId": "fixture-parent-fallback",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-parent-fallback.gen.000000000001.write-parent",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-parent-fallback\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-parent\",\"activationId\":\"activation-parent\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":269,\"projectJson\":\"{\\\"id\\\":\\\"fixture-parent-fallback\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Parent fallback\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:43453f6e\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-parent-fallback.gen.000000000002.write-broken",
+          "value": "{corrupt"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-parent-fallback.head",
+          "value": "{\"storageVersion\":1,\"state\":\"active\",\"projectId\":\"fixture-parent-fallback\",\"ordinal\":2,\"generationKey\":\"cts.persistence.v1.project.fixture-parent-fallback.gen.000000000002.write-broken\",\"operationId\":\"write-broken\",\"parentHeadVersion\":\"1:active:write-parent\",\"payloadChecksum\":\"crc32:5473dcdf\",\"committedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:16d319bf\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-parent-fallback\",\"schemaVersion\":2,\"title\":\"Parent fallback\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "recoveryReason": "generation-corrupt",
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-parent-fallback\",\"schemaVersion\":2,\"title\":\"Parent fallback\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "bare-tombstone-missing-head-boundary",
+      "projectId": "fixture-tombstone-missing",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-tombstone-missing.gen.000000000001.write-old",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-tombstone-missing\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-old\",\"activationId\":\"activation-old\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":275,\"projectJson\":\"{\\\"id\\\":\\\"fixture-tombstone-missing\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Deleted old project\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:a0c92402\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-tombstone-missing.gen.000000000002.delete-1",
+          "value": "{\"storageVersion\":1,\"kind\":\"tombstone\",\"projectId\":\"fixture-tombstone-missing\",\"ordinal\":2,\"parentHeadVersion\":\"1:active:write-old\",\"deleteId\":\"delete-1\",\"deletedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:ad5c82d1\"}"
+        },
+        {
+          "key": "cts.project.fixture-tombstone-missing",
+          "value": "{\"id\":\"fixture-tombstone-missing\",\"schemaVersion\":1,\"title\":\"Deleted old project\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "corrupt-data",
+        "recoveryReason": null,
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "corrupt-data"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "bare-tombstone-corrupt-head-boundary",
+      "projectId": "fixture-tombstone-corrupt",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-tombstone-corrupt.gen.000000000001.write-old",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-tombstone-corrupt\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-old\",\"activationId\":\"activation-old\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":275,\"projectJson\":\"{\\\"id\\\":\\\"fixture-tombstone-corrupt\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Deleted old project\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:f2a24ae1\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-tombstone-corrupt.gen.000000000002.delete-1",
+          "value": "{\"storageVersion\":1,\"kind\":\"tombstone\",\"projectId\":\"fixture-tombstone-corrupt\",\"ordinal\":2,\"parentHeadVersion\":\"1:active:write-old\",\"deleteId\":\"delete-1\",\"deletedAt\":\"2026-07-10T00:00:00.000Z\",\"checksum\":\"crc32:986d6361\"}"
+        },
+        {
+          "key": "cts.project.fixture-tombstone-corrupt",
+          "value": "{\"id\":\"fixture-tombstone-corrupt\",\"schemaVersion\":1,\"title\":\"Deleted old project\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-tombstone-corrupt.head",
+          "value": "{corrupt"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "corrupt-data",
+        "recoveryReason": null,
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "corrupt-data"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "stale-known-empty-recovery-after-canonical-generation",
+      "projectId": "fixture-stale-known-empty",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-stale-known-empty.gen.000000000001.write-b",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-stale-known-empty\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-b\",\"activationId\":\"activation-b\",\"revision\":2,\"savedAt\":\"2026-07-10T00:00:02.000Z\",\"bytes\":282,\"projectJson\":\"{\\\"id\\\":\\\"fixture-stale-known-empty\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Later canonical generation\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:02.000Z\\\"}\",\"checksum\":\"crc32:bbf048fb\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-stale-known-empty.recovery.activation-a",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-stale-known-empty\",\"baseHeadKnown\":true,\"baseHeadVersion\":null,\"activationId\":\"activation-a\",\"revision\":1,\"writeId\":\"write-a\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":281,\"projectJson\":\"{\\\"id\\\":\\\"fixture-stale-known-empty\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Stale first-save recovery\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:62250a70\"}"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "conflict",
+        "recoveryReason": null,
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "conflict"
+        },
+        {
+          "kind": "branch",
+          "projectJson": "{\"id\":\"fixture-stale-known-empty\",\"schemaVersion\":2,\"title\":\"Stale first-save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+          "source": "recovery-journal",
+          "activationId": "activation-a",
+          "revision": 1,
+          "writeId": "write-a",
+          "savedAt": "2026-07-10T00:00:00.000Z"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 1
+      }
+    },
+    {
+      "name": "stale-known-empty-recovery-with-newer-mirror",
+      "projectId": "fixture-stale-mirror",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-stale-mirror.recovery.activation-a",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-stale-mirror\",\"baseHeadKnown\":true,\"baseHeadVersion\":null,\"activationId\":\"activation-a\",\"revision\":1,\"writeId\":\"write-a\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":265,\"projectJson\":\"{\\\"id\\\":\\\"fixture-stale-mirror\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Stale recovery\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:02eaeb7a\"}"
+        },
+        {
+          "key": "cts.project.fixture-stale-mirror",
+          "value": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":1,\"title\":\"Newer mirror\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":2,\"title\":\"Newer mirror\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "recoveryReason": "legacy-project",
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":2,\"title\":\"Newer mirror\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+        },
+        {
+          "kind": "branch",
+          "projectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":2,\"title\":\"Stale recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+          "source": "recovery-journal",
+          "activationId": "activation-a",
+          "revision": 1,
+          "writeId": "write-a",
+          "savedAt": "2026-07-10T00:00:00.000Z"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 1
+      }
+    },
+    {
+      "name": "future-mirror-dominates-known-empty-recovery",
+      "projectId": "fixture-future-recovery",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-future-recovery.recovery.activation-a",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-future-recovery\",\"baseHeadKnown\":true,\"baseHeadVersion\":null,\"activationId\":\"activation-a\",\"revision\":1,\"writeId\":\"write-a\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":270,\"projectJson\":\"{\\\"id\\\":\\\"fixture-future-recovery\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Current recovery\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:da1dc042\"}"
+        },
+        {
+          "key": "cts.project.fixture-future-recovery",
+          "value": "{\"id\":\"fixture-future-recovery\",\"schemaVersion\":999}"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "unsupported-version",
+        "recoveryReason": null,
+        "branchCount": 0
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "unsupported-version"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "corrupt-mirror-dominates-known-empty-recovery",
+      "projectId": "fixture-future-recovery",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-future-recovery.recovery.activation-a",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-future-recovery\",\"baseHeadKnown\":true,\"baseHeadVersion\":null,\"activationId\":\"activation-a\",\"revision\":1,\"writeId\":\"write-a\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":270,\"projectJson\":\"{\\\"id\\\":\\\"fixture-future-recovery\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Current recovery\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:da1dc042\"}"
+        },
+        {
+          "key": "cts.project.fixture-future-recovery",
+          "value": "{corrupt"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "corrupt-data",
+        "recoveryReason": null,
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "corrupt-data"
+        },
+        {
+          "kind": "branch",
+          "projectJson": "{\"id\":\"fixture-future-recovery\",\"schemaVersion\":2,\"title\":\"Current recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+          "source": "recovery-journal",
+          "activationId": "activation-a",
+          "revision": 1,
+          "writeId": "write-a",
+          "savedAt": "2026-07-10T00:00:00.000Z"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 1
+      }
+    },
+    {
+      "name": "known-empty-recovery-exact-committed-generation-duplicate",
+      "projectId": "fixture-exact-duplicate",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-exact-duplicate.gen.000000000001.write-a",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-exact-duplicate\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-a\",\"activationId\":\"activation-a\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":279,\"projectJson\":\"{\\\"id\\\":\\\"fixture-exact-duplicate\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Exact committed duplicate\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:539c169e\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-exact-duplicate.recovery.activation-a",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-exact-duplicate\",\"baseHeadKnown\":true,\"baseHeadVersion\":null,\"activationId\":\"activation-a\",\"revision\":1,\"writeId\":\"write-a\",\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":279,\"projectJson\":\"{\\\"id\\\":\\\"fixture-exact-duplicate\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Exact committed duplicate\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:d496cc0e\"}"
+        }
+      ],
+      "expected": {
+        "status": "ready",
+        "canonicalProjectJson": "{\"id\":\"fixture-exact-duplicate\",\"schemaVersion\":2,\"title\":\"Exact committed duplicate\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "recoveryReason": "recovery-journal",
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "head",
+          "projectJson": "{\"id\":\"fixture-exact-duplicate\",\"schemaVersion\":2,\"title\":\"Exact committed duplicate\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 1,
+        "unreadableProjectCount": 0,
+        "branchCount": 0
+      }
+    },
+    {
+      "name": "stale-recovery-based-on-nonlatest-historical-generation",
+      "projectId": "fixture-stale-history",
+      "storageEntries": [
+        {
+          "key": "cts.persistence.v1.project.fixture-stale-history.gen.000000000001.write-h1",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-stale-history\",\"ordinal\":1,\"parentHeadVersion\":null,\"writeId\":\"write-h1\",\"activationId\":\"activation-h1\",\"revision\":1,\"savedAt\":\"2026-07-10T00:00:00.000Z\",\"bytes\":265,\"projectJson\":\"{\\\"id\\\":\\\"fixture-stale-history\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Historical H1\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:01.000Z\\\"}\",\"checksum\":\"crc32:7a752f3d\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-stale-history.gen.000000000002.write-h2",
+          "value": "{\"storageVersion\":1,\"kind\":\"project\",\"projectId\":\"fixture-stale-history\",\"ordinal\":2,\"parentHeadVersion\":\"1:active:write-h1\",\"writeId\":\"write-h2\",\"activationId\":\"activation-h2\",\"revision\":2,\"savedAt\":\"2026-07-10T00:00:02.000Z\",\"bytes\":270,\"projectJson\":\"{\\\"id\\\":\\\"fixture-stale-history\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Later divergent H2\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:02.000Z\\\"}\",\"checksum\":\"crc32:ddb8c80f\"}"
+        },
+        {
+          "key": "cts.persistence.v1.project.fixture-stale-history.recovery.activation-r",
+          "value": "{\"storageVersion\":1,\"projectId\":\"fixture-stale-history\",\"baseHeadKnown\":true,\"baseHeadVersion\":\"1:active:write-h1\",\"activationId\":\"activation-r\",\"revision\":3,\"writeId\":\"write-r\",\"savedAt\":\"2026-07-10T00:00:03.000Z\",\"bytes\":274,\"projectJson\":\"{\\\"id\\\":\\\"fixture-stale-history\\\",\\\"schemaVersion\\\":1,\\\"title\\\":\\\"Stale recovery from H1\\\",\\\"bpm\\\":120,\\\"timeSignature\\\":[4,4],\\\"key\\\":\\\"C\\\",\\\"scale\\\":\\\"major\\\",\\\"lengthBars\\\":8,\\\"tracks\\\":[],\\\"chordTrack\\\":[],\\\"sections\\\":[],\\\"createdAt\\\":\\\"2026-07-10T00:00:00.000Z\\\",\\\"updatedAt\\\":\\\"2026-07-10T00:00:03.000Z\\\"}\",\"checksum\":\"crc32:f61c6634\"}"
+        }
+      ],
+      "expected": {
+        "status": "unreadable",
+        "errorCode": "conflict",
+        "recoveryReason": null,
+        "branchCount": 1
+      },
+      "expectedImports": [
+        {
+          "kind": "diagnostic",
+          "errorCode": "conflict"
+        },
+        {
+          "kind": "branch",
+          "projectJson": "{\"id\":\"fixture-stale-history\",\"schemaVersion\":2,\"title\":\"Stale recovery from H1\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:03.000Z\"}",
+          "source": "recovery-journal",
+          "activationId": "activation-r",
+          "revision": 3,
+          "writeId": "write-r",
+          "savedAt": "2026-07-10T00:00:03.000Z"
+        }
+      ],
+      "expectedCompletion": {
+        "readyProjectCount": 0,
+        "unreadableProjectCount": 1,
+        "branchCount": 1
+      }
+    }
+  ]
+}

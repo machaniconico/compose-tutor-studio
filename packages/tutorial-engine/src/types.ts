@@ -6,7 +6,13 @@
 // in the package barrel (index.ts). Engine internals use these names; the public
 // barrel re-exports them with the Tutorial prefix.
 
-import type { DrumLane, Project, SectionType } from '@cts/project-model';
+import type {
+  DrumLane,
+  MusicalKey,
+  Project,
+  ScaleName,
+  SectionType,
+} from '@cts/project-model';
 
 // Re-export Project so consumers don't need to import it separately
 export type { Project };
@@ -53,8 +59,7 @@ export type ProjectPredicate =
   | { type: 'noteCountAtLeast'; trackName: string; value: number }
   | { type: 'hasSection'; sectionType: SectionType }
   | { type: 'bpmInRange'; min: number; max: number }
-  | { type: 'trackVolumeInRange'; trackName: string; min: number; max: number }
-  | { type: 'exportCompleted'; format: 'midi' | 'wav' };
+  | { type: 'trackVolumeInRange'; trackName: string; min: number; max: number };
 
 // ─── Step Goals ───────────────────────────────────────────────────────────────
 
@@ -62,6 +67,8 @@ export type EventMatch = Partial<{
   chordSymbol: string;
   pitch: number;
   inScale: boolean;
+  key: MusicalKey;
+  scale: ScaleName;
   lane: DrumLane;
   trackName: string;
   format: 'midi' | 'wav';
@@ -151,8 +158,8 @@ export interface ExportPayload {
 }
 
 export interface ScaleSnapPayload {
-  key: string;
-  scale: string;
+  key: MusicalKey;
+  scale: ScaleName;
 }
 
 export interface ClipCreatedPayload {

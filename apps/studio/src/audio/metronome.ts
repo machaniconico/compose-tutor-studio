@@ -12,6 +12,11 @@ export type MetronomeClick = {
   accent: boolean;
 };
 
+export type ScheduledMetronomeClick = {
+  /** Stop a future/in-flight click and disconnect every node. Idempotent. */
+  cancel: () => void;
+};
+
 /**
  * Enumerate metronome clicks across a beat range `[fromBeat, toBeat)`.
  * Clicks land on whole beats; the accent is the first beat of each bar.
@@ -40,18 +45,58 @@ export function scheduleMetronomeClick(
   output: AudioNode,
   time: number,
   accent: boolean,
-): void {
+  onEnded?: () => void,
+): ScheduledMetronomeClick {
   const osc = ctx.createOscillator();
-  osc.type = 'square';
-  osc.frequency.setValueAtTime(accent ? 1600 : 1000, time);
+  let gain: GainNode | null = null;
+  let settled = false;
 
-  const gain = ctx.createGain();
-  const peak = accent ? 0.3 : 0.18;
-  gain.gain.setValueAtTime(peak, time);
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+  const cleanup = (): void => {
+    if (settled) return;
+    settled = true;
+    osc.onended = null;
+    try {
+      osc.disconnect();
+    } catch {
+      // already disconnected
+    }
+    try {
+      gain?.disconnect();
+    } catch {
+      // already disconnected
+    }
+    onEnded?.();
+  };
 
-  osc.connect(gain);
-  gain.connect(output);
-  osc.start(time);
-  osc.stop(time + 0.06);
+  try {
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(accent ? 1600 : 1000, time);
+
+    gain = ctx.createGain();
+    const peak = accent ? 0.3 : 0.18;
+    gain.gain.setValueAtTime(peak, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+
+    osc.connect(gain);
+    gain.connect(output);
+    osc.onended = cleanup;
+    osc.start(time);
+    osc.stop(time + 0.06);
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+
+  return {
+    cancel: () => {
+      if (settled) return;
+      try {
+        osc.stop();
+      } catch {
+        // The source may have ended or never reached start(). Disconnecting is
+        // still sufficient to keep it out of the output graph.
+      }
+      cleanup();
+    },
+  };
 }

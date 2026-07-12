@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { EffectConfig, Track } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import {
@@ -87,6 +87,19 @@ const PARAM_CONTROLS: Record<InsertEffectType, ParamControl[]> = {
   ],
 };
 
+// The Tauri window may be as short as 640 CSS pixels. At that height the full
+// mixer can consume the piano-roll viewport, so start with it tucked away while
+// keeping the choice reversible and keyboard accessible.
+const COMPACT_MIXER_MEDIA_QUERY = '(min-width: 901px) and (max-height: 700px)';
+
+function shouldStartWithExpandedMixer(): boolean {
+  return !(
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia(COMPACT_MIXER_MEDIA_QUERY).matches
+  );
+}
+
 /** Convert a linear gain (0..2) to an approximate dB label for display. */
 function gainToDbLabel(gain: number): string {
   if (gain <= 0.0001) return '-∞';
@@ -174,20 +187,71 @@ export function MixerStrip() {
   const tracks = useStore((s) => s.project.tracks);
   const channels = tracks.filter((t) => t.type !== 'master');
   const master = tracks.find((t) => t.type === 'master') ?? null;
+  const contentId = useId();
+  const manuallyToggled = useRef(false);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [expanded, setExpanded] = useState(shouldStartWithExpandedMixer);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(COMPACT_MIXER_MEDIA_QUERY);
+    const followViewportUntilManuallyToggled = () => {
+      if (manuallyToggled.current) return;
+      if (
+        media.matches &&
+        contentRef.current?.contains(document.activeElement)
+      ) {
+        toggleRef.current?.focus();
+      }
+      setExpanded(!media.matches);
+    };
+
+    followViewportUntilManuallyToggled();
+    media.addEventListener('change', followViewportUntilManuallyToggled);
+    return () => media.removeEventListener('change', followViewportUntilManuallyToggled);
+  }, []);
 
   return (
-    <footer className="mixer-strip" aria-label="ミキサー">
-      <div className="mixer-strip__row">
-        {channels.map((track) => (
-          <ChannelStrip key={track.id} track={track} />
-        ))}
+    <section
+      className={`mixer-strip${expanded ? ' is-expanded' : ' is-collapsed'}`}
+      aria-label="ミキサー"
+    >
+      <div className="mixer-strip__toggle-rail">
+        <button
+          ref={toggleRef}
+          type="button"
+          className="mixer-strip__toggle"
+          aria-controls={contentId}
+          aria-expanded={expanded}
+          aria-label={expanded ? 'ミキサーをたたむ' : 'ミキサーを開く'}
+          onClick={() => {
+            manuallyToggled.current = true;
+            setExpanded((current) => !current);
+          }}
+        >
+          <span aria-hidden="true">{expanded ? 'たたむ ▾' : 'ミキサーを開く ▴'}</span>
+        </button>
       </div>
-      {master ? (
-        <div className="mixer-strip__master">
-          <ChannelStrip track={master} isMaster />
+
+      <div
+        ref={contentRef}
+        className="mixer-strip__content"
+        id={contentId}
+        hidden={!expanded}
+      >
+        <div className="mixer-strip__row">
+          {channels.map((track) => (
+            <ChannelStrip key={track.id} track={track} />
+          ))}
         </div>
-      ) : null}
-    </footer>
+        {master ? (
+          <div className="mixer-strip__master">
+            <ChannelStrip track={master} isMaster />
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -248,6 +312,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
             type="button"
             className={`mini-btn${track.mute ? ' is-active is-mute' : ''}`}
             aria-pressed={track.mute}
+            aria-label={`${track.name} ミュート`}
             onClick={() => toggleMute(track.id)}
             title="ミュート"
           >
@@ -257,6 +322,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
             type="button"
             className={`mini-btn${track.solo ? ' is-active is-solo' : ''}`}
             aria-pressed={track.solo}
+            aria-label={`${track.name} ソロ`}
             onClick={() => toggleSolo(track.id)}
             title="ソロ"
           >
@@ -361,8 +427,18 @@ function EffectRack({ track }: { track: Track }) {
 
       {track.effects.length > 0 ? (
         <div style={{ display: 'grid', gap: 8 }}>
-          {track.effects.map((effect) => (
-            <EffectEditor key={effect.id} trackId={track.id} effect={effect} />
+          {track.effects.map((effect, index) => (
+            <EffectEditor
+              key={effect.id}
+              trackId={track.id}
+              trackName={track.name}
+              effect={effect}
+              ordinal={
+                track.effects
+                  .slice(0, index + 1)
+                  .filter((candidate) => candidate.type === effect.type).length
+              }
+            />
           ))}
         </div>
       ) : (
@@ -372,17 +448,28 @@ function EffectRack({ track }: { track: Track }) {
   );
 }
 
-function EffectEditor(props: { trackId: string; effect: EffectConfig }) {
-  const { trackId, effect } = props;
+function EffectEditor(props: {
+  trackId: string;
+  trackName: string;
+  effect: EffectConfig;
+  ordinal: number;
+}) {
+  const { trackId, trackName, effect, ordinal } = props;
 
   if (!isInsertEffectType(effect.type)) {
+    const effectLabel = `${trackName} 未対応の効果 ${ordinal}`;
     return (
-      <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+      <div
+        role="group"
+        aria-label={effectLabel}
+        style={{ display: 'grid', gap: 6, fontSize: 12 }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <strong>未対応の効果</strong>
           <button
             type="button"
             className="mini-btn"
+            aria-label={`${effectLabel}を削除`}
             onClick={() => removeTrackEffect(trackId, effect.id)}
             title="この効果を削除"
           >
@@ -396,14 +483,20 @@ function EffectEditor(props: { trackId: string; effect: EffectConfig }) {
 
   const normalized = normalizeEffectConfig(effect);
   const info = EFFECT_INFO[effect.type];
+  const effectLabel = `${trackName} ${info.label} ${ordinal}`;
 
   return (
-    <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+    <div
+      role="group"
+      aria-label={effectLabel}
+      style={{ display: 'grid', gap: 6, fontSize: 12 }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <strong>{info.label}</strong>
+        <strong>{info.label} {ordinal}</strong>
         <button
           type="button"
           className="mini-btn"
+          aria-label={`${effectLabel}を削除`}
           onClick={() => removeTrackEffect(trackId, effect.id)}
           title={`${info.label}を削除`}
         >
@@ -425,7 +518,7 @@ function EffectEditor(props: { trackId: string; effect: EffectConfig }) {
               max={1}
               step={0.01}
               value={value}
-              aria-label={`${info.label} ${control.label}`}
+              aria-label={`${effectLabel} ${control.label}`}
               onChange={(e) =>
                 updateTrackEffectParam(trackId, effect.id, control.key, Number(e.target.value))
               }

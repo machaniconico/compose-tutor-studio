@@ -18,9 +18,10 @@ beforeAll(async () => {
   ({ useStore } = await import('../src/state/store'));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  await useStore.getState().flushPendingSave();
   installLocalStorage();
-  useStore.getState().createNewProject('テスト');
+  expect(await useStore.getState().createNewProject('テスト')).toBe(true);
 });
 
 describe('MIDI export', () => {
@@ -43,16 +44,16 @@ describe('MIDI export', () => {
 });
 
 describe('project file round-trip into store', () => {
-  it('serializes then deserializes + loads an equivalent project', () => {
+  it('serializes then deserializes + loads an equivalent project', async () => {
     const original = createDefaultProject('丸ごと往復');
-    useStore.getState().replaceProject(original);
+    await useStore.getState().replaceProject(original);
 
     const json = serializeProject(useStore.getState().project);
     const loaded = deserializeProject(json);
     expect(validateProject(loaded).ok).toBe(true);
 
     // Replace into the store and confirm key fields survived the round trip.
-    useStore.getState().replaceProject(loaded);
+    await useStore.getState().replaceProject(loaded);
     const inStore = useStore.getState().project;
     expect(inStore.id).toBe(original.id);
     expect(inStore.title).toBe('丸ごと往復');
@@ -77,9 +78,9 @@ describe('template instantiation', () => {
     }
   });
 
-  it('loads a template into the store via replaceProject', () => {
+  it('loads a template into the store via replaceProject', async () => {
     const project = instantiateTemplate('8bar-pop');
-    useStore.getState().replaceProject(project);
+    await useStore.getState().replaceProject(project);
     const inStore = useStore.getState().project;
     expect(inStore.title).toBe(PROJECT_TEMPLATES['8bar-pop'].name);
     expect(validateProject(inStore).ok).toBe(true);

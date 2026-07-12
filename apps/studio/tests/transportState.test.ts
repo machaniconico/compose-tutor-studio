@@ -1,0 +1,371 @@
+import { describe, expect, it } from 'vitest';
+import { MemoryProjectRepository } from '@cts/project-persistence';
+import { beatsPerBar } from '@cts/project-model';
+import type { AppEvent } from '@cts/tutorial-engine';
+import { subscribeAppEvents } from '../src/state/appEvents';
+import { createStudioStore } from '../src/state/store';
+
+describe('transport playback lifecycle', () => {
+  it('publishes transport.played only after the matching start is confirmed', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const events: AppEvent[] = [];
+    const unsubscribe = subscribeAppEvents((event) => events.push(event));
+
+    try {
+      store.getState().setPosition(2);
+      store.getState().play();
+      const requestId = store.getState().transport.playbackRequestId;
+
+      expect(store.getState().transport).toMatchObject({
+        phase: 'starting',
+        isPlaying: false,
+        audioIssue: null,
+      });
+      expect(events).toEqual([]);
+
+      store.getState().confirmPlaybackStarted(requestId + 1);
+      expect(store.getState().transport.phase).toBe('starting');
+      expect(events).toEqual([]);
+
+      store.getState().confirmPlaybackStarted(requestId);
+      expect(store.getState().transport).toMatchObject({
+        phase: 'playing',
+        isPlaying: true,
+      });
+      expect(events).toEqual([
+        { type: 'transport.played', payload: { positionBeats: 2 } },
+      ]);
+
+      store.getState().confirmPlaybackStarted(requestId);
+      expect(events).toHaveLength(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('keeps a startup failure visible and ignores its stale completion', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+
+    store.getState().play();
+    const failedRequestId = store.getState().transport.playbackRequestId;
+    store.getState().failPlaybackStart(failedRequestId);
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      audioIssue: 'start-failed',
+      playbackRequestId: failedRequestId + 1,
+    });
+
+    store.getState().confirmPlaybackStarted(failedRequestId);
+    expect(store.getState().transport.phase).toBe('stopped');
+
+    store.getState().play();
+    expect(store.getState().transport).toMatchObject({
+      phase: 'starting',
+      isPlaying: false,
+      audioIssue: null,
+    });
+    expect(store.getState().transport.playbackRequestId).toBe(failedRequestId + 2);
+  });
+
+  it.each([
+    ['the exact song end', 32],
+    ['past the song end', 32.25],
+    ['a non-finite position', Number.NaN],
+    ['a negative position', -0.25],
+  ])('rewinds %s before requesting playback', (_label, positionBeat) => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    store.setState((state) => ({
+      project: { ...state.project, lengthBars: 8, timeSignature: [4, 4] },
+      transport: { ...state.transport, positionBeat },
+    }));
+
+    const before = store.getState();
+    before.play();
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'starting',
+      isPlaying: false,
+      playbackRequestId: before.transport.playbackRequestId + 1,
+      audioIssue: null,
+      positionBeat: 0,
+    });
+  });
+
+  it('preserves a valid playhead and leaves project history untouched', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    store.getState().setPosition(3.5);
+    store.setState((state) => ({
+      transport: { ...state.transport, audioIssue: 'start-failed' },
+    }));
+    const before = store.getState();
+
+    before.play();
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'starting',
+      playbackRequestId: before.transport.playbackRequestId + 1,
+      audioIssue: null,
+      positionBeat: 3.5,
+    });
+    expect(store.getState().project).toBe(before.project);
+    expect(store.getState().past).toBe(before.past);
+    expect(store.getState().future).toBe(before.future);
+    expect(store.getState().saveState).toBe(before.saveState);
+  });
+
+  it('uses denominator-aware song length when deciding whether to rewind', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    store.setState((state) => ({
+      project: {
+        ...state.project,
+        lengthBars: 2,
+        timeSignature: [6, 8] as [number, number],
+      },
+      transport: { ...state.transport, positionBeat: 6 },
+    }));
+
+    store.getState().play();
+
+    expect(store.getState().transport.positionBeat).toBe(0);
+  });
+
+  it.each([0, Number.NaN])(
+    'uses beat zero when the project length is unusable (%s)',
+    (lengthBars) => {
+      const store = createStudioStore(new MemoryProjectRepository());
+      store.setState((state) => ({
+        project: { ...state.project, lengthBars },
+        transport: { ...state.transport, positionBeat: 2 },
+      }));
+
+      store.getState().play();
+
+      expect(store.getState().transport.positionBeat).toBe(0);
+    },
+  );
+
+  it('rewinds at the song end without changing an enabled loop region', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    store.setState((state) => ({
+      project: { ...state.project, lengthBars: 2, timeSignature: [4, 4] },
+      transport: {
+        ...state.transport,
+        positionBeat: 8,
+        loopEnabled: true,
+        loopStartBeat: 2,
+        loopEndBeat: 6,
+      },
+    }));
+
+    store.getState().play();
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'starting',
+      positionBeat: 0,
+      loopEnabled: true,
+      loopStartBeat: 2,
+      loopEndBeat: 6,
+    });
+  });
+
+  it('can confirm a retry after a failed end-of-song start', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const projectLength =
+      store.getState().project.lengthBars *
+      beatsPerBar(store.getState().project.timeSignature);
+    store.getState().setPosition(projectLength);
+
+    store.getState().play();
+    const failedRequestId = store.getState().transport.playbackRequestId;
+    expect(store.getState().transport.positionBeat).toBe(0);
+    store.getState().failPlaybackStart(failedRequestId);
+
+    store.getState().setPosition(projectLength);
+    store.getState().play();
+    const retryRequestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(retryRequestId);
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'playing',
+      isPlaying: true,
+      playbackRequestId: retryRequestId,
+      audioIssue: null,
+      positionBeat: 0,
+    });
+    expect(retryRequestId).toBe(failedRequestId + 2);
+  });
+
+  it('invalidates rapid stop/play races while preserving pause and rewind semantics', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+
+    store.getState().setPosition(4);
+    store.getState().play();
+    const staleRequestId = store.getState().transport.playbackRequestId;
+    store.getState().stop();
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      positionBeat: 4,
+      playbackRequestId: staleRequestId + 1,
+    });
+
+    store.getState().play();
+    const activeRequestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(staleRequestId);
+    expect(store.getState().transport.phase).toBe('starting');
+
+    store.getState().confirmPlaybackStarted(activeRequestId);
+    store.getState().stop();
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      positionBeat: 4,
+    });
+
+    store.getState().stop();
+    expect(store.getState().transport.positionBeat).toBe(0);
+  });
+
+  it('does not recycle request IDs when a project activation resets transport', async () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+
+    store.getState().play();
+    const oldProjectRequestId = store.getState().transport.playbackRequestId;
+
+    await expect(store.getState().createNewProject('次の曲')).resolves.toBe(true);
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      playbackRequestId: oldProjectRequestId + 1,
+    });
+
+    store.getState().play();
+    expect(store.getState().transport.playbackRequestId).toBe(oldProjectRequestId + 2);
+    store.getState().confirmPlaybackStarted(oldProjectRequestId);
+    expect(store.getState().transport.phase).toBe('starting');
+  });
+
+  it('surfaces matching interruptions and rewinds a matching natural end', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+
+    store.getState().play();
+    let requestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(requestId);
+    store.getState().interruptPlayback(requestId + 1);
+    expect(store.getState().transport.phase).toBe('playing');
+
+    store.getState().interruptPlayback(requestId);
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      audioIssue: 'interrupted',
+    });
+
+    store.getState().play();
+    requestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(requestId);
+    store.getState().setPosition(8);
+    store.getState().finishPlayback(requestId);
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      audioIssue: null,
+      positionBeat: 0,
+    });
+  });
+
+  it('enables a first loop over the whole song without starting stopped playback', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const before = store.getState();
+    const projectLength =
+      before.project.lengthBars * beatsPerBar(before.project.timeSignature);
+
+    before.toggleLoop();
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      playbackRequestId: before.transport.playbackRequestId,
+      loopEnabled: true,
+      loopStartBeat: 0,
+      loopEndBeat: projectLength,
+    });
+    expect(store.getState().project).toBe(before.project);
+    expect(store.getState().past).toBe(before.past);
+    expect(store.getState().future).toBe(before.future);
+
+    store.getState().toggleLoop();
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      playbackRequestId: before.transport.playbackRequestId,
+      loopEnabled: false,
+      loopStartBeat: 0,
+      loopEndBeat: projectLength,
+    });
+  });
+
+  it('uses denominator-aware quarter-note beats and clamps position on toggle', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    store.setState((state) => ({
+      project: {
+        ...state.project,
+        lengthBars: 2,
+        timeSignature: [6, 8] as [number, number],
+      },
+      transport: {
+        ...state.transport,
+        positionBeat: 99,
+      },
+    }));
+
+    store.getState().toggleLoop();
+
+    expect(store.getState().transport).toMatchObject({
+      loopEnabled: true,
+      loopStartBeat: 0,
+      loopEndBeat: 6,
+      positionBeat: 6,
+    });
+  });
+
+  it('supersedes starting and playing generations when the loop setting changes', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const project = store.getState().project;
+    const past = store.getState().past;
+    const future = store.getState().future;
+
+    store.getState().setPosition(2.5);
+    store.getState().play();
+    const firstRequestId = store.getState().transport.playbackRequestId;
+    store.setState((state) => ({
+      transport: { ...state.transport, audioIssue: 'interrupted' },
+    }));
+
+    store.getState().toggleLoop();
+    const loopRequestId = store.getState().transport.playbackRequestId;
+    expect(store.getState().transport).toMatchObject({
+      phase: 'starting',
+      isPlaying: false,
+      playbackRequestId: firstRequestId + 1,
+      audioIssue: null,
+      positionBeat: 2.5,
+      loopEnabled: true,
+    });
+
+    store.getState().confirmPlaybackStarted(loopRequestId);
+    expect(store.getState().transport.phase).toBe('playing');
+
+    store.getState().toggleLoop();
+    expect(store.getState().transport).toMatchObject({
+      phase: 'starting',
+      isPlaying: false,
+      playbackRequestId: loopRequestId + 1,
+      audioIssue: null,
+      positionBeat: 2.5,
+      loopEnabled: false,
+    });
+    expect(store.getState().project).toBe(project);
+    expect(store.getState().past).toBe(past);
+    expect(store.getState().future).toBe(future);
+  });
+});

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { COMPOSE_PLUS_LESSON_5 } from '../src/content/compose-plus-course.js';
 import { TutorialEngine } from '../src/engine.js';
 import type { AppEvent, TutorialLesson } from '../src/types.js';
 import { makeProject } from './helpers.js';
@@ -100,6 +101,19 @@ describe('TutorialEngine', () => {
     const result = engine.handleEvent(anyEvent, project);
     expect(result.advanced).toBe(true);
     expect(engine.getState().stepIndex).toBe(2);
+  });
+
+  it('reconciles a project predicate without a synthetic app event', () => {
+    const chordEvent: AppEvent = { type: 'chord.added', payload: { bar: 0, chordSymbol: 'C' } };
+    engine.handleEvent(chordEvent, project);
+    expect(engine.getState().stepIndex).toBe(1);
+
+    expect(engine.reconcileProject(project)).toMatchObject({ advanced: true });
+    expect(engine.getState().stepIndex).toBe(2);
+    expect(engine.reconcileProject(project)).toEqual({
+      advanced: false,
+      completedLesson: false,
+    });
   });
 
   // ─── Exercise step ──────────────────────────────────────────────────────────
@@ -240,5 +254,45 @@ describe('TutorialEngine', () => {
     const extra = engine.handleEvent(chordEvent, project);
     expect(extra.advanced).toBe(false);
     expect(extra.completedLesson).toBe(false);
+  });
+
+  it('completes the capstone only after successful MIDI and WAV export events', () => {
+    const capstone = new TutorialEngine();
+    capstone.loadLesson(COMPOSE_PLUS_LESSON_5);
+
+    capstone.handleEvent(
+      { type: 'transport.played', payload: { positionBeats: 0 } },
+      project,
+    );
+    expect(capstone.getState().currentStep?.id).toBe('compose-plus-5-s2');
+
+    const wrongFormat = capstone.handleEvent(
+      { type: 'export.wav', payload: { format: 'wav' } },
+      project,
+    );
+    expect(wrongFormat.advanced).toBe(false);
+    expect(capstone.getState().currentStep?.id).toBe('compose-plus-5-s2');
+
+    const midi = capstone.handleEvent(
+      { type: 'export.midi', payload: { format: 'midi' } },
+      project,
+    );
+    expect(midi.advanced).toBe(true);
+    expect(capstone.getState().currentStep?.id).toBe('compose-plus-5-s3');
+
+    const wav = capstone.handleEvent(
+      { type: 'export.wav', payload: { format: 'wav' } },
+      project,
+    );
+    expect(wav.advanced).toBe(true);
+    expect(capstone.getState().currentStep?.id).toBe('compose-plus-5-s4');
+
+    const completed = capstone.answerExercise({
+      kind: 'orderChoices',
+      orderedIndices: [0, 1, 2],
+    });
+    expect(completed.correct).toBe(true);
+    expect(completed.completedLesson).toBe(true);
+    expect(capstone.getState().status).toBe('completed');
   });
 });

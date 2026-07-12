@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _resetIdCounter,
+  CURRENT_SCHEMA_VERSION,
   makeId,
   createDefaultProject,
   createInstrumentTrack,
@@ -23,12 +24,12 @@ describe('makeId', () => {
 
   it('returns a string with the given prefix', () => {
     const id = makeId('track');
-    expect(id).toMatch(/^track-\d+$/);
+    expect(id).toMatch(/^track-[a-z0-9]+-1$/i);
   });
 
   it('defaults prefix to "id"', () => {
     const id = makeId();
-    expect(id).toMatch(/^id-\d+$/);
+    expect(id).toMatch(/^id-[a-z0-9]+-1$/i);
   });
 
   it('produces unique ids on successive calls', () => {
@@ -61,7 +62,7 @@ describe('createDefaultProject', () => {
     expect(p.scale).toBe('major');
     expect(p.timeSignature).toEqual([4, 4]);
     expect(p.lengthBars).toBe(8);
-    expect(p.schemaVersion).toBe(1);
+    expect(p.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   });
 
   it('accepts overrides', () => {

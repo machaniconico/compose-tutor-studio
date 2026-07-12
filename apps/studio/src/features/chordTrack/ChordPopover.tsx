@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
-import type { ChordEvent, Project } from '@cts/project-model';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { beatsPerBar, type ChordEvent, type Project } from '@cts/project-model';
 import {
   analyzeChord,
   getDiatonicChords,
   parseChord,
+  qualityLabel,
   suggestNextChords,
   type ChordSuggestion,
   type ChordSuggestionTag,
@@ -51,11 +53,13 @@ function parseFeedback(symbol: string, key: string): { ok: boolean; text: string
   try {
     const parsed = parseChord(trimmed, key);
     const notes = parsed.notes.join(' ');
-    return { ok: true, text: `${parsed.root} ${parsed.quality} / 構成音: ${notes}` };
+    return { ok: true, text: `${parsed.root} ${qualityLabel(parsed.quality)} / 構成音: ${notes}` };
   } catch {
     return { ok: false, text: 'このコード名は読み取れませんでした。綴りを確認してください。' };
   }
 }
+
+export type ChordPopoverCloseReason = 'dismiss' | 'outside' | 'commit' | 'delete';
 
 function suggestionTag(suggestion: ChordSuggestion): ChordSuggestionTag {
   return suggestion.tag ?? 'diatonic';
@@ -121,13 +125,78 @@ function detailLines(suggestion: ChordSuggestion, project: Project): string[] {
  * reasons, and a delete button.
  */
 export function ChordPopover(props: {
+  id: string;
   project: Project;
   chord: ChordEvent;
-  onClose: () => void;
+  triggerElement: HTMLButtonElement | null;
+  anchorLeft: number;
+  anchorTop: number;
+  maxHeight: number;
+  onClose: (reason: ChordPopoverCloseReason) => void;
 }) {
-  const { project, chord, onClose } = props;
+  const { id, project, chord, triggerElement, anchorLeft, anchorTop, maxHeight, onClose } = props;
   const removeChord = useStore((s) => s.removeChord);
+  const updateChord = useStore((s) => s.updateChord);
   const [text, setText] = useState(chord.symbol);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const onCloseRef = useRef(onClose);
+  const triggerElementRef = useRef(triggerElement);
+  onCloseRef.current = onClose;
+  triggerElementRef.current = triggerElement;
+  const titleId = useId();
+  const feedbackId = useId();
+  const bpb = beatsPerBar(project.timeSignature);
+  const startBar = Math.floor(chord.startBeat / bpb) + 1;
+  const durationBars = Math.max(1, Math.round(chord.durationBeats / bpb));
+  const maxDurationBars = Math.max(1, project.lengthBars - startBar + 1);
+  const portalRoot = triggerElement?.closest<HTMLElement>('.app-shell') ?? document.body;
+
+  useEffect(() => {
+    const input = inputRef.current;
+    input?.focus({ preventScroll: true });
+    input?.select();
+
+    const contains = (container: Node | null, target: EventTarget | null) =>
+      container !== null && target instanceof Node && container.contains(target);
+
+    const closeOutside = (event: PointerEvent | FocusEvent) => {
+      const popover = popoverRef.current;
+      if (
+        contains(popover, event.target) ||
+        contains(triggerElementRef.current, event.target)
+      ) {
+        return;
+      }
+      onCloseRef.current('outside');
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onCloseRef.current('dismiss');
+        return;
+      }
+      // Buttons and <summary> inside the editor own Space. Do not let the
+      // transport's global Space shortcut run as a second action.
+      if (
+        (event.key === ' ' || event.code === 'Space') &&
+        contains(popoverRef.current, event.target)
+      ) {
+        event.stopPropagation();
+      }
+    };
+
+    document.addEventListener('pointerdown', closeOutside, true);
+    document.addEventListener('focusin', closeOutside);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside, true);
+      document.removeEventListener('focusin', closeOutside);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
 
   const feedback = useMemo(() => parseFeedback(text, project.key), [text, project.key]);
 
@@ -163,16 +232,51 @@ export function ChordPopover(props: {
   );
 
   const commit = (symbol: string) => {
-    if (symbol.trim() === '') return;
-    updateChordSymbol(chord.id, symbol.trim());
-    onClose();
+    const nextSymbol = symbol.trim();
+    if (!parseFeedback(nextSymbol, project.key).ok) return;
+    updateChordSymbol(chord.id, nextSymbol);
+    onClose('commit');
   };
 
-  return (
-    <div className="chord-pop" role="dialog" aria-label="コード編集">
+  const moveToBar = (nextBar: number) => {
+    const boundedBar = Math.min(project.lengthBars, Math.max(1, Math.round(nextBar)));
+    const boundedDuration = Math.min(
+      durationBars,
+      Math.max(1, project.lengthBars - boundedBar + 1),
+    );
+    updateChord(chord.id, {
+      startBeat: (boundedBar - 1) * bpb,
+      durationBeats: boundedDuration * bpb,
+    });
+  };
+
+  const resizeToBars = (nextDuration: number) => {
+    const boundedDuration = Math.min(
+      maxDurationBars,
+      Math.max(1, Math.round(nextDuration)),
+    );
+    updateChord(chord.id, { durationBeats: boundedDuration * bpb });
+  };
+
+  return createPortal(
+    <div
+      ref={popoverRef}
+      id={id}
+      className="chord-pop"
+      role="dialog"
+      aria-modal={false}
+      aria-labelledby={titleId}
+      data-shortcuts-suspended="true"
+      style={{ left: anchorLeft, top: anchorTop, maxHeight }}
+    >
       <div className="chord-pop__head">
-        <strong>コードを編集</strong>
-        <button type="button" className="chord-pop__close" onClick={onClose} aria-label="閉じる">
+        <strong id={titleId}>コードを編集: {chord.symbol}</strong>
+        <button
+          type="button"
+          className="chord-pop__close"
+          onClick={() => onClose('dismiss')}
+          aria-label="コード編集を閉じる"
+        >
           ×
         </button>
       </div>
@@ -184,19 +288,57 @@ export function ChordPopover(props: {
           commit(text);
         }}
       >
-        <input
-          className="chord-pop__input"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          aria-label="コード名"
-          autoFocus
-          placeholder="例: C, Am, Fmaj7, G7"
-        />
+        <label className="chord-pop__field">
+          <span>コード名</span>
+          <input
+            ref={inputRef}
+            className="chord-pop__input"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            aria-describedby={feedbackId}
+            aria-invalid={!feedback.ok}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="例: C, Am, Fmaj7, G7"
+          />
+        </label>
         <button type="submit" className="is-active" disabled={!feedback.ok}>
           適用
         </button>
       </form>
-      <p className={`chord-pop__feedback${feedback.ok ? ' is-ok' : ' is-warn'}`}>{feedback.text}</p>
+      <p
+        id={feedbackId}
+        className={`chord-pop__feedback${feedback.ok ? ' is-ok' : ' is-warn'}`}
+        role="status"
+        aria-live="polite"
+      >
+        {feedback.text}
+      </p>
+
+      <div className="chord-pop__timing" role="group" aria-label="コードの配置">
+        <label>
+          <span>開始小節</span>
+          <input
+            type="number"
+            min={1}
+            max={project.lengthBars}
+            step={1}
+            value={startBar}
+            onChange={(event) => moveToBar(Number(event.target.value))}
+          />
+        </label>
+        <label>
+          <span>長さ（小節）</span>
+          <input
+            type="number"
+            min={1}
+            max={maxDurationBars}
+            step={1}
+            value={durationBars}
+            onChange={(event) => resizeToBars(Number(event.target.value))}
+          />
+        </label>
+      </div>
 
       <div className="chord-pop__section">
         <p className="chord-pop__label">ダイアトニック</p>
@@ -282,12 +424,13 @@ export function ChordPopover(props: {
           className="chord-pop__delete"
           onClick={() => {
             removeChord(chord.id);
-            onClose();
+            onClose('delete');
           }}
         >
           このコードを削除
         </button>
       </div>
-    </div>
+    </div>,
+    portalRoot,
   );
 }

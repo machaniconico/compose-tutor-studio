@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persistence-stage-crash-draft"
+description = "Enables the persistence_stage_crash_draft command without any pre-configured scope."
+commands.allow = ["persistence_stage_crash_draft"]
+
+[[permission]]
+identifier = "deny-persistence-stage-crash-draft"
+description = "Denies the persistence_stage_crash_draft command without any pre-configured scope."
+commands.deny = ["persistence_stage_crash_draft"]

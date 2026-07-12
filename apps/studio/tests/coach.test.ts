@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { ChordEvent, Project } from '@cts/project-model';
+import { duplicateClip, type ChordEvent, type Project } from '@cts/project-model';
 import { createDefaultProject } from '../src/state/defaultProject';
 import {
   analyzeProjectForCoaching,
   coachCategoryLabel,
+  melodyNotesOnProjectTimeline,
   type CoachSuggestion,
 } from '../src/state/coach';
 
@@ -82,6 +83,50 @@ describe('analyzeProjectForCoaching', () => {
     }
     const suggestions = analyzeProjectForCoaching(project);
     expect(ids(suggestions)).toContain('melody-empty');
+  });
+
+  it('resolves linked melody instances at their absolute project beats', () => {
+    const project = clone(createDefaultProject());
+    const melodyTrack = project.tracks.find(
+      (track) => track.name.toLowerCase() === 'melody',
+    );
+    const source = melodyTrack?.clips[0];
+    expect(melodyTrack).toBeTruthy();
+    expect(source).toBeTruthy();
+    if (!melodyTrack || !source) return;
+
+    source.startBeat = 4;
+    source.lengthBeats = 4;
+    source.notes = [
+      {
+        id: 'linked-melody-note',
+        pitch: 71,
+        startBeat: 0,
+        durationBeats: 1,
+        velocity: 100,
+      },
+    ];
+    project.chordTrack = [chord('C', 0), chord('G', 4), chord('G', 8)];
+
+    const linked = duplicateClip(project, source.id, {
+      id: 'linked-melody-instance',
+      startBeat: 8,
+      linked: true,
+    });
+    expect(linked.ok).toBe(true);
+    if (!linked.ok) return;
+    const linkedTrack = linked.project.tracks.find(
+      (track) => track.id === melodyTrack.id,
+    );
+
+    expect(melodyNotesOnProjectTimeline(linked.project, linkedTrack)).toEqual([
+      { pitch: 71, startBeat: 4, durationBeats: 1 },
+      { pitch: 71, startBeat: 8, durationBeats: 1 },
+    ]);
+    const suggestionIds = ids(analyzeProjectForCoaching(linked.project));
+    expect(suggestionIds).toContain('melody-good');
+    expect(suggestionIds).not.toContain('melody-empty');
+    expect(suggestionIds).not.toContain('melody-warn');
   });
 
   it('suggests adding drums when the drum track is truly empty', () => {

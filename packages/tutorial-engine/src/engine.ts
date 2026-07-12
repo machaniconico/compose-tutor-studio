@@ -2,7 +2,7 @@
 
 import type { Project } from '@cts/project-model';
 import { gradeExercise } from './exercises.js';
-import { checkGoalOnEvent } from './goals.js';
+import { checkGoalOnEvent, evaluateProjectPredicate } from './goals.js';
 import type {
   AppEvent,
   EngineState,
@@ -95,6 +95,22 @@ export class TutorialEngine {
       return { advanced: false, completedLesson: false };
     }
 
+    return this.advanceStep();
+  }
+
+  /** Re-evaluate the current state-backed goal without inventing an AppEvent. */
+  reconcileProject(project: Project): FeedbackResult {
+    if (!this.lesson || this.status !== 'inProgress') {
+      return { advanced: false, completedLesson: false };
+    }
+    const step = this.lesson.steps[this.stepIndex];
+    if (
+      !step ||
+      step.goal.kind !== 'project' ||
+      !evaluateProjectPredicate(step.goal.predicate, project)
+    ) {
+      return { advanced: false, completedLesson: false };
+    }
     return this.advanceStep();
   }
 
@@ -206,4 +222,3 @@ export class TutorialEngine {
     return step?.exercise ?? null;
   }
 }
-

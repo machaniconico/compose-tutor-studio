@@ -1,10 +1,19 @@
-import { useEffect } from 'react';
-import { useStore } from '../../state/store';
-import type { MusicalKey, ScaleName } from '@cts/project-model';
+import { useEffect, useRef, useState, type Ref } from 'react';
+import { useStore, type TransportState } from '../../state/store';
+import {
+  beatsPerBar,
+  type MusicalKey,
+  type ScaleName,
+} from '@cts/project-model';
 import { formatPosition } from '../timeline';
 import { initAudioBridge } from '../../audio/playback';
 import { ProjectMenu } from '../projectMenu/ProjectMenu';
 import { ExportMenu } from '../export/ExportMenu';
+import { downloadBlob } from '../export/download';
+import { exportEmergencyProjectBackup } from '../export/emergencyProjectBackup';
+import { SaveControl } from './SaveControl';
+import { studioRuntime } from '../../platform/runtime';
+import { pushToast } from '../../state/tutorialBridge';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -21,13 +30,70 @@ const SCALES: { value: ScaleName; label: string }[] = [
 type TransportBarProps = {
   /** Re-open the first-launch onboarding / guided entry point. */
   onOpenGuide: () => void;
+  /** Focus destination after the onboarding is dismissed without starting. */
+  guideButtonRef?: Ref<HTMLButtonElement>;
 };
 
+type PlaybackLifecycleControlProps = {
+  transport: TransportState;
+  onPlay: () => void;
+  onStop: () => void;
+};
+
+/** Render the async playback lifecycle independently from the rest of the bar. */
+export function PlaybackLifecycleControl({
+  transport,
+  onPlay,
+  onStop,
+}: PlaybackLifecycleControlProps) {
+  const isStarting = transport.phase === 'starting';
+  const isPlaying = transport.phase === 'playing';
+  const isActive = transport.phase !== 'stopped';
+  const audioIssueMessage =
+    transport.audioIssue === 'event-limit-exceeded'
+      ? '再生イベントが多すぎます。ノート、ドラム、または連動コピーを減らして、もう一度「再生」を押してください。編集内容はそのままです。'
+      : transport.audioIssue === 'start-failed'
+        ? '音を再生できませんでした。出力先と端末の音量を確認して、もう一度「再生」を押してください。編集内容はそのままです。'
+        : transport.audioIssue === 'interrupted'
+          ? '音声の再生が中断されました。出力先が変わった可能性があります。もう一度「再生」を押してください。編集内容はそのままです。'
+          : null;
+
+  return (
+    <>
+      <button
+        type="button"
+        className={isPlaying ? 'is-active' : ''}
+        aria-busy={isStarting || undefined}
+        aria-describedby="transport-playback-status"
+        onClick={() => (isActive ? onStop() : onPlay())}
+      >
+        {isStarting ? '開始を中止' : isPlaying ? '一時停止' : '再生'}
+      </button>
+
+      <span
+        id="transport-playback-status"
+        className="visually-hidden"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {isStarting ? '音声を開始しています。' : isPlaying ? '再生中です。' : '再生は停止しています。'}
+      </span>
+
+      {audioIssueMessage ? (
+        <span className="save-indicator save-indicator--error" role="alert" aria-atomic="true">
+          {audioIssueMessage}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 /** Top transport + project metadata bar. */
-export function TransportBar({ onOpenGuide }: TransportBarProps) {
+export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps) {
   const project = useStore((s) => s.project);
   const transport = useStore((s) => s.transport);
-  const isPlaying = transport.isPlaying;
+  const isActive = transport.phase !== 'stopped';
   const play = useStore((s) => s.play);
   const stop = useStore((s) => s.stop);
   const toggleLoop = useStore((s) => s.toggleLoop);
@@ -40,13 +106,50 @@ export function TransportBar({ onOpenGuide }: TransportBarProps) {
   const redo = useStore((s) => s.redo);
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
+  const saveState = useStore((s) => s.saveState);
   const saveToLocalStorage = useStore((s) => s.saveToLocalStorage);
+  const emergencyExportLock = useRef(false);
+  const [emergencyExportBusy, setEmergencyExportBusy] = useState(false);
 
-  // Connect the store to the audio engine once. The bridge subscribes to
-  // transport.isPlaying so the play/stop buttons below only touch store state.
+  // Connect the store to the audio engine once. The bridge confirms the
+  // asynchronous starting -> playing transition; this component only sends
+  // play/cancel intent.
   useEffect(() => initAudioBridge(), []);
 
-  const beatsPerBar = project.timeSignature[0];
+  const projectBeatsPerBar = beatsPerBar(project.timeSignature);
+  const exportEmergencyBackup = async () => {
+    if (emergencyExportLock.current) return;
+    emergencyExportLock.current = true;
+    setEmergencyExportBusy(true);
+    try {
+      const result = await exportEmergencyProjectBackup(project, {
+        runtime: studioRuntime.kind,
+        exportNative: async (bytes, fileName) => {
+          const { nativeFileGateway } = await import('../../platform/nativeFileGateway');
+          return nativeFileGateway.exportProject(bytes, fileName);
+        },
+        downloadWeb: downloadBlob,
+      });
+      if (result.status === 'saved') {
+        pushToast('バックアップを書き出しました。', 'success');
+      } else if (result.status === 'download-started') {
+        pushToast('検証済みバックアップのダウンロードを開始しました。', 'success');
+      } else if (result.status === 'invalid-project') {
+        pushToast(
+          '安全に再読込できるバックアップを作成できませんでした。プロジェクトの内容を確認してください。',
+          'error',
+        );
+      } else if (result.status === 'failed') {
+        pushToast(
+          'バックアップの書き出しに失敗しました。保存先の権限と空き容量を確認してください。',
+          'error',
+        );
+      }
+    } finally {
+      emergencyExportLock.current = false;
+      setEmergencyExportBusy(false);
+    }
+  };
 
   return (
     <header className="transport-bar">
@@ -54,6 +157,7 @@ export function TransportBar({ onOpenGuide }: TransportBarProps) {
         <ProjectMenu />
 
         <button
+          ref={guideButtonRef}
           type="button"
           className="transport-bar__guide"
           aria-label="はじめてガイドを開く"
@@ -62,19 +166,12 @@ export function TransportBar({ onOpenGuide }: TransportBarProps) {
           はじめてガイド
         </button>
 
-        <button
-          type="button"
-          className={isPlaying ? 'is-active' : ''}
-          aria-pressed={isPlaying}
-          onClick={() => (isPlaying ? stop() : play())}
-        >
-          {isPlaying ? '一時停止' : '再生'}
-        </button>
+        <PlaybackLifecycleControl transport={transport} onPlay={play} onStop={stop} />
 
         <button
           type="button"
           aria-label="先頭へ戻す"
-          disabled={isPlaying && transport.positionBeat === 0}
+          disabled={isActive && transport.positionBeat === 0}
           onClick={() => stop(true)}
         >
           先頭へ
@@ -99,7 +196,7 @@ export function TransportBar({ onOpenGuide }: TransportBarProps) {
         </button>
 
         <div className="position-display" aria-label="再生位置">
-          {formatPosition(transport.positionBeat, beatsPerBar)}
+          {formatPosition(transport.positionBeat, projectBeatsPerBar)}
         </div>
 
         <div className="field">
@@ -158,15 +255,14 @@ export function TransportBar({ onOpenGuide }: TransportBarProps) {
           onChange={(e) => setTitle(e.target.value)}
         />
 
-        <button type="button" onClick={() => saveToLocalStorage()}>
-          保存
-        </button>
+        <SaveControl
+          state={saveState}
+          onSave={saveToLocalStorage}
+          onEmergencyExport={exportEmergencyBackup}
+          emergencyExportBusy={emergencyExportBusy}
+        />
 
         <ExportMenu />
-
-        <span className="save-indicator">
-          更新: {new Date(project.updatedAt).toLocaleTimeString('ja-JP')}
-        </span>
       </div>
     </header>
   );

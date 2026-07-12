@@ -1,4 +1,5 @@
 import type { EffectConfig, EffectType } from '@cts/project-model';
+import { REVERB_IMPULSE_PEAK_AMPLITUDE } from './voiceTiming';
 
 export type InsertEffectType = Extract<EffectType, 'filter' | 'delay' | 'reverb' | 'eq' | 'compressor'>;
 type FilterEffectConfig = EffectConfig & { type: 'filter' };
@@ -20,6 +21,13 @@ export type BuiltEffectChain = {
   isBypassed: boolean;
   dispose: () => void;
 };
+
+export type BiquadStageSettings = Readonly<{
+  type: Extract<BiquadFilterType, 'lowpass' | 'lowshelf' | 'peaking' | 'highshelf'>;
+  frequencyHz: number;
+  q: number | null;
+  gainDb: number | null;
+}>;
 
 type EffectStage = {
   input: AudioNode;
@@ -54,10 +62,10 @@ const REVERB_MIN_SECONDS = 0.15;
 const REVERB_MAX_SECONDS = 3;
 const EQ_MIN_DB = -12;
 const EQ_MAX_DB = 12;
-const EQ_LOW_HZ = 160;
-const EQ_MID_HZ = 1_000;
-const EQ_HIGH_HZ = 5_000;
-const EQ_MID_Q = 1.1;
+export const EQ_LOW_HZ = 160;
+export const EQ_MID_HZ = 1_000;
+export const EQ_HIGH_HZ = 5_000;
+export const EQ_MID_Q = 1.1;
 const COMPRESSOR_MIN_THRESHOLD_DB = -48;
 const COMPRESSOR_MAX_THRESHOLD_DB = -6;
 const COMPRESSOR_MIN_RATIO = 1;
@@ -179,13 +187,169 @@ export function compressorReleaseToSeconds(release: number): number {
     (COMPRESSOR_MAX_RELEASE_SECONDS - COMPRESSOR_MIN_RELEASE_SECONDS);
 }
 
+/** Resolve the exact low-pass parameters assigned to the runtime BiquadFilterNode. */
+export function resolveFilterBiquadSettings(
+  config: EffectConfig,
+  sampleRate: number,
+): BiquadStageSettings {
+  const normalized = normalizeEffectConfig(config);
+  return {
+    type: 'lowpass',
+    frequencyHz: cutoffToFrequency(
+      normalized.params.cutoff ?? DEFAULT_EFFECT_PARAMS.filter.cutoff,
+      sampleRate,
+    ),
+    q: resonanceToQ(
+      normalized.params.resonance ?? DEFAULT_EFFECT_PARAMS.filter.resonance,
+    ),
+    gainDb: null,
+  };
+}
+
+/** Resolve the three serial EQ stages assigned by the runtime graph. */
+export function resolveEqBiquadSettings(
+  config: EffectConfig,
+): readonly BiquadStageSettings[] {
+  const normalized = normalizeEffectConfig(config);
+  return [
+    {
+      type: 'lowshelf',
+      frequencyHz: EQ_LOW_HZ,
+      q: null,
+      gainDb: eqGainToDb(
+        normalized.params.lowGain ?? DEFAULT_EFFECT_PARAMS.eq.lowGain,
+      ),
+    },
+    {
+      type: 'peaking',
+      frequencyHz: EQ_MID_HZ,
+      q: EQ_MID_Q,
+      gainDb: eqGainToDb(
+        normalized.params.midGain ?? DEFAULT_EFFECT_PARAMS.eq.midGain,
+      ),
+    },
+    {
+      type: 'highshelf',
+      frequencyHz: EQ_HIGH_HZ,
+      q: null,
+      gainDb: eqGainToDb(
+        normalized.params.highGain ?? DEFAULT_EFFECT_PARAMS.eq.highGain,
+      ),
+    },
+  ];
+}
+
+/**
+ * Largest pole magnitude for the fixed Web Audio 1.1 biquad coefficients.
+ * Runtime nodes and the tail planner both consume the same stage settings;
+ * returning null makes invalid/non-finite inputs fail closed in the planner.
+ */
+export function webAudioBiquadPoleRadius(
+  settings: BiquadStageSettings,
+  sampleRate: number,
+): number | null {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) return null;
+  if (!Number.isFinite(settings.frequencyHz)) return null;
+  if (settings.q !== null && !Number.isFinite(settings.q)) return null;
+  if (settings.gainDb !== null && !Number.isFinite(settings.gainDb)) return null;
+
+  const nyquist = sampleRate / 2;
+  const frequency = Math.min(nyquist, Math.max(0, settings.frequencyHz));
+  const omega = 2 * Math.PI * frequency / sampleRate;
+  const sin = Math.sin(omega);
+  const cos = Math.cos(omega);
+  let a0: number;
+  let a1: number;
+  let a2: number;
+
+  if (settings.type === 'lowpass') {
+    const qDb = settings.q ?? 0;
+    const alpha = sin / (2 * 10 ** (qDb / 20));
+    a0 = 1 + alpha;
+    a1 = -2 * cos;
+    a2 = 1 - alpha;
+  } else {
+    const gainDb = settings.gainDb ?? 0;
+    const amplitude = 10 ** (gainDb / 40);
+    if (!Number.isFinite(amplitude) || amplitude <= 0) return null;
+
+    if (settings.type === 'peaking') {
+      const q = settings.q ?? 0;
+      if (q <= 0) return null;
+      const alpha = sin / (2 * q);
+      a0 = 1 + alpha / amplitude;
+      a1 = -2 * cos;
+      a2 = 1 - alpha / amplitude;
+    } else {
+      const alpha = sin / 2 * Math.SQRT2;
+      const twoAlphaRootA = 2 * alpha * Math.sqrt(amplitude);
+      if (settings.type === 'lowshelf') {
+        a0 =
+          amplitude + 1 +
+          (amplitude - 1) * cos +
+          twoAlphaRootA;
+        a1 = -2 * (amplitude - 1 + (amplitude + 1) * cos);
+        a2 =
+          amplitude + 1 +
+          (amplitude - 1) * cos -
+          twoAlphaRootA;
+      } else {
+        a0 =
+          amplitude + 1 -
+          (amplitude - 1) * cos +
+          twoAlphaRootA;
+        a1 = 2 * (amplitude - 1 - (amplitude + 1) * cos);
+        a2 =
+          amplitude + 1 -
+          (amplitude - 1) * cos -
+          twoAlphaRootA;
+      }
+    }
+  }
+
+  if (![a0, a1, a2].every(Number.isFinite) || a0 === 0) return null;
+  const normalizedA1 = a1 / a0;
+  const normalizedA2 = a2 / a0;
+  const discriminant = normalizedA1 ** 2 - 4 * normalizedA2;
+  if (discriminant < 0) {
+    return normalizedA2 >= 0 ? Math.sqrt(normalizedA2) : null;
+  }
+  const root = Math.sqrt(discriminant);
+  return Math.max(
+    Math.abs((-normalizedA1 + root) / 2),
+    Math.abs((-normalizedA1 - root) / 2),
+  );
+}
+
+function applyBiquadStageSettings(
+  node: BiquadFilterNode,
+  settings: BiquadStageSettings,
+): void {
+  node.type = settings.type;
+  node.frequency.value = settings.frequencyHz;
+  if (settings.q !== null) node.Q.value = settings.q;
+  if (settings.gainDb !== null) node.gain.value = settings.gainDb;
+}
+
 export function buildEffectChain(
   ctx: BaseAudioContext,
   configs: readonly EffectConfig[],
 ): BuiltEffectChain {
-  const stages = normalizeEffectConfigs(configs)
-    .filter((config) => config.enabled && isInsertEffectType(config.type))
-    .map((config) => createStage(ctx, config as InsertEffectConfig));
+  const enabledConfigs = normalizeEffectConfigs(configs).filter(
+    (config): config is InsertEffectConfig => config.enabled && isInsertEffectType(config.type),
+  );
+  const stages: EffectStage[] = [];
+
+  try {
+    for (const config of enabledConfigs) stages.push(createStage(ctx, config));
+
+    for (let index = 1; index < stages.length; index += 1) {
+      stages[index - 1]?.output.connect(stages[index]?.input as AudioNode);
+    }
+  } catch (error) {
+    disconnectNodes(stages.flatMap((stage) => stage.nodes));
+    throw error;
+  }
 
   if (stages.length === 0) {
     return {
@@ -199,26 +363,24 @@ export function buildEffectChain(
     };
   }
 
-  for (let index = 1; index < stages.length; index += 1) {
-    stages[index - 1]?.output.connect(stages[index]?.input as AudioNode);
-  }
-
   const nodes = stages.flatMap((stage) => stage.nodes);
   return {
     input: stages[0]?.input ?? null,
     output: stages[stages.length - 1]?.output ?? null,
     nodes,
     isBypassed: false,
-    dispose: () => {
-      for (const node of nodes) {
-        try {
-          node.disconnect();
-        } catch {
-          // already disconnected
-        }
-      }
-    },
+    dispose: () => disconnectNodes(nodes),
   };
+}
+
+function disconnectNodes(nodes: readonly AudioNode[]): void {
+  for (const node of nodes) {
+    try {
+      node.disconnect();
+    } catch {
+      // A partially-created stage may never have connected this node.
+    }
+  }
 }
 
 function createStage(
@@ -237,113 +399,135 @@ function createFilterStage(
   config: FilterEffectConfig,
 ): EffectStage {
   const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.value = cutoffToFrequency(
-    config.params.cutoff ?? DEFAULT_EFFECT_PARAMS.filter.cutoff,
-    ctx.sampleRate,
-  );
-  filter.Q.value = resonanceToQ(
-    config.params.resonance ?? DEFAULT_EFFECT_PARAMS.filter.resonance,
-  );
-  return { input: filter, output: filter, nodes: [filter] };
+  try {
+    applyBiquadStageSettings(
+      filter,
+      resolveFilterBiquadSettings(config, ctx.sampleRate),
+    );
+    return { input: filter, output: filter, nodes: [filter] };
+  } catch (error) {
+    disconnectNodes([filter]);
+    throw error;
+  }
 }
 
 function createDelayStage(
   ctx: BaseAudioContext,
   config: DelayEffectConfig,
 ): EffectStage {
-  const input = ctx.createGain();
-  const output = ctx.createGain();
-  const dry = ctx.createGain();
-  const wet = ctx.createGain();
-  const delay = ctx.createDelay(1);
-  const feedback = ctx.createGain();
-  const mix = clamp01(config.params.mix ?? DEFAULT_EFFECT_PARAMS.delay.mix, DEFAULT_EFFECT_PARAMS.delay.mix);
+  const nodes: AudioNode[] = [];
+  try {
+    const input = ctx.createGain();
+    nodes.push(input);
+    const output = ctx.createGain();
+    nodes.push(output);
+    const dry = ctx.createGain();
+    nodes.push(dry);
+    const wet = ctx.createGain();
+    nodes.push(wet);
+    const delay = ctx.createDelay(1);
+    nodes.push(delay);
+    const feedback = ctx.createGain();
+    nodes.push(feedback);
+    const mix = clamp01(
+      config.params.mix ?? DEFAULT_EFFECT_PARAMS.delay.mix,
+      DEFAULT_EFFECT_PARAMS.delay.mix,
+    );
 
-  dry.gain.value = 1 - mix;
-  wet.gain.value = mix;
-  delay.delayTime.value = delayTimeToSeconds(
-    config.params.delayTime ?? DEFAULT_EFFECT_PARAMS.delay.delayTime,
-  );
-  feedback.gain.value = feedbackToGain(
-    config.params.feedback ?? DEFAULT_EFFECT_PARAMS.delay.feedback,
-  );
+    dry.gain.value = 1 - mix;
+    wet.gain.value = mix;
+    delay.delayTime.value = delayTimeToSeconds(
+      config.params.delayTime ?? DEFAULT_EFFECT_PARAMS.delay.delayTime,
+    );
+    feedback.gain.value = feedbackToGain(
+      config.params.feedback ?? DEFAULT_EFFECT_PARAMS.delay.feedback,
+    );
 
-  input.connect(dry);
-  dry.connect(output);
-  input.connect(delay);
-  delay.connect(wet);
-  wet.connect(output);
-  delay.connect(feedback);
-  feedback.connect(delay);
+    input.connect(dry);
+    dry.connect(output);
+    input.connect(delay);
+    delay.connect(wet);
+    wet.connect(output);
+    delay.connect(feedback);
+    feedback.connect(delay);
 
-  return {
-    input,
-    output,
-    nodes: [input, dry, delay, feedback, wet, output],
-  };
+    return { input, output, nodes };
+  } catch (error) {
+    disconnectNodes(nodes);
+    throw error;
+  }
 }
 
 function createReverbStage(
   ctx: BaseAudioContext,
   config: ReverbEffectConfig,
 ): EffectStage {
-  const input = ctx.createGain();
-  const output = ctx.createGain();
-  const dry = ctx.createGain();
-  const wet = ctx.createGain();
-  const convolver = ctx.createConvolver();
-  const wetAmount = clamp01(config.params.wet ?? DEFAULT_EFFECT_PARAMS.reverb.wet, DEFAULT_EFFECT_PARAMS.reverb.wet);
+  const nodes: AudioNode[] = [];
+  try {
+    const input = ctx.createGain();
+    nodes.push(input);
+    const output = ctx.createGain();
+    nodes.push(output);
+    const dry = ctx.createGain();
+    nodes.push(dry);
+    const wet = ctx.createGain();
+    nodes.push(wet);
+    const convolver = ctx.createConvolver();
+    nodes.push(convolver);
+    const wetAmount = clamp01(
+      config.params.wet ?? DEFAULT_EFFECT_PARAMS.reverb.wet,
+      DEFAULT_EFFECT_PARAMS.reverb.wet,
+    );
 
-  convolver.buffer = createSyntheticImpulse(
-    ctx,
-    decayToSeconds(config.params.decay ?? DEFAULT_EFFECT_PARAMS.reverb.decay),
-  );
-  dry.gain.value = 1 - wetAmount;
-  wet.gain.value = wetAmount;
+    convolver.buffer = createSyntheticImpulse(
+      ctx,
+      decayToSeconds(config.params.decay ?? DEFAULT_EFFECT_PARAMS.reverb.decay),
+    );
+    dry.gain.value = 1 - wetAmount;
+    wet.gain.value = wetAmount;
 
-  input.connect(dry);
-  dry.connect(output);
-  input.connect(convolver);
-  convolver.connect(wet);
-  wet.connect(output);
+    input.connect(dry);
+    dry.connect(output);
+    input.connect(convolver);
+    convolver.connect(wet);
+    wet.connect(output);
 
-  return {
-    input,
-    output,
-    nodes: [input, dry, convolver, wet, output],
-  };
+    return { input, output, nodes };
+  } catch (error) {
+    disconnectNodes(nodes);
+    throw error;
+  }
 }
 
 function createEqStage(
   ctx: BaseAudioContext,
   config: EqEffectConfig,
 ): EffectStage {
-  const low = ctx.createBiquadFilter();
-  const mid = ctx.createBiquadFilter();
-  const high = ctx.createBiquadFilter();
+  const nodes: AudioNode[] = [];
+  try {
+    const [lowSettings, midSettings, highSettings] = resolveEqBiquadSettings(config);
+    if (!lowSettings || !midSettings || !highSettings) {
+      throw new Error('EQ stage settings are incomplete.');
+    }
+    const low = ctx.createBiquadFilter();
+    nodes.push(low);
+    const mid = ctx.createBiquadFilter();
+    nodes.push(mid);
+    const high = ctx.createBiquadFilter();
+    nodes.push(high);
 
-  low.type = 'lowshelf';
-  low.frequency.value = EQ_LOW_HZ;
-  low.gain.value = eqGainToDb(config.params.lowGain ?? DEFAULT_EFFECT_PARAMS.eq.lowGain);
+    applyBiquadStageSettings(low, lowSettings);
+    applyBiquadStageSettings(mid, midSettings);
+    applyBiquadStageSettings(high, highSettings);
 
-  mid.type = 'peaking';
-  mid.frequency.value = EQ_MID_HZ;
-  mid.Q.value = EQ_MID_Q;
-  mid.gain.value = eqGainToDb(config.params.midGain ?? DEFAULT_EFFECT_PARAMS.eq.midGain);
+    low.connect(mid);
+    mid.connect(high);
 
-  high.type = 'highshelf';
-  high.frequency.value = EQ_HIGH_HZ;
-  high.gain.value = eqGainToDb(config.params.highGain ?? DEFAULT_EFFECT_PARAMS.eq.highGain);
-
-  low.connect(mid);
-  mid.connect(high);
-
-  return {
-    input: low,
-    output: high,
-    nodes: [low, mid, high],
-  };
+    return { input: low, output: high, nodes };
+  } catch (error) {
+    disconnectNodes(nodes);
+    throw error;
+  }
 }
 
 function createCompressorStage(
@@ -351,26 +535,26 @@ function createCompressorStage(
   config: CompressorEffectConfig,
 ): EffectStage {
   const compressor = ctx.createDynamicsCompressor();
+  try {
+    compressor.threshold.value = compressorThresholdToDb(
+      config.params.threshold ?? DEFAULT_EFFECT_PARAMS.compressor.threshold,
+    );
+    compressor.knee.value = 24;
+    compressor.ratio.value = compressorRatioToValue(
+      config.params.ratio ?? DEFAULT_EFFECT_PARAMS.compressor.ratio,
+    );
+    compressor.attack.value = compressorAttackToSeconds(
+      config.params.attack ?? DEFAULT_EFFECT_PARAMS.compressor.attack,
+    );
+    compressor.release.value = compressorReleaseToSeconds(
+      config.params.release ?? DEFAULT_EFFECT_PARAMS.compressor.release,
+    );
 
-  compressor.threshold.value = compressorThresholdToDb(
-    config.params.threshold ?? DEFAULT_EFFECT_PARAMS.compressor.threshold,
-  );
-  compressor.knee.value = 24;
-  compressor.ratio.value = compressorRatioToValue(
-    config.params.ratio ?? DEFAULT_EFFECT_PARAMS.compressor.ratio,
-  );
-  compressor.attack.value = compressorAttackToSeconds(
-    config.params.attack ?? DEFAULT_EFFECT_PARAMS.compressor.attack,
-  );
-  compressor.release.value = compressorReleaseToSeconds(
-    config.params.release ?? DEFAULT_EFFECT_PARAMS.compressor.release,
-  );
-
-  return {
-    input: compressor,
-    output: compressor,
-    nodes: [compressor],
-  };
+    return { input: compressor, output: compressor, nodes: [compressor] };
+  } catch (error) {
+    disconnectNodes([compressor]);
+    throw error;
+  }
 }
 
 function createSyntheticImpulse(ctx: BaseAudioContext, seconds: number): AudioBuffer {
@@ -384,7 +568,7 @@ function createSyntheticImpulse(ctx: BaseAudioContext, seconds: number): AudioBu
       seed = (1664525 * seed + 1013904223) >>> 0;
       const noise = (seed / 0xffffffff) * 2 - 1;
       const envelope = (1 - i / length) ** 2;
-      data[i] = noise * envelope * 0.35;
+      data[i] = noise * envelope * REVERB_IMPULSE_PEAK_AMPLITUDE;
     }
   }
 

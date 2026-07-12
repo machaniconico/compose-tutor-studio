@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persistence-import-legacy-project"
+description = "Enables the persistence_import_legacy_project command without any pre-configured scope."
+commands.allow = ["persistence_import_legacy_project"]
+
+[[permission]]
+identifier = "deny-persistence-import-legacy-project"
+description = "Denies the persistence_import_legacy_project command without any pre-configured scope."
+commands.deny = ["persistence_import_legacy_project"]

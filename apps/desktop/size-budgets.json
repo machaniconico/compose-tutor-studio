@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "platforms": {
+    "darwin-arm64": {
+      "executable": {
+        "baselineBytes": 9281696,
+        "maxBytes": 11141120
+      }
+    },
+    "darwin-x64": {
+      "executable": {
+        "maxBytes": 7864320,
+        "provisional": true
+      }
+    },
+    "linux-x64": {
+      "executable": {
+        "maxBytes": 12582912,
+        "provisional": true
+      }
+    },
+    "win32-x64": {
+      "executable": {
+        "maxBytes": 12582912,
+        "provisional": true
+      }
+    }
+  }
+}

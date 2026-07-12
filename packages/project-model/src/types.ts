@@ -55,6 +55,15 @@ export type DrumEvent = {
   lane: DrumLane;
   stepIndex: number;
   velocity: number;
+  /** Per-hit playback chance, from 0 (never) to 1 (always). */
+  probability?: number;
+};
+
+export type DrumGrooveSettings = {
+  swing: number;
+  probability: number;
+  humanizeVelocity: number;
+  seed: number;
 };
 
 export type ChordFunction = 'T' | 'SD' | 'D' | 'Other';
@@ -86,6 +95,7 @@ export type Clip = {
   drumEvents?: DrumEvent[];
   /** steps per bar for drum clips (default 16) */
   stepsPerBar?: number;
+  drumGroove?: DrumGrooveSettings;
   audioAssetId?: string;
 };
 

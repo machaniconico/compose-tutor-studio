@@ -1,6 +1,10 @@
 // Goal evaluation — project predicates and event matching
 
-import type { Project } from '@cts/project-model';
+import {
+  buildClipIndex,
+  resolveClipContent,
+  type Project,
+} from '@cts/project-model';
 import type {
   AppEvent,
   AppEventType,
@@ -30,25 +34,29 @@ export function evaluateProjectPredicate(
     }
 
     case 'drumLaneActive': {
+      const clipIndex = buildClipIndex(project);
       for (const track of project.tracks) {
         if (track.type !== 'drum') continue;
+        let activeStepCount = 0;
         for (const clip of track.clips) {
-          if (!clip.drumEvents) continue;
-          const activeSteps = clip.drumEvents.filter(
+          const effectiveClip = resolveClipContent(project, clip, clipIndex);
+          if (!effectiveClip?.drumEvents) continue;
+          activeStepCount += effectiveClip.drumEvents.filter(
             (e) => e.lane === predicate.lane,
-          );
-          if (activeSteps.length >= predicate.minSteps) return true;
+          ).length;
+          if (activeStepCount >= predicate.minSteps) return true;
         }
       }
       return false;
     }
 
     case 'noteCountAtLeast': {
+      const clipIndex = buildClipIndex(project);
       for (const track of project.tracks) {
         if (track.name !== predicate.trackName) continue;
         let count = 0;
         for (const clip of track.clips) {
-          count += clip.notes?.length ?? 0;
+          count += resolveClipContent(project, clip, clipIndex)?.notes?.length ?? 0;
         }
         if (count >= predicate.value) return true;
       }
@@ -73,11 +81,6 @@ export function evaluateProjectPredicate(
       return false;
     }
 
-    case 'exportCompleted': {
-      // Export state is tracked via events, not in Project. Always false here;
-      // the engine handles export events separately.
-      return false;
-    }
   }
 }
 
@@ -97,6 +100,14 @@ function matchesEventMatch(event: AppEvent, match: EventMatch): boolean {
   if (match.inScale !== undefined) {
     const inScale = p['inScale'] as boolean | undefined;
     if (inScale !== match.inScale) return false;
+  }
+  if (match.key !== undefined) {
+    const key = p['key'] as string | undefined;
+    if (key !== match.key) return false;
+  }
+  if (match.scale !== undefined) {
+    const scale = p['scale'] as string | undefined;
+    if (scale !== match.scale) return false;
   }
   if (match.lane !== undefined) {
     const lane = p['lane'] as string | undefined;

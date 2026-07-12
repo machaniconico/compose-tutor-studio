@@ -8,9 +8,21 @@
 // This module is the only place that constructs a (live, non-offline)
 // AudioContext, which keeps the singleton invariant simple.
 
+import { buildMasterBus } from './masterBus';
+import { disposeMasterMeter } from './graph';
+
+export type AudioContextFactory = () => AudioContext;
+export type AudioEngineStateListener = (state: string) => void;
+
+type ActivationFlight = {
+  context: AudioContext;
+  promise: Promise<void>;
+};
+
 /**
  * The app-wide audio engine. Wraps a lazily-created AudioContext and the master
- * output bus. Construct via {@link getAudioEngine}; do not instantiate directly.
+ * output bus. App code should use {@link getAudioEngine}; the public constructor
+ * exists so tests can inject a deterministic AudioContext factory.
  */
 export class AudioEngine {
   private context: AudioContext | null = null;
@@ -18,15 +30,45 @@ export class AudioEngine {
   private masterBus: GainNode | null = null;
   /** Soft limiter on the master bus before the destination. */
   private limiter: DynamicsCompressorNode | null = null;
+  private activationFlight: ActivationFlight | null = null;
+  private readonly stateListeners = new Set<AudioEngineStateListener>();
 
-  /** True once an AudioContext has been created. */
+  constructor(
+    private readonly createAudioContext: AudioContextFactory = () => new AudioContext(),
+  ) {}
+
+  private readonly handleContextStateChange = (event: Event): void => {
+    if (event.currentTarget !== this.context || !this.context) return;
+    const state = String(this.context.state);
+    for (const listener of [...this.stateListeners]) {
+      try {
+        listener(state);
+      } catch {
+        // A playback/UI observer must not prevent other observers from seeing
+        // the underlying browser state change.
+      }
+    }
+  };
+
+  /** True once a usable (possibly currently suspended) context has been created. */
   get isInitialized(): boolean {
     return this.context !== null;
   }
 
-  /** The live AudioContext, or null if play has never been pressed. */
+  /** The current AudioContext, or null if play has never been pressed. */
   get audioContext(): AudioContext | null {
     return this.context;
+  }
+
+  /**
+   * Subscribe before or after context creation. The subscription follows any
+   * replacement context created after the browser closes the previous one.
+   */
+  subscribeStateChange(listener: AudioEngineStateListener): () => void {
+    this.stateListeners.add(listener);
+    return () => {
+      this.stateListeners.delete(listener);
+    };
   }
 
   /**
@@ -43,32 +85,29 @@ export class AudioEngine {
    * master input node that per-track chains should connect to.
    */
   async ensureContext(): Promise<{ context: AudioContext; master: GainNode }> {
-    if (!this.context) {
-      this.context = new AudioContext();
-      const master = this.context.createGain();
-      master.gain.value = 1;
+    // Intentionally stays before the first await: browser gesture authorization
+    // can be lost at a microtask boundary in stricter Web Audio implementations.
+    const context = this.getOrCreateContext();
 
-      // Soft limiter: gentle compression with a high threshold acts as a
-      // brick-wall-ish safety net against summed-voice clipping.
-      const limiter = this.context.createDynamicsCompressor();
-      limiter.threshold.value = -3;
-      limiter.knee.value = 6;
-      limiter.ratio.value = 12;
-      limiter.attack.value = 0.002;
-      limiter.release.value = 0.12;
-
-      master.connect(limiter);
-      limiter.connect(this.context.destination);
-
-      this.masterBus = master;
-      this.limiter = limiter;
+    try {
+      await this.ensureRunning(context);
+    } catch (error) {
+      if (String(context.state) === 'closed') {
+        this.clearCommittedContext(context);
+      }
+      throw error;
     }
 
-    if (this.context.state === 'suspended') {
-      await this.context.resume();
+    if (this.context !== context || String(context.state) !== 'running') {
+      if (String(context.state) === 'closed') {
+        this.clearCommittedContext(context);
+      }
+      throw new Error(
+        `AudioEngine: audio context did not enter running state (${String(context.state)}).`,
+      );
     }
 
-    return { context: this.context, master: this.requireMaster() };
+    return { context, master: this.requireMaster() };
   }
 
   /** The master input node. Throws if the context has not been created yet. */
@@ -81,26 +120,153 @@ export class AudioEngine {
 
   /** Suspend the audio hardware (no-op if no context). */
   async suspend(): Promise<void> {
-    if (this.context && this.context.state === 'running') {
-      await this.context.suspend();
+    const context = this.context;
+    if (context && String(context.state) === 'running') {
+      await context.suspend();
     }
   }
 
   /** Resume the audio hardware (no-op if no context). */
   async resume(): Promise<void> {
-    if (this.context && this.context.state === 'suspended') {
-      await this.context.resume();
+    const context = this.context;
+    if (!context) return;
+    if (String(context.state) === 'closed') {
+      this.clearCommittedContext(context);
+      return;
     }
+    await this.ensureRunning(context);
   }
 
   /** Tear down the context entirely. Mainly for tests / project switches. */
   async dispose(): Promise<void> {
-    if (this.context) {
-      await this.context.close();
+    const context = this.context;
+    if (!context) return;
+
+    // Clear first so an in-flight ensureContext cannot publish this context
+    // after disposal. A later user gesture may safely create a replacement.
+    this.clearCommittedContext(context);
+    if (String(context.state) !== 'closed') {
+      await context.close();
     }
+  }
+
+  /**
+   * Return an existing context or synchronously construct and commit a complete
+   * master graph. No partially-created context is ever exposed on failure.
+   */
+  private getOrCreateContext(): AudioContext {
+    if (this.context && String(this.context.state) !== 'closed') {
+      return this.context;
+    }
+    if (this.context) {
+      this.clearCommittedContext(this.context);
+    }
+
+    let context: AudioContext | null = null;
+    let master: GainNode | null = null;
+    let limiter: DynamicsCompressorNode | null = null;
+    let stateListenerAttached = false;
+
+    try {
+      context = this.createAudioContext();
+      const graph = buildMasterBus(context, context.destination);
+      master = graph.master;
+      limiter = graph.limiter;
+      context.addEventListener('statechange', this.handleContextStateChange);
+      stateListenerAttached = true;
+    } catch (error) {
+      if (context && stateListenerAttached) {
+        this.removeStateListenerBestEffort(context);
+      }
+      this.disconnectBestEffort(master);
+      this.disconnectBestEffort(limiter);
+      if (context) this.closeBestEffort(context);
+      throw error;
+    }
+
+    this.context = context;
+    this.masterBus = master;
+    this.limiter = limiter;
+    return context;
+  }
+
+  /** Share one resume attempt among concurrent callers for the same context. */
+  private ensureRunning(context: AudioContext): Promise<void> {
+    const state = String(context.state);
+    if (state === 'running') return Promise.resolve();
+    if (state === 'closed') {
+      return Promise.reject(new Error('AudioEngine: cannot resume a closed audio context.'));
+    }
+
+    const currentFlight = this.activationFlight;
+    if (currentFlight?.context === context) return currentFlight.promise;
+
+    const promise = (async () => {
+      await context.resume();
+      if (this.context !== context) {
+        throw new Error('AudioEngine: audio context changed while it was starting.');
+      }
+      if (String(context.state) !== 'running') {
+        throw new Error(
+          `AudioEngine: audio context did not enter running state (${String(context.state)}).`,
+        );
+      }
+    })();
+    const flight: ActivationFlight = { context, promise };
+    this.activationFlight = flight;
+    promise.then(
+      () => {
+        if (this.activationFlight === flight) this.activationFlight = null;
+      },
+      () => {
+        if (this.activationFlight === flight) this.activationFlight = null;
+      },
+    );
+    return promise;
+  }
+
+  private clearCommittedContext(context: AudioContext): void {
+    if (this.context !== context) return;
+    this.removeStateListenerBestEffort(context);
+    const master = this.masterBus;
+    const limiter = this.limiter;
+    if (master) disposeMasterMeter(master);
+    this.disconnectBestEffort(master);
+    this.disconnectBestEffort(limiter);
     this.context = null;
     this.masterBus = null;
     this.limiter = null;
+    if (this.activationFlight?.context === context) {
+      this.activationFlight = null;
+    }
+  }
+
+  private removeStateListenerBestEffort(context: AudioContext): void {
+    try {
+      context.removeEventListener('statechange', this.handleContextStateChange);
+    } catch {
+      // Cleanup should not replace the original initialization/disposal result.
+    }
+  }
+
+  private disconnectBestEffort(node: AudioNode | null): void {
+    if (!node) return;
+    try {
+      node.disconnect();
+    } catch {
+      // A node may never have connected if graph construction failed midway.
+    }
+  }
+
+  private closeBestEffort(context: AudioContext): void {
+    if (String(context.state) === 'closed') return;
+    try {
+      void context.close().catch(() => {
+        // Preserve the graph-construction error; this context was never exposed.
+      });
+    } catch {
+      // Some test doubles / implementations may throw before returning a promise.
+    }
   }
 }
 

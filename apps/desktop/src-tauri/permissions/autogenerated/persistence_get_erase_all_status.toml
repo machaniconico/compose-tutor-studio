@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persistence-get-erase-all-status"
+description = "Enables the persistence_get_erase_all_status command without any pre-configured scope."
+commands.allow = ["persistence_get_erase_all_status"]
+
+[[permission]]
+identifier = "deny-persistence-get-erase-all-status"
+description = "Denies the persistence_get_erase_all_status command without any pre-configured scope."
+commands.deny = ["persistence_get_erase_all_status"]

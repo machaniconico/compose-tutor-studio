@@ -8,11 +8,18 @@
 // 純粋・決定的: 同じ Project からは常に同じ提案リストが得られる。UI はこの結果を
 // 表示するだけで、副作用はここには無い。
 
-import type { Project, Track } from '@cts/project-model';
+import {
+  buildClipIndex,
+  resolveClipContent,
+  type ClipIndex,
+  type Project,
+  type Track,
+} from '@cts/project-model';
 import {
   analyzeMelody,
   suggestNextChords,
   type ChordSuggestion,
+  type MelodyNoteInput,
 } from '@cts/theory-engine';
 
 /** 提案の重要度。good=良い点の肯定, tip=やってみると良い提案, warn=気になる点。 */
@@ -65,12 +72,46 @@ function trackByName(project: Project, name: string): Track | undefined {
 }
 
 /** トラックが持つノートの総数。 */
-function noteCountOf(track: Track | undefined): number {
+function noteCountOf(
+  project: Project,
+  track: Track | undefined,
+  clipIndex: ClipIndex,
+): number {
   if (!track) return 0;
   if (track.type === 'drum') {
-    return track.clips.reduce((sum, clip) => sum + (clip.drumEvents?.length ?? 0), 0);
+    return track.clips.reduce(
+      (sum, clip) =>
+        sum + (resolveClipContent(project, clip, clipIndex)?.drumEvents?.length ?? 0),
+      0,
+    );
   }
-  return track.clips.reduce((sum, clip) => sum + (clip.notes?.length ?? 0), 0);
+  return track.clips.reduce(
+    (sum, clip) =>
+      sum + (resolveClipContent(project, clip, clipIndex)?.notes?.length ?? 0),
+    0,
+  );
+}
+
+/**
+ * Resolve every MIDI clip instance and convert its clip-local note positions
+ * into absolute project beats. Linked clips therefore contribute once at each
+ * timeline placement while retaining their source-owned note payload.
+ */
+export function melodyNotesOnProjectTimeline(
+  project: Project,
+  track: Track | undefined,
+  clipIndex: ClipIndex = buildClipIndex(project),
+): MelodyNoteInput[] {
+  if (!track) return [];
+  return track.clips.flatMap((clip) => {
+    const effectiveClip = resolveClipContent(project, clip, clipIndex);
+    if (!effectiveClip?.notes) return [];
+    return effectiveClip.notes.map((note) => ({
+      pitch: note.pitch,
+      startBeat: effectiveClip.startBeat + note.startBeat,
+      durationBeats: note.durationBeats,
+    }));
+  });
 }
 
 /** トニック(主和音)のルート音名を素朴に取り出す(キー文字列の先頭)。 */
@@ -85,10 +126,11 @@ function tonicRootName(key: string): string {
  * すべて防御的に握りつぶし、提案が作れない部分は静かにスキップする。
  */
 export function analyzeProjectForCoaching(project: Project): CoachSuggestion[] {
+  const clipIndex = buildClipIndex(project);
   const out: CoachSuggestion[] = [];
   out.push(...coachProgression(project));
-  out.push(...coachMelody(project));
-  out.push(...coachArrangement(project));
+  out.push(...coachMelody(project, clipIndex));
+  out.push(...coachArrangement(project, clipIndex));
   return out;
 }
 
@@ -180,12 +222,12 @@ function pickColorSuggestion(suggestions: ChordSuggestion[]): ChordSuggestion | 
 }
 
 /** メロディに関する提案。 */
-function coachMelody(project: Project): CoachSuggestion[] {
+function coachMelody(project: Project, clipIndex: ClipIndex): CoachSuggestion[] {
   const out: CoachSuggestion[] = [];
   const melodyTrack = trackByName(project, 'Melody');
-  const noteCount = noteCountOf(melodyTrack);
+  const notes = melodyNotesOnProjectTimeline(project, melodyTrack, clipIndex);
 
-  if (noteCount === 0) {
+  if (notes.length === 0) {
     out.push({
       id: 'melody-empty',
       category: 'melody',
@@ -199,11 +241,6 @@ function coachMelody(project: Project): CoachSuggestion[] {
 
   // メロディ添削(analyzeMelody)。未知/解析不能は静かにスキップ。
   try {
-    const notes = (melodyTrack?.clips ?? [])
-      .flatMap((c) => c.notes ?? [])
-      .map((n) => ({ pitch: n.pitch, startBeat: n.startBeat, durationBeats: n.durationBeats }));
-    if (notes.length === 0) return out;
-
     const analysis = analyzeMelody({
       key: project.key,
       scale: project.scale,
@@ -262,12 +299,12 @@ function progressionChordInputs(
 }
 
 /** 構成・アレンジに関する提案。 */
-function coachArrangement(project: Project): CoachSuggestion[] {
+function coachArrangement(project: Project, clipIndex: ClipIndex): CoachSuggestion[] {
   const out: CoachSuggestion[] = [];
 
   // ドラム: type==='drum' のトラックにヒットがあるか。
   const drumTrack = project.tracks.find((t) => t.type === 'drum');
-  if (drumTrack && noteCountOf(drumTrack) === 0) {
+  if (drumTrack && noteCountOf(project, drumTrack, clipIndex) === 0) {
     out.push({
       id: 'arr-drums',
       category: 'arrangement',
@@ -280,7 +317,7 @@ function coachArrangement(project: Project): CoachSuggestion[] {
 
   // ベース: 'Bass' トラックが空。
   const bassTrack = trackByName(project, 'Bass');
-  if (bassTrack && noteCountOf(bassTrack) === 0) {
+  if (bassTrack && noteCountOf(project, bassTrack, clipIndex) === 0) {
     out.push({
       id: 'arr-bass',
       category: 'arrangement',

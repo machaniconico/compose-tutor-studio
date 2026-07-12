@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Compose Tutor Studio">
+  <defs>
+    <linearGradient id="surface" x1="132" y1="96" x2="892" y2="944" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#252a35"/>
+      <stop offset="1" stop-color="#12141a"/>
+    </linearGradient>
+    <linearGradient id="melody" x1="248" y1="708" x2="790" y2="302" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2bb4ad"/>
+      <stop offset="1" stop-color="#65e4dc"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="224" fill="url(#surface)" stroke="#3c4250" stroke-width="20"/>
+  <g opacity="0.18" stroke="#9aa1b2" stroke-width="10">
+    <path d="M224 320H800M224 512H800M224 704H800"/>
+    <path d="M320 224V800M512 224V800M704 224V800"/>
+  </g>
+  <path d="M248 674C338 674 342 548 430 548C518 548 516 612 602 612C688 612 682 374 776 374" fill="none" stroke="#173d3b" stroke-width="62" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  <path d="M248 674C338 674 342 548 430 548C518 548 516 612 602 612C688 612 682 374 776 374" fill="none" stroke="url(#melody)" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <g fill="#3fd0c9" stroke="#0d2625" stroke-width="18">
+    <circle cx="248" cy="674" r="56"/>
+    <circle cx="430" cy="548" r="56"/>
+    <circle cx="602" cy="612" r="56"/>
+  </g>
+  <circle cx="776" cy="374" r="68" fill="#e0a44b" stroke="#3b2b13" stroke-width="20"/>
+  <path d="M776 374V256H854" fill="none" stroke="#e0a44b" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

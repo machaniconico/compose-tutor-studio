@@ -4,6 +4,7 @@
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
 import { makeId } from './ids';
+import { clipContentOwnerId } from './clip-content';
 import type {
   ChordEvent,
   Clip,
@@ -27,9 +28,11 @@ function mapTrack(project: Project, trackId: string, fn: (track: Track) => Track
 
 /** Map over a clip wherever it lives, returning new track list. */
 function mapClip(project: Project, clipId: string, fn: (clip: Clip) => Clip): Track[] {
+  const ownerId = clipContentOwnerId(project, clipId);
+  if (ownerId === null) return project.tracks;
   return project.tracks.map((track) => {
-    if (!track.clips.some((c) => c.id === clipId)) return track;
-    return { ...track, clips: track.clips.map((c) => (c.id === clipId ? fn(c) : c)) };
+    if (!track.clips.some((c) => c.id === ownerId)) return track;
+    return { ...track, clips: track.clips.map((c) => (c.id === ownerId ? fn(c) : c)) };
   });
 }
 

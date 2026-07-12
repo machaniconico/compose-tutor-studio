@@ -20,7 +20,15 @@ import type {
   Project,
   Track,
 } from '@cts/project-model';
-import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
+import {
+  MAX_EVENTS_PER_CLIP,
+  MAX_PROJECT_LENGTH_BARS,
+  MAX_PROJECT_TIMELINE_BEATS,
+  MIN_EVENT_DURATION_BEATS,
+  beatsPerBar as beatsPerBarOf,
+  clipContentOwnerId,
+  resolveClipContent,
+} from '@cts/project-model';
 import {
   analyzeChord,
   parseChord,
@@ -37,7 +45,10 @@ import { getScalePitchClasses } from '@cts/theory-engine';
 import { useStore } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
-import { quantizeStart } from '../features/pianoRoll/gridMath';
+import {
+  quantizeStart,
+  snapPitchToPitchClasses,
+} from '../features/pianoRoll/gridMath';
 import {
   createDefaultEffectConfig,
   isInsertEffectType,
@@ -83,9 +94,11 @@ function mapTracks(project: Project, fn: (t: Track) => Track): Project {
 }
 
 function mapClip(project: Project, clipId: string, fn: (c: Clip) => Clip): Project {
+  const ownerId = clipContentOwnerId(project, clipId);
+  if (!ownerId) return project;
   return mapTracks(project, (t) => ({
     ...t,
-    clips: t.clips.map((c) => (c.id === clipId ? fn(c) : c)),
+    clips: t.clips.map((c) => (c.id === ownerId ? fn(c) : c)),
   }));
 }
 
@@ -96,25 +109,28 @@ function mapClip(project: Project, clipId: string, fn: (c: Clip) => Clip): Proje
 /** Add a filter/delay/reverb insert effect to a non-master track. */
 export function addTrackEffect(trackId: string, type: InsertEffectType): string | null {
   if (!isInsertEffectType(type)) return null;
+  const target = useStore.getState().project.tracks.find(
+    (track) => track.id === trackId && track.type !== 'master',
+  );
+  if (!target) return null;
   const id = uid('fx');
   const effect = createDefaultEffectConfig(type, id);
-  let added = false;
-  let trackName = '';
-  useStore.getState().applyProjectChange((project) =>
+  const committed = useStore.getState().applyProjectChange((project) =>
     mapTracks(project, (track) => {
       if (track.id !== trackId || track.type === 'master') return track;
-      added = true;
-      trackName = track.name;
       return { ...track, effects: [...track.effects, effect] };
     }),
   );
-  if (added) {
-    publishAppEvent({
-      type: 'effect.added',
-      payload: { trackId, trackName, effectType: type },
-    });
-  }
-  return added ? id : null;
+  if (!committed) return null;
+  const adoptedTrack = useStore.getState().project.tracks.find(
+    (track) => track.id === trackId && track.effects.some((candidate) => candidate.id === id),
+  );
+  if (!adoptedTrack) return null;
+  publishAppEvent({
+    type: 'effect.added',
+    payload: { trackId, trackName: adoptedTrack.name, effectType: type },
+  });
+  return id;
 }
 
 /** Remove one insert effect from a track. */
@@ -156,7 +172,7 @@ export function findClip(project: Project, clipId: string | null): Clip | null {
   if (!clipId) return null;
   for (const track of project.tracks) {
     const clip = track.clips.find((c) => c.id === clipId);
-    if (clip) return clip;
+    if (clip) return resolveClipContent(project, clip);
   }
   return null;
 }
@@ -171,7 +187,8 @@ export function findTrackByName(project: Project, name: string): Track | null {
 export function firstMidiClipOfTrack(project: Project, name: string): Clip | null {
   const track = findTrackByName(project, name);
   if (!track) return null;
-  return track.clips.find((c) => c.type === 'midi') ?? track.clips[0] ?? null;
+  const instance = track.clips.find((c) => c.type === 'midi') ?? track.clips[0];
+  return instance ? resolveClipContent(project, instance) : null;
 }
 
 /** Beats per bar for the project's time signature. */
@@ -291,9 +308,15 @@ export function appendChordAfterLast(symbol: string): void {
     const last = sorted[sorted.length - 1];
     const bpb = projectBeatsPerBar(project);
     const startBeat = last ? last.startBeat + last.durationBeats : 0;
+    const requiredLengthBars = Math.ceil((startBeat + bpb) / bpb);
+    if (requiredLengthBars > MAX_PROJECT_LENGTH_BARS) return project;
     const event = buildChordEvent(project, symbol, startBeat, bpb);
     captured.push({ project, event });
-    return { ...project, chordTrack: [...project.chordTrack, event] };
+    return {
+      ...project,
+      lengthBars: Math.max(project.lengthBars, requiredLengthBars),
+      chordTrack: [...project.chordTrack, event],
+    };
   });
   const first = captured[0];
   if (first) emitChordAdded(first.project, first.event);
@@ -336,51 +359,246 @@ export function applyProgressionTemplate(templateId: string): void {
 // Note edits (piano roll).
 // ---------------------------------------------------------------------------
 
-/** Quantize the start of the given notes (within a clip) to a grid snap. */
-export function quantizeNotes(clipId: string, noteIds: readonly string[], snap: number): void {
-  const ids = new Set(noteIds);
-  useStore.getState().applyProjectChange((project) =>
-    mapClip(project, clipId, (c) => ({
-      ...c,
-      notes: (c.notes ?? []).map((n) =>
-        ids.has(n.id) ? { ...n, startBeat: quantizeStart(n.startBeat, snap) } : n,
-      ),
+export type NoteUpdatePatch = Readonly<
+  Partial<Pick<NoteEvent, 'pitch' | 'startBeat' | 'durationBeats' | 'velocity'>>
+>;
+
+export type NoteUpdate = Readonly<{
+  id: string;
+  patch: NoteUpdatePatch;
+}>;
+
+export type NoteDuplicatePlacement = Readonly<{
+  sourceId: string;
+  startBeat: number;
+  pitch: number;
+}>;
+
+function noteValuesEqual(left: NoteEvent, right: NoteEvent): boolean {
+  return (
+    left.pitch === right.pitch &&
+    left.startBeat === right.startBeat &&
+    left.durationBeats === right.durationBeats &&
+    left.velocity === right.velocity
+  );
+}
+
+function isValidNoteForClip(note: NoteEvent, clip: Clip): boolean {
+  return (
+    clip.type === 'midi' &&
+    Number.isInteger(note.pitch) &&
+    note.pitch >= 0 &&
+    note.pitch <= 127 &&
+    Number.isFinite(note.startBeat) &&
+    note.startBeat >= 0 &&
+    Number.isFinite(note.durationBeats) &&
+    note.durationBeats >= MIN_EVENT_DURATION_BEATS &&
+    note.durationBeats <= MAX_PROJECT_TIMELINE_BEATS &&
+    note.startBeat + note.durationBeats <= clip.lengthBeats &&
+    Number.isInteger(note.velocity) &&
+    note.velocity >= 1 &&
+    note.velocity <= 127
+  );
+}
+
+/**
+ * Commit the final values from one piano-roll gesture as one transaction.
+ *
+ * Duplicate ids, missing notes, or any invalid candidate reject the whole
+ * batch. No-op entries are ignored; if every entry is a no-op there is no
+ * history/revision/save write. Returns only notes that were actually changed.
+ */
+export function commitNoteUpdates(
+  clipId: string,
+  updates: readonly NoteUpdate[],
+): NoteEvent[] {
+  if (updates.length === 0) return [];
+
+  const state = useStore.getState();
+  const track = state.project.tracks.find((candidate) =>
+    candidate.clips.some((clip) => clip.id === clipId),
+  );
+  const clip = findClip(state.project, clipId);
+  if (!track || !clip || clip.type !== 'midi') return [];
+
+  const currentById = new Map((clip.notes ?? []).map((note) => [note.id, note]));
+  const seen = new Set<string>();
+  const changed: Array<{ before: NoteEvent; after: NoteEvent }> = [];
+
+  for (const update of updates) {
+    if (seen.has(update.id)) return [];
+    seen.add(update.id);
+
+    const current = currentById.get(update.id);
+    if (!current) return [];
+    const candidate: NoteEvent = {
+      id: current.id,
+      pitch: update.patch.pitch ?? current.pitch,
+      startBeat: update.patch.startBeat ?? current.startBeat,
+      durationBeats: update.patch.durationBeats ?? current.durationBeats,
+      velocity: update.patch.velocity ?? current.velocity,
+    };
+    if (!isValidNoteForClip(candidate, clip)) return [];
+    if (!noteValuesEqual(current, candidate)) {
+      changed.push({ before: current, after: candidate });
+    }
+  }
+
+  if (changed.length === 0) return [];
+  const changedById = new Map(changed.map(({ after }) => [after.id, after]));
+  const committed = state.applyProjectChange((project) =>
+    mapClip(project, clipId, (candidate) => ({
+      ...candidate,
+      notes: (candidate.notes ?? []).map((note) => changedById.get(note.id) ?? note),
     })),
+  );
+  if (!committed) return [];
+
+  const committedProject = useStore.getState().project;
+  const committedClip = findClip(committedProject, clipId);
+  const committedById = new Map((committedClip?.notes ?? []).map((note) => [note.id, note]));
+  const committedNotes = changed
+    .map(({ after }) => committedById.get(after.id))
+    .filter((note): note is NoteEvent => note !== undefined);
+
+  for (const { before, after } of changed) {
+    if (before.pitch === after.pitch && before.startBeat === after.startBeat) continue;
+    const committedNote = committedById.get(after.id);
+    if (!committedNote) continue;
+    publishAppEvent({
+      type: 'note.moved',
+      payload: {
+        pitch: committedNote.pitch,
+        startBeat: committedNote.startBeat,
+        trackId: track.id,
+        trackName: track.name,
+      },
+    });
+  }
+  return committedNotes;
+}
+
+/**
+ * Duplicate notes at their final gesture positions in one transaction.
+ * IDs are allocated only after every source and placement has been validated.
+ */
+export function duplicateNotesAt(
+  clipId: string,
+  placements: readonly NoteDuplicatePlacement[],
+): NoteEvent[] {
+  if (placements.length === 0) return [];
+
+  const state = useStore.getState();
+  const clip = findClip(state.project, clipId);
+  if (!clip || clip.type !== 'midi') return [];
+  if ((clip.notes?.length ?? 0) + placements.length > MAX_EVENTS_PER_CLIP) return [];
+
+  const sourceById = new Map((clip.notes ?? []).map((note) => [note.id, note]));
+  const seen = new Set<string>();
+  const validated: Array<Omit<NoteEvent, 'id'>> = [];
+  for (const placement of placements) {
+    if (seen.has(placement.sourceId)) return [];
+    seen.add(placement.sourceId);
+
+    const source = sourceById.get(placement.sourceId);
+    if (!source) return [];
+    const candidate: NoteEvent = {
+      id: source.id,
+      pitch: placement.pitch,
+      startBeat: placement.startBeat,
+      durationBeats: source.durationBeats,
+      velocity: source.velocity,
+    };
+    if (!isValidNoteForClip(candidate, clip)) return [];
+    validated.push({
+      pitch: candidate.pitch,
+      startBeat: candidate.startBeat,
+      durationBeats: candidate.durationBeats,
+      velocity: candidate.velocity,
+    });
+  }
+
+  const duplicates: NoteEvent[] = validated.map((note) => ({ ...note, id: uid('note') }));
+  const committed = state.applyProjectChange((project) =>
+    mapClip(project, clipId, (candidate) => ({
+      ...candidate,
+      notes: [...(candidate.notes ?? []), ...duplicates],
+    })),
+  );
+  if (!committed) return [];
+
+  const committedProject = useStore.getState().project;
+  const committedClip = findClip(committedProject, clipId);
+  const committedById = new Map((committedClip?.notes ?? []).map((note) => [note.id, note]));
+  const committedDuplicates = duplicates
+    .map((note) => committedById.get(note.id))
+    .filter((note): note is NoteEvent => note !== undefined);
+  emitNotesAdded(clipId, { project: committedProject, dupes: committedDuplicates });
+  return committedDuplicates;
+}
+
+/** Quantize the start of the given notes (within a clip) to a grid snap. */
+export function quantizeNotes(
+  clipId: string,
+  noteIds: readonly string[],
+  snap: number,
+): NoteEvent[] {
+  const ids = new Set(noteIds);
+  const state = useStore.getState();
+  const clip = findClip(state.project, clipId);
+  if (!clip || clip.type !== 'midi') return [];
+  const quantizedStart = (note: NoteEvent): number => {
+    const maximumStart = Math.max(0, clip.lengthBeats - note.durationBeats);
+    const nearest = quantizeStart(note.startBeat, snap);
+    if (nearest <= maximumStart || snap <= 0) return Math.min(nearest, maximumStart);
+    // The nearest grid line can lie beyond the clip for a long final note.
+    // Prefer the latest valid grid line to rejecting the user's whole batch.
+    const latestGrid = Math.floor((maximumStart + snap * 1e-9) / snap) * snap;
+    return Math.max(0, Math.min(maximumStart, latestGrid));
+  };
+  return commitNoteUpdates(
+    clipId,
+    (clip.notes ?? [])
+      .filter((note) => ids.has(note.id))
+      .map((note) => ({
+        id: note.id,
+        patch: { startBeat: quantizedStart(note) },
+      })),
   );
 }
 
 /**
  * Duplicate the given notes within a clip, offset by `offsetBeats`.
- * Returns the new note ids (so callers can re-select the duplicates).
+ * Returns only the committed copies so callers can select and drag their
+ * final pitch/position. Rejected candidates return an empty array.
  */
 export function duplicateNotes(
   clipId: string,
   noteIds: readonly string[],
   offsetBeats: number,
-): string[] {
+): NoteEvent[] {
   const ids = new Set(noteIds);
-  const newIds: string[] = [];
-  const dupesByCall: { project: Project; dupes: NoteEvent[] }[] = [];
-  useStore.getState().applyProjectChange((project) =>
-    mapClip(project, clipId, (c) => {
-      const source = (c.notes ?? []).filter((n) => ids.has(n.id));
-      const dupes: NoteEvent[] = source.map((n) => {
-        const id = uid('note');
-        newIds.push(id);
-        return {
-          id,
-          pitch: n.pitch,
-          startBeat: Math.max(0, n.startBeat + offsetBeats),
-          durationBeats: n.durationBeats,
-          velocity: n.velocity,
-        };
-      });
-      dupesByCall.push({ project, dupes });
-      return { ...c, notes: [...(c.notes ?? []), ...dupes] };
-    }),
-  );
-  emitNotesAdded(clipId, dupesByCall[0]);
-  return newIds;
+  const state = useStore.getState();
+  const sourceClip = findClip(state.project, clipId);
+  const source = (sourceClip?.notes ?? []).filter((note) => ids.has(note.id));
+  if (source.length === 0) return [];
+
+  let scalePcs: ReadonlySet<number> = new Set();
+  if (state.editor.scaleSnap) {
+    try {
+      scalePcs = new Set(getScalePitchClasses(state.project.key, state.project.scale));
+    } catch {
+      scalePcs = new Set();
+    }
+  }
+  const placements: NoteDuplicatePlacement[] = source.map((note) => ({
+    sourceId: note.id,
+    pitch: state.editor.scaleSnap
+      ? snapPitchToPitchClasses(note.pitch, scalePcs)
+      : note.pitch,
+    startBeat: Math.max(0, note.startBeat + offsetBeats),
+  }));
+  return duplicateNotesAt(clipId, placements);
 }
 
 /** Emit a note.added event per note for a clip-targeted batch write. */
@@ -413,10 +631,20 @@ export function setNoteVelocity(
 ): void {
   const v = Math.max(1, Math.min(127, Math.round(velocity)));
   const ids = new Set(noteIds);
-  useStore.getState().applyProjectChange((project) =>
+  const state = useStore.getState();
+  const clip = findClip(state.project, clipId);
+  const changedIds = new Set(
+    (clip?.notes ?? [])
+      .filter((note) => ids.has(note.id) && note.velocity !== v)
+      .map((note) => note.id),
+  );
+  if (changedIds.size === 0) return;
+  state.applyProjectChange((project) =>
     mapClip(project, clipId, (c) => ({
       ...c,
-      notes: (c.notes ?? []).map((n) => (ids.has(n.id) ? { ...n, velocity: v } : n)),
+      notes: (c.notes ?? []).map((n) =>
+        changedIds.has(n.id) ? { ...n, velocity: v } : n,
+      ),
     })),
   );
 }
@@ -424,7 +652,10 @@ export function setNoteVelocity(
 /** Remove the given notes from a clip. */
 export function removeNotes(clipId: string, noteIds: readonly string[]): void {
   const ids = new Set(noteIds);
-  useStore.getState().applyProjectChange((project) =>
+  const state = useStore.getState();
+  const clip = findClip(state.project, clipId);
+  if (!(clip?.notes ?? []).some((note) => ids.has(note.id))) return;
+  state.applyProjectChange((project) =>
     mapClip(project, clipId, (c) => ({
       ...c,
       notes: (c.notes ?? []).filter((n) => !ids.has(n.id)),
@@ -432,9 +663,12 @@ export function removeNotes(clipId: string, noteIds: readonly string[]): void {
   );
 }
 
-/** Replace ALL notes of a clip with the provided ones. */
-export function replaceClipNotes(clipId: string, notes: NoteEvent[]): void {
-  useStore.getState().applyProjectChange((project) =>
+/** Replace ALL notes of a clip. False means the candidate was not adopted. */
+export function replaceClipNotes(clipId: string, notes: NoteEvent[]): boolean {
+  const state = useStore.getState();
+  const clip = findClip(state.project, clipId);
+  if (!clip || clip.type !== 'midi') return false;
+  return state.applyProjectChange((project) =>
     mapClip(project, clipId, (c) => ({ ...c, notes })),
   );
 }
@@ -463,9 +697,13 @@ export function chordTrackInputs(project: Project): ChordEventInput[] {
 
 /**
  * Generate a bass line from the chord track and write it into the given clip,
- * replacing its notes. Returns the per-note reasons for UI display.
+ * replacing its notes. Returns the per-note reasons only after a committed
+ * write; null means the candidate was rejected.
  */
-export function generateBassIntoClip(clipId: string, mode: BassMode): GeneratedNote[] {
+export function generateBassIntoClip(
+  clipId: string,
+  mode: BassMode,
+): GeneratedNote[] | null {
   const project = useStore.getState().project;
   const chords = chordTrackInputs(project);
   const generated = generateBassLine(chords, {
@@ -475,17 +713,27 @@ export function generateBassIntoClip(clipId: string, mode: BassMode): GeneratedN
     beatsPerBar: projectBeatsPerBar(project),
   });
   const events = generatedToNoteEvents(generated);
-  replaceClipNotes(clipId, events);
-  emitNotesAdded(clipId, { project: useStore.getState().project, dupes: events });
+  if (!replaceClipNotes(clipId, events)) return null;
+  const committedProject = useStore.getState().project;
+  const committedClip = findClip(committedProject, clipId);
+  const committedById = new Map((committedClip?.notes ?? []).map((note) => [note.id, note]));
+  const committedEvents = events
+    .map((note) => committedById.get(note.id))
+    .filter((note): note is NoteEvent => note !== undefined);
+  emitNotesAdded(clipId, { project: committedProject, dupes: committedEvents });
   return generated;
 }
 
 /**
  * Generate a scale melody from the chord track and write it into the given
  * clip, replacing its notes. The seed makes repeat clicks vary deterministically
- * when the caller passes an incrementing seed. Returns the generated notes.
+ * when the caller passes an incrementing seed. Returns the generated notes
+ * only after a committed write; null means the candidate was rejected.
  */
-export function generateMelodyIntoClip(clipId: string, seed: number): GeneratedNote[] {
+export function generateMelodyIntoClip(
+  clipId: string,
+  seed: number,
+): GeneratedNote[] | null {
   const project = useStore.getState().project;
   const chords = chordTrackInputs(project);
   const generated = generateScaleMelody({
@@ -496,8 +744,14 @@ export function generateMelodyIntoClip(clipId: string, seed: number): GeneratedN
     beatsPerBar: projectBeatsPerBar(project),
   });
   const events = generatedToNoteEvents(generated);
-  replaceClipNotes(clipId, events);
-  emitNotesAdded(clipId, { project: useStore.getState().project, dupes: events });
+  if (!replaceClipNotes(clipId, events)) return null;
+  const committedProject = useStore.getState().project;
+  const committedClip = findClip(committedProject, clipId);
+  const committedById = new Map((committedClip?.notes ?? []).map((note) => [note.id, note]));
+  const committedEvents = events
+    .map((note) => committedById.get(note.id))
+    .filter((note): note is NoteEvent => note !== undefined);
+  emitNotesAdded(clipId, { project: committedProject, dupes: committedEvents });
   return generated;
 }
 
@@ -578,10 +832,13 @@ export const DRUM_PATTERNS: DrumPattern[] = [
  * Apply a drum pattern to a drum clip, replacing its events. The pattern's
  * one-bar step map is tiled across every bar the clip spans.
  */
-export function applyDrumPattern(clipId: string, patternId: DrumPatternId): void {
+export function applyDrumPattern(clipId: string, patternId: DrumPatternId): boolean {
   const pattern = DRUM_PATTERNS.find((p) => p.id === patternId);
-  if (!pattern) return;
-  useStore.getState().applyProjectChange((project) => {
+  if (!pattern) return false;
+  const state = useStore.getState();
+  const clip = findClip(state.project, clipId);
+  if (!clip || clip.type !== 'drum') return false;
+  return state.applyProjectChange((project) => {
     const bpb = projectBeatsPerBar(project);
     return mapClip(project, clipId, (clip) => {
       const stepsPerBar = clip.stepsPerBar ?? 16;
@@ -614,8 +871,21 @@ export function setDrumStepVelocity(
   lane: DrumLane,
   stepIndex: number,
   velocity: number,
-): void {
-  useStore.getState().applyProjectChange((project) =>
+): boolean {
+  const state = useStore.getState();
+  const clip = findClip(state.project, clipId);
+  if (!clip || clip.type !== 'drum') return false;
+  const existing = (clip.drumEvents ?? []).find(
+    (event) => event.lane === lane && event.stepIndex === stepIndex,
+  );
+  if ((velocity <= 0 && !existing) || (existing && velocity === existing.velocity)) {
+    return false;
+  }
+  const track = state.project.tracks.find((candidate) =>
+    candidate.clips.some((candidateClip) => candidateClip.id === clipId),
+  );
+  if (!track) return false;
+  const committed = state.applyProjectChange((project) =>
     mapClip(project, clipId, (clip) => {
       const events = clip.drumEvents ?? [];
       const existing = events.find((e) => e.lane === lane && e.stepIndex === stepIndex);
@@ -632,4 +902,10 @@ export function setDrumStepVelocity(
       return { ...clip, drumEvents: [...events, created] };
     }),
   );
+  if (!committed) return false;
+  publishAppEvent({
+    type: 'drum.stepToggled',
+    payload: { lane, stepIndex, active: velocity > 0, trackId: track.id },
+  });
+  return true;
 }

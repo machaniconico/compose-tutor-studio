@@ -4,14 +4,35 @@
   "version": "0.1.0",
   "description": "Education-integrated composition app: learn chords, scales, and song structure while making an 8-16 bar original song.",
   "scripts": {
-    "dev": "pnpm --filter @cts/studio dev",
+    "dev": "pnpm --dir apps/studio dev",
+    "dev:desktop": "pnpm --dir apps/desktop dev",
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "desktop:check": "pnpm --dir apps/desktop check:rust",
+    "desktop:test": "pnpm --dir apps/desktop test:rust",
+    "desktop:lint": "pnpm --dir apps/desktop lint:rust",
+    "desktop:typecheck:native": "pnpm --dir apps/desktop typecheck:native",
+    "desktop:test:size": "pnpm --dir apps/desktop test:size",
+    "desktop:test:release-policy": "pnpm --dir apps/desktop test:release-policy",
+    "desktop:size:check": "pnpm --dir apps/desktop size:check",
+    "desktop:e2e:native": "pnpm --dir apps/desktop e2e:native",
+    "desktop:build:smoke": "pnpm --dir apps/desktop build:smoke",
+    "desktop:build:bundle": "pnpm --dir apps/desktop build:bundle",
+    "e2e": "pnpm --dir apps/studio e2e",
+    "test": "pnpm --workspace-concurrency=2 -r test --maxWorkers=2",
+    "typecheck": "pnpm --workspace-concurrency=2 -r typecheck",
+    "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm e2e",
+    "verify:desktop": "pnpm desktop:lint && pnpm desktop:test && pnpm desktop:typecheck:native && pnpm desktop:test:size && pnpm desktop:test:release-policy && pnpm desktop:e2e:native && pnpm desktop:build:smoke && pnpm desktop:size:check"
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@wdio/native-utils": "2.5.0",
+      "esbuild": "0.28.1",
+      "serialize-javascript": "7.0.7"
+    }
   }
 }

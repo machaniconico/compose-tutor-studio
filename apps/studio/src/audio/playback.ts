@@ -1,270 +1,650 @@
 // Store <-> audio engine bridge.
 //
-// Design (documented): the Zustand store stays fully decoupled from the audio
-// layer — it never imports anything under src/audio. Instead the transport UI
-// calls `initAudioBridge()` once on mount, which subscribes to the store and
-// drives the engine in response to state changes:
-//
-//   transport.isPlaying  false->true  => startPlayback()
-//                        true ->false  => stopAudio()
-//   project / mixer changes            => live volume/pan/mute/solo update
-//
-// The bridge writes transport.positionBeat back to the store ~30fps while
-// playing so the playhead UI tracks the audio clock. The store owns play/stop
-// *intent* and the position semantics (see store.stop(reset?)); this bridge owns
-// the actual audio lifecycle.
+// The store owns transport intent and acknowledges an actual start only after
+// this bridge has a running AudioContext and a live scheduler. Every async start
+// carries a monotonically increasing request id; late work is disposed instead
+// of being allowed to attach itself to a newer play request.
 
+import {
+  beatsPerBar as beatsPerBarForTimeSignature,
+  MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
+  RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
+  ScheduleEventLimitError,
+  type Project,
+  type Track,
+} from '@cts/project-model';
 import { useStore } from '../state/store';
+import { createNoiseBuffer, DrumVoiceManager } from './drums';
 import { getAudioEngine } from './engine';
 import { buildScheduleEvents, type SchedulePayload } from './events';
-import { applyMixState, buildTrackGraphs, type TrackGraph } from './graph';
+import {
+  applyMixState,
+  buildTrackGraphs,
+  computeAudibleTracks,
+  type TrackGraph,
+} from './graph';
+import { applyMasterMix } from './mixState';
+import {
+  metronomeBeatEvents,
+  scheduleMetronomeClick,
+  type ScheduledMetronomeClick,
+} from './metronome';
+import {
+  PlaybackController,
+  type PlaybackSession,
+  type PlaybackSessionHandlers,
+} from './playbackController';
 import {
   beatToTime,
+  createScheduleEventIndex,
+  preflightLoopScheduleDensity,
   projectLengthBeats,
+  resolveDrumOccurrence,
   Scheduler,
   secondsPerBeat,
   type DueEvent,
   type LoopRegion,
   type ScheduledEvent,
 } from './scheduler';
-import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
-import { metronomeBeatEvents, scheduleMetronomeClick } from './metronome';
+import {
+  DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
+  FINAL_TAIL_FADE_SECONDS,
+  planAudioTail,
+} from './tail';
 
 /** Position update rate while playing (ms ~= 30fps). */
 const POSITION_TICK_MS = 33;
 
-/** Mutable bridge state held at module scope (singleton, like the engine). */
-type BridgeState = {
-  scheduler: Scheduler | null;
+type RuntimeSession = PlaybackSession & {
+  requestId: number;
+  scheduler: Scheduler;
+  master: GainNode;
   graphs: Map<string, TrackGraph>;
   synths: Map<string, SynthVoiceManager>;
   drums: Map<string, DrumVoiceManager>;
-  /** Metronome clicks already scheduled up to this beat (exclusive). */
+  metronomeClicks: Set<ScheduledMetronomeClick>;
   metronomeBeatFrontier: number;
-  metronomeOn: boolean;
-  beatsPerBar: number;
-  bpm: number;
-  anchorBeat: number;
-  anchorTime: number;
-  loop: LoopRegion | null;
+  readonly metronomeOn: boolean;
+  readonly beatsPerBar: number;
+  readonly bpm: number;
+  readonly anchorBeat: number;
+  readonly anchorTime: number;
+  readonly loop: LoopRegion | null;
+  readonly lengthBeats: number;
+  readonly projectSnapshot: Project;
+  readonly scheduleEvents: readonly ScheduledEvent[];
+  readonly everAudibleTrackIds: Set<string>;
   positionTimer: ReturnType<typeof setInterval> | null;
-  /** Unsubscribe handles. */
+};
+
+type NaturalDrainControls = Readonly<{
+  scheduler: Pick<Scheduler, 'stop'>;
+  output: GainNode;
+  now: () => number;
+  projectEndTime: number;
+  tailSeconds: number;
+  postLimiterTailSeconds: number;
+  stopPositionUpdates: () => void;
+  cancelMetronomeClicks: () => void;
+  onComplete: () => void;
+}>;
+
+type BridgeState = {
+  controller: PlaybackController<RuntimeSession> | null;
   unsub: Array<() => void>;
   installed: boolean;
 };
 
-const state: BridgeState = {
-  scheduler: null,
-  graphs: new Map(),
-  synths: new Map(),
-  drums: new Map(),
-  metronomeBeatFrontier: 0,
-  metronomeOn: false,
-  beatsPerBar: 4,
-  bpm: 120,
-  anchorBeat: 0,
-  anchorTime: 0,
-  loop: null,
-  positionTimer: null,
+const bridge: BridgeState = {
+  controller: null,
   unsub: [],
   installed: false,
 };
 
+class CancelledPlaybackRequest extends Error {
+  constructor() {
+    super('Playback request was superseded before audio startup completed.');
+    this.name = 'CancelledPlaybackRequest';
+  }
+}
+
+/**
+ * Resolve persisted transport loop state into a scheduler-safe region.
+ * Invalid enabled bounds intentionally recover to the whole song so the loop
+ * control remains useful even for older projects that stored the 0..0 default.
+ */
+export function normalizeTransportLoop(
+  enabled: boolean,
+  startBeat: number,
+  endBeat: number,
+  projectLength: number,
+): LoopRegion | null {
+  if (!enabled || !Number.isFinite(projectLength) || projectLength <= 0) {
+    return null;
+  }
+  if (!Number.isFinite(startBeat) || !Number.isFinite(endBeat)) {
+    return { startBeat: 0, endBeat: projectLength };
+  }
+
+  const safeStart = Math.min(projectLength, Math.max(0, startBeat));
+  const safeEnd = Math.min(projectLength, Math.max(0, endBeat));
+  return safeEnd > safeStart
+    ? { startBeat: safeStart, endBeat: safeEnd }
+    : { startBeat: 0, endBeat: projectLength };
+}
+
+/**
+ * Build the live-session tail plan from its immutable schedule snapshot.
+ *
+ * Effects may be edited while the session is active, so effects from the latest
+ * matching track id are merged in. Audibility is conservative: once a track has
+ * fed the live graph, muting it at the boundary must not erase delay/reverb
+ * energy that is already circulating through that graph.
+ */
+export function planRuntimeAudioTail(
+  projectSnapshot: Project,
+  latestTracks: readonly Track[],
+  rawEvents: readonly ScheduledEvent[],
+  startBeat: number,
+  endBeat: number,
+  everAudibleTrackIds: ReadonlySet<string>,
+  sampleRate: number = DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
+): ReturnType<typeof planAudioTail> {
+  const latestById = new Map(latestTracks.map((track) => [track.id, track]));
+  const planningTracks = projectSnapshot.tracks.map((snapshotTrack) => {
+    const latestTrack = latestById.get(snapshotTrack.id);
+    const effects = latestTrack?.effects ?? snapshotTrack.effects;
+    if (snapshotTrack.type === 'master') {
+      return { ...snapshotTrack, effects };
+    }
+    return {
+      ...snapshotTrack,
+      effects,
+      mute: !everAudibleTrackIds.has(snapshotTrack.id),
+      solo: false,
+    };
+  });
+  const planningProject: Project = {
+    ...projectSnapshot,
+    tracks: planningTracks,
+  };
+  const resolvedEvents = rawEvents.flatMap((event) => {
+    const resolved = resolveDrumOccurrence(event, event.beat);
+    return resolved ? [resolved] : [];
+  });
+
+  return planAudioTail(
+    planningProject,
+    resolvedEvents,
+    startBeat,
+    endBeat,
+    sampleRate,
+  );
+}
+
+/**
+ * Stop transport-owned controls and leave the audio graph connected until its
+ * absolute tail deadline. The returned cancellation is used by manual stop,
+ * supersession, context interruption, and bridge disposal.
+ */
+export function beginRuntimeNaturalDrain(controls: NaturalDrainControls): () => void {
+  controls.scheduler.stop();
+  controls.stopPositionUpdates();
+  controls.cancelMetronomeClicks();
+
+  const now = controls.now();
+  const safeTailSeconds = Number.isFinite(controls.tailSeconds)
+    ? Math.max(0, controls.tailSeconds)
+    : 0;
+  const cleanupDeadline = controls.projectEndTime + safeTailSeconds;
+  const safePostLimiterTailSeconds = Number.isFinite(controls.postLimiterTailSeconds)
+    ? Math.min(safeTailSeconds, Math.max(0, controls.postLimiterTailSeconds))
+    : 0;
+  const fadeEndTime = cleanupDeadline - safePostLimiterTailSeconds;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
+
+  const complete = (): void => {
+    if (settled) return;
+    settled = true;
+    timer = null;
+    controls.onComplete();
+  };
+
+  if (!Number.isFinite(now) || !Number.isFinite(cleanupDeadline) || cleanupDeadline <= now) {
+    complete();
+    return () => {
+      settled = true;
+    };
+  }
+
+  if (safeTailSeconds > 0) {
+    const fadeStartTime = Math.max(now, fadeEndTime - FINAL_TAIL_FADE_SECONDS);
+    const fadeFromValue = Number.isFinite(controls.output.gain.value)
+      ? controls.output.gain.value
+      : 1;
+    controls.output.gain.cancelScheduledValues(fadeStartTime);
+    if (fadeEndTime <= fadeStartTime) {
+      controls.output.gain.setValueAtTime(0, fadeStartTime);
+    } else {
+      controls.output.gain.setValueAtTime(fadeFromValue, fadeStartTime);
+      controls.output.gain.linearRampToValueAtTime(0, fadeEndTime);
+    }
+  }
+
+  timer = setTimeout(
+    complete,
+    Math.ceil((cleanupDeadline - now) * 1_000),
+  );
+  return () => {
+    if (settled) return;
+    settled = true;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+}
+
+/** Cancel a finished/cancelled drain's master automation before reusing the engine. */
+export function restoreRuntimeMaster(
+  master: GainNode,
+  tracks: readonly Track[],
+  when: number,
+): void {
+  applyMasterMix(master, tracks, when, 'immediate');
+}
+
 /**
  * Install the store subscriptions. Idempotent — safe to call from multiple
- * component mounts. Returns a teardown function.
+ * component mounts. Returns a teardown function owned by the first caller.
  */
 export function initAudioBridge(): () => void {
-  if (state.installed) {
+  if (bridge.installed) {
     return () => {
       /* already installed; teardown is owned by the first caller */
     };
   }
-  state.installed = true;
+  bridge.installed = true;
 
-  // React to play/stop intent.
-  const unsubPlaying = useStore.subscribe((s, prev) => {
-    if (s.transport.isPlaying === prev.transport.isPlaying) return;
-    if (s.transport.isPlaying) {
-      void startPlayback();
-    } else {
-      stopAudio();
+  const controller = new PlaybackController<RuntimeSession>({
+    getRequestState: () => {
+      const { transport } = useStore.getState();
+      return {
+        phase: transport.phase,
+        requestId: transport.playbackRequestId,
+      };
+    },
+    createSession: (requestId, handlers, isCurrent) =>
+      createRuntimeSession(requestId, handlers, isCurrent),
+    confirmStarted: (requestId) => useStore.getState().confirmPlaybackStarted(requestId),
+    failStart: (requestId, error) => useStore.getState().failPlaybackStart(
+      requestId,
+      error instanceof ScheduleEventLimitError ? 'event-limit-exceeded' : 'start-failed',
+    ),
+    finish: (requestId) => useStore.getState().finishPlayback(requestId),
+    interrupt: (requestId) => useStore.getState().interruptPlayback(requestId),
+  });
+  bridge.controller = controller;
+
+  // React to transport intent. Invoking requestStart synchronously is important:
+  // AudioContext construction stays inside the originating click/key gesture.
+  const unsubTransport = useStore.subscribe((next, previous) => {
+    const current = next.transport;
+    const prior = previous.transport;
+    if (
+      current.phase === prior.phase &&
+      current.playbackRequestId === prior.playbackRequestId
+    ) {
+      return;
     }
+    controller.reconcile({
+      phase: current.phase,
+      requestId: current.playbackRequestId,
+    });
   });
 
-  // React to project / mixer changes for live mix updates while playing.
-  const unsubProject = useStore.subscribe((s, prev) => {
-    if (s.project === prev.project) return;
-    if (!state.scheduler?.isRunning) return;
-    const engine = getAudioEngine();
-    applyMixState(state.graphs, s.project.tracks, engine.now());
+  // Apply mixer changes to the accepted session only. Notes, tempo and loop
+  // topology remain snapshots until the next playback request, as before.
+  const unsubProject = useStore.subscribe((next, previous) => {
+    if (next.project === previous.project) return;
+    const session = controller.activeSession;
+    if (!session?.scheduler.isRunning) return;
+    for (const trackId of computeAudibleTracks(next.project.tracks)) {
+      if (session.graphs.has(trackId)) session.everAudibleTrackIds.add(trackId);
+    }
+    const now = getAudioEngine().now();
+    applyMasterMix(session.master, next.project.tracks, now, 'smoothed');
+    applyMixState(session.graphs, next.project.tracks, now);
   });
 
-  state.unsub = [unsubPlaying, unsubProject];
+  bridge.unsub = [unsubTransport, unsubProject];
+  controller.reconcile();
 
   return () => {
-    for (const u of state.unsub) u();
-    state.unsub = [];
-    state.installed = false;
-    stopAudio();
+    for (const unsubscribe of bridge.unsub) unsubscribe();
+    bridge.unsub = [];
+    bridge.installed = false;
+    controller.dispose();
+    if (bridge.controller === controller) bridge.controller = null;
   };
 }
 
-/** Build (or rebuild) the per-track graph + voice managers for a render pass. */
-function buildVoices(
-  ctx: AudioContext,
-  master: GainNode,
-  tracks: ReturnType<typeof useStore.getState>['project']['tracks'],
-  when: number,
-): void {
-  // Tear down any prior graphs.
-  for (const g of state.graphs.values()) g.dispose();
-  state.graphs = buildTrackGraphs(ctx, master, tracks, when);
-  state.synths = new Map();
-  state.drums = new Map();
-  for (const track of tracks) {
-    const graph = state.graphs.get(track.id);
-    if (!graph) continue;
-    if (track.type === 'drum') {
-      state.drums.set(track.id, new DrumVoiceManager(ctx, graph.input));
-    } else if (track.type !== 'master') {
-      state.synths.set(
-        track.id,
-        new SynthVoiceManager(ctx, graph.input, track.instrument?.preset),
+/** Build and start one fully isolated render session. */
+async function createRuntimeSession(
+  requestId: number,
+  handlers: PlaybackSessionHandlers,
+  isCurrent: () => boolean,
+): Promise<RuntimeSession> {
+  const engine = getAudioEngine();
+  // ensureContext begins synchronously when this async function is invoked.
+  const { context, master } = await engine.ensureContext();
+  if (!isCurrent()) throw new CancelledPlaybackRequest();
+  if (String(context.state) !== 'running') {
+    throw new Error(`AudioContext did not enter the running state (${String(context.state)}).`);
+  }
+
+  const store = useStore.getState();
+  const project = store.project;
+  const transport = store.transport;
+  const beatsPerBar = beatsPerBarForTimeSignature(project.timeSignature);
+  const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
+  const loop = normalizeTransportLoop(
+    transport.loopEnabled,
+    transport.loopStartBeat,
+    transport.loopEndBeat,
+    lengthBeats,
+  );
+  const startBeat = transport.positionBeat;
+  const now = engine.now();
+  // Build and budget the immutable schedule before allocating per-track Web
+  // Audio graphs. Oversized linked projects fail closed at this boundary.
+  const scheduleEvents: readonly ScheduledEvent[] = buildScheduleEvents(project);
+  const scheduleIndex = createScheduleEventIndex(scheduleEvents, loop);
+  if (loop) {
+    const density = preflightLoopScheduleDensity(
+      scheduleIndex,
+      RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
+      MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
+    );
+    if (!density.ok) {
+      throw new ScheduleEventLimitError(
+        density.limit,
+        density.observed,
+        'density',
+        density.windowStartBeat,
       );
     }
   }
+
+  let graphs = new Map<string, TrackGraph>();
+  const synths = new Map<string, SynthVoiceManager>();
+  const drums = new Map<string, DrumVoiceManager>();
+  let session: RuntimeSession | null = null;
+  let unsubscribeContext = () => {};
+  let cancelNaturalDrainTimer = () => {};
+  let disposed = false;
+
+  const stopPositionUpdates = (): void => {
+    if (session?.positionTimer != null) {
+      clearInterval(session.positionTimer);
+      session.positionTimer = null;
+    }
+  };
+
+  const cancelMetronomeClicks = (): void => {
+    for (const click of session?.metronomeClicks ?? []) click.cancel();
+    session?.metronomeClicks.clear();
+  };
+
+  const disposeResources = (): void => {
+    if (disposed) return;
+    disposed = true;
+    cancelNaturalDrainTimer();
+    cancelNaturalDrainTimer = () => {};
+    unsubscribeContext();
+    unsubscribeContext = () => {};
+    stopPositionUpdates();
+    session?.scheduler.stop();
+    cancelMetronomeClicks();
+    for (const synth of synths.values()) {
+      try {
+        synth.dispose();
+      } catch {
+        // A closed output device must not prevent the remaining graph cleanup.
+      }
+    }
+    synths.clear();
+    for (const drum of drums.values()) {
+      try {
+        drum.dispose();
+      } catch {
+        // Dispose every scheduled drum even if one source is already stopped.
+      }
+    }
+    drums.clear();
+    for (const graph of graphs.values()) {
+      try {
+        graph.dispose();
+      } catch {
+        // Dispose every track even if one browser node was already disconnected.
+      }
+    }
+    graphs.clear();
+    try {
+      // Natural drain fades the shared master only while this generation owns
+      // it. Restore the current project value and cancel pending fade events so
+      // a later preview or replacement session never inherits silence.
+      restoreRuntimeMaster(master, useStore.getState().project.tracks, engine.now());
+    } catch {
+      // A closed context has no reusable output to restore.
+    }
+  };
+
+  try {
+    applyMasterMix(master, project.tracks, now, 'immediate');
+    graphs = buildTrackGraphs(context, master, project.tracks, now, 'live');
+    let sharedDrumNoise: AudioBuffer | undefined;
+    for (const track of project.tracks) {
+      const graph = graphs.get(track.id);
+      if (!graph) continue;
+      if (track.type === 'drum') {
+        sharedDrumNoise ??= createNoiseBuffer(context);
+        drums.set(
+          track.id,
+          new DrumVoiceManager(context, graph.input, sharedDrumNoise),
+        );
+      } else if (track.type !== 'master') {
+        synths.set(
+          track.id,
+          new SynthVoiceManager(context, graph.input, track.instrument?.preset),
+        );
+      }
+    }
+
+    if (!isCurrent()) throw new CancelledPlaybackRequest();
+
+    let startupAnchorTime: number | null = null;
+    const scheduler = new Scheduler({
+      clock: () => startupAnchorTime ?? engine.now(),
+      fire: (due) => {
+        if (session) fireEvents(session, due);
+      },
+      onScheduleWindow: (window) => {
+        if (session?.metronomeOn) {
+          scheduleMetronomeForWindow(
+            session,
+            window.startBeat,
+            window.endBeat,
+            context,
+            master,
+          );
+        }
+      },
+      onError: () => handlers.onInterrupted(),
+      ...(loop ? {} : { onEnd: handlers.onEnd }),
+    });
+
+    const anchorTime = engine.now();
+    const everAudibleTrackIds = computeAudibleTracks(project.tracks);
+    let naturalDrainStarted = false;
+
+    const beginNaturalDrain = (onComplete: () => void): void => {
+      if (naturalDrainStarted) return;
+      naturalDrainStarted = true;
+      if (!session || disposed) {
+        onComplete();
+        return;
+      }
+
+      const latestProject = useStore.getState().project;
+      const latestTracks = latestProject.id === project.id
+        ? latestProject.tracks
+        : project.tracks;
+      const tail = planRuntimeAudioTail(
+        project,
+        latestTracks,
+        scheduleEvents,
+        startBeat,
+        lengthBeats,
+        everAudibleTrackIds,
+        context.sampleRate,
+      );
+      const projectEndTime = beatToTime(
+        lengthBeats,
+        project.bpm,
+        startBeat,
+        anchorTime,
+      );
+      cancelNaturalDrainTimer = beginRuntimeNaturalDrain({
+        scheduler,
+        output: master,
+        now: () => engine.now(),
+        projectEndTime,
+        tailSeconds: tail.tailSeconds,
+        postLimiterTailSeconds: tail.postLimiterTailSeconds,
+        stopPositionUpdates,
+        cancelMetronomeClicks,
+        onComplete,
+      });
+    };
+
+    const runtimeSession: RuntimeSession = {
+      requestId,
+      scheduler,
+      master,
+      graphs,
+      synths,
+      drums,
+      metronomeClicks: new Set(),
+      metronomeBeatFrontier: startBeat,
+      metronomeOn: transport.metronome,
+      beatsPerBar,
+      bpm: project.bpm,
+      anchorBeat: startBeat,
+      anchorTime,
+      loop,
+      lengthBeats,
+      projectSnapshot: project,
+      scheduleEvents,
+      everAudibleTrackIds,
+      positionTimer: null,
+      ...(loop ? {} : { beginNaturalDrain }),
+      isReady: () =>
+        !disposed &&
+        scheduler.isRunning &&
+        engine.audioContext === context &&
+        String(context.state) === 'running',
+      dispose: disposeResources,
+    };
+    session = runtimeSession;
+
+    unsubscribeContext = engine.subscribeStateChange((contextState) => {
+      // Ignore notifications from a replacement context after this generation
+      // has lost ownership of the engine.
+      if (engine.audioContext === context && contextState !== 'running') {
+        handlers.onInterrupted();
+      }
+    });
+
+    const endBeat = loop ? Infinity : lengthBeats;
+    startupAnchorTime = anchorTime;
+    scheduler.startIndexed(scheduleIndex, project.bpm, startBeat, endBeat);
+    startupAnchorTime = null;
+    if (!scheduler.isRunning || String(context.state) !== 'running' || !isCurrent()) {
+      throw new CancelledPlaybackRequest();
+    }
+    startPositionLoop(runtimeSession);
+    return runtimeSession;
+  } catch (error) {
+    disposeResources();
+    throw error;
+  }
 }
 
-/** Start audio playback from the current transport position. */
-async function startPlayback(): Promise<void> {
-  const engine = getAudioEngine();
-  const { context, master } = await engine.ensureContext();
-
-  // The store could have been stopped again during the await.
-  const store = useStore.getState();
-  if (!store.transport.isPlaying) return;
-
-  const project = store.project;
-  const transport = store.transport;
-  const beatsPerBar = project.timeSignature[0] > 0 ? project.timeSignature[0] : 4;
-  const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
-
-  state.beatsPerBar = beatsPerBar;
-  state.bpm = project.bpm;
-  state.metronomeOn = transport.metronome;
-  state.loop =
-    transport.loopEnabled && transport.loopEndBeat > transport.loopStartBeat
-      ? { startBeat: transport.loopStartBeat, endBeat: transport.loopEndBeat }
-      : null;
-
-  const startBeat = transport.positionBeat;
-  const now = engine.now();
-  state.anchorBeat = startBeat;
-  state.anchorTime = now;
-  state.metronomeBeatFrontier = startBeat;
-
-  buildVoices(context, master, project.tracks, now);
-
-  const events: ScheduledEvent[] = buildScheduleEvents(project);
-  const endBeat = state.loop ? Infinity : lengthBeats;
-
-  const scheduler = new Scheduler({
-    clock: () => engine.now(),
-    fire: (due) => fireEvents(due, context, master),
-    onScheduleWindow: (window) => {
-      if (state.metronomeOn) {
-        scheduleMetronomeForWindow(window.startBeat, window.endBeat, context, master);
-      }
-    },
-    onEnd: () => {
-      // Stop at project end: pause then reset the store transport to the start.
-      const s = useStore.getState();
-      if (s.transport.isPlaying) {
-        s.stop(); // pause: keeps position
-        s.stop(); // second stop resets position to 0 (store semantics)
-      }
-    },
-  });
-  state.scheduler = scheduler;
-  scheduler.start(events, project.bpm, startBeat, state.loop, endBeat);
-
-  startPositionLoop();
-}
-
-/** Schedule a batch of due note/drum events (light work only). */
-function fireEvents(due: DueEvent[], ctx: AudioContext, master: GainNode): void {
-  const spb = secondsPerBeat(state.bpm);
-  for (const ev of due) {
-    const payload = ev.payload as SchedulePayload;
+/** Schedule a batch of due note/drum events for one generation only. */
+function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
+  const secondsPerProjectBeat = secondsPerBeat(session.bpm);
+  for (const event of due) {
+    const payload = event.payload as SchedulePayload;
     if (payload.kind === 'note') {
-      const synth = state.synths.get(payload.trackId);
-      if (synth) {
-        synth.noteOn(payload.pitch, ev.time, payload.durationBeats * spb, payload.velocity);
-      }
+      const synth = session.synths.get(payload.trackId);
+      synth?.noteOn(
+        payload.pitch,
+        event.time,
+        payload.durationBeats * secondsPerProjectBeat,
+        payload.velocity,
+      );
     } else {
-      const drum = state.drums.get(payload.trackId);
-      if (drum) {
-        drum.trigger(payload.lane, ev.time, payload.velocity);
-      }
+      session.drums
+        .get(payload.trackId)
+        ?.trigger(payload.lane, event.time, payload.velocity, payload.voiceSeed);
     }
   }
 }
 
-/**
- * Schedule metronome clicks for the raw scheduler lookahead window. This is
- * independent of note/drum due events so empty projects and silent tails still
- * click while transport is running.
- */
 function scheduleMetronomeForWindow(
+  session: RuntimeSession,
   windowStartBeat: number,
   windowEndBeat: number,
-  ctx: AudioContext,
+  context: AudioContext,
   master: GainNode,
 ): void {
   if (windowEndBeat <= windowStartBeat) return;
-  const horizonBeat = Math.max(windowEndBeat, state.metronomeBeatFrontier);
-  const clicks = metronomeBeatEvents(state.metronomeBeatFrontier, horizonBeat, state.beatsPerBar);
+  const scheduleStartBeat = Math.max(windowStartBeat, session.metronomeBeatFrontier);
+  const horizonBeat = Math.max(windowEndBeat, session.metronomeBeatFrontier);
+  const clicks = metronomeBeatEvents(
+    scheduleStartBeat,
+    horizonBeat,
+    session.beatsPerBar,
+  );
   for (const click of clicks) {
-    const time = beatToTime(click.beat, state.bpm, state.anchorBeat, state.anchorTime);
-    scheduleMetronomeClick(ctx, master, time, click.accent);
+    const time = beatToTime(
+      click.beat,
+      session.bpm,
+      session.anchorBeat,
+      session.anchorTime,
+    );
+    let scheduled: ScheduledMetronomeClick | null = null;
+    scheduled = scheduleMetronomeClick(context, master, time, click.accent, () => {
+      if (scheduled) session.metronomeClicks.delete(scheduled);
+    });
+    session.metronomeClicks.add(scheduled);
   }
-  state.metronomeBeatFrontier = horizonBeat;
+  session.metronomeBeatFrontier = horizonBeat;
 }
 
-/** Drive transport.positionBeat from the audio clock ~30fps. */
-function startPositionLoop(): void {
-  stopPositionLoop();
-  state.positionTimer = setInterval(() => {
-    const scheduler = state.scheduler;
-    if (!scheduler?.isRunning) return;
-    const beat = scheduler.currentBeat();
-    if (Number.isFinite(beat) && beat >= 0) {
-      useStore.getState().setPosition(beat);
+function startPositionLoop(session: RuntimeSession): void {
+  if (session.positionTimer != null) clearInterval(session.positionTimer);
+  session.positionTimer = setInterval(() => {
+    const { transport, setPosition } = useStore.getState();
+    if (
+      transport.phase !== 'playing' ||
+      transport.playbackRequestId !== session.requestId ||
+      !session.scheduler.isRunning
+    ) {
+      return;
     }
+    const beat = session.scheduler.currentBeat();
+    if (Number.isFinite(beat) && beat >= 0) setPosition(beat);
   }, POSITION_TICK_MS);
-}
-
-function stopPositionLoop(): void {
-  if (state.positionTimer != null) {
-    clearInterval(state.positionTimer);
-    state.positionTimer = null;
-  }
-}
-
-/** Stop the audio: scheduler + voices + position loop. Does not touch store. */
-function stopAudio(): void {
-  state.scheduler?.stop();
-  state.scheduler = null;
-  stopPositionLoop();
-
-  const engine = getAudioEngine();
-  const when = engine.now();
-  for (const synth of state.synths.values()) synth.releaseAll(when);
-  state.synths.clear();
-  state.drums.clear();
-  for (const g of state.graphs.values()) g.dispose();
-  state.graphs.clear();
-  state.metronomeBeatFrontier = 0;
 }

@@ -6,8 +6,14 @@ export * from './validation';
 export * from './factories';
 export * from './templates';
 export * from './serialization';
+export * from './project-codec';
+export * from './migrations';
 export * from './mutations';
-// New deterministic id helper (counter-based, no Math.random/Date.now)
+export * from './clip-content';
+export * from './chord-realization';
+export * from './schedule-budget';
+export * from './midi-clip-loop';
+// Persistable id helper with a per-realm nonce and monotonic local counter.
 export * from './ids';
 // New factory helpers (createDefaultProject, createInstrumentTrack, createDrumTrack,
 // createNoteEvent, createChordEvent). createMidiClip/createDrumClip are already

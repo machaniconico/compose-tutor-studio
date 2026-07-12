@@ -4,14 +4,12 @@
 // so the persistent entry point survives the first dismissal. Escape/backdrop
 // dismiss it; it registers as a modal dialog so global shortcuts are suppressed.
 
-import { useEffect } from 'react';
+import { useId } from 'react';
 import { useStore } from '../../state/store';
-import { startLesson } from '../../state/tutorialBridge';
-import { registerDialog } from '../common/dialogState';
+import { areRendererStorageWritesFenced } from '../../platform/rendererStorageFence';
+import { useModalDialog } from '../common/useModalDialog';
 
 const ONBOARDED_KEY = 'cts.onboarded';
-/** The first live beginner lesson (content/*), the guided entry point for a true beginner. */
-const FIRST_LESSON_ID = 'basic-1';
 
 function getStorage(): Storage | null {
   try {
@@ -24,6 +22,7 @@ function getStorage(): Storage | null {
 
 /** Persist the "seen onboarding" flag so it does not auto-show again. */
 function markOnboarded(): void {
+  if (areRendererStorageWritesFenced()) return;
   const storage = getStorage();
   try {
     storage?.setItem(ONBOARDED_KEY, '1');
@@ -41,9 +40,9 @@ export function shouldShowOnboarding(): boolean {
 }
 
 const STEPS = [
-  { n: '①', text: '再生ボタンを押して、音を聞いてみましょう。' },
-  { n: '②', text: 'コードを選ぶと、なぜその響きになるのか理由が見られます。' },
-  { n: '③', text: '「チュートリアル」タブで、作曲を学びながら進められます。' },
+  { n: '①', text: '最初のコードを置いて、曲の土台を作ります。' },
+  { n: '②', text: '4つのコードを並べ、8小節の進行へ広げます。' },
+  { n: '③', text: 'できた進行を再生し、響きを確かめます。' },
 ];
 
 type OnboardingOverlayProps = {
@@ -51,59 +50,70 @@ type OnboardingOverlayProps = {
   open: boolean;
   /** Close the overlay. */
   onClose: () => void;
+  /** Create the first-song project and reveal its composition lesson. */
+  onLessonStarted: () => Promise<boolean>;
+  /** Prevent duplicate project creation while the primary handoff is running. */
+  lessonStartPending: boolean;
+  /** Beginner-facing explanation when the project could not be prepared. */
+  lessonStartError: string | null;
 };
 
 /** Welcome overlay shown on first launch and re-openable from the guide button. */
-export function OnboardingOverlay({ open, onClose }: OnboardingOverlayProps) {
-  // While open, register as a modal dialog (suppresses global shortcuts) and
-  // close on Escape — matching the shared Dialog component's conventions.
-  useEffect(() => {
-    if (!open) return;
-    const unregister = registerDialog();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        // Match backdrop / "あとで": remember we've onboarded so the overlay
-        // does not auto-reappear on the next reload.
-        markOnboarded();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      window.removeEventListener('keydown', onKey, true);
-      unregister();
-    };
-  }, [open, onClose]);
-
-  if (!open) return null;
+export function OnboardingOverlay({
+  open,
+  onClose,
+  onLessonStarted,
+  lessonStartPending,
+  lessonStartError,
+}: OnboardingOverlayProps) {
+  const titleId = useId();
+  const descriptionId = useId();
 
   // "あとで" / backdrop: remember we've onboarded, then dismiss.
   const skip = () => {
+    if (lessonStartPending) return;
     markOnboarded();
     onClose();
   };
+  const dialogRef = useModalDialog({
+    open,
+    onEscape: skip,
+    escapeDisabled: lessonStartPending,
+    // App chooses between the guide trigger and tutorial destination.
+    restoreFocus: false,
+  });
 
-  // Primary CTA: start the first guided lesson, then dismiss so the user lands
-  // in the tutorial rather than an empty studio. Open the「チュートリアル」tab to
-  // follow along.
-  const begin = () => {
-    markOnboarded();
-    startLesson(FIRST_LESSON_ID);
-    onClose();
+  if (!open) return null;
+
+  // The parent owns the atomic project switch and closes this dialog only after
+  // the new project is durable and the lesson has started.
+  const begin = async () => {
+    if (lessonStartPending) return;
+    if (await onLessonStarted()) markOnboarded();
   };
 
   return (
-    <div className="onboarding-backdrop" role="presentation" onClick={skip}>
+    <div
+      className="onboarding-backdrop"
+      data-modal-layer
+      role="presentation"
+      onClick={skip}
+    >
       <div
+        ref={dialogRef}
         className="onboarding"
         role="dialog"
         aria-modal="true"
-        aria-label="ようこそ"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        aria-busy={lessonStartPending}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="onboarding__title">Compose Tutor Studio へようこそ</h2>
-        <p className="onboarding__lead">
+        <h2 className="onboarding__title" id={titleId}>
+          Compose Tutor Studio へようこそ
+        </h2>
+        <p className="onboarding__lead" id={descriptionId}>
           作曲をしながら音楽の仕組みを学べるアプリです。まずは3ステップから。
         </p>
         <ol className="onboarding__steps">
@@ -114,11 +124,28 @@ export function OnboardingOverlay({ open, onClose }: OnboardingOverlayProps) {
             </li>
           ))}
         </ol>
+        {lessonStartError ? (
+          <p className="onboarding__error" role="alert">
+            {lessonStartError}
+          </p>
+        ) : null}
         <div className="onboarding__actions">
-          <button type="button" className="onboarding__start" onClick={begin}>
-            レッスンをはじめる
+          <button
+            type="button"
+            className="onboarding__start"
+            data-modal-initial-focus
+            onClick={() => void begin()}
+            aria-disabled={lessonStartPending}
+            aria-busy={lessonStartPending}
+          >
+            {lessonStartPending ? '最初の1曲を準備中…' : '最初の1曲を作る'}
           </button>
-          <button type="button" className="onboarding__skip" onClick={skip}>
+          <button
+            type="button"
+            className="onboarding__skip"
+            onClick={skip}
+            disabled={lessonStartPending}
+          >
             あとで
           </button>
         </div>

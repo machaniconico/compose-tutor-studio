@@ -1,0 +1,108 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Compose Tutor Studio",
+  "version": "0.1.0",
+  "identifier": "com.composetutor.studio",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../studio dev --host 127.0.0.1 --port 5173 --strictPort",
+    "beforeBuildCommand": "pnpm --dir ../studio build",
+    "devUrl": "http://127.0.0.1:5173",
+    "frontendDist": "../../studio/dist",
+    "removeUnusedCommands": true
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "url": "index.html",
+        "title": "Compose Tutor Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "center": true,
+        "preventOverflow": true,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "backgroundColor": "#14161c",
+        "generalAutofillEnabled": false,
+        "allowLinkPreview": false,
+        "useHttpsScheme": true
+      }
+    ],
+    "security": {
+      "capabilities": ["main"],
+      "assetProtocol": {
+        "enable": false,
+        "scope": []
+      },
+      "csp": {
+        "default-src": "'self'",
+        "base-uri": "'none'",
+        "object-src": "'none'",
+        "form-action": "'none'",
+        "frame-src": "'none'",
+        "frame-ancestors": "'none'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "media-src": "'self' data: blob:",
+        "worker-src": "'self' blob:",
+        "connect-src": "ipc: http://ipc.localhost https://ipc.localhost"
+      },
+      "devCsp": {
+        "default-src": "'self'",
+        "base-uri": "'none'",
+        "object-src": "'none'",
+        "form-action": "'none'",
+        "frame-src": "'none'",
+        "frame-ancestors": "'none'",
+        "script-src": "'self' 'unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "media-src": "'self' data: blob:",
+        "worker-src": "'self' blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost https://ipc.localhost ws://127.0.0.1:5173"
+      },
+      "freezePrototype": true,
+      "dangerousDisableAssetCspModification": false,
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": false,
+    "category": "Music",
+    "shortDescription": "Learn music theory while composing an original song.",
+    "longDescription": "A beginner-friendly composition studio with integrated music theory tutorials.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "minimumWebview2Version": "105.0.1343.25"
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.4",
+      "hardenedRuntime": true
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
+  }
+}

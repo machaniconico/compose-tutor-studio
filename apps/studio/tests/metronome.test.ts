@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { metronomeBeatEvents } from '../src/audio/metronome';
+import { describe, expect, it, vi } from 'vitest';
+import { metronomeBeatEvents, scheduleMetronomeClick } from '../src/audio/metronome';
 
 describe('metronomeBeatEvents', () => {
   it('emits one click per whole beat in [from, to)', () => {
@@ -24,5 +24,40 @@ describe('metronomeBeatEvents', () => {
 
   it('returns nothing for an empty range', () => {
     expect(metronomeBeatEvents(4, 4, 4)).toEqual([]);
+  });
+
+  it('cancels and disconnects a lookahead click before it can outlive its session', () => {
+    const oscillator = {
+      type: 'sine',
+      frequency: { setValueAtTime: vi.fn() },
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+      onended: null as (() => void) | null,
+    };
+    const gain = {
+      gain: {
+        setValueAtTime: vi.fn(),
+        exponentialRampToValueAtTime: vi.fn(),
+      },
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    const context = {
+      createOscillator: vi.fn(() => oscillator),
+      createGain: vi.fn(() => gain),
+    } as unknown as BaseAudioContext;
+    const output = {} as AudioNode;
+    const ended = vi.fn();
+
+    const click = scheduleMetronomeClick(context, output, 10, true, ended);
+    click.cancel();
+    click.cancel();
+
+    expect(oscillator.stop).toHaveBeenLastCalledWith();
+    expect(oscillator.disconnect).toHaveBeenCalledOnce();
+    expect(gain.disconnect).toHaveBeenCalledOnce();
+    expect(ended).toHaveBeenCalledOnce();
   });
 });

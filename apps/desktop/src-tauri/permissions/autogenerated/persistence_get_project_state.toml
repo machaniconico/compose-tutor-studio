@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-persistence-get-project-state"
+description = "Enables the persistence_get_project_state command without any pre-configured scope."
+commands.allow = ["persistence_get_project_state"]
+
+[[permission]]
+identifier = "deny-persistence-get-project-state"
+description = "Denies the persistence_get_project_state command without any pre-configured scope."
+commands.deny = ["persistence_get_project_state"]

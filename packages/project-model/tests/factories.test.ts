@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { createEmptyProject, validateProject, projectLengthBeats } from '../src/index';
+import {
+  CURRENT_SCHEMA_VERSION,
+  createEmptyProject,
+  validateProject,
+  projectLengthBeats,
+} from '../src/index';
 
 const fixedClock = () => new Date('2026-06-11T00:00:00.000Z');
 
@@ -12,7 +17,7 @@ describe('createEmptyProject', () => {
     expect(project.scale).toBe('major');
     expect(project.timeSignature).toEqual([4, 4]);
     expect(project.lengthBars).toBe(8);
-    expect(project.schemaVersion).toBe(1);
+    expect(project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(project.createdAt).toBe('2026-06-11T00:00:00.000Z');
     expect(project.updatedAt).toBe('2026-06-11T00:00:00.000Z');
   });
