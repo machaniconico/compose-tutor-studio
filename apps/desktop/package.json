@@ -30,7 +30,7 @@
     "@wdio/tauri-service": "1.2.0",
     "@wdio/types": "9.27.1",
     "smol-toml": "1.7.0",
-    "typescript": "^5.8.0",
+    "typescript": "^7.0.2",
     "webdriverio": "9.27.1"
   }
 }
