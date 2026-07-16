@@ -2048,7 +2048,7 @@ fn guarded_vfs_runtime_and_dependency_contract_is_exact() {
     assert!(cargo_manifest.contains(
         "rusqlite = { version = \"=0.40.1\", default-features = false, features = [\"bundled\"] }"
     ));
-    let cargo_lock = include_str!("../../Cargo.lock");
+    let cargo_lock = include_str!("../../Cargo.lock").replace("\r\n", "\n");
     assert!(cargo_lock.contains("name = \"libsqlite3-sys\"\nversion = \"0.38.1\""));
 }
 
