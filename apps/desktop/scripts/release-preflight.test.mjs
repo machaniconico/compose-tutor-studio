@@ -1003,6 +1003,19 @@ async function createLinuxBuild(rootDir, marker = null) {
   const release = path.join(rootDir, 'apps/desktop/src-tauri/target/release');
   const bundle = path.join(release, 'bundle/appimage');
   const extractionRoot = path.join(rootDir, 'appimage-extract/squashfs-root');
+  const virtualFileModes = new Map();
+  const setLinuxFileMode = async (filePath, mode) => {
+    if (process.platform === 'win32') {
+      virtualFileModes.set(path.resolve(filePath), mode);
+      return;
+    }
+    await chmod(filePath, mode);
+  };
+  const linuxFileMode =
+    process.platform === 'win32'
+      ? (filePath, fileInfo) =>
+          virtualFileModes.get(path.resolve(filePath)) ?? fileInfo.mode
+      : undefined;
   const packagedExecutable = path.join(
     extractionRoot,
     'usr/bin/compose-tutor-studio-desktop',
@@ -1013,25 +1026,27 @@ async function createLinuxBuild(rootDir, marker = null) {
   await writeFile(path.join(release, 'compose-tutor-studio-desktop'), binary);
   await mkdir(path.dirname(packagedExecutable), { recursive: true });
   await writeFile(packagedExecutable, binary);
-  await chmod(packagedExecutable, 0o755);
+  await setLinuxFileMode(packagedExecutable, 0o755);
   const appImage = Buffer.alloc(80 * 1024, 2);
   appImage.set([0x7f, 0x45, 0x4c, 0x46], 0);
   appImage.set([0x41, 0x49, 0x02], 8);
   const appImagePath = path.join(bundle, 'Compose_Tutor_Studio_1.2.3_amd64.AppImage');
   await writeFile(appImagePath, appImage);
-  await chmod(appImagePath, 0o755);
+  await setLinuxFileMode(appImagePath, 0o755);
   return {
     appImagePath,
     extractionRoot,
     packagedExecutable,
     appImageExtractor: async () => ({ root: extractionRoot, cleanup: async () => {} }),
+    linuxFileMode,
+    setLinuxFileMode,
   };
 }
 
 test('stages a bounded AppImage and records its checksums', async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'cts-release-stage-'));
   const outputDir = path.join(rootDir, 'output');
-  const { appImageExtractor } = await createLinuxBuild(rootDir);
+  const { appImageExtractor, linuxFileMode } = await createLinuxBuild(rootDir);
   const inventory = await stagePlatformArtifact({
     rootDir,
     outputDir,
@@ -1040,6 +1055,7 @@ test('stages a bounded AppImage and records its checksums', async () => {
     sha,
     verification: 'appimage-executable-sha256-identical',
     appImageExtractor,
+    linuxFileMode,
   });
   assert.equal(inventory.artifact.bytes, 80 * 1024);
   assert.match(inventory.artifact.sha256, /^[a-f0-9]{64}$/);
@@ -1091,7 +1107,7 @@ test('uses the signed universal DMG and NSIS output paths for commercial platfor
 
 test('rejects an ambiguous platform bundle with multiple distribution artifacts', async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'cts-release-count-'));
-  const { appImageExtractor } = await createLinuxBuild(rootDir);
+  const { appImageExtractor, linuxFileMode } = await createLinuxBuild(rootDir);
   await writeFile(
     path.join(
       rootDir,
@@ -1108,6 +1124,7 @@ test('rejects an ambiguous platform bundle with multiple distribution artifacts'
       sha,
       verification: 'appimage-executable-sha256-identical',
       appImageExtractor,
+      linuxFileMode,
     }),
     /exactly one linux .* artifact, found 2/,
   );
@@ -1115,12 +1132,13 @@ test('rejects an ambiguous platform bundle with multiple distribution artifacts'
 
 test('rejects a non-executable or malformed AppImage before staging', async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'cts-release-appimage-format-'));
-  const { appImageExtractor } = await createLinuxBuild(rootDir);
+  const fixture = await createLinuxBuild(rootDir);
+  const { appImageExtractor, linuxFileMode } = fixture;
   const appImage = path.join(
     rootDir,
     'apps/desktop/src-tauri/target/release/bundle/appimage/Compose_Tutor_Studio_1.2.3_amd64.AppImage',
   );
-  await chmod(appImage, 0o644);
+  await fixture.setLinuxFileMode(appImage, 0o644);
   await assert.rejects(
     stagePlatformArtifact({
       rootDir,
@@ -1130,10 +1148,11 @@ test('rejects a non-executable or malformed AppImage before staging', async () =
       sha,
       verification: 'appimage-executable-sha256-identical',
       appImageExtractor,
+      linuxFileMode,
     }),
     /executable mode bit/,
   );
-  await chmod(appImage, 0o755);
+  await fixture.setLinuxFileMode(appImage, 0o755);
   await writeFile(appImage, Buffer.alloc(80 * 1024, 9));
   await assert.rejects(
     stagePlatformArtifact({
@@ -1144,15 +1163,35 @@ test('rejects a non-executable or malformed AppImage before staging', async () =
       sha,
       verification: 'appimage-executable-sha256-identical',
       appImageExtractor,
+      linuxFileMode,
     }),
     /ELF and AppImage magic/,
+  );
+});
+
+test('rejects a non-executable product binary extracted from an AppImage', async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'cts-release-packaged-mode-'));
+  const fixture = await createLinuxBuild(rootDir);
+  await fixture.setLinuxFileMode(fixture.packagedExecutable, 0o644);
+  await assert.rejects(
+    stagePlatformArtifact({
+      rootDir,
+      outputDir: path.join(rootDir, 'output'),
+      platform: 'linux',
+      tag: 'v1.2.3',
+      sha,
+      verification: 'appimage-executable-sha256-identical',
+      appImageExtractor: fixture.appImageExtractor,
+      linuxFileMode: fixture.linuxFileMode,
+    }),
+    /Extracted Linux product executable must be a regular executable file/,
   );
 });
 
 test('rejects a production executable containing any test-only runtime marker', async () => {
   for (const marker of runtimeTestOnlyMarkers) {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'cts-release-marker-'));
-    const { appImageExtractor } = await createLinuxBuild(rootDir, marker);
+    const { appImageExtractor, linuxFileMode } = await createLinuxBuild(rootDir, marker);
     await assert.rejects(
       stagePlatformArtifact({
         rootDir,
@@ -1162,6 +1201,7 @@ test('rejects a production executable containing any test-only runtime marker', 
         sha,
         verification: 'appimage-executable-sha256-identical',
         appImageExtractor,
+        linuxFileMode,
       }),
       new RegExp(`test-only marker: ${marker}`),
     );
@@ -1171,7 +1211,8 @@ test('rejects a production executable containing any test-only runtime marker', 
 test('rejects every test-only runtime marker in the extracted AppImage executable', async () => {
   for (const marker of runtimeTestOnlyMarkers) {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'cts-release-packaged-marker-'));
-    const { appImageExtractor, packagedExecutable } = await createLinuxBuild(rootDir);
+    const { appImageExtractor, linuxFileMode, packagedExecutable } =
+      await createLinuxBuild(rootDir);
     const packagedBytes = Buffer.alloc(70 * 1024, 1);
     packagedBytes.write(marker, 100, 'utf8');
     await writeFile(packagedExecutable, packagedBytes);
@@ -1184,6 +1225,7 @@ test('rejects every test-only runtime marker in the extracted AppImage executabl
         sha,
         verification: 'appimage-executable-sha256-identical',
         appImageExtractor,
+        linuxFileMode,
       }),
       new RegExp(`Extracted Linux product executable contains test-only marker: ${marker}`),
     );
@@ -1192,7 +1234,8 @@ test('rejects every test-only runtime marker in the extracted AppImage executabl
 
 test('rejects a packaged executable that is not byte-identical to the standalone executable', async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'cts-release-packaged-identity-'));
-  const { appImageExtractor, packagedExecutable } = await createLinuxBuild(rootDir);
+  const { appImageExtractor, linuxFileMode, packagedExecutable } =
+    await createLinuxBuild(rootDir);
   await writeFile(packagedExecutable, Buffer.alloc(70 * 1024, 7));
   await assert.rejects(
     stagePlatformArtifact({
@@ -1203,6 +1246,7 @@ test('rejects a packaged executable that is not byte-identical to the standalone
       sha,
       verification: 'appimage-executable-sha256-identical',
       appImageExtractor,
+      linuxFileMode,
     }),
     /not byte-identical to the standalone production executable/,
   );
@@ -1215,7 +1259,7 @@ test('rejects an AppImage that changes after extraction and before staging', asy
     const changedAppImage = await readFile(fixture.appImagePath);
     changedAppImage[changedAppImage.length - 1] ^= 0xff;
     await writeFile(fixture.appImagePath, changedAppImage);
-    await chmod(fixture.appImagePath, 0o755);
+    await fixture.setLinuxFileMode(fixture.appImagePath, 0o755);
     return fixture.appImageExtractor();
   };
   await assert.rejects(
@@ -1227,6 +1271,7 @@ test('rejects an AppImage that changes after extraction and before staging', asy
       sha,
       verification: 'appimage-executable-sha256-identical',
       appImageExtractor: mutatingExtractor,
+      linuxFileMode: fixture.linuxFileMode,
     }),
     /AppImage changed while its packaged executable identity was being verified/,
   );
@@ -1234,11 +1279,12 @@ test('rejects an AppImage that changes after extraction and before staging', asy
 
 test('rejects multiple product executable entries in an extracted AppImage', async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'cts-release-packaged-count-'));
-  const { appImageExtractor, extractionRoot } = await createLinuxBuild(rootDir);
+  const fixture = await createLinuxBuild(rootDir);
+  const { appImageExtractor, extractionRoot, linuxFileMode } = fixture;
   const duplicate = path.join(extractionRoot, 'opt/compose-tutor-studio-desktop');
   await mkdir(path.dirname(duplicate), { recursive: true });
   await writeFile(duplicate, Buffer.alloc(70 * 1024, 1));
-  await chmod(duplicate, 0o755);
+  await fixture.setLinuxFileMode(duplicate, 0o755);
   await assert.rejects(
     stagePlatformArtifact({
       rootDir,
@@ -1248,6 +1294,7 @@ test('rejects multiple product executable entries in an extracted AppImage', asy
       sha,
       verification: 'appimage-executable-sha256-identical',
       appImageExtractor,
+      linuxFileMode,
     }),
     /exactly one extracted Linux product executable, found 2/,
   );

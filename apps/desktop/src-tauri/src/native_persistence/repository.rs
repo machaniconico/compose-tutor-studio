@@ -9028,7 +9028,9 @@ fn invoke_sqlite_file_control(
     Some(unsafe { control(file, opcode, argument) })
 }
 
+// The OS device identifier is u64 on Linux but a narrower signed type on Apple targets.
 #[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
 fn sqlite_vfs_file_matches_identity(
     file: *mut rusqlite::ffi::sqlite3_file,
     expected: OpenedFileIdentity,

@@ -1799,6 +1799,18 @@ async function sha256File(filePath) {
   return hash.digest('hex');
 }
 
+function nativeFileMode(_filePath, fileInfo) {
+  return fileInfo.mode;
+}
+
+function resolvedLinuxFileMode(filePath, fileInfo, resolveFileMode) {
+  const mode = resolveFileMode(filePath, fileInfo);
+  if (!Number.isSafeInteger(mode) || mode < 0) {
+    fail(`Linux file mode could not be determined for ${filePath}`);
+  }
+  return mode;
+}
+
 function assertNoTestOnlyMarkers(executableBytes, label) {
   for (const marker of testOnlyMarkers) {
     if (executableBytes.includes(Buffer.from(marker))) {
@@ -1857,6 +1869,7 @@ async function verifyLinuxPackagedExecutable({
   executableName,
   standaloneBytes,
   standaloneSha256,
+  resolveFileMode,
 }) {
   const extractionInfo = await lstat(extractionRoot);
   if (!extractionInfo.isDirectory() || extractionInfo.isSymbolicLink()) {
@@ -1873,10 +1886,15 @@ async function verifyLinuxPackagedExecutable({
     fail(`Extracted Linux product executable is at an unexpected path: ${relativePath}`);
   }
   const packagedInfo = await lstat(packagedExecutable);
+  const packagedMode = resolvedLinuxFileMode(
+    packagedExecutable,
+    packagedInfo,
+    resolveFileMode,
+  );
   if (
     packagedInfo.isSymbolicLink() ||
     !packagedInfo.isFile() ||
-    (packagedInfo.mode & 0o111) === 0
+    (packagedMode & 0o111) === 0
   ) {
     fail('Extracted Linux product executable must be a regular executable file');
   }
@@ -1903,8 +1921,9 @@ async function verifyLinuxPackagedExecutable({
   };
 }
 
-async function verifyAppImageFile(filePath, fileInfo) {
-  if ((fileInfo.mode & 0o111) === 0) fail('AppImage does not have an executable mode bit');
+async function verifyAppImageFile(filePath, fileInfo, resolveFileMode) {
+  const fileMode = resolvedLinuxFileMode(filePath, fileInfo, resolveFileMode);
+  if ((fileMode & 0o111) === 0) fail('AppImage does not have an executable mode bit');
   const header = Buffer.alloc(11);
   const handle = await open(filePath, 'r');
   try {
@@ -1917,6 +1936,7 @@ async function verifyAppImageFile(filePath, fileInfo) {
   const isAppImage =
     header[8] === 0x41 && header[9] === 0x49 && (header[10] === 0x01 || header[10] === 0x02);
   if (!isElf || !isAppImage) fail('Linux artifact does not contain ELF and AppImage magic bytes');
+  return fileMode;
 }
 
 function platformPaths(rootDir, platform) {
@@ -1959,6 +1979,7 @@ export async function stagePlatformArtifact({
   sha,
   verification,
   appImageExtractor = extractAppImageToTemporaryDirectory,
+  linuxFileMode = nativeFileMode,
 }) {
   if (!stableTagPattern.test(tag ?? '') || !shaPattern.test(sha ?? '')) {
     fail('stage requires a stable tag and full commit SHA');
@@ -1998,7 +2019,10 @@ export async function stagePlatformArtifact({
   if (artifactInfo.size > releaseLimits[platform]) {
     fail(`Release artifact exceeds ${releaseLimits[platform]} byte ${platform} limit`);
   }
-  if (platform === 'linux') await verifyAppImageFile(source, artifactInfo);
+  const artifactMode =
+    platform === 'linux'
+      ? await verifyAppImageFile(source, artifactInfo, linuxFileMode)
+      : undefined;
 
   let packagedExecutable;
   let verifiedAppImageSha256;
@@ -2018,6 +2042,7 @@ export async function stagePlatformArtifact({
         executableName: locations.executableName,
         standaloneBytes: executableBytes,
         standaloneSha256: executableSha256,
+        resolveFileMode: linuxFileMode,
       });
     } finally {
       await extraction.cleanup();
@@ -2029,7 +2054,7 @@ export async function stagePlatformArtifact({
   await mkdir(platformOutput, { recursive: true });
   const destination = path.join(platformOutput, path.basename(source));
   await copyFile(source, destination);
-  if (platform === 'linux') await chmod(destination, artifactInfo.mode & 0o777);
+  if (platform === 'linux') await chmod(destination, artifactMode & 0o777);
   const stagedArtifactSha256 = await sha256File(destination);
   if (platform === 'linux' && stagedArtifactSha256 !== verifiedAppImageSha256) {
     await rm(platformOutput, { recursive: true, force: true });

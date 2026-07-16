@@ -2176,6 +2176,11 @@ button.pr__note:hover {
     padding: var(--sp-1) var(--sp-3);
   }
 
+  .transport-bar__title {
+    width: 160px;
+    min-width: 120px;
+  }
+
   .mixer-strip.is-expanded {
     max-height: 160px;
   }
