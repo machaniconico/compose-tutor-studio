@@ -1,4 +1,4 @@
-import type { Track } from '@cts/project-model';
+import type { AudioRouting, Track } from '@cts/project-model';
 import { effectConfigSignature } from './effects';
 
 export const MIX_RAMP_SECONDS = 0.01;
@@ -32,6 +32,24 @@ export function hasLiveMixChanged(
       track.mute !== candidate.mute ||
       track.solo !== candidate.solo ||
       effectConfigSignature(track.effects) !== effectConfigSignature(candidate.effects)
+    );
+  });
+}
+
+/** Whether an existing compiled graph needs only send-gain gate updates. */
+export function hasLiveRoutingMixChanged(
+  current: AudioRouting,
+  next: AudioRouting,
+): boolean {
+  if (current === next) return false;
+  if (current.sends.length !== next.sends.length) return true;
+  return current.sends.some((send, index) => {
+    const candidate = next.sends[index];
+    return (
+      candidate === undefined ||
+      send.id !== candidate.id ||
+      send.gain !== candidate.gain ||
+      send.enabled !== candidate.enabled
     );
   });
 }

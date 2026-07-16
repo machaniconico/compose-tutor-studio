@@ -15,6 +15,7 @@ import {
   preflightScheduleEventBudget,
 } from './schedule-budget';
 import { MAX_CLIPS_PER_TRACK, MIN_EVENT_DURATION_BEATS } from './limits';
+import { validateAudioRouting } from './audio-routing';
 
 export { MAX_CLIPS_PER_TRACK, MIN_EVENT_DURATION_BEATS } from './limits';
 
@@ -356,6 +357,16 @@ export function validateProject(project: Project): ValidationResult {
       markId(effect.id, `tracks[${ti}].effects[${ei}].id`);
     });
   });
+
+  project.audioRouting.sends.forEach((send, index) => {
+    if (atErrorLimit()) return;
+    markId(send.id, `audioRouting.sends[${index}].id`);
+  });
+  const routingValidation = validateAudioRouting(project);
+  for (const error of routingValidation.errors) {
+    if (atErrorLimit()) break;
+    push(error.path, error.message);
+  }
 
   if (project.automationLanes.length > MAX_AUTOMATION_LANES) {
     push(

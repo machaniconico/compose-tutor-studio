@@ -2,6 +2,9 @@ import { CURRENT_SCHEMA_VERSION } from './factories';
 import { migrateProject, ProjectMigrationError } from './migrations';
 import type {
   AudioAsset,
+  AudioRouteDestination,
+  AudioRouting,
+  AudioSend,
   AutomationLane,
   AutomationPoint,
   AutomationTarget,
@@ -17,6 +20,7 @@ import type {
   TempoMapEvent,
   TimeSignatureMapEvent,
   Track,
+  TrackOutputRoute,
 } from './types';
 import { validateProject } from './validation';
 
@@ -111,6 +115,7 @@ const AUDIO_MEDIA_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac'] 
 const UNRESOLVED_AUDIO_REASONS = ['legacy-reference', 'missing-reference'] as const;
 const AUTOMATION_TARGET_TYPES = ['track-volume', 'track-pan'] as const;
 const AUTOMATION_INTERPOLATIONS = ['hold', 'linear'] as const;
+const AUDIO_SEND_POSITIONS = ['pre-fader', 'post-fader'] as const;
 const ISO_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 class StructureDecoder {
@@ -744,6 +749,107 @@ function decodeAutomationLane(
   };
 }
 
+function decodeAudioRouteDestination(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioRouteDestination {
+  const record = decoder.record(value, path, ['type', 'trackId']) ?? {};
+  const type = decoder.member(
+    decoder.required(record, 'type', `${path}.type`),
+    ['master', 'bus'],
+    `${path}.type`,
+  );
+  if (type === 'master') {
+    if (Object.prototype.hasOwnProperty.call(record, 'trackId')) {
+      decoder.issue(`${path}.trackId`, 'unknown-key', 'Master destination must not contain trackId');
+    }
+    return { type: 'master' };
+  }
+  return {
+    type: 'bus',
+    trackId: decoder.string(
+      decoder.required(record, 'trackId', `${path}.trackId`),
+      `${path}.trackId`,
+    ),
+  };
+}
+
+function decodeTrackOutputRoute(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): TrackOutputRoute {
+  const record = decoder.record(value, path, ['sourceTrackId', 'destination']) ?? {};
+  return {
+    sourceTrackId: decoder.string(
+      decoder.required(record, 'sourceTrackId', `${path}.sourceTrackId`),
+      `${path}.sourceTrackId`,
+    ),
+    destination: decodeAudioRouteDestination(
+      decoder,
+      decoder.required(record, 'destination', `${path}.destination`),
+      `${path}.destination`,
+    ),
+  };
+}
+
+function decodeAudioSend(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioSend {
+  const record = decoder.record(value, path, [
+    'id',
+    'sourceTrackId',
+    'targetBusId',
+    'position',
+    'gain',
+    'enabled',
+  ]) ?? {};
+  return {
+    id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    sourceTrackId: decoder.string(
+      decoder.required(record, 'sourceTrackId', `${path}.sourceTrackId`),
+      `${path}.sourceTrackId`,
+    ),
+    targetBusId: decoder.string(
+      decoder.required(record, 'targetBusId', `${path}.targetBusId`),
+      `${path}.targetBusId`,
+    ),
+    position: decoder.member(
+      decoder.required(record, 'position', `${path}.position`),
+      AUDIO_SEND_POSITIONS,
+      `${path}.position`,
+    ),
+    gain: decoder.number(decoder.required(record, 'gain', `${path}.gain`), `${path}.gain`),
+    enabled: decoder.boolean(
+      decoder.required(record, 'enabled', `${path}.enabled`),
+      `${path}.enabled`,
+    ),
+  };
+}
+
+function decodeAudioRouting(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioRouting {
+  const record = decoder.record(value, path, ['outputs', 'sends']) ?? {};
+  return {
+    outputs: decoder.array(
+      decoder.required(record, 'outputs', `${path}.outputs`),
+      `${path}.outputs`,
+      (item, itemPath) => decodeTrackOutputRoute(decoder, item, itemPath),
+    ),
+    sends: decoder.array(
+      decoder.required(record, 'sends', `${path}.sends`),
+      `${path}.sends`,
+      (item, itemPath) => decodeAudioSend(decoder, item, itemPath),
+    ),
+  };
+}
+
 function decodeCurrentProject(input: unknown): ProjectDecodeResult {
   const decoder = new StructureDecoder();
   try {
@@ -761,6 +867,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
       'timeSignatureMap',
       'audioAssets',
       'automationLanes',
+      'audioRouting',
       'tracks',
       'chordTrack',
       'sections',
@@ -824,6 +931,11 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
         'automationLanes',
         (item, itemPath) => decodeAutomationLane(decoder, item, itemPath),
       ),
+      audioRouting: decodeAudioRouting(
+        decoder,
+        decoder.required(record, 'audioRouting', 'audioRouting'),
+        'audioRouting',
+      ),
       tracks: decoder.array(
         decoder.required(record, 'tracks', 'tracks'),
         'tracks',
@@ -879,8 +991,8 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
   }
 }
 
-/** Reject fields that were not part of the declared v1/v2 transport shape. */
-function inspectLegacyProjectStructure(input: unknown, schemaVersion: 1 | 2): ProjectCodecIssue[] {
+/** Reject fields that were not part of the declared legacy transport shape. */
+function inspectLegacyProjectStructure(input: unknown, schemaVersion: 1 | 2 | 3): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
     'id',
@@ -891,6 +1003,9 @@ function inspectLegacyProjectStructure(input: unknown, schemaVersion: 1 | 2): Pr
     'key',
     'scale',
     'lengthBars',
+    ...(schemaVersion >= 3
+      ? ['lengthBeats', 'tempoMap', 'timeSignatureMap', 'audioAssets', 'automationLanes']
+      : []),
     'tracks',
     'chordTrack',
     'sections',
@@ -919,6 +1034,29 @@ function inspectLegacyProjectStructure(input: unknown, schemaVersion: 1 | 2): Pr
   decoder.member(decoder.required(record, 'key', 'key'), PROJECT_KEYS, 'key');
   decoder.member(decoder.required(record, 'scale', 'scale'), PROJECT_SCALES, 'scale');
   decoder.number(decoder.required(record, 'lengthBars', 'lengthBars'), 'lengthBars');
+  if (schemaVersion >= 3) {
+    decoder.number(decoder.required(record, 'lengthBeats', 'lengthBeats'), 'lengthBeats');
+    decoder.array(
+      decoder.required(record, 'tempoMap', 'tempoMap'),
+      'tempoMap',
+      (item, itemPath) => decodeTempoMapEvent(decoder, item, itemPath),
+    );
+    decoder.array(
+      decoder.required(record, 'timeSignatureMap', 'timeSignatureMap'),
+      'timeSignatureMap',
+      (item, itemPath) => decodeTimeSignatureMapEvent(decoder, item, itemPath),
+    );
+    decoder.array(
+      decoder.required(record, 'audioAssets', 'audioAssets'),
+      'audioAssets',
+      (item, itemPath) => decodeAudioAsset(decoder, item, itemPath),
+    );
+    decoder.array(
+      decoder.required(record, 'automationLanes', 'automationLanes'),
+      'automationLanes',
+      (item, itemPath) => decodeAutomationLane(decoder, item, itemPath),
+    );
+  }
   decoder.array(
     decoder.required(record, 'tracks', 'tracks'),
     'tracks',
@@ -1006,7 +1144,7 @@ export function decodeProject(input: unknown): ProjectDecodeResult {
 
   let current: unknown = input;
   if (version.version < CURRENT_SCHEMA_VERSION) {
-    const legacyIssues = inspectLegacyProjectStructure(input, version.version as 1 | 2);
+    const legacyIssues = inspectLegacyProjectStructure(input, version.version as 1 | 2 | 3);
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };
     }

@@ -7,6 +7,7 @@
 
 import {
   assertScheduleEventBudget,
+  compileAudioRouting,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   ScheduleEventLimitError,
@@ -41,7 +42,12 @@ import {
 } from './audioClipPlanner';
 import { AudioClipVoiceManager } from './audioClipVoice';
 import { buildScheduleEvents, type SchedulePayload } from './events';
-import { buildTrackGraphs, computeAudibleTracks, type TrackGraph } from './graph';
+import {
+  assertRoutingGraphNodeBudget,
+  buildTrackGraphs,
+  resolveAudioRoutingMix,
+  type TrackGraph,
+} from './graph';
 import { buildMasterBus } from './masterBus';
 import { applyMasterMix } from './mixState';
 import { beatDurationSeconds, createProjectMusicalTime } from './musicalTime';
@@ -459,6 +465,15 @@ export async function renderProjectToWav(
   const events = buildWavScheduleEvents(project);
   const audioClipPlans = buildWavAudioClipPlans(project);
   const plan = planWavRender(project, events, audioClipPlans);
+  const compiledRouting = compileAudioRouting(project);
+  if (!compiledRouting.ok) {
+    const first = compiledRouting.errors[0];
+    throw new Error(
+      `Audio routing is invalid.${first ? ` ${first.path}: ${first.message}` : ''}`,
+    );
+  }
+  const routingPlan = compiledRouting.plan;
+  assertRoutingGraphNodeBudget(project, routingPlan, 'disabled');
   const { index: musicalTime, tempo } = createProjectMusicalTime(project);
   const audioAssetCache = options.audioAssetCache ?? getAudioAssetPlaybackCache();
   // Unleased buffers have no reason to count against a new offline render;
@@ -528,8 +543,15 @@ export async function renderProjectToWav(
 
       // Offline exports deliberately omit UI meters. Registering their analysers
       // would replace the live meter registry and retain the offline context.
-      graphs = buildTrackGraphs(ctx, graphDestination, project.tracks, 0, 'disabled');
-      const audibleTrackIds = computeAudibleTracks(project.tracks);
+      graphs = buildTrackGraphs(
+        ctx,
+        graphDestination,
+        project,
+        0,
+        'disabled',
+        routingPlan,
+      );
+      const audibleTrackIds = resolveAudioRoutingMix(project, routingPlan).audibleChannelIds;
       const tracksById = new Map(project.tracks.map((track) => [track.id, track]));
       const tempoChangeBeats = project.tempoMap.slice(1).map((event) => event.beat);
       for (const lane of project.automationLanes) {

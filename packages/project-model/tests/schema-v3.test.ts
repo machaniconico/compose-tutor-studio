@@ -25,6 +25,7 @@ function toLegacyRecord(project: Project, schemaVersion: 1 | 2): Record<string, 
   delete legacy.timeSignatureMap;
   delete legacy.audioAssets;
   delete legacy.automationLanes;
+  delete legacy.audioRouting;
   for (const track of legacy.tracks as Array<Record<string, unknown>>) {
     delete track.role;
     for (const clip of track.clips as Array<Record<string, unknown>>) {
@@ -122,7 +123,7 @@ describe('schema-v3 migration', () => {
     expect(first).toEqual(second);
     expect(legacy).toEqual(untouched);
     expect(first).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       lengthBeats: 32,
       tempoMap: [{ id: 'migrated-tempo-2', beat: 0, bpm: 120 }],
       timeSignatureMap: [{
@@ -132,6 +133,7 @@ describe('schema-v3 migration', () => {
         denominator: 4,
       }],
       automationLanes: [],
+      audioRouting: expect.objectContaining({ sends: [] }),
     });
 
     const migratedTracks = first.tracks as Array<Record<string, unknown>>;
@@ -249,6 +251,10 @@ describe('schema-v3 audio and automation', () => {
       frameCount: 96_000,
     });
     project.tracks.splice(project.tracks.length - 1, 0, audio);
+    project.audioRouting.outputs.push({
+      sourceTrackId: audio.id,
+      destination: { type: 'master' },
+    });
     return project;
   }
 

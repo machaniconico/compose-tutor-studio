@@ -90,6 +90,10 @@ function project(track: Track): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{ sourceTrackId: track.id, destination: { type: 'master' } }],
+      sends: [],
+    },
     tracks: [track],
     chordTrack: [],
     sections: [],
@@ -345,5 +349,72 @@ describe('planRuntimeAudioTail', () => {
       ninetySix.totalSeconds - MASTER_LIMITER_LOOKAHEAD_SECONDS,
       12,
     );
+  });
+
+  it('retains Bus effect energy from a send that was audible before being disabled', () => {
+    const source = instrumentTrack();
+    const bus: Track = {
+      id: 'wet-bus',
+      name: 'Wet Bus',
+      type: 'bus',
+      role: 'general',
+      clips: [],
+      volume: 1,
+      pan: 0,
+      mute: false,
+      solo: false,
+      effects: [{
+        id: 'bus-reverb',
+        type: 'reverb',
+        enabled: true,
+        params: { wet: 1, decay: 1 },
+      }],
+    };
+    const snapshot: Project = {
+      ...project(source),
+      tracks: [source, bus],
+      audioRouting: {
+        outputs: [
+          { sourceTrackId: source.id, destination: { type: 'master' } },
+          { sourceTrackId: bus.id, destination: { type: 'master' } },
+        ],
+        sends: [{
+          id: 'wet-send',
+          sourceTrackId: source.id,
+          targetBusId: bus.id,
+          position: 'post-fader',
+          gain: 1,
+          enabled: true,
+        }],
+      },
+    };
+    const disabledRouting = {
+      ...snapshot.audioRouting,
+      sends: [{ ...snapshot.audioRouting.sends[0]!, enabled: false }],
+    };
+    const withoutHistory = planRuntimeAudioTail(
+      snapshot,
+      snapshot.tracks,
+      [finalNote()],
+      0,
+      4,
+      new Set([source.id, bus.id]),
+      44_100,
+      undefined,
+      disabledRouting,
+    );
+    const withHistory = planRuntimeAudioTail(
+      snapshot,
+      snapshot.tracks,
+      [finalNote()],
+      0,
+      4,
+      new Set([source.id, bus.id]),
+      44_100,
+      new Set(['output:source', 'send:wet-send', 'output:wet-bus']),
+      disabledRouting,
+    );
+
+    expect(withHistory.tailSeconds).toBeGreaterThan(withoutHistory.tailSeconds);
   });
 });

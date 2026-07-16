@@ -176,3 +176,80 @@ test('keeps the track list and add dialog usable on a narrow viewport', async ({
   expect(visibility.rowTop).toBeGreaterThanOrEqual(visibility.listTop - 1);
   expect(visibility.rowBottom).toBeLessThanOrEqual(visibility.listBottom + 1);
 });
+
+test('creates a stereo Bus and persists one undoable pre-fader send', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto('/');
+  await dismissWelcome(page);
+
+  await page.getByRole('button', { name: '＋ 追加', exact: true }).click();
+  const addDialog = page.getByRole('dialog', { name: 'トラックを追加' });
+  await addDialog.getByRole('radio', { name: /バストラック/ }).check();
+  await addDialog.getByLabel('名前', { exact: true }).fill('Room Bus');
+  await expect(addDialog).toContainText('最初はマスターへ直接つなぎます');
+  await addDialog.getByRole('button', { name: '追加', exact: true }).click();
+  await expect(page.getByRole('button', {
+    name: 'Room Bus トラックを選択',
+    exact: true,
+  })).toBeFocused();
+
+  const mixer = page.getByRole('region', { name: 'ミキサー', exact: true });
+  const chordsChannel = mixer.locator('.mix-ch').filter({ hasText: 'Chords' }).first();
+  await chordsChannel.locator('summary').click();
+  await chordsChannel.getByRole('combobox', {
+    name: 'Chords センドを追加',
+    exact: true,
+  }).selectOption({ label: 'Room Bus' });
+
+  const sendTarget = chordsChannel.getByRole('combobox', {
+    name: 'Chords Room Busへのセンドの送り先',
+    exact: true,
+  });
+  await expect(sendTarget).toBeVisible();
+  const undo = page.getByRole('button', { name: '元に戻す', exact: true });
+  const redo = page.getByRole('button', { name: 'やり直す', exact: true });
+  await undo.click();
+  await expect(sendTarget).toHaveCount(0);
+  await redo.click();
+  await expect(sendTarget).toBeVisible();
+
+  const sendPosition = chordsChannel.getByRole('combobox', {
+    name: 'Chords Room Busへのセンドの位置',
+    exact: true,
+  });
+  const sendEnabled = chordsChannel.getByRole('checkbox', {
+    name: 'Chords Room Busへのセンドを有効にする',
+    exact: true,
+  });
+  const sendGain = chordsChannel.getByRole('slider', {
+    name: 'Chords Room Busへのセンドの送り量',
+    exact: true,
+  });
+  await sendPosition.selectOption('pre-fader');
+  await sendEnabled.uncheck();
+  await sendGain.fill('0.5');
+
+  await page.keyboard.press('Control+S');
+  await expect(page.locator('#project-save-status')).toContainText('保存済み');
+  await page.reload();
+  await dismissWelcome(page);
+
+  const reloadedMixer = page.getByRole('region', { name: 'ミキサー', exact: true });
+  const reloadedChords = reloadedMixer.locator('.mix-ch').filter({ hasText: 'Chords' }).first();
+  await reloadedChords.locator('summary').click();
+  await expect(reloadedChords.getByRole('combobox', {
+    name: 'Chords Room Busへのセンドの位置',
+    exact: true,
+  })).toHaveValue('pre-fader');
+  await expect(reloadedChords.getByRole('checkbox', {
+    name: 'Chords Room Busへのセンドを有効にする',
+    exact: true,
+  })).not.toBeChecked();
+  await expect(reloadedChords.getByRole('slider', {
+    name: 'Chords Room Busへのセンドの送り量',
+    exact: true,
+  })).toHaveValue('0.5');
+  expect(pageErrors).toEqual([]);
+});

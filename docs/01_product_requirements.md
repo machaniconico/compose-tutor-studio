@@ -56,7 +56,7 @@
 | US-009 | ユーザーとして、AIに改善案を聞きたい | Should | プロジェクトのコード/メロディ情報から説明付き提案を返す |
 | US-010 | 上級者として、外部VSTを使いたい | Could/Future | VST3 SDK/ライセンス確認後に実装判断 |
 | US-011 | 動画制作者・学習者として、利用許諾のある既存曲からカラオケ練習用音源を作りたい | Should | 対応するステレオ音源を端末内で中央定位軽減し、A/B試聴後にWAVを書き出せる |
-| US-012 | 作曲者として、曲に楽器やドラムを足して音色と並びを整えたい | Must | production UIから安全に追加・複製・並べ替え・一般Track削除を行い、内蔵音色を選んで保存・Undo・再生できる。schema v3では学習role Trackも改名できてroleを保持し、削除だけを保護する |
+| US-012 | 作曲者として、曲に楽器・ドラム・音源・Busを足して音色と経路を整えたい | Must | production UIから安全に追加・複製・並べ替え・一般Track削除を行い、内蔵音色、main output、pre/post-fader sendを選んで保存・Undo・再生・WAVへ反映できる。schema v4では学習role Trackも改名できてroleを保持し、削除だけを保護する |
 | US-013 | 作曲者として、手元の音声を曲へ置いて非破壊編集したい | Must | WAV / MP3 / M4A / AACをAudio Trackへ読み込み、移動、左右trim、gain、fade、loop、split、独立複製、削除をUndo/Redoでき、live再生・WAV・再読込で同じ範囲を使う |
 
 ## 3. MVP機能範囲
@@ -77,7 +77,7 @@
 - Bass Assistant: コードルート、5度、オクターブ、経過音候補
 - Melody Assistant: コードトーン、アプローチノート、モチーフ反復の可視化
 - Pattern/Clip: 1〜4小節単位の素材を組み合わせる
-- Track管理（部分実装）: instrument / drum追加、音源fileからのAudio Track追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v3の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない。Bus / Folder / routingは後続とする
+- Track管理（部分実装）: instrument / drum / stereo Bus追加、音源fileからのAudio Track追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v4の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない。Folder / Stackは後続とする
 - Audio Clip: app-ownedな48 kHz mono/stereo PCM 16-bit WAVへ正規化し、移動、trim、gain、fade、loop、split、独立複製、削除を非破壊に行う。loop中は位相fieldがまだないためleft trimとsplitを無効にする
 
 ### 3.3 Learning
@@ -98,6 +98,7 @@
 - WAVレンダリング
 - app-owned Audio Assetのlive再生とoffline WAV取り込み。Project単体JSONには音声binaryを同梱せず、欠落・変更・storage不可を音声素材ごとに表示する
 - WAV/MP3/M4A/AACのステレオ音源を使う、ローカル完結の中央定位ボーカル軽減
+- stereo Bus、各non-Masterのmain output、pre/post-fader send / return。循環は候補Project採用前に拒否し、live再生とoffline WAVで同じrouting graphを使う
 
 ### 3.5 Export
 
@@ -116,7 +117,7 @@
 | 自動マスタリング本実装 | 音質評価・責任範囲が大きい | まずはラウドネス/ピーク診断に限定 |
 | 楽譜エディタ | 実装量が大きい | MIDI編集が安定後 |
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
-| Bus / send / return routing | Audio Trackは利用可能になったが、明示routing graph、循環拒否、pre/post-fader send、live/offline parityが未完成 | Batch 6でstereo Busとsend/returnを導入してからproduction追加を有効化 |
+| VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
 
 ## 5. 非機能要件
 
@@ -140,7 +141,7 @@
 - レッスンの開始、判定、完了、進捗保存ができる
 - MIDI/WAVを書き出せる
 - 利用許諾のあるステレオ音源から、ローカル処理でカラオケ用WAVを作成できる
-- instrument / drum Trackの管理と音色変更が、Master保護、schema v3学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
+- instrument / drum / Audio / Bus Trackの管理と音色・routing変更が、Master保護、schema v4学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
 - Audio Trackへ取り込んだ音声を非破壊編集でき、live再生とWAVが同じsource range / gain / fade / loopを使う。欠落・変更されたbinaryは別素材へ黙って置換せず、Project metadataを保持して説明する
 - 主要ロジックにテストがある
 - 既存DAWのUIコピーではなく、独自デザインである

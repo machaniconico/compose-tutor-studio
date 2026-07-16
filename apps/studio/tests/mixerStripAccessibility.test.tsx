@@ -5,11 +5,15 @@ import { addTrackEffect } from '../src/state/editorActions';
 
 let useStore: typeof import('../src/state/store')['useStore'];
 let MixerStrip: typeof import('../src/features/mixer/MixerStrip')['MixerStrip'];
+let addStudioTrack: typeof import('../src/state/trackActions')['addStudioTrack'];
+let addStudioAudioSend: typeof import('../src/state/routingActions')['addStudioAudioSend'];
 
 beforeAll(async () => {
   installLocalStorage();
   ({ useStore } = await import('../src/state/store'));
   ({ MixerStrip } = await import('../src/features/mixer/MixerStrip'));
+  ({ addStudioTrack } = await import('../src/state/trackActions'));
+  ({ addStudioAudioSend } = await import('../src/state/routingActions'));
 });
 
 beforeEach(async () => {
@@ -80,5 +84,70 @@ describe('Mixer mute/solo accessibility', () => {
     expect(html).toContain('aria-label="Harmony（同名 2/2） 音量"');
     expect(html).toContain('aria-label="Harmony（同名 1/2） ミュート"');
     expect(html).toContain('aria-label="Harmony（同名 2/2） ミュート"');
+  });
+
+  it('names Bus output and pre/post-fader send controls in beginner-facing language', () => {
+    const source = useStore.getState().project.tracks.find(
+      (track) => track.type !== 'master' && track.type !== 'bus',
+    );
+    if (!source) throw new Error('source fixture missing');
+    const bus = addStudioTrack({ kind: 'bus', name: 'Vocal Bus' });
+    if (!bus.ok) throw new Error('Bus fixture missing');
+    const send = addStudioAudioSend(source.id, bus.trackId);
+    if (!send.ok) throw new Error('send fixture missing');
+    Object.assign(useStore.getInitialState(), useStore.getState());
+
+    const html = renderToStaticMarkup(<MixerStrip />);
+    expect(html).toContain('Vocal Bus（Bus）');
+    expect(html).toContain(`aria-label="${source.name} 出力先"`);
+    expect(html).toContain(`aria-label="${source.name} Vocal Busへのセンドの送り先"`);
+    expect(html).toContain(`aria-label="${source.name} Vocal Busへのセンドを有効にする"`);
+    expect(html).toContain(`aria-label="${source.name} Vocal Busへのセンドの位置"`);
+    expect(html).toContain(`aria-label="${source.name} Vocal Busへのセンドの送り量"`);
+    expect(html).toContain(`aria-label="${source.name} Vocal Busへのセンドを削除"`);
+    expect(html).toContain('フェーダー前は音量・効果の前');
+    expect(html).toContain('フェーダー後は音量・効果・パンの後');
+  });
+
+  it('disambiguates same-name Bus destinations in every send control', () => {
+    const source = useStore.getState().project.tracks.find(
+      (track) => track.type !== 'master' && track.type !== 'bus',
+    );
+    if (!source) throw new Error('source fixture missing');
+    const first = addStudioTrack({ kind: 'bus', name: 'FX' });
+    const second = addStudioTrack({ kind: 'bus', name: 'FX' });
+    if (!first.ok || !second.ok) throw new Error('Bus fixtures missing');
+    expect(addStudioAudioSend(source.id, first.trackId).ok).toBe(true);
+    expect(addStudioAudioSend(source.id, second.trackId).ok).toBe(true);
+    Object.assign(useStore.getInitialState(), useStore.getState());
+
+    const html = renderToStaticMarkup(<MixerStrip />);
+    for (const ordinal of [1, 2]) {
+      const destination = `FX（同名 ${ordinal}/2）`;
+      expect(html).toContain(`${source.name} ${destination}へのセンドの送り先`);
+      expect(html).toContain(`${source.name} ${destination}へのセンドを有効にする`);
+      expect(html).toContain(`${source.name} ${destination}へのセンドの位置`);
+      expect(html).toContain(`${source.name} ${destination}へのセンドの送り量`);
+      expect(html).toContain(`${source.name} ${destination}へのセンドを削除`);
+    }
+  });
+
+  it('stops offering new sends at the per-source limit', () => {
+    const source = useStore.getState().project.tracks.find(
+      (track) => track.type !== 'master' && track.type !== 'bus',
+    );
+    if (!source) throw new Error('source fixture missing');
+    for (let index = 0; index < 16; index += 1) {
+      const bus = addStudioTrack({ kind: 'bus', name: `Bus ${index + 1}` });
+      if (!bus.ok) throw new Error(`Bus fixture ${index + 1} missing`);
+      if (!addStudioAudioSend(source.id, bus.trackId).ok) {
+        throw new Error(`send fixture ${index + 1} missing`);
+      }
+    }
+    Object.assign(useStore.getInitialState(), useStore.getState());
+
+    const html = renderToStaticMarkup(<MixerStrip />);
+    expect(html).not.toContain(`aria-label="${source.name} センドを追加"`);
+    expect(html).toContain('1つのトラックから追加できるセンドは最大16件です。');
   });
 });

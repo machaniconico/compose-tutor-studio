@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Track } from '@cts/project-model';
+import type { AudioRouting, Track } from '@cts/project-model';
 import {
   MIX_RAMP_SECONDS,
   applyAudioParam,
@@ -7,6 +7,7 @@ import {
   clampPan,
   clampVolume,
   hasLiveMixChanged,
+  hasLiveRoutingMixChanged,
   resolveMasterMix,
   resolveTrackMix,
 } from '../src/audio/mixState';
@@ -58,6 +59,39 @@ describe('master mix policy', () => {
         params: { cutoff: 0.5, resonance: 0.2 },
       }],
     }])).toBe(true);
+  });
+
+  it('updates existing send gates only for live gain/enabled changes', () => {
+    const current: AudioRouting = {
+      outputs: [{ sourceTrackId: 'source', destination: { type: 'master' } }],
+      sends: [{
+        id: 'wet',
+        sourceTrackId: 'source',
+        targetBusId: 'bus',
+        position: 'post-fader',
+        gain: 0.5,
+        enabled: true,
+      }],
+    };
+
+    expect(hasLiveRoutingMixChanged(current, current)).toBe(false);
+    expect(hasLiveRoutingMixChanged(current, {
+      ...current,
+      sends: [{ ...current.sends[0]!, gain: 1.25 }],
+    })).toBe(true);
+    expect(hasLiveRoutingMixChanged(current, {
+      ...current,
+      sends: [{ ...current.sends[0]!, enabled: false }],
+    })).toBe(true);
+    // Topology is owned by playback-generation invalidation, not a live patch.
+    expect(hasLiveRoutingMixChanged(current, {
+      ...current,
+      outputs: [{ sourceTrackId: 'source', destination: { type: 'bus', trackId: 'bus' } }],
+    })).toBe(false);
+    expect(hasLiveRoutingMixChanged(current, {
+      ...current,
+      sends: [{ ...current.sends[0]!, position: 'pre-fader' }],
+    })).toBe(false);
   });
 
   it('uses unity without a master and the first master volume exactly once', () => {

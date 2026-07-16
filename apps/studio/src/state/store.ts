@@ -252,8 +252,11 @@ export type StoreState = {
     requestId: number,
     issue?: Exclude<AudioIssue, null | 'interrupted'>,
   ) => void;
-  /** Stop a confirmed/current request after the browser interrupts its audio context. */
-  interruptPlayback: (requestId: number) => void;
+  /** Stop a confirmed/current request after an output or bounded-resource interruption. */
+  interruptPlayback: (
+    requestId: number,
+    issue?: 'interrupted' | 'audio-resource-limit',
+  ) => void;
   /** Rewind after the scheduler reaches the natural end of the active request. */
   finishPlayback: (requestId: number) => void;
   clearAudioIssue: () => void;
@@ -483,6 +486,38 @@ function automationTopologyEqual(left: Project, right: Project): boolean {
   );
 }
 
+/** Send gain/enabled are live controls; every other routing field owns graph topology. */
+function audioRoutingTopologyEqual(left: Project, right: Project): boolean {
+  const leftRouting = left.audioRouting;
+  const rightRouting = right.audioRouting;
+  return (
+    leftRouting.outputs.length === rightRouting.outputs.length &&
+    leftRouting.outputs.every((output, index) => {
+      const candidate = rightRouting.outputs[index];
+      if (
+        candidate?.sourceTrackId !== output.sourceTrackId ||
+        candidate.destination.type !== output.destination.type
+      ) {
+        return false;
+      }
+      return output.destination.type === 'master'
+        ? candidate.destination.type === 'master'
+        : candidate.destination.type === 'bus' &&
+            candidate.destination.trackId === output.destination.trackId;
+    }) &&
+    leftRouting.sends.length === rightRouting.sends.length &&
+    leftRouting.sends.every((send, index) => {
+      const candidate = rightRouting.sends[index];
+      return (
+        candidate?.id === send.id &&
+        candidate.sourceTrackId === send.sourceTrackId &&
+        candidate.targetBusId === send.targetBusId &&
+        candidate.position === send.position
+      );
+    })
+  );
+}
+
 /**
  * Whether an adopted project edit invalidates the topology captured by the
  * current playback session. Live mixer fields are applied by the audio bridge;
@@ -498,6 +533,7 @@ export function hasPlaybackTopologyChanged(current: Project, next: Project): boo
   if (!musicalTimelineTopologyEqual(current, next)) return true;
   if (!audioAssetTopologyEqual(current, next)) return true;
   if (!automationTopologyEqual(current, next)) return true;
+  if (!audioRoutingTopologyEqual(current, next)) return true;
   if (
     (current.automationLanes.length > 0 || next.automationLanes.length > 0) &&
     hasLiveMixChanged(current.tracks, next.tracks)
@@ -1755,7 +1791,7 @@ export function createStudioStore(
         },
       });
     },
-    interruptPlayback: (requestId) => {
+    interruptPlayback: (requestId, issue = 'interrupted') => {
       const state = get();
       if (
         state.transport.phase === 'stopped' ||
@@ -1769,7 +1805,7 @@ export function createStudioStore(
           phase: 'stopped',
           isPlaying: false,
           playbackRequestId: state.transport.playbackRequestId + 1,
-          audioIssue: 'interrupted',
+          audioIssue: issue,
         },
       });
     },

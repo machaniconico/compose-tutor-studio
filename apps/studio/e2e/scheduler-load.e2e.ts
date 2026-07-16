@@ -64,6 +64,10 @@ function schedulerLoadProject(): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{ sourceTrackId: trackId, destination: { type: 'master' } }],
+      sends: [],
+    },
     tracks: [
       // Keep the selected first track payload-free so this test isolates the
       // scheduler from rendering thousands of piano-roll DOM nodes.
@@ -122,6 +126,10 @@ function shortLoopDensityProject(noteCount: number): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{ sourceTrackId: trackId, destination: { type: 'master' } }],
+      sends: [],
+    },
     tracks: [
       {
         id: 'short-loop-master',

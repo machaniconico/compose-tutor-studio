@@ -28,19 +28,19 @@
 
 | カテゴリ | Cubase Pro 15.0.30 / Logic Pro 12.3 の代表機能 | 現アプリ | 優先度 | 差分と採用方針 | 公式根拠 |
 |---|---|---|---:|---|---|
-| プロジェクト、履歴、素材管理 | 多数のトラック種別、素材参照、プロジェクト内の音声を前提に編集する | **部分**: schema v3、SQLite自動保存、クラッシュ復旧、Undo/Redo、`.ctsproj.json` exact metadata roundtripに加え、app-owned SHA-256 Audio Assetをnative content-addressed directory / Web IndexedDBへ保存する。nativeはstaging recovery、全retained generation / draftをrootにしたGC、端末全消去を持つ。portable binary bundle、素材browser、Web generation-aware GCはない | P0 | JSONとbinaryの分離を維持し、Batch 6以降でportable bundle / asset browserを独立設計する。競合の全交換形式を直ちに再現しない | [Cubase Pro Help](https://www.steinberg.help/r/cubase-pro/15.0/en), [Logic Pro project basics](https://support.apple.com/en-ie/guide/logicpro/lgcpe9cc47b2/mac) |
-| トラック管理と音色 | Audio / MIDI / Instrument / Group / FX / Folder などを作成・削除・複製・並べ替えでき、音源やパッチを選べる。Logic は Track Stacks も持つ | **部分**: production UIからinstrument / drumとfile由来Audio Trackを追加し、non-masterの複製・並べ替え、一般Trackの削除・改名、canonical synth 4音色を扱える。schema v3のroleが学習意味の正本で、学習Trackも改名可能・削除保護、複製先はgeneralになる。Bus、Folder/Stack、freeze、track versionはない | P0 | role / 名前の分離とAudio Asset整合性を維持し、次はBatch 6のstereo Bus / send routingへ進む | [Cubase Pro Help](https://www.steinberg.help/r/cubase-pro/15.0/en), [Logic Pro Track Stacks](https://support.apple.com/en-ca/guide/logicpro/lgcp9bc4b63d/mac) |
+| プロジェクト、履歴、素材管理 | 多数のトラック種別、素材参照、プロジェクト内の音声を前提に編集する | **部分**: schema v4、SQLite自動保存、クラッシュ復旧、Undo/Redo、`.ctsproj.json` exact metadata / routing roundtripに加え、app-owned SHA-256 Audio Assetをnative content-addressed directory / Web IndexedDBへ保存する。nativeはstaging recovery、全retained generation / draftをrootにしたGC、端末全消去を持つ。portable binary bundle、素材browser、Web generation-aware GCはない | P0 | JSONとbinaryの分離を維持し、portable bundle / asset browserを独立設計する。競合の全交換形式を直ちに再現しない | [Cubase Pro Help](https://www.steinberg.help/r/cubase-pro/15.0/en), [Logic Pro project basics](https://support.apple.com/en-ie/guide/logicpro/lgcpe9cc47b2/mac) |
+| トラック管理と音色 | Audio / MIDI / Instrument / Group / FX / Folder などを作成・削除・複製・並べ替えでき、音源やパッチを選べる。Logic は Track Stacks も持つ | **部分**: production UIからinstrument / drum、file由来Audio Track、空のstereo Busを追加し、non-masterの複製・並べ替え、一般Trackの削除・改名、canonical synth 4音色を扱える。schema v4のroleが学習意味の正本で、学習Trackも改名可能・削除保護、複製先はgeneralになる。Folder/Stack、freeze、track versionはない | P0 | role / 名前、Audio Asset、routingの整合性を維持し、Folder / Stackやfreezeは用途別の独立incrementにする | [Cubase Pro Help](https://www.steinberg.help/r/cubase-pro/15.0/en), [Logic Pro Track Stacks](https://support.apple.com/en-ca/guide/logicpro/lgcp9bc4b63d/mac) |
 | MIDI / Drum 編集 | Piano Roll、controller lane、pitch bend、aftertouch、step input、複数 part 編集、expression map、詳細 quantize など | **部分**: ノート作成・移動・複製・長さ・velocity・量子化・scale snap、Drum Step Sequencer、MIDI import/export はある。CC lane、pitch bend、MPE/Note Expression、step/real-time MIDI 録音、高度 transform はない | P1 | 初心者向け編集を保ち、controller lane、sustain、pitch bend、入力記録を段階追加する。MPE / articulation / logical editor は後段 | [Cubase Key Editor](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/midi_editors/midi_editors_key_editor_r.html), [Cubase Scale Assistant](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/midi_editors/midi_editors_scales_in_key_editor_r.html), [Logic Pro User Guide](https://support.apple.com/guide/logicpro/welcome/mac) |
 | コード、スケール、伴奏支援 | 両製品に Chord Track があり、Cubase は Chord Assistant、Logic は Chord Track と Session Players の連携を持つ | **部分**: Chord Track、機能和声表示、コード候補、scale guide、Bass/Melody Assistant、学習解説は実装済。音声/MIDIからのコード解析、演奏スタイル付き伴奏、コード追従オーディオはない | P1 | 現アプリの教育的な説明は維持する。先に Project/Audio 基盤を作り、その後にコード解析と編集可能な伴奏生成を足す | [Cubase Chord Track](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/chord_functions/chord_functions_chord_track_c.html), [Cubase Chord Assistant](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/chord_functions/chord_functions_chord_assistant_c.html), [Logic Pro chords](https://support.apple.com/en-ie/guide/logicpro/lgcp2633963f/mac), [Logic Pro Session Players](https://support.apple.com/en-ie/guide/logicpro/lgcpbf624405/mac) |
 | セクション、非線形アレンジ | Cubase の Arranger Track は chain、repeat、live jump、flatten を持つ。Logic の Live Loops は cell/scene を同期再生し Tracks area へ記録できる | **部分**: section label、clip の独立/連動複製、transport loop はある。section 順序を再生する chain、scene/cell 起動、performance capture はない | P1 | section annotation を壊さず、最初に「セクション再生順と反復」を追加する。Live Loops 相当の即興 grid はその後 | [Cubase Arranger Track](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/arranger_track/arranger_track_c.html), [Logic Pro Live Loops](https://support.apple.com/guide/logicpro/live-loops-overview-lgcpf46ffc88/10.7/mac/11.0) |
-| Tempo / 拍子 / musical time | Tempo Track、拍子イベント、tempo change、音声からの tempo 解析・追従を扱える。Logic は Smart Tempo を持つ | **部分**: schema v3でtempo / 拍子mapと`lengthBeats`が正本、固定値はlegacy mirrorである。共通変換をlive / WAV / MIDI / timeline、metronome、Piano Roll / Drum / Chord UIへ接続済み。productionのmap編集UIとaudio followはない | P0 | variable-map回帰を維持してmap editorを提供し、Smart Tempo相当はP1で別評価する | [Cubase Tempo Track](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/editing_tempo_and_signature/editing_tempo_tempo_track_c.html), [Cubase Signature Track](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/tracks_about/tracks_about_signature_track_c.html), [Logic Pro tempo overview](https://support.apple.com/guide/logicpro/tempo-overview-lgcp3c2e8ef9/mac), [Logic Pro Smart Tempo](https://support.apple.com/guide/logicpro/smart-tempo-overview-lgcp9281e70c/10.7/mac/11.0) |
+| Tempo / 拍子 / musical time | Tempo Track、拍子イベント、tempo change、音声からの tempo 解析・追従を扱える。Logic は Smart Tempo を持つ | **部分**: schema v4でtempo / 拍子mapと`lengthBeats`が正本、固定値はlegacy mirrorである。共通変換をlive / WAV / MIDI / timeline、metronome、Piano Roll / Drum / Chord UIへ接続済み。productionのmap編集UIとaudio followはない | P0 | variable-map回帰を維持してmap editorを提供し、Smart Tempo相当はP1で別評価する | [Cubase Tempo Track](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/editing_tempo_and_signature/editing_tempo_tempo_track_c.html), [Cubase Signature Track](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/tracks_about/tracks_about_signature_track_c.html), [Logic Pro tempo overview](https://support.apple.com/guide/logicpro/tempo-overview-lgcp3c2e8ef9/mac), [Logic Pro Smart Tempo](https://support.apple.com/guide/logicpro/smart-tempo-overview-lgcp9281e70c/10.7/mac/11.0) |
 | Audio Asset / Audio Track | 音声をプロジェクトへ読み込み、region/event として配置・分割・trim・fade・crossfade・loop・gain 調整できる | **部分**: WAV / MP3 / M4A / AACをlocalで48 kHz mono/stereo PCM16 WAVへ正規化し、app-owned content-addressed objectとして保存する。production UIからmove、左右trim、gain、fade、loop、split、独立duplicate、deleteができ、shared plannerでlive / WAVを一致させる。missing / changed表示もある。waveform、crossfade、rate/stretch、loop中left trim / split、portable bundleはない | P0 | Batch 5の非破壊source rangeとasset integrityを回帰維持し、crossfade / waveform / persisted loop phaseは独立した後続incrementにする | [Cubase Pro Help](https://www.steinberg.help/r/cubase-pro/15.0/en), [Logic Pro project basics](https://support.apple.com/en-ie/guide/logicpro/lgcpe9cc47b2/mac) |
-| Audio 録音、take、comping | Audio/MIDI 録音、cycle take、punch、lane/take folder、comping、複数入力を扱える | **未実装**: record arm、入力 device、monitoring、録音 file、take/lane/comp の production 導線がない | P1 | 実装済みschema v3 Audio Asset / Track基盤を使い、単一入力録音→cycle takes→非破壊compの順で実装する。初回からmulti-I/O全対応を約束しない | [Cubase recording lanes and takes](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/track_handling/track_handling_lanes_working_with_c.html), [Logic Pro recording overview](https://support.apple.com/guide/logicpro/overview-lgcp7f3af10b/mac), [Logic Pro comping](https://support.apple.com/guide/logicpro/comping-overview-lgcp317d758e/10.7/mac/11.0) |
+| Audio 録音、take、comping | Audio/MIDI 録音、cycle take、punch、lane/take folder、comping、複数入力を扱える | **未実装**: record arm、入力 device、monitoring、録音 file、take/lane/comp の production 導線がない | P1 | 実装済みschema v4 Audio Asset / Track基盤を使い、単一入力録音→cycle takes→非破壊compの順で実装する。初回からmulti-I/O全対応を約束しない | [Cubase recording lanes and takes](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/track_handling/track_handling_lanes_working_with_c.html), [Logic Pro recording overview](https://support.apple.com/guide/logicpro/overview-lgcp7f3af10b/mac), [Logic Pro comping](https://support.apple.com/guide/logicpro/comping-overview-lgcp317d758e/10.7/mac/11.0) |
 | Audio の time / pitch 編集 | Cubase は AudioWarp / VariAudio、Logic は Flex Time / Flex Pitch で timing と pitch を編集できる | **未実装**: rate 1.0の非破壊frame trimはあるが、waveform editor、warp marker、pitch segment、formant、audio quantizeはない | P1 | Audio Clip source rangeとtempo mapは基盤として利用し、次にtime stretch、単音pitch correctionの順で評価する | [Cubase AudioWarp](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/sample_editor_window/sample_editor_inspector_audiowarp_r.html), [Cubase VariAudio](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/sample_editor_variaudio/sample_editor_variaudio_c.html), [Logic Pro Flex overview](https://support.apple.com/guide/logicpro/flex-time-pitch-logic-pro-mac-audio-track-lgcp308143aa/mac), [Logic Pro Flex Pitch editing](https://support.apple.com/guide/logicpro/edit-pitch-and-timing-with-flex-pitch-lgcpc53e6bef/mac) |
 | ハミング / 単音音声 → Melody MIDI | VariAudio と Flex Pitch は、解析済みの単音音声から MIDI note を生成できる | **部分**: 60秒以内の録音済み単音ファイルをローカル解析し、検出結果を確認して既存 MIDI Clip へ1回の変更で配置できる。マイク直録り、波形/pitch segment手修正、polyphonic transcriptionはない | P0 | 現行のfile decode → pitch/onset → confidence → tempo/grid quantize →確認→NoteEvent確定を堅牢化する。次にマイク権限と録音Asset基盤へ接続し、歌詞認識とは分離する | [Cubase Extracting MIDI from Audio](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/sample_editor_variaudio/sample_editor_variaudio_midi_extract_from_audio_t.html), [Logic Pro Create MIDI from Flex Pitch Data](https://support.apple.com/guide/logicpro/create-midi-from-audio-recordings-lgcpe2fd1b83/mac) |
 | ボーカルカット / Stem 分離 | 両製品は vocal、drums、bass、その他などを推定分離する Stem Separation を持つ | **部分**: ローカル Mid/Side 中央定位軽減、3 preset、A/B、PCM 16-bit WAV 書き出しはある。中央にない vocal や reverb は残り、中央の楽器も減る。ML stem 分離ではない | P0 | まず現方式の境界・5分上限・codec padding・cancel/recovery を完成させる。ML stem 分離は品質、モデル配布、端末負荷、権利を別評価して P1 で判断する | [Cubase Stem Separation](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/audio_functions/audio_functions_stem_separation_r.html), [Logic Pro Stem Splitter](https://support.apple.com/guide/logicpro/extract-vocal-instrumental-stems-stem-lgcp61bae908/mac) |
-| Mixer、routing、bus/send | MixConsole/Mixer は insert、send、group/aux、output、VCA、side-chain、複数 routing、automation を扱う | **部分**: per-track volume/pan/mute/solo、meter、Filter/Delay/Reverb/EQ/Compressor insert、Master gain/limiter はある。bus/send/return、VCA、side-chain、hardware I/O はない | P1 | schema v3 後に明示的な audio graph routing を導入する。最初は stereo bus と pre/post-fader send、循環拒否、live/offline parity を完了条件にする | [Cubase MixConsole](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/mixconsole/mixconsole_c.html), [Logic Pro mixing overview](https://support.apple.com/guide/logicpro/mixing-overview-lgcpbc219818/mac), [Logic Pro channel strip types](https://support.apple.com/guide/logicpro/channel-strip-types-lgcpbc2192ea/10.7/mac/11.0) |
-| Automation / modulation | Track/region automation、write/read mode、parameter curve を持ち、mix や plug-in parameter を時間変化させられる | **部分**: schema v3にvolume / pan target、point、hold / linear補間があり、共通resolverでlive / offline schedulingする。production lane UIとwrite/read操作、insert/send/tempo automationはない | P0 | volume/panのlane editorとwrite/readを接続し、保存・Undo・loop・live/offline parityを維持してからinsert/send/tempoへ広げる | [Cubase Automation](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/automation/automation_c.html), [Logic Pro automation overview](https://support.apple.com/guide/logicpro/automation-overview-lgcpb1a1ea03/mac) |
+| Mixer、routing、bus/send | MixConsole/Mixer は insert、send、group/aux、output、VCA、side-chain、複数 routing、automation を扱う | **部分**: per-track volume/pan/mute/solo、meter、5種のinsert、Master gain/limiterに加え、stereo Bus、各non-Masterのmain output、pre/post-fader send / return、循環拒否、edge-aware solo、live/WAV共通DAGをproduction Mixerから扱える。VCA、side-chain、hardware I/O、send automationはない | P1 | schema v4 routingの回帰を維持し、次はautomation lane UI、side-chain、VCAを独立して追加する。外部I/Oはdevice設計後に扱う | [Cubase MixConsole](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/mixconsole/mixconsole_c.html), [Logic Pro mixing overview](https://support.apple.com/guide/logicpro/mixing-overview-lgcpbc219818/mac), [Logic Pro channel strip types](https://support.apple.com/guide/logicpro/channel-strip-types-lgcpbc2192ea/10.7/mac/11.0) |
+| Automation / modulation | Track/region automation、write/read mode、parameter curve を持ち、mix や plug-in parameter を時間変化させられる | **部分**: schema v4にvolume / pan target、point、hold / linear補間があり、共通resolverでlive / offline schedulingする。production lane UIとwrite/read操作、insert/send/tempo automationはない | P0 | volume/panのlane editorとwrite/readを接続し、保存・Undo・loop・live/offline parityを維持してからinsert/send/tempoへ広げる | [Cubase Automation](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/automation/automation_c.html), [Logic Pro automation overview](https://support.apple.com/guide/logicpro/automation-overview-lgcpb1a1ea03/mac) |
 | 内蔵音源、effect、sample library | 多数の software instrument / sampler / effect、preset browser、multi-output、modulation を持つ | **部分**: 小規模な内蔵 subtractive synth/drum と5種の insert はある。Sampler、音源 browser、multi-output、modulator、convolution、専門的 metering はない | P1 | P0 では現在の preset を選択可能にする。Sampler と asset browser を Audio Asset 上へ追加し、音源数の競争より一貫した保存・再現性を優先する | [Cubase Pro Help](https://www.steinberg.help/r/cubase-pro/15.0/en), [Logic Pro User Guide](https://support.apple.com/guide/logicpro/welcome/mac) |
 | Export、bounce、相互運用 | 複数 format、channel/stem、range、real-time/offline bounce、業務用交換形式を扱う | **部分**: project 全体の stereo WAV、SMF Format 1 MIDI、`.ctsproj.json` はある。track/stem 一括、MP3/M4A、bit depth/sample rate 選択、AAF/XML/MusicXML はない | P1 | 先に routing/automation と同一結果の track/stem WAV を追加し、format option を拡張する。AAF/XML は P2 の明示的な互換プロジェクトとして扱う | [Cubase Export Audio Mixdown](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/export_audio_mixdown/export_audio_mixdown_r.html), [Logic Pro bounce](https://support.apple.com/en-gb/guide/logicpro/lgcp785a41c3/mac), [Logic Pro sharing](https://support.apple.com/guide/logicpro/sharing-overview-lgcp5a70f0fc/10.7/mac/11.0) |
 | 楽譜 | MIDI を譜面表示・入力・layout・印刷/出力できる | **未実装** | P2 | Piano Roll と NoteEvent が安定した後の別 editor とする。初期は閲覧と MusicXML export の価値を検証する | [Cubase Score Editor](https://www.steinberg.help/r/cubase-pro/cubasescore/15.0/en), [Logic Pro Score Editor](https://support.apple.com/guide/logicpro/score-editor-interface-lgcpc7885e0b/10.7/mac/11.0) |
@@ -53,15 +53,15 @@
 
 1. **完了済み**: ボーカルカットの入力時間・codec padding・cancel/recovery・書き出し回帰を実装する。ML stem分離は別のP1製品判断とする。
 2. **部分完了**: ハミング/単音音声ファイルを解析し、確認後に Melody MIDI へ変換する。無音、雑音、和音、多すぎるノート、上限超過のnegative-case gateとマイク直録りは未完了である。
-3. **部分完了**: Track管理のinstrument / drum / file由来audio追加、non-master整理、roleと名前を分離した改名・削除保護、内蔵synth音色選択を実装する。上限・全出力経路のrelease gateとBus / Folder / Stackは未完了である。
-4. **完了済み基盤**: Project schema v3としてTrack role、AudioAsset / Automation metadata、Tempo/Signature Map、v1→v2→v3 migration、native metadata境界を導入する。
-5. **完了済み基盤**: application-owned audio binary repositoryを作り、schema v3を使うAudio Clip配置・再生・非破壊編集を実装する。
-6. **次Batch**: stereo Bus / send routing、または単一入力録音を独立incrementとして進める。
+3. **部分完了**: Track管理のinstrument / drum / file由来audio / stereo Bus追加、non-master整理、roleと名前を分離した改名・削除保護、内蔵synth音色選択を実装する。上限・全出力経路のrelease gateとFolder / Stackは未完了である。
+4. **完了済み基盤**: Project schema v4としてTrack role、AudioAsset / Automation metadata、Tempo/Signature Map、audio routing、v1→v2→v3→v4 migration、native metadata境界を導入する。
+5. **完了済み基盤**: application-owned audio binary repositoryを作り、schema v4を使うAudio Clip配置・再生・非破壊編集を実装する。
+6. **完了済み基盤**: stereo Bus、main output、pre/post-fader send、循環拒否、live/offline共通routing graphを実装する。次は単一入力録音またはautomation lane UIを独立incrementとして進める。
 
 ### P1: 制作・録音・ミックス
 
 - Audio 録音、monitor、take/lane、comping、punch
-- stereo bus、pre/post-fader send/return、side-chain の最小基盤
+- side-chain、VCA、hardware I/O routing
 - controller lane、sustain/pitch bend、MIDI step/real-time recording
 - automation lane UI、write/read、insert/send parameter automation
 - tempo/signature change 対応と Smart Tempo 相当の段階的な解析
@@ -84,10 +84,10 @@
 flowchart LR
   B1[1. ボーカルカット完了] --> B2[2. ファイル入力の<br/>ハミング→メロディ]
   B2 --> B3[3. Track管理 + 音色<br/>部分完了]
-  B3 --> B4[4. schema v3<br/>Track role / Audio Asset / Automation / Tempo Map]
+  B3 --> B4[4. schema v3 metadata<br/>Track role / Audio Asset / Automation / Tempo Map]
   B4 --> B5[5. Audio Clip<br/>配置 + 再生 + 非破壊編集]
   B5 --> B6A[6a. Audio録音 + monitor]
-  B5 --> B6B[6b. bus / send routing]
+  B5 --> B6B[6b. bus / send routing<br/>実装済]
   B6A --> B6C[6c. takes / comping]
   B6B --> B6C
 ```
@@ -105,13 +105,13 @@ flowchart LR
 - 初回は既存 Melody MIDI Clip への挿入で成立させ、Batch 3のinstrument追加導入後は新規instrument TrackのMIDI Clipも選べるようにする。
 - 確定までは Project/history/autosave を変更せず、確定を Undo 1回にまとめる。
 
-### Batch 3: Track 管理 + 音色（部分完了、schema v3 roleへ移行済み）
+### Batch 3: Track 管理 + 音色（部分完了、schema v4へ継承済み）
 
-- Batch 3時点のproduction UIはinstrument / drumだけを追加し、全曲長の空Clipを持たせて先頭Master直前へ挿入した。AudioはBatch 5で有効化済み、Busはroutingが必要という未提供理由を引き続き表示する。
+- Batch 3時点のinstrument / drumに加え、AudioはBatch 5、空のstereo BusとroutingはBatch 6bでproduction UIへ接続済みである。Folder / Stackは未提供として区別する。
 - non-masterのduplicate / reorder、一般non-masterのdeleteとcanonical synth 4 presetをProject mutationとして検証する。duplicateは全nested IDを新規にしてTrack内aliasをremapし、Masterは全管理操作から保護する。
-- renameはlocal draftから1 commitにまとめる。schema v3では学習role Trackも改名できてroleを保持し、削除だけを保護する。一般TrackはChords / Bass / Melodyという名前でも学習roleにならない。
+- renameはlocal draftから1 commitにまとめる。schema v4では学習role Trackも改名できてroleを保持し、削除だけを保護する。一般TrackはChords / Bass / Melodyという名前でも学習roleにならない。
 - 128 Track上限とcodec拒否はatomicにし、成功だけをUndo 1回・自動保存1回として採用する。selectionを生存IDへreconcileし、採用されたtopology / preset変更はplayheadを保持して再生を停止する。
-- Batch 3由来の残作業はBus routingであり、Audio binary / TrackはBatch 5で完了した。
+- Batch 3由来の残作業はFolder / Stackとrelease gateである。Audio binary / TrackはBatch 5、Bus routingはBatch 6bで接続した。
 
 ### Batch 4: schema v3 metadata foundation（実装済み）
 
@@ -136,11 +136,12 @@ Batch 4ではmetadata/domain foundationに加え、Automationのlive/offline sch
 - binaryをProject採用前に保存し、Project CAS失敗時はmetadataをcommitしない。nativeは全retained generation / crash draftをrootにしてorphanを回収し、音声bytesを履歴snapshotへ重複コピーしない。
 - Project JSON単体はbinaryを同梱しない。Web generation-aware GC、portable bundle、waveform / crossfade、loop中left trim / splitは既知の後続範囲である。
 
-### Batch 6: 録音 / comping / bus-send
+### Batch 6: 録音 / comping / bus-send（6b実装済み）
 
 - 一つの巨大変更にはせず、`6a 録音とmonitor`、`6b bus/send`、`6c takes/comping` に分ける。
 - recording は permission、device loss、disk full、入力切替、cancel、録音中のproject closeを回復可能にする。
-- bus/send は routing cycle を保存前に拒否し、live/offline export で同じ graph を解決する。
+- bus/send はschema v4で実装済み。全non-Masterのmain output、sourceごと最大16のpre/post-fader send、全1,024 edge、stable DAG、循環のatomic拒否、live/offline共通graphを持つ。無効・gain 0のsendもcycle検査へ含める。
+- MixerはBus追加、output選択、send追加 / 有効 / 送り量 / 前後 / 削除を公開する。gain / enabledは再生中に平滑更新し、topology変更はplayheadを保持して再生を止める。VCA、side-chain、hardware I/O、send automationは後続である。
 - comp は元 take を破壊せず、採用範囲の編集だけを保存する。
 
 ## 5. 実装判断の原則
@@ -159,16 +160,16 @@ Batch 4ではmetadata/domain foundationに加え、Automationのlive/offline sch
 - [x] Batch 1: 対応する通常音源、exact 5分、上限超過、cancel/reopen を含む unit/E2E/実ブラウザ検証が通る。
 - [x] Batch 2: 単音 fixture で pitch/onset/休符/quantize が許容誤差内となり、preview から MIDI 確定を Undo 1回で戻せる。
 - [ ] Batch 2: 無音、雑音、和音、多すぎるノート、上限超過を Project 無変更で説明付き拒否できる。
-- [x] Batch 3 production導線（部分実装）: instrument / drum追加、non-master duplicate/reorder、一般Track delete/rename、schema v3の学習role Track改名・削除保護、canonical synth selectorを提供した。AudioはBatch 5で追加し、Busだけを未提供と表示する。
+- [x] Batch 3 production導線（部分実装）: instrument / drum / Audio / Bus追加、non-master duplicate/reorder、一般Track delete/rename、schema v4の学習role Track改名・削除保護、canonical synth selectorを提供した。Folder / Stackは未提供として区別する。
 - [ ] Batch 3検証gate: 127→128と追加/複製上限、候補だけがcodec拒否されるevent/string fixture、全構造commandのactive playback停止差、canonical 4 presetのlive/WAV/Undo/`.ctsproj.json`/SQLite一致、drum browser E2Eを完了する。
-- [ ] Track CRUD後続境界: Bus / Folder / Stackが完了するまで全Track CRUDと表現しない。
+- [ ] Track CRUD後続境界: Folder / Stackが完了するまで全Track CRUDと表現しない。
 - [x] Batch 4 metadata foundation: v2→v3 migration、Track role、AudioAsset / Automation metadata、Tempo/Signature Mapのexact roundtrip、壊れた入力拒否、native metadata境界を実装する。
 - [x] Batch 4 consumer integration: variable tempo / 拍子でもlive / WAV / MIDI / timeline / metronome /主要editorが共通mapを使う。
 - [x] Batch 5 implementation: 実binaryのchecksum付きcontent-addressed保存、native staging recovery / generation-aware orphan GC / erase-all、Web IndexedDBを実装する。
 - [x] Batch 5 implementation: Audio Clipの配置・trim・gain・fade・loop・split・duplicate・deleteを非破壊にし、live/WAV/Undo/Redo/再読込で同じshared planを使う。
 - [ ] Batch 5 release gate: 3OS candidateでnative import / restart / tamper / erase、browser keyboard E2E、live/WAV聴感を完了する。
 - [ ] Batch 6: 録音失敗・device loss・disk full・close/cancel で既存 Project と Asset が壊れない。
-- [ ] Batch 6: bus/send/automation を含む live と offline WAV の topology と parameter plan が一致する。
+- [x] Batch 6b implementation: bus/send/既存volume-pan automationを含む live と offline WAV のtopologyとparameter planを共有し、cycle拒否、Undo/Redo、schema v4 / Rust境界を検証する。
 - [ ] Batch 6: take/comp の編集が非破壊で、保存・再読込・Undo/Redo 後も同じ範囲を再生する。
 
 ### リリース判定

@@ -255,6 +255,10 @@ describe('createAudioTrackClip', () => {
       }),
     );
     trackLimited.tracks = [...trackLimited.tracks, ...extraTracks];
+    trackLimited.audioRouting.outputs.push(...extraTracks.map((track) => ({
+      sourceTrackId: track.id,
+      destination: { type: 'master' as const },
+    })));
     expect(validateProject(trackLimited).ok).toBe(true);
     const trackBefore = structuredClone(trackLimited);
     expectFailure(createAudioTrackClip(trackLimited, readyAsset()), 'track-limit');

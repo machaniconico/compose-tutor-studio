@@ -192,6 +192,13 @@ function masterTrack(): Track {
 export function createDefaultProject(title = '最初の1曲'): Project {
   const lengthBeats = DEFAULT_LENGTH_BEATS;
   const now = nowIso();
+  const tracks = [
+    instrumentTrack('Chords', 'warmPad', '#5bb0a8', lengthBeats, 'learning.chords'),
+    instrumentTrack('Bass', 'subBass', '#c75b86', lengthBeats, 'learning.bass'),
+    instrumentTrack('Melody', 'leadSine', '#6f9bd8', lengthBeats, 'learning.melody'),
+    drumTrack(lengthBeats),
+    masterTrack(),
+  ];
   return {
     id: uid('project'),
     schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -211,13 +218,16 @@ export function createDefaultProject(title = '最初の1曲'): Project {
     }],
     audioAssets: [],
     automationLanes: [],
-    tracks: [
-      instrumentTrack('Chords', 'warmPad', '#5bb0a8', lengthBeats, 'learning.chords'),
-      instrumentTrack('Bass', 'subBass', '#c75b86', lengthBeats, 'learning.bass'),
-      instrumentTrack('Melody', 'leadSine', '#6f9bd8', lengthBeats, 'learning.melody'),
-      drumTrack(lengthBeats),
-      masterTrack(),
-    ],
+    audioRouting: {
+      outputs: tracks
+        .filter((track) => track.type !== 'master')
+        .map((track) => ({
+          sourceTrackId: track.id,
+          destination: { type: 'master' as const },
+        })),
+      sends: [],
+    },
+    tracks,
     chordTrack: buildChordTrack(lengthBeats),
     sections: [
       {

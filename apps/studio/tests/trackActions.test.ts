@@ -79,6 +79,30 @@ describe('studio track commands', () => {
     expect(state.editor.activeView).toBe('drums');
   });
 
+  it('adds an empty stereo Bus with one direct Master output in one history step', () => {
+    const before = useStore.getState();
+    const result = trackActions.addStudioTrack({ kind: 'bus', name: '  Vocal Bus  ' });
+    expect(result).toMatchObject({ ok: true, changed: true, trackName: 'Vocal Bus' });
+    if (!result.ok) throw new Error('Bus track was not added');
+
+    const state = useStore.getState();
+    const bus = state.project.tracks.find((track) => track.id === result.trackId);
+    expect(bus).toMatchObject({ type: 'bus', clips: [], effects: [] });
+    expect(bus?.instrument).toBeUndefined();
+    expect(state.project.audioRouting.outputs).toContainEqual({
+      sourceTrackId: result.trackId,
+      destination: { type: 'master' },
+    });
+    expect(state.project.audioRouting.sends).toEqual([]);
+    expect(state.editor).toMatchObject({
+      selectedTrackId: result.trackId,
+      selectedClipId: null,
+      activeView: 'arranger',
+    });
+    expect(state.past).toHaveLength(before.past.length + 1);
+    expect(state.saveState.revision).toBe(before.saveState.revision + 1);
+  });
+
   it('rejects blank names but keeps learning roles independent from editable names', () => {
     const before = useStore.getState();
     const projectBefore = fingerprint(before.project);
@@ -355,7 +379,17 @@ describe('studio track commands', () => {
         track.clips.push(createMidiClip(track.id, 0, 32));
         return track;
       });
-      return { ...project, tracks: [...tracks, master] };
+      return {
+        ...project,
+        audioRouting: {
+          outputs: tracks.map((track) => ({
+            sourceTrackId: track.id,
+            destination: { type: 'master' as const },
+          })),
+          sends: [],
+        },
+        tracks: [...tracks, master],
+      };
     })).toBe(true);
     const before = useStore.getState();
     const projectBefore = fingerprint(before.project);

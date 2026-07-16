@@ -88,6 +88,9 @@ test('keeps the primary editor usable at the Tauri minimum window size', async (
   await expect(mixer.locator('.mixer-strip__content')).toBeVisible();
 
   for (let index = 0; index < 5; index += 1) await page.keyboard.press('Tab');
+  const chordRouting = mixer.locator('.mix-ch').filter({ hasText: 'Chords' }).first().locator('summary');
+  await expect(chordRouting).toBeFocused();
+  await page.keyboard.press('Tab');
   const addChordEffect = mixer.getByRole('combobox', {
     name: 'Chords エフェクト追加',
     exact: true,

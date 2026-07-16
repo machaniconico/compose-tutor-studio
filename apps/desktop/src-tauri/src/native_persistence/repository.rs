@@ -43,12 +43,12 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 3;
+const PROJECT_SCHEMA_VERSION: u64 = 4;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
 const LEGACY_STORAGE_VERSION: u64 = 1;
-const LEGACY_MIGRATION_VERSION: u64 = 3;
+const LEGACY_MIGRATION_VERSION: u64 = 4;
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const APPLICATION_ID: i64 = 0x4354_5331; // "CTS1"
 const MAX_PROJECT_JSON_BYTES: usize = 16 * 1024 * 1024;
@@ -585,11 +585,46 @@ struct ProjectDto {
     time_signature_map: Option<Vec<TimeSignatureMapEventDto>>,
     audio_assets: Option<Vec<AudioAssetDto>>,
     automation_lanes: Option<Vec<AutomationLaneDto>>,
+    audio_routing: Option<AudioRoutingDto>,
     tracks: Vec<TrackDto>,
     chord_track: Vec<ChordDto>,
     sections: Vec<SectionDto>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioRoutingDto {
+    outputs: Vec<AudioOutputDto>,
+    sends: Vec<AudioSendDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioOutputDto {
+    source_track_id: String,
+    destination: AudioRouteDestinationDto,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioRouteDestinationDto {
+    #[serde(rename = "type")]
+    kind: String,
+    track_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioSendDto {
+    id: String,
+    source_track_id: String,
+    target_bus_id: String,
+    position: String,
+    gain: f64,
+    #[serde(rename = "enabled")]
+    _enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -3351,6 +3386,7 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
         project = match version {
             1 => migrate_project_value_v1_to_v2(project)?,
             2 => migrate_project_value_v2_to_v3(project)?,
+            3 => migrate_project_value_v3_to_v4(project)?,
             _ => return None,
         };
         version += 1;
@@ -3419,6 +3455,10 @@ fn value_contains_v3_project_fields(project: &serde_json::Map<String, Value>) ->
                     })
                 })
             })
+}
+
+fn value_contains_v4_project_fields(project: &serde_json::Map<String, Value>) -> bool {
+    project.contains_key("audioRouting")
 }
 
 fn collect_value_ids(value: &Value, ids: &mut HashSet<String>) {
@@ -3605,6 +3645,37 @@ fn migrate_project_value_v2_to_v3(mut project: Value) -> Option<Value> {
     );
     project_record.insert("audioAssets".to_owned(), Value::Array(migrated_assets));
     project_record.insert("automationLanes".to_owned(), Value::Array(Vec::new()));
+    Some(project)
+}
+
+/** v4 makes the previously implicit direct-to-master routing graph explicit. */
+fn migrate_project_value_v3_to_v4(mut project: Value) -> Option<Value> {
+    let project_record = project.as_object()?;
+    if project_record.get("schemaVersion").and_then(Value::as_u64) != Some(3)
+        || value_contains_v4_project_fields(project_record)
+    {
+        return None;
+    }
+    let tracks = project_record.get("tracks")?.as_array()?;
+    let mut outputs = Vec::with_capacity(tracks.len());
+    for track in tracks {
+        let track = track.as_object()?;
+        let track_id = track.get("id")?.as_str()?;
+        let track_kind = track.get("type")?.as_str()?;
+        if track_kind == "master" {
+            continue;
+        }
+        outputs.push(serde_json::json!({
+            "sourceTrackId": track_id,
+            "destination": { "type": "master" }
+        }));
+    }
+    let project_record = project.as_object_mut()?;
+    project_record.insert("schemaVersion".to_owned(), Value::from(4));
+    project_record.insert(
+        "audioRouting".to_owned(),
+        serde_json::json!({ "outputs": outputs, "sends": [] }),
+    );
     Some(project)
 }
 
@@ -7183,10 +7254,12 @@ fn validate_project_versioned_presence(
         "gainDb",
     ];
     let project = value.as_object().ok_or(GenerationIssue::Corrupt)?;
-    let is_v3 = schema_version == 3;
+    let has_v3_fields = schema_version >= 3;
+    let has_v4_fields = schema_version >= 4;
     if V3_PROJECT_FIELDS
         .iter()
-        .any(|key| project.contains_key(*key) != is_v3)
+        .any(|key| project.contains_key(*key) != has_v3_fields)
+        || project.contains_key("audioRouting") != has_v4_fields
     {
         return Err(GenerationIssue::Corrupt);
     }
@@ -7196,7 +7269,7 @@ fn validate_project_versioned_presence(
         .ok_or(GenerationIssue::Corrupt)?;
     for track in tracks {
         let track = track.as_object().ok_or(GenerationIssue::Corrupt)?;
-        if track.contains_key("role") != is_v3 {
+        if track.contains_key("role") != has_v3_fields {
             return Err(GenerationIssue::Corrupt);
         }
         let clips = track
@@ -7205,7 +7278,8 @@ fn validate_project_versioned_presence(
             .ok_or(GenerationIssue::Corrupt)?;
         for clip in clips {
             let clip = clip.as_object().ok_or(GenerationIssue::Corrupt)?;
-            let is_v3_audio = is_v3 && clip.get("type").and_then(Value::as_str) == Some("audio");
+            let is_v3_audio =
+                has_v3_fields && clip.get("type").and_then(Value::as_str) == Some("audio");
             if V3_AUDIO_CLIP_FIELDS
                 .iter()
                 .any(|key| clip.contains_key(*key) != is_v3_audio)
@@ -7380,7 +7454,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
         return Err(GenerationIssue::Corrupt);
     }
     let beats_per_bar = project.time_signature[0] as f64 * 4.0 / project.time_signature[1] as f64;
-    let project_length_beats = if project.schema_version == 3 {
+    let project_length_beats = if project.schema_version >= 3 {
         project.length_beats.ok_or(GenerationIssue::Corrupt)?
     } else {
         project.length_bars as f64 * beats_per_bar
@@ -7398,7 +7472,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
     }
     let mut total_items = project.tracks.len() + project.chord_track.len() + project.sections.len();
     let mut audio_assets_by_id = HashMap::<&str, &AudioAssetDto>::new();
-    if project.schema_version == 3 {
+    if project.schema_version >= 3 {
         let tempo_map = project
             .tempo_map
             .as_deref()
@@ -7578,7 +7652,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                 .color
                 .as_deref()
                 .is_some_and(|color| !valid_track_color(color))
-            || (project.schema_version == 3
+            || (project.schema_version >= 3
                 && match track.role.as_deref() {
                     Some("general") => false,
                     Some(role @ ("learning.chords" | "learning.bass" | "learning.melody")) => {
@@ -7621,7 +7695,149 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
         }
     }
 
-    if project.schema_version == 3 {
+    if project.schema_version >= 4 {
+        const MAX_AUDIO_ROUTING_EDGES: usize = 1_024;
+        const MAX_SENDS_PER_SOURCE: usize = 16;
+        let routing = project
+            .audio_routing
+            .as_ref()
+            .ok_or(GenerationIssue::Corrupt)?;
+        let non_master_track_count = project
+            .tracks
+            .iter()
+            .filter(|track| track.kind != "master")
+            .count();
+        if routing
+            .outputs
+            .len()
+            .checked_add(routing.sends.len())
+            .is_none_or(|edge_count| edge_count > MAX_AUDIO_ROUTING_EDGES)
+        {
+            return Err(GenerationIssue::Corrupt);
+        }
+        total_items = total_items
+            .checked_add(routing.outputs.len() + routing.sends.len())
+            .ok_or(GenerationIssue::Corrupt)?;
+
+        let mut output_bus_by_source = HashMap::<&str, Option<&str>>::new();
+        let mut routing_edges = HashMap::<&str, Vec<&str>>::new();
+        let mut incoming_edge_count = HashMap::<&str, usize>::new();
+        for track in &project.tracks {
+            if track.kind != "master" {
+                routing_edges.insert(track.id.as_str(), Vec::new());
+                incoming_edge_count.insert(track.id.as_str(), 0);
+            }
+        }
+
+        for output in &routing.outputs {
+            let source_id = output.source_track_id.as_str();
+            if !valid_project_string(source_id, MAX_STRING_CHARS, false)
+                || track_kinds_by_id
+                    .get(source_id)
+                    .is_none_or(|kind| *kind == "master")
+                || output_bus_by_source.contains_key(source_id)
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+            let destination_bus = match output.destination.kind.as_str() {
+                "master" if output.destination.track_id.is_none() => None,
+                "bus" => {
+                    let target_id = output
+                        .destination
+                        .track_id
+                        .as_deref()
+                        .filter(|target_id| {
+                            valid_project_string(target_id, MAX_STRING_CHARS, false)
+                                && track_kinds_by_id.get(*target_id) == Some(&"bus")
+                                && *target_id != source_id
+                        })
+                        .ok_or(GenerationIssue::Corrupt)?;
+                    Some(target_id)
+                }
+                _ => return Err(GenerationIssue::Corrupt),
+            };
+            output_bus_by_source.insert(source_id, destination_bus);
+            if let Some(target_id) = destination_bus {
+                routing_edges
+                    .get_mut(source_id)
+                    .ok_or(GenerationIssue::Corrupt)?
+                    .push(target_id);
+                *incoming_edge_count
+                    .get_mut(target_id)
+                    .ok_or(GenerationIssue::Corrupt)? += 1;
+            }
+        }
+        if output_bus_by_source.len() != non_master_track_count {
+            return Err(GenerationIssue::Corrupt);
+        }
+
+        let mut sends_per_source = HashMap::<&str, usize>::new();
+        let mut send_pairs = HashSet::<(&str, &str)>::new();
+        for send in &routing.sends {
+            let source_id = send.source_track_id.as_str();
+            let target_id = send.target_bus_id.as_str();
+            let source_send_count = sends_per_source.entry(source_id).or_default();
+            *source_send_count += 1;
+            if !valid_project_string(&send.id, MAX_STRING_CHARS, false)
+                || !ids.insert(send.id.as_str())
+                || !valid_project_string(source_id, MAX_STRING_CHARS, false)
+                || track_kinds_by_id
+                    .get(source_id)
+                    .is_none_or(|kind| *kind == "master")
+                || !valid_project_string(target_id, MAX_STRING_CHARS, false)
+                || track_kinds_by_id.get(target_id) != Some(&"bus")
+                || source_id == target_id
+                || !matches!(send.position.as_str(), "pre-fader" | "post-fader")
+                || !send.gain.is_finite()
+                || !(0.0..=2.0).contains(&send.gain)
+                || *source_send_count > MAX_SENDS_PER_SOURCE
+                || !send_pairs.insert((source_id, target_id))
+                || output_bus_by_source.get(source_id).copied().flatten() == Some(target_id)
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+            routing_edges
+                .get_mut(source_id)
+                .ok_or(GenerationIssue::Corrupt)?
+                .push(target_id);
+            *incoming_edge_count
+                .get_mut(target_id)
+                .ok_or(GenerationIssue::Corrupt)? += 1;
+        }
+
+        let mut ready = project
+            .tracks
+            .iter()
+            .filter(|track| {
+                track.kind != "master"
+                    && incoming_edge_count.get(track.id.as_str()).copied() == Some(0)
+            })
+            .map(|track| track.id.as_str())
+            .collect::<Vec<_>>();
+        let mut cursor = 0usize;
+        while let Some(source_id) = ready.get(cursor).copied() {
+            cursor += 1;
+            for target_id in routing_edges
+                .get(source_id)
+                .ok_or(GenerationIssue::Corrupt)?
+            {
+                let incoming = incoming_edge_count
+                    .get_mut(target_id)
+                    .ok_or(GenerationIssue::Corrupt)?;
+                *incoming = incoming.checked_sub(1).ok_or(GenerationIssue::Corrupt)?;
+                if *incoming == 0 {
+                    ready.push(target_id);
+                }
+            }
+        }
+        if cursor != non_master_track_count {
+            return Err(GenerationIssue::Corrupt);
+        }
+    } else if project.audio_routing.is_some() {
+        return Err(GenerationIssue::Corrupt);
+    }
+
+    if project.schema_version >= 3 {
         let automation_lanes = project
             .automation_lanes
             .as_deref()
@@ -7766,7 +7982,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                     }
                 }
             }
-            if project.schema_version == 3 && clip.kind == "audio" {
+            if project.schema_version >= 3 && clip.kind == "audio" {
                 let asset_id = clip
                     .audio_asset_id
                     .as_deref()
@@ -7871,7 +8087,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                 }
             }
             let steps_per_bar = clip.steps_per_bar.unwrap_or(16);
-            let drum_projector = if project.schema_version == 3 && !drums.is_empty() {
+            let drum_projector = if project.schema_version >= 3 && !drums.is_empty() {
                 Some(
                     DrumStepTimelineProjector::compile(
                         steps_per_bar,
@@ -7887,7 +8103,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                 None
             };
             for drum in drums {
-                let drum_beat_in_clip = if project.schema_version == 3 {
+                let drum_beat_in_clip = if project.schema_version >= 3 {
                     drum_projector
                         .as_ref()
                         .and_then(|projector| projector.project(drum.step_index))
@@ -7986,9 +8202,24 @@ fn project_has_explicit_null_optionals(value: &Value) -> bool {
             "timeSignatureMap",
             "audioAssets",
             "automationLanes",
+            "audioRouting",
         ],
     ) {
         return true;
+    }
+    if let Some(Value::Object(routing)) = project.get("audioRouting") {
+        if let Some(Value::Array(outputs)) = routing.get("outputs") {
+            for output in outputs {
+                let Some(output) = output.as_object() else {
+                    continue;
+                };
+                if let Some(Value::Object(destination)) = output.get("destination") {
+                    if has_null(destination, &["trackId"]) {
+                        return true;
+                    }
+                }
+            }
+        }
     }
     if let Some(Value::Array(tracks)) = project.get("tracks") {
         for track in tracks {

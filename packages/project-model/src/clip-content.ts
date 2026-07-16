@@ -112,7 +112,8 @@ function projectHasEntityId(project: Project, id: string): boolean {
         ),
     )
     || project.chordTrack.some((chord) => chord.id === id)
-    || project.sections.some((section) => section.id === id);
+    || project.sections.some((section) => section.id === id)
+    || project.audioRouting.sends.some((send) => send.id === id);
 }
 
 export type DuplicateClipResult =

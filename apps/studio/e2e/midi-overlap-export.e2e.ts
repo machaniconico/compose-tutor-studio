@@ -22,6 +22,10 @@ function overlappingProject(): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],
+      sends: [],
+    },
     tracks: [
       {
         id: 'lead',

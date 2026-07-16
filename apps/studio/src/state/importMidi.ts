@@ -638,6 +638,16 @@ export function appendImportedMidiTracks(project: Project, importedTracks: reado
     ...project,
     lengthBars: Math.max(project.lengthBars, requiredBars),
     lengthBeats: Math.max(project.lengthBeats, requiredLengthBeats),
+    audioRouting: {
+      ...project.audioRouting,
+      outputs: [
+        ...project.audioRouting.outputs,
+        ...importedTracks.map((track) => ({
+          sourceTrackId: track.id,
+          destination: { type: 'master' as const },
+        })),
+      ],
+    },
     tracks: insertBeforeMaster(project.tracks, importedTracks),
   };
 }

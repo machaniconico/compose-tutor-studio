@@ -96,6 +96,15 @@ function project(tracks: Track[]): Project {
     timeSignatureMap: [{ id: 'signature-1', beat: 0, numerator: 4, denominator: 4 }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: tracks
+        .filter((track) => track.type !== 'master')
+        .map((track) => ({
+          sourceTrackId: track.id,
+          destination: { type: 'master' as const },
+        })),
+      sends: [],
+    },
     tracks,
     chordTrack: [],
     sections: [],
@@ -503,6 +512,7 @@ describe('buildScheduleEvents', () => {
     delete legacyRecord.timeSignatureMap;
     delete legacyRecord.audioAssets;
     delete legacyRecord.automationLanes;
+    delete legacyRecord.audioRouting;
     for (const track of legacyRecord.tracks as Array<Record<string, unknown>>) {
       delete track.role;
     }

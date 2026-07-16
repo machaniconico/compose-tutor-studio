@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { EffectConfig, Track } from '@cts/project-model';
+import { MAX_AUDIO_SENDS_PER_SOURCE, type EffectConfig, type Track } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import {
   addTrackEffect,
@@ -19,6 +19,15 @@ import {
 } from '../../audio/effects';
 import { readMeterLevel, type MeterLevel } from '../../audio/graph';
 import { accessibleTrackName } from '../tracklist/trackPresentation';
+import {
+  addStudioAudioSend,
+  removeStudioAudioSend,
+  setStudioTrackOutput,
+  studioRoutingErrorMessage,
+  updateStudioAudioSend,
+  type StudioRoutingCommandResult,
+} from '../../state/routingActions';
+import { pushToast } from '../../state/tutorialBridge';
 
 type EffectInfo = {
   label: string;
@@ -187,6 +196,7 @@ function useMeterLevel(trackId: string): MeterLevel {
 export function MixerStrip() {
   const tracks = useStore((s) => s.project.tracks);
   const channels = tracks.filter((t) => t.type !== 'master');
+  const buses = channels.filter((track) => track.type === 'bus');
   const master = tracks.find((t) => t.type === 'master') ?? null;
   const contentId = useId();
   const manuallyToggled = useRef(false);
@@ -247,6 +257,7 @@ export function MixerStrip() {
               key={track.id}
               track={track}
               accessibleName={accessibleTrackName(tracks, track)}
+              buses={buses}
             />
           ))}
         </div>
@@ -255,6 +266,7 @@ export function MixerStrip() {
             <ChannelStrip
               track={master}
               accessibleName={accessibleTrackName(tracks, master)}
+              buses={buses}
               isMaster
             />
           </div>
@@ -264,8 +276,13 @@ export function MixerStrip() {
   );
 }
 
-function ChannelStrip(props: { track: Track; accessibleName: string; isMaster?: boolean }) {
-  const { track, accessibleName, isMaster = false } = props;
+function ChannelStrip(props: {
+  track: Track;
+  accessibleName: string;
+  buses: readonly Track[];
+  isMaster?: boolean;
+}) {
+  const { track, accessibleName, buses, isMaster = false } = props;
   const meter = useMeterLevel(track.id);
   const setTrackVolume = useStore((s) => s.setTrackVolume);
   const setTrackPan = useStore((s) => s.setTrackPan);
@@ -281,7 +298,7 @@ function ChannelStrip(props: { track: Track; accessibleName: string; isMaster?: 
           aria-hidden="true"
         />
         <span className="mix-ch__name" title={track.name}>
-          {isMaster ? 'マスター' : track.name}
+          {isMaster ? 'マスター' : `${track.name}${track.type === 'bus' ? '（Bus）' : ''}`}
         </span>
       </div>
 
@@ -340,8 +357,207 @@ function ChannelStrip(props: { track: Track; accessibleName: string; isMaster?: 
         </div>
       ) : null}
 
+      {!isMaster ? (
+        <RoutingControls track={track} accessibleName={accessibleName} buses={buses} />
+      ) : null}
+
       {!isMaster ? <EffectRack track={track} accessibleName={accessibleName} /> : null}
     </div>
+  );
+}
+
+function reportRoutingResult(
+  result: StudioRoutingCommandResult,
+  successMessage: string,
+): boolean {
+  if (!result.ok) {
+    pushToast(studioRoutingErrorMessage(result.code), 'error');
+    return false;
+  }
+  if (result.changed && (successMessage.length > 0 || result.playbackStopped)) {
+    pushToast(
+      `${successMessage}${result.playbackStopped ? ' 再生を停止し、位置を保持しました。' : ''}`.trim(),
+      'info',
+    );
+  }
+  return true;
+}
+
+function RoutingControls(props: {
+  track: Track;
+  accessibleName: string;
+  buses: readonly Track[];
+}) {
+  const { track, accessibleName, buses } = props;
+  const routing = useStore((state) => state.project.audioRouting);
+  const output = routing.outputs.find((route) => route.sourceTrackId === track.id);
+  const sends = routing.sends.filter((send) => send.sourceTrackId === track.id);
+  const mainBusId = output?.destination.type === 'bus' ? output.destination.trackId : null;
+  const sendTargets = new Set(sends.map((send) => send.targetBusId));
+  const availableNewTargets = buses.filter(
+    (bus) => bus.id !== track.id && bus.id !== mainBusId && !sendTargets.has(bus.id),
+  );
+  const canAddSend = sends.length < MAX_AUDIO_SENDS_PER_SOURCE;
+  const outputValue = output?.destination.type === 'bus'
+    ? `bus:${output.destination.trackId}`
+    : 'master';
+
+  return (
+    <details className="mix-ch__routing">
+      <summary>経路</summary>
+      <label className="mix-ch__routing-field">
+        <span>出力</span>
+        <select
+          aria-label={`${accessibleName} 出力先`}
+          value={outputValue}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            const result = value === 'master'
+              ? setStudioTrackOutput(track.id, { type: 'master' })
+              : setStudioTrackOutput(track.id, {
+                  type: 'bus',
+                  trackId: value.slice('bus:'.length),
+                });
+            reportRoutingResult(result, `${track.name}の出力先を変更しました。`);
+          }}
+        >
+          <option value="master">マスター</option>
+          {buses.filter((bus) => bus.id !== track.id).map((bus) => (
+            <option key={bus.id} value={`bus:${bus.id}`}>
+              {accessibleTrackName(buses, bus)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="mix-ch__sends" aria-label={`${accessibleName} センド`}>
+        <span className="mix-ch__routing-title">センド</span>
+        {sends.length === 0 ? <small>追加したバスへ音を分けて送れます。</small> : null}
+        {sends.map((send) => {
+          const otherTargets = new Set(
+            sends.filter((candidate) => candidate.id !== send.id).map((candidate) => candidate.targetBusId),
+          );
+          const targetBus = buses.find((bus) => bus.id === send.targetBusId);
+          const targetName = targetBus ? accessibleTrackName(buses, targetBus) : 'バス';
+          const sendAccessibleName = `${accessibleName} ${targetName}へのセンド`;
+          return (
+            <div className="mix-ch__send" key={send.id}>
+              <label>
+                <span className="visually-hidden">{sendAccessibleName}の送り先</span>
+                <select
+                  aria-label={`${sendAccessibleName}の送り先`}
+                  value={send.targetBusId}
+                  onChange={(event) => {
+                    reportRoutingResult(
+                      updateStudioAudioSend(send.id, { targetBusId: event.currentTarget.value }),
+                      `${track.name}のセンド先を変更しました。`,
+                    );
+                  }}
+                >
+                  {buses
+                    .filter((bus) =>
+                      bus.id !== track.id &&
+                      bus.id !== mainBusId &&
+                      !otherTargets.has(bus.id))
+                    .map((bus) => (
+                      <option key={bus.id} value={bus.id}>{accessibleTrackName(buses, bus)}</option>
+                    ))}
+                </select>
+              </label>
+              <label className="mix-ch__send-enabled">
+                <input
+                  type="checkbox"
+                  aria-label={`${sendAccessibleName}を有効にする`}
+                  checked={send.enabled}
+                  onChange={(event) => {
+                    reportRoutingResult(
+                      updateStudioAudioSend(send.id, { enabled: event.currentTarget.checked }),
+                      '',
+                    );
+                  }}
+                />
+                有効
+              </label>
+              <label>
+                <span className="visually-hidden">{sendAccessibleName}の位置</span>
+                <select
+                  aria-label={`${sendAccessibleName}の位置`}
+                  value={send.position}
+                  onChange={(event) => {
+                    const position = event.currentTarget.value === 'pre-fader'
+                      ? 'pre-fader'
+                      : 'post-fader';
+                    reportRoutingResult(
+                      updateStudioAudioSend(send.id, { position }),
+                      `${track.name}のセンド位置を変更しました。`,
+                    );
+                  }}
+                >
+                  <option value="post-fader">フェーダー後</option>
+                  <option value="pre-fader">フェーダー前</option>
+                </select>
+              </label>
+              <label className="mix-ch__send-gain">
+                <span>量 {gainToDbLabel(send.gain)}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.01}
+                  value={send.gain}
+                  aria-label={`${sendAccessibleName}の送り量`}
+                  onChange={(event) => {
+                    reportRoutingResult(
+                      updateStudioAudioSend(send.id, { gain: Number(event.currentTarget.value) }),
+                      '',
+                    );
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="mix-ch__send-remove"
+                aria-label={`${sendAccessibleName}を削除`}
+                onClick={() => {
+                  reportRoutingResult(
+                    removeStudioAudioSend(send.id),
+                    `${track.name}のセンドを削除しました。`,
+                  );
+                }}
+              >
+                削除
+              </button>
+            </div>
+          );
+        })}
+        {canAddSend && availableNewTargets.length > 0 ? (
+          <label className="mix-ch__routing-field">
+            <span className="visually-hidden">{accessibleName} センドを追加</span>
+            <select
+              aria-label={`${accessibleName} センドを追加`}
+              value=""
+              onChange={(event) => {
+                const targetBusId = event.currentTarget.value;
+                if (targetBusId.length === 0) return;
+                reportRoutingResult(
+                  addStudioAudioSend(track.id, targetBusId),
+                  `${track.name}にセンドを追加しました。`,
+                );
+              }}
+            >
+              <option value="">センドを追加…</option>
+              {availableNewTargets.map((bus) => (
+                <option key={bus.id} value={bus.id}>{accessibleTrackName(buses, bus)}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {!canAddSend ? (
+          <small>1つのトラックから追加できるセンドは最大{MAX_AUDIO_SENDS_PER_SOURCE}件です。</small>
+        ) : null}
+        <small>フェーダー前は音量・効果の前、フェーダー後は音量・効果・パンの後から送ります。</small>
+      </div>
+    </details>
   );
 }
 

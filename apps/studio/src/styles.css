@@ -2360,6 +2360,10 @@ button.pr__note:hover {
   overflow: hidden;
 }
 
+.mixer-strip.is-expanded {
+  max-height: min(320px, 40vh);
+}
+
 .mixer-strip__toggle-rail {
   display: flex;
   flex: 0 0 auto;
@@ -2386,7 +2390,7 @@ button.pr__note:hover {
   flex: 1 1 auto;
   min-width: 0;
   align-items: stretch;
-  overflow-x: auto;
+  overflow: auto;
 }
 
 .mixer-strip__content[hidden] {
@@ -2509,6 +2513,85 @@ button.pr__note:hover {
   display: flex;
   gap: var(--sp-1);
   justify-content: center;
+}
+
+.mix-ch__routing {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-2);
+  font-size: 10px;
+}
+
+.mix-ch__routing > summary {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-1);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.mix-ch__routing[open] {
+  padding: 0 var(--sp-1) var(--sp-1);
+}
+
+.mix-ch__routing[open] > summary {
+  margin: 0 calc(-1 * var(--sp-1)) var(--sp-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.mix-ch__routing-field,
+.mix-ch__send,
+.mix-ch__send-gain,
+.mix-ch__sends {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.mix-ch__routing-field select,
+.mix-ch__send select,
+.mix-ch__send input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  font-size: 10px;
+}
+
+.mix-ch__routing-title {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.mix-ch__sends {
+  margin-top: var(--sp-2);
+}
+
+.mix-ch__sends small {
+  color: var(--text-faint);
+  line-height: 1.35;
+}
+
+.mix-ch__send {
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--border);
+}
+
+.mix-ch__send-enabled {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.mix-ch__send-enabled input {
+  margin: 0;
+}
+
+.mix-ch__send-remove {
+  min-height: 28px;
+  padding: 2px var(--sp-1);
+  font-size: 10px;
+  color: var(--danger);
 }
 
 .mini-btn.is-mute {

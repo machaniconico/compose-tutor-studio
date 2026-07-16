@@ -32,6 +32,13 @@ function drumOnlyProject(grooveSeed: number): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{
+        sourceTrackId: 'track-deterministic-drums',
+        destination: { type: 'master' },
+      }],
+      sends: [],
+    },
     tracks: [
       {
         id: 'track-deterministic-drums',

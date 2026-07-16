@@ -150,6 +150,13 @@ export function createDefaultProject(opts: CreateDefaultProjectOpts = {}): Proje
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [instrTrack, drumTrack].map((track) => ({
+        sourceTrackId: track.id,
+        destination: { type: 'master' as const },
+      })),
+      sends: [],
+    },
     tracks: [master, instrTrack, drumTrack],
     chordTrack: [],
     sections: [],

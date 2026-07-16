@@ -31,6 +31,15 @@ function project(tracks: Track[], chordTrack: ChordEvent[] = []): Project {
     timeSignatureMap: [{ id: 'signature-1', beat: 0, numerator: 4, denominator: 4 }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: tracks
+        .filter((track) => track.type !== 'master')
+        .map((track) => ({
+          sourceTrackId: track.id,
+          destination: { type: 'master' as const },
+        })),
+      sends: [],
+    },
     tracks,
     chordTrack,
     sections: [],

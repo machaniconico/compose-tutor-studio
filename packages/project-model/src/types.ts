@@ -192,6 +192,34 @@ export type AutomationLane = {
   points: AutomationPoint[];
 };
 
+/** A track's single main-output destination. Master is a logical sink. */
+export type AudioRouteDestination =
+  | { type: 'master' }
+  | { type: 'bus'; trackId: string };
+
+export type TrackOutputRoute = {
+  sourceTrackId: string;
+  destination: AudioRouteDestination;
+};
+
+export type AudioSendPosition = 'pre-fader' | 'post-fader';
+
+export type AudioSend = {
+  id: string;
+  sourceTrackId: string;
+  targetBusId: string;
+  position: AudioSendPosition;
+  /** Linear gain. Zero is silence; values above one provide makeup gain. */
+  gain: number;
+  enabled: boolean;
+};
+
+/** Normalized stereo audio-routing graph for every non-Master track. */
+export type AudioRouting = {
+  outputs: TrackOutputRoute[];
+  sends: AudioSend[];
+};
+
 export type Project = {
   id: string;
   schemaVersion: number;
@@ -206,6 +234,7 @@ export type Project = {
   timeSignatureMap: TimeSignatureMapEvent[];
   audioAssets: AudioAsset[];
   automationLanes: AutomationLane[];
+  audioRouting: AudioRouting;
   tracks: Track[];
   chordTrack: ChordEvent[];
   sections: Section[];

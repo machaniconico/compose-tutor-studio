@@ -26,7 +26,7 @@ beforeEach(async () => {
 });
 
 describe('track management UI', () => {
-  it('offers immediately usable instrument, drum and local Audio Track choices', () => {
+  it('offers immediately usable instrument, drum, local Audio, and stereo Bus choices', () => {
     const html = renderToStaticMarkup(
       <AddTrackDialog onClose={() => undefined} onCreated={() => undefined} />,
     );
@@ -40,7 +40,9 @@ describe('track management UI', () => {
     expect(html).toContain('accept=".wav,.mp3,.m4a,.aac,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/aac"');
     expect(html).toContain('やわらかいパッド');
     expect(html).toContain('明るいリード');
-    expect(html).toContain('バストラックはルーティングの実装後');
+    expect(html).toContain('バストラック');
+    expect(html).toContain('複数トラックの音をまとめて');
+    expect(html).not.toContain('バストラックはルーティングの実装後');
     expect(html).not.toContain('オーディオトラックは音声素材管理');
     expect(html).toContain('data-modal-initial-focus="true"');
     expect(html).not.toContain('maxLength=');

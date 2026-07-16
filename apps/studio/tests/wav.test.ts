@@ -105,6 +105,10 @@ function projectWithDrumClip(clip: Clip): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{ sourceTrackId: 'drums', destination: { type: 'master' } }],
+      sends: [],
+    },
     tracks: [drumTrack(clip)],
     chordTrack: [],
     sections: [],
@@ -138,6 +142,7 @@ function projectWithMasterOnly(): Project {
         effects: [],
       },
     ],
+    audioRouting: { outputs: [], sends: [] },
   };
 }
 
@@ -183,6 +188,10 @@ async function projectWithAudioClip(bytes: Uint8Array): Promise<Project> {
       solo: false,
       effects: [],
     }],
+    audioRouting: {
+      outputs: [{ sourceTrackId: 'wav-audio-track', destination: { type: 'master' } }],
+      sends: [],
+    },
   };
 }
 
@@ -464,6 +473,10 @@ describe('buildWavScheduleEvents drum groove parity', () => {
       }],
       audioAssets: [],
       automationLanes: [],
+      audioRouting: {
+        outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],
+        sends: [],
+      },
       tracks: [{
         id: 'lead',
         name: 'Lead',
@@ -718,6 +731,10 @@ describe('MIDI Clip loop live/WAV parity', () => {
       }],
       audioAssets: [],
       automationLanes: [],
+      audioRouting: {
+        outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],
+        sends: [],
+      },
       tracks: [{
         id: 'lead',
         name: 'Lead',

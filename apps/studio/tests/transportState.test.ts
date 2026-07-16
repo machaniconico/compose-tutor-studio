@@ -118,6 +118,74 @@ describe('playback topology changes', () => {
     })).toBe(false);
   });
 
+  it('stops for routing topology but keeps send gain and enable changes live', () => {
+    const project = createDefaultProject();
+    const source = project.tracks.find((track) => track.type !== 'master');
+    if (!source) throw new Error('source track fixture missing');
+    const bus = {
+      id: 'bus-routing-test',
+      name: 'Routing Bus',
+      type: 'bus' as const,
+      role: 'general' as const,
+      clips: [],
+      volume: 1,
+      pan: 0,
+      mute: false,
+      solo: false,
+      effects: [],
+    };
+    const routed = {
+      ...project,
+      tracks: [...project.tracks, bus],
+      audioRouting: {
+        outputs: [
+          ...project.audioRouting.outputs,
+          { sourceTrackId: bus.id, destination: { type: 'master' as const } },
+        ],
+        sends: [{
+          id: 'send-routing-test',
+          sourceTrackId: source.id,
+          targetBusId: bus.id,
+          position: 'post-fader' as const,
+          gain: 0.5,
+          enabled: true,
+        }],
+      },
+    };
+
+    expect(hasPlaybackTopologyChanged(routed, {
+      ...routed,
+      audioRouting: {
+        ...routed.audioRouting,
+        sends: routed.audioRouting.sends.map((send) => ({
+          ...send,
+          gain: 1.25,
+          enabled: false,
+        })),
+      },
+    })).toBe(false);
+    expect(hasPlaybackTopologyChanged(routed, {
+      ...routed,
+      audioRouting: {
+        ...routed.audioRouting,
+        sends: routed.audioRouting.sends.map((send) => ({
+          ...send,
+          position: 'pre-fader' as const,
+        })),
+      },
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(routed, {
+      ...routed,
+      audioRouting: {
+        ...routed.audioRouting,
+        outputs: routed.audioRouting.outputs.map((output) =>
+          output.sourceTrackId === source.id
+            ? { ...output, destination: { type: 'bus' as const, trackId: bus.id } }
+            : output),
+      },
+    })).toBe(true);
+  });
+
   it('treats automation edits and automated live-mix edits as snapshot changes', () => {
     const project = createDefaultProject();
     const target = project.tracks[0];
@@ -612,6 +680,16 @@ describe('transport playback lifecycle', () => {
       phase: 'stopped',
       isPlaying: false,
       audioIssue: 'interrupted',
+    });
+
+    store.getState().play();
+    requestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(requestId);
+    store.getState().interruptPlayback(requestId, 'audio-resource-limit');
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      audioIssue: 'audio-resource-limit',
     });
 
     store.getState().play();

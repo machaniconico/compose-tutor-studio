@@ -76,7 +76,7 @@ export function PlaybackLifecycleControl({
             : transport.audioIssue === 'audio-decode-failed'
               ? '保存済みの音声素材を読み取れませんでした。素材が対応形式か、破損していないか確認してください。編集内容はそのままです。'
               : transport.audioIssue === 'audio-resource-limit'
-                ? '音声素材が再生時のメモリ上限を超えています。使用する素材の数または長さを減らしてください。編集内容はそのままです。'
+                ? '再生時の音声処理またはメモリ上限を超えています。エフェクト、バス、または音声素材の数や長さを減らしてください。編集内容はそのままです。'
       : transport.audioIssue === 'start-failed'
         ? '音を再生できませんでした。出力先と端末の音量を確認して、もう一度「再生」を押してください。編集内容はそのままです。'
         : transport.audioIssue === 'interrupted'

@@ -230,9 +230,12 @@ components:
     Project:
       type: object
       description: >-
-        Current schema-v3 aggregate. lengthBeats, tempoMap, and timeSignatureMap
+        Current schema-v4 aggregate. lengthBeats, tempoMap, and timeSignatureMap
         are the musical-time authority; bpm, timeSignature, and lengthBars are
-        validated compatibility mirrors. Across non-Master clips, resolved stored MIDI-note
+        validated compatibility mirrors. audioRouting is one normalized,
+        acyclic stereo graph shared by realtime playback and offline WAV
+        rendering; disabled and zero-gain sends still participate in cycle
+        validation. Across non-Master clips, resolved stored MIDI-note
         and drum-event occurrences (linked source payload multiplied by clip
         instances) must not exceed 200000. Runtime limits the MIDI, drum, and
         realized-chord audible projection to 20000 events for live playback.
@@ -259,6 +262,7 @@ components:
         - timeSignatureMap
         - audioAssets
         - automationLanes
+        - audioRouting
         - tracks
         - chordTrack
         - sections
@@ -271,7 +275,7 @@ components:
           maxLength: 4096
         schemaVersion:
           type: integer
-          const: 3
+          const: 4
         title:
           type: string
           maxLength: 4096
@@ -333,6 +337,8 @@ components:
           maxItems: 2048
           items:
             $ref: '#/components/schemas/AutomationLane'
+        audioRouting:
+          $ref: '#/components/schemas/AudioRouting'
         tracks:
           type: array
           maxItems: 128
@@ -403,6 +409,98 @@ components:
           maxItems: 64
           items:
             $ref: '#/components/schemas/EffectConfig'
+    AudioRouting:
+      type: object
+      additionalProperties: false
+      required: [outputs, sends]
+      description: >-
+        Every non-Master Track owns exactly one output; Master owns none.
+        Output and send edges together must form an acyclic graph; disabled and
+        zero-gain sends still participate in cycle validation. A source may own
+        at most 16 sends, and outputs plus sends may contain at most 1024 edges.
+        Send ids are unique across the Project. Duplicate source-to-Bus sends
+        and a send that duplicates its source's main Bus output are invalid.
+        These cross-object invariants are authoritative in the project-model
+        codec and native persistence validator; JSON Schema keywords alone do
+        not enforce them.
+      properties:
+        outputs:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/TrackOutputRoute'
+        sends:
+          type: array
+          maxItems: 1024
+          items:
+            $ref: '#/components/schemas/AudioSend'
+    TrackOutputRoute:
+      type: object
+      additionalProperties: false
+      required: [sourceTrackId, destination]
+      properties:
+        sourceTrackId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Existing non-Master Track id; each appears exactly once in outputs.
+        destination:
+          oneOf:
+            - $ref: '#/components/schemas/MasterAudioRouteDestination'
+            - $ref: '#/components/schemas/BusAudioRouteDestination'
+    MasterAudioRouteDestination:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: master
+    BusAudioRouteDestination:
+      type: object
+      additionalProperties: false
+      required: [type, trackId]
+      properties:
+        type:
+          const: bus
+        trackId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Existing Track id whose type is bus; it must differ from the source.
+    AudioSend:
+      type: object
+      additionalProperties: false
+      required: [id, sourceTrackId, targetBusId, position, gain, enabled]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Identifier unique across all sends and Project entities.
+        sourceTrackId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Existing non-Master Track id; it may own at most 16 sends.
+        targetBusId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Existing Track id whose type is bus; it must differ from the source.
+        position:
+          type: string
+          enum: [pre-fader, post-fader]
+          description: >-
+            pre-fader taps before the source fader and insert chain;
+            post-fader taps after the source fader, insert chain, and pan.
+        gain:
+          type: number
+          minimum: 0
+          maximum: 2
+          description: Linear send gain; 1 is unity.
+        enabled:
+          type: boolean
+          description: Controls audibility only; a disabled send remains a routing edge for cycle validation.
     InstrumentConfig:
       type: object
       additionalProperties: false
@@ -516,7 +614,7 @@ components:
           minLength: 1
           maxLength: 4096
           description: >-
-            Linked-clip source id retained by current schema v3. MIDI/drum only;
+            Linked-clip source id retained by current schema v4. MIDI/drum only;
             the source must be
             a direct same-track, same-type non-alias clip of identical length.
             Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and

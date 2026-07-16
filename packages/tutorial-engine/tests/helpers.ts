@@ -10,6 +10,7 @@ import type {
   SectionType,
   Track,
 } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION } from '@cts/project-model';
 
 function makeTrack(
   overrides: Partial<Track> & { name: string; type: Track['type'] },
@@ -37,11 +38,14 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
     timeSignatureMap,
     audioAssets,
     automationLanes,
+    audioRouting,
+    tracks,
     ...rest
   } = overrides;
+  const projectTracks = tracks ?? [];
   return {
     id: 'test-project',
-    schemaVersion: 3,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title: 'Test',
     bpm: 120,
     timeSignature: [4, 4],
@@ -58,7 +62,16 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
     }],
     audioAssets: audioAssets ?? [],
     automationLanes: automationLanes ?? [],
-    tracks: [],
+    audioRouting: audioRouting ?? {
+      outputs: projectTracks
+        .filter((track) => track.type !== 'master')
+        .map((track) => ({
+          sourceTrackId: track.id,
+          destination: { type: 'master' as const },
+        })),
+      sends: [],
+    },
+    tracks: projectTracks,
     chordTrack: [],
     sections: [],
     createdAt: '2025-01-01T00:00:00.000Z',

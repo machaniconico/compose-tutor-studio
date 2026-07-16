@@ -1,7 +1,9 @@
 import {
   beatToSecondsAt,
+  compileAudioRouting,
   compileMusicalTime,
   secondsBetweenBeats,
+  type CompiledAudioRoutingPlan,
   type EffectConfig,
   type MusicalTimeIndex,
   type Project,
@@ -18,7 +20,10 @@ import {
   type BiquadStageSettings,
 } from './effects';
 import type { SchedulePayload } from './events';
-import { computeAudibleTracks } from './graph';
+import {
+  audioRoutingEdgeKey,
+  resolveAudioRoutingMix,
+} from './graph';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from './masterBus';
 import type { ScheduledEvent } from './scheduler';
 import { resolvePreset } from './synth';
@@ -68,6 +73,12 @@ export type AudioTailPlan = Readonly<{
 export type AudioTailSource = Readonly<{
   trackId: string;
   endSeconds: number;
+}>;
+
+export type AudioTailRoutingState = Readonly<{
+  plan: CompiledAudioRoutingPlan;
+  audibleChannelIds: ReadonlySet<string>;
+  activeEdgeIds: ReadonlySet<string>;
 }>;
 
 /**
@@ -208,6 +219,7 @@ export function planAudioTail(
   endBeat = project.lengthBeats,
   sampleRate: number = DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
   additionalSources: readonly AudioTailSource[] = [],
+  suppliedRoutingState?: AudioTailRoutingState,
 ): AudioTailPlan {
   const safeStartBeat = finiteNonNegative(startBeat);
   const safeEndBeat = Number.isFinite(endBeat)
@@ -219,7 +231,22 @@ export function planAudioTail(
     secondsBetweenBeats(musicalTime, safeStartBeat, safeEndBeat),
   );
   const tracks = new Map(project.tracks.map((track) => [track.id, track]));
-  const audibleTrackIds = computeAudibleTracks(project.tracks);
+  let routingState = suppliedRoutingState;
+  if (!routingState) {
+    const compiled = compileAudioRouting(project);
+    if (!compiled.ok) {
+      const first = compiled.errors[0];
+      throw new Error(
+        `Audio routing is invalid.${first ? ` ${first.path}: ${first.message}` : ''}`,
+      );
+    }
+    const mix = resolveAudioRoutingMix(project, compiled.plan);
+    routingState = {
+      plan: compiled.plan,
+      audibleChannelIds: mix.audibleChannelIds,
+      activeEdgeIds: mix.activeEdgeIds,
+    };
+  }
   const sourceEndByTrack = new Map<string, number>();
 
   for (const event of resolvedEvents) {
@@ -231,7 +258,7 @@ export function planAudioTail(
       continue;
     }
     const payload = schedulePayload(event.payload);
-    if (!payload || !audibleTrackIds.has(payload.trackId)) continue;
+    if (!payload || !routingState.audibleChannelIds.has(payload.trackId)) continue;
     const track = tracks.get(payload.trackId);
     if (!track) continue;
 
@@ -253,7 +280,7 @@ export function planAudioTail(
 
   for (const source of additionalSources) {
     if (
-      !audibleTrackIds.has(source.trackId) ||
+      !routingState.audibleChannelIds.has(source.trackId) ||
       !tracks.has(source.trackId) ||
       !Number.isFinite(source.endSeconds) ||
       source.endSeconds < 0
@@ -266,17 +293,49 @@ export function planAudioTail(
     );
   }
 
+  const edgesBySource = new Map<string, CompiledAudioRoutingPlan['edges'][number][]>();
+  for (const edge of routingState.plan.edges) {
+    const edges = edgesBySource.get(edge.sourceTrackId) ?? [];
+    edges.push(edge);
+    edgesBySource.set(edge.sourceTrackId, edges);
+  }
+  const inputEndByTrack = new Map(sourceEndByTrack);
   let latestPreMasterEnd = Number.NEGATIVE_INFINITY;
-  for (const [trackId, sourceEnd] of sourceEndByTrack) {
-    const track = tracks.get(trackId);
-    if (!track) continue;
-    latestPreMasterEnd = Math.max(
-      latestPreMasterEnd,
-      sourceEnd + estimateInsertChainTailSeconds(track.effects, sampleRate),
+  const propagate = (
+    edge: CompiledAudioRoutingPlan['edges'][number],
+    endSeconds: number,
+  ): void => {
+    if (!routingState.activeEdgeIds.has(audioRoutingEdgeKey(edge))) return;
+    if (edge.destination.type === 'master') {
+      latestPreMasterEnd = Math.max(latestPreMasterEnd, endSeconds);
+      return;
+    }
+    inputEndByTrack.set(
+      edge.destination.trackId,
+      Math.max(
+        inputEndByTrack.get(edge.destination.trackId) ?? Number.NEGATIVE_INFINITY,
+        endSeconds,
+      ),
     );
+  };
+
+  for (const trackId of routingState.plan.topologicalTrackIds) {
+    if (!routingState.audibleChannelIds.has(trackId)) continue;
+    const inputEnd = inputEndByTrack.get(trackId);
+    const track = tracks.get(trackId);
+    if (!track || inputEnd === undefined || !Number.isFinite(inputEnd)) continue;
+    const postInsertEnd = inputEnd + estimateInsertChainTailSeconds(track.effects, sampleRate);
+    for (const edge of edgesBySource.get(trackId) ?? []) {
+      propagate(
+        edge,
+        edge.kind === 'send' && edge.position === 'pre-fader'
+          ? inputEnd
+          : postInsertEnd,
+      );
+    }
   }
 
-  if (sourceEndByTrack.size === 0 || !Number.isFinite(latestPreMasterEnd)) {
+  if (!Number.isFinite(latestPreMasterEnd)) {
     return {
       uncappedTailSeconds: 0,
       tailSeconds: 0,

@@ -341,6 +341,10 @@ describe('exportProjectToMidi', () => {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{ sourceTrackId: 'track-1', destination: { type: 'master' } }],
+      sends: [],
+    },
     tracks: [
       {
         id: 'track-1',

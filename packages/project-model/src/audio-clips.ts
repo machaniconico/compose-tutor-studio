@@ -222,6 +222,7 @@ function allEntityIds(project: Project): Set<string> {
   }
   for (const chord of project.chordTrack) ids.add(chord.id);
   for (const section of project.sections) ids.add(section.id);
+  for (const send of project.audioRouting.sends) ids.add(send.id);
   return ids;
 }
 
@@ -564,6 +565,13 @@ export function createAudioTrackClip(
         track,
         ...extension.project.tracks.slice(insertionIndex),
       ],
+      audioRouting: {
+        ...extension.project.audioRouting,
+        outputs: [
+          ...extension.project.audioRouting.outputs,
+          { sourceTrackId: track.id, destination: { type: 'master' } },
+        ],
+      },
       updatedAt: nowIso(clock),
     };
     return {

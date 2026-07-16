@@ -35,6 +35,7 @@ type AddTrackDialogProps = Readonly<{
 const DEFAULT_TRACK_NAME: Readonly<Record<AddStudioTrackKind, string>> = {
   instrument: '新しい楽器',
   drum: '新しいドラム',
+  bus: '新しいバス',
 };
 
 type AddTrackChoice = AddStudioTrackKind | 'audio';
@@ -59,7 +60,7 @@ function nativeAudioErrorMessage(error: unknown): string {
   return '音声ファイルを開けませんでした。アクセス権を確認して、もう一度お試しください。';
 }
 
-/** Create one immediately usable instrument or drum track. */
+/** Create one immediately usable instrument, drum, audio, or stereo Bus track. */
 export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
   const [kind, setKind] = useState<AddTrackChoice>('instrument');
   const [name, setName] = useState(DEFAULT_TRACK_NAMES.instrument);
@@ -285,6 +286,20 @@ export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
               <small>WAV、MP3、M4A、AACを48 kHz・PCM16へ変換して端末内へ保存します。プロジェクトJSONには音声本体を含まないため、JSON単体では別端末へ移せません。</small>
             </span>
           </label>
+          <label>
+            <input
+              type="radio"
+              name="track-kind"
+              value="bus"
+              checked={kind === 'bus'}
+              disabled={busy}
+              onChange={() => changeKind('bus')}
+            />
+            <span>
+              <strong>バストラック</strong>
+              <small>複数トラックの音をまとめて、同じ音量やエフェクトで調整できます。</small>
+            </span>
+          </label>
         </fieldset>
 
         <label className="track-add__field">
@@ -332,9 +347,12 @@ export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
           </div>
         ) : null}
 
-        <p className="track-add__future">
-          バストラックはルーティングの実装後に利用できます。
-        </p>
+        {kind === 'bus' ? (
+          <div className="track-add__audio-help">
+            <p>空のステレオバスを作り、最初はマスターへ直接つなぎます。</p>
+            <p>追加後、ミキサーの「経路」で各トラックの出力やセンド先に選べます。</p>
+          </div>
+        ) : null}
 
         <input
           ref={fileInputRef}

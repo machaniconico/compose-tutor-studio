@@ -65,6 +65,14 @@ function sourceProject(): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [
+        { sourceTrackId: 'source-drums', destination: { type: 'master' } },
+        { sourceTrackId: 'source-lead', destination: { type: 'master' } },
+        { sourceTrackId: 'source-bass', destination: { type: 'master' } },
+      ],
+      sends: [],
+    },
     tracks: [
       {
         id: 'source-drums',

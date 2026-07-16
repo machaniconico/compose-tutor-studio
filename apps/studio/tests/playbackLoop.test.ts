@@ -22,6 +22,7 @@ import {
   normalizeTransportLoop,
   shouldRefreshAudioAssetIssuesAfterFailure,
 } from '../src/audio/playback';
+import { AudioRoutingGraphError } from '../src/audio/graph';
 
 function projectWithReadyAudioAsset(checksumSha256 = '0'.repeat(64)) {
   const asset: ReadyAudioAsset = {
@@ -99,6 +100,12 @@ describe('classifyPlaybackStartFailure', () => {
     expect(classifyPlaybackStartFailure(
       new AudioAssetPlaybackError('cancelled', 'asset-1'),
     )).toBe('start-failed');
+  });
+
+  it('classifies the bounded routing graph ceiling as a resource limit', () => {
+    expect(classifyPlaybackStartFailure(
+      new AudioRoutingGraphError('graph-node-limit', 'too many nodes', 4_100),
+    )).toBe('audio-resource-limit');
   });
 
   it.each([

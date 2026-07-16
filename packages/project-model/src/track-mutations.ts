@@ -13,9 +13,9 @@ export const MAX_TRACK_NAME_CODE_POINTS = 128;
 export const DEFAULT_SYNTH_TRACK_PRESET = 'softPad';
 export const DEFAULT_DRUM_TRACK_PRESET = 'acoustic';
 
-export type AddTrackKind = 'instrument' | 'drum';
+export type AddTrackKind = 'instrument' | 'drum' | 'bus';
 export type TrackMoveDirection = 'up' | 'down';
-export type TrackEntityIdKind = 'track' | 'clip' | 'note' | 'drum' | 'effect';
+export type TrackEntityIdKind = 'track' | 'clip' | 'note' | 'drum' | 'effect' | 'send';
 export type TrackIdFactory = (kind: TrackEntityIdKind) => string;
 
 export type TrackMutationErrorCode =
@@ -140,6 +140,7 @@ function allEntityIds(project: Project): Set<string> {
     ids.add(lane.id);
     for (const point of lane.points) ids.add(point.id);
   }
+  for (const send of project.audioRouting.sends) ids.add(send.id);
   return ids;
 }
 
@@ -216,14 +217,14 @@ function firstMasterIndex(project: Project): number {
   return index === -1 ? project.tracks.length : index;
 }
 
-/** Add a full-song instrument or drum track immediately before the first master. */
+/** Add a full-song instrument/drum track or an empty Bus before the first Master. */
 export function addTrack(
   project: Project,
   kind: AddTrackKind,
   options: AddTrackOptions = {},
 ): TrackMutationResult {
   return runMutation(project, () => {
-    if (kind !== 'instrument' && kind !== 'drum') {
+    if (kind !== 'instrument' && kind !== 'drum' && kind !== 'bus') {
       return failure('unsupported-track-kind', `Unsupported track kind: ${String(kind)}`);
     }
     if (project.tracks.length >= MAX_PROJECT_TRACKS) {
@@ -231,7 +232,10 @@ export function addTrack(
     }
 
     const name = options.name === undefined
-      ? generatedUniqueName(project, kind === 'instrument' ? 'Instrument' : 'Drums')
+      ? generatedUniqueName(
+          project,
+          kind === 'instrument' ? 'Instrument' : kind === 'drum' ? 'Drums' : 'Bus',
+        )
       : normalizedName(options.name);
     if (name === null) {
       return failure(
@@ -243,44 +247,52 @@ export function addTrack(
     const idFactory = options.idFactory ?? defaultIdFactory;
     const trackId = allocateId('track', idFactory, reserved);
     if (!trackId.ok) return trackId.result;
-    const clipId = allocateId('clip', idFactory, reserved);
-    if (!clipId.ok) return clipId.result;
 
     const lengthBeats = projectLengthBeats(project);
     const isInstrument = kind === 'instrument';
-    const clip: Clip = isInstrument
-      ? {
-          id: clipId.id,
-          trackId: trackId.id,
-          type: 'midi',
-          startBeat: 0,
-          lengthBeats,
-          loop: false,
-          notes: [],
-        }
-      : {
-          id: clipId.id,
-          trackId: trackId.id,
-          type: 'drum',
-          startBeat: 0,
-          lengthBeats,
-          loop: false,
-          stepsPerBar: 16,
-          drumEvents: [],
-        };
+    const isBus = kind === 'bus';
+    const clips: Clip[] = [];
+    if (!isBus) {
+      const clipId = allocateId('clip', idFactory, reserved);
+      if (!clipId.ok) return clipId.result;
+      clips.push(isInstrument
+        ? {
+            id: clipId.id,
+            trackId: trackId.id,
+            type: 'midi',
+            startBeat: 0,
+            lengthBeats,
+            loop: false,
+            notes: [],
+          }
+        : {
+            id: clipId.id,
+            trackId: trackId.id,
+            type: 'drum',
+            startBeat: 0,
+            lengthBeats,
+            loop: false,
+            stepsPerBar: 16,
+            drumEvents: [],
+          });
+    }
     const track: Track = {
       id: trackId.id,
       name,
       type: kind,
       role: 'general',
-      clips: [clip],
+      clips,
       volume: 1,
       pan: 0,
       mute: false,
       solo: false,
-      instrument: isInstrument
-        ? { type: 'synth', preset: DEFAULT_SYNTH_TRACK_PRESET }
-        : { type: 'drumkit', preset: DEFAULT_DRUM_TRACK_PRESET },
+      ...(!isBus
+        ? {
+            instrument: isInstrument
+              ? { type: 'synth' as const, preset: DEFAULT_SYNTH_TRACK_PRESET }
+              : { type: 'drumkit' as const, preset: DEFAULT_DRUM_TRACK_PRESET },
+          }
+        : {}),
       effects: [],
     };
     const insertionIndex = firstMasterIndex(project);
@@ -289,7 +301,17 @@ export function addTrack(
       track,
       ...project.tracks.slice(insertionIndex),
     ];
-    return success({ ...project, tracks }, track.id, true);
+    return success({
+      ...project,
+      tracks,
+      audioRouting: {
+        ...project.audioRouting,
+        outputs: [
+          ...project.audioRouting.outputs,
+          { sourceTrackId: track.id, destination: { type: 'master' } },
+        ],
+      },
+    }, track.id, true);
   });
 }
 
@@ -448,7 +470,37 @@ export function duplicateTrack(
       duplicate,
       ...project.tracks.slice(insertionIndex),
     ];
-    return success({ ...project, tracks }, duplicate.id, true);
+    const sourceOutputIndex = project.audioRouting.outputs.findIndex(
+      (output) => output.sourceTrackId === source.id,
+    );
+    const sourceOutput = project.audioRouting.outputs[sourceOutputIndex];
+    if (sourceOutput === undefined) {
+      return failure('project-not-adoptable', 'The source track has no main output route.');
+    }
+    const duplicateOutput = {
+      sourceTrackId: duplicate.id,
+      destination: { ...sourceOutput.destination },
+    };
+    const outputs = [
+      ...project.audioRouting.outputs.slice(0, sourceOutputIndex + 1),
+      duplicateOutput,
+      ...project.audioRouting.outputs.slice(sourceOutputIndex + 1),
+    ];
+    const clonedSends = [];
+    for (const send of project.audioRouting.sends) {
+      if (send.sourceTrackId !== source.id) continue;
+      const sendId = allocateId('send', idFactory, reserved);
+      if (!sendId.ok) return sendId.result;
+      clonedSends.push({ ...send, id: sendId.id, sourceTrackId: duplicate.id });
+    }
+    return success({
+      ...project,
+      tracks,
+      audioRouting: {
+        outputs,
+        sends: [...project.audioRouting.sends, ...clonedSends],
+      },
+    }, duplicate.id, true);
   });
 }
 
@@ -515,7 +567,25 @@ export function removeTrack(project: Project, trackId: string): TrackMutationRes
     const audioAssets = project.audioAssets.filter(
       (asset) => !removedAudioAssetIds.has(asset.id) || remainingAudioAssetIds.has(asset.id),
     );
-    return success({ ...project, tracks, automationLanes, audioAssets }, trackId, true);
+    const audioRouting = {
+      outputs: project.audioRouting.outputs
+        .filter((output) => output.sourceTrackId !== trackId)
+        .map((output) => (
+          output.destination.type === 'bus' && output.destination.trackId === trackId
+            ? { ...output, destination: { type: 'master' as const } }
+            : output
+        )),
+      sends: project.audioRouting.sends.filter(
+        (send) => send.sourceTrackId !== trackId && send.targetBusId !== trackId,
+      ),
+    };
+    return success({
+      ...project,
+      tracks,
+      automationLanes,
+      audioAssets,
+      audioRouting,
+    }, trackId, true);
   });
 }
 

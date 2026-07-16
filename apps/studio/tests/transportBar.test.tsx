@@ -76,7 +76,7 @@ describe('TransportBar playback lifecycle', () => {
     ['audio-asset-changed', '変更または破損'],
     ['audio-asset-unavailable', '保存領域へ現在アクセスできません'],
     ['audio-decode-failed', '音声素材を読み取れませんでした'],
-    ['audio-resource-limit', '再生時のメモリ上限'],
+    ['audio-resource-limit', '再生時の音声処理またはメモリ上限'],
   ] as const)('explains %s without generic device advice', (audioIssue, expected) => {
     const html = renderTransport({
       ...stopped,

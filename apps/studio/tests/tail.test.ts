@@ -90,6 +90,25 @@ function audioTrack(effects: EffectConfig[] = []): Track {
   };
 }
 
+function busTrack(
+  id: string,
+  effects: EffectConfig[] = [],
+  mute = false,
+): Track {
+  return {
+    id,
+    name: id,
+    type: 'bus',
+    role: 'general',
+    clips: [],
+    volume: 1,
+    pan: 0,
+    mute,
+    solo: false,
+    effects,
+  };
+}
+
 function project(track: Track): Project {
   return {
     id: 'tail-project',
@@ -110,6 +129,10 @@ function project(track: Track): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{ sourceTrackId: track.id, destination: { type: 'master' } }],
+      sends: [],
+    },
     tracks: [track],
     chordTrack: [],
     sections: [],
@@ -368,6 +391,72 @@ describe('planAudioTail', () => {
     expect(plan.postLimiterTailSeconds).toBe(MASTER_LIMITER_LOOKAHEAD_SECONDS);
   });
 
+  it('propagates nested Bus insert tails once per channel in DAG order', () => {
+    const compressor = effect('compressor', {});
+    const source = instrumentTrack([compressor]);
+    const firstBus = busTrack('bus-a', [{ ...compressor, id: 'bus-a-compressor' }]);
+    const secondBus = busTrack('bus-b', [{ ...compressor, id: 'bus-b-compressor' }]);
+    const routedProject: Project = {
+      ...project(source),
+      tracks: [source, firstBus, secondBus],
+      audioRouting: {
+        outputs: [
+          { sourceTrackId: source.id, destination: { type: 'bus', trackId: firstBus.id } },
+          { sourceTrackId: firstBus.id, destination: { type: 'bus', trackId: secondBus.id } },
+          { sourceTrackId: secondBus.id, destination: { type: 'master' } },
+        ],
+        sends: [],
+      },
+    };
+    const dry = planAudioTail(project(instrumentTrack()), [note(3.9, 0.1)], 0, 4);
+    const nested = planAudioTail(routedProject, [note(3.9, 0.1)], 0, 4);
+
+    expect(nested.uncappedTailSeconds).toBeCloseTo(
+      dry.uncappedTailSeconds + 3 * MASTER_LIMITER_LOOKAHEAD_SECONDS,
+      10,
+    );
+    expect(nested.postLimiterTailSeconds).toBe(MASTER_LIMITER_LOOKAHEAD_SECONDS);
+  });
+
+  it('takes pre-fader Bus sends before source inserts and post-fader sends after them', () => {
+    const compressor = effect('compressor', {});
+    const source = instrumentTrack([compressor]);
+    const mutedDryBus = busTrack('dry-bus', [], true);
+    const wetBus = busTrack('wet-bus', [{ ...compressor, id: 'wet-compressor' }]);
+    const routedProject: Project = {
+      ...project(source),
+      tracks: [source, mutedDryBus, wetBus],
+      audioRouting: {
+        outputs: [
+          { sourceTrackId: source.id, destination: { type: 'bus', trackId: mutedDryBus.id } },
+          { sourceTrackId: mutedDryBus.id, destination: { type: 'master' } },
+          { sourceTrackId: wetBus.id, destination: { type: 'master' } },
+        ],
+        sends: [{
+          id: 'wet-send',
+          sourceTrackId: source.id,
+          targetBusId: wetBus.id,
+          position: 'pre-fader',
+          gain: 1,
+          enabled: true,
+        }],
+      },
+    };
+    const pre = planAudioTail(routedProject, [note(3.9, 0.1)], 0, 4);
+    const post = planAudioTail({
+      ...routedProject,
+      audioRouting: {
+        ...routedProject.audioRouting,
+        sends: [{ ...routedProject.audioRouting.sends[0]!, position: 'post-fader' }],
+      },
+    }, [note(3.9, 0.1)], 0, 4);
+
+    expect(post.uncappedTailSeconds - pre.uncappedTailSeconds).toBeCloseTo(
+      MASTER_LIMITER_LOOKAHEAD_SECONDS,
+      10,
+    );
+  });
+
   it('preserves a full post-song fade before the limiter cleanup window', () => {
     // kick pre-master end = 1.651s onset + 0.35s source = song end + 1ms
     const plan = planAudioTail(project(drumTrack()), [drum(3.302, 'kick')], 0, 4);
@@ -432,6 +521,10 @@ describe('planAudioTail', () => {
     solo.solo = true;
     const soloProject = project(nonSolo);
     soloProject.tracks = [nonSolo, solo];
+    soloProject.audioRouting.outputs.push({
+      sourceTrackId: solo.id,
+      destination: { type: 'master' },
+    });
     const nonSoloPlan = planAudioTail(soloProject, [note(3.9, 0.1)], 0, 4);
     expect(nonSoloPlan.tailSeconds).toBe(0);
     expect(nonSoloPlan.postLimiterTailSeconds).toBe(0);

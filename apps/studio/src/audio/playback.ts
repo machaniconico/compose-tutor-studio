@@ -6,9 +6,12 @@
 // of being allowed to attach itself to a newer play request.
 
 import {
+  compileAudioRouting,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   ScheduleEventLimitError,
+  type AudioRouting,
+  type CompiledAudioRoutingPlan,
   type MusicalTimeIndex,
   type Project,
   type Track,
@@ -41,11 +44,18 @@ import { getAudioEngine } from './engine';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import {
   applyMixState,
+  applyRoutingMixState,
+  AudioRoutingGraphError,
+  assertRoutingGraphNodeBudget,
   buildTrackGraphs,
-  computeAudibleTracks,
+  resolveAudioRoutingMix,
   type TrackGraph,
 } from './graph';
-import { applyMasterMix, hasLiveMixChanged } from './mixState';
+import {
+  applyMasterMix,
+  hasLiveMixChanged,
+  hasLiveRoutingMixChanged,
+} from './mixState';
 import {
   createProjectMusicalTime,
   mappedBeatDurationSeconds,
@@ -105,8 +115,10 @@ type RuntimeSession = PlaybackSession & {
   readonly loop: LoopRegion | null;
   readonly lengthBeats: number;
   readonly projectSnapshot: Project;
+  readonly routingPlan: CompiledAudioRoutingPlan;
   readonly scheduleEvents: readonly ScheduledEvent[];
   readonly everAudibleTrackIds: Set<string>;
+  readonly everAudibleEdgeIds: Set<string>;
   positionTimer: ReturnType<typeof setInterval> | null;
 };
 
@@ -156,6 +168,9 @@ export function classifyPlaybackStartFailure(
     if (error.code === 'resolver-unavailable' || error.code === 'asset-unavailable') {
       return 'audio-asset-unavailable';
     }
+  }
+  if (error instanceof AudioRoutingGraphError && error.code === 'graph-node-limit') {
+    return 'audio-resource-limit';
   }
   return 'start-failed';
 }
@@ -210,6 +225,8 @@ export function planRuntimeAudioTail(
   endBeat: number,
   everAudibleTrackIds: ReadonlySet<string>,
   sampleRate: number = DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
+  everAudibleEdgeIds?: ReadonlySet<string>,
+  latestAudioRouting: AudioRouting = projectSnapshot.audioRouting,
 ): ReturnType<typeof planAudioTail> {
   const latestById = new Map(latestTracks.map((track) => [track.id, track]));
   const planningTracks = projectSnapshot.tracks.map((snapshotTrack) => {
@@ -228,6 +245,7 @@ export function planRuntimeAudioTail(
   const planningProject: Project = {
     ...projectSnapshot,
     tracks: planningTracks,
+    audioRouting: latestAudioRouting,
   };
   const resolvedEvents = rawEvents.flatMap((event) => {
     const resolved = resolveDrumOccurrence(event, event.beat);
@@ -240,6 +258,15 @@ export function planRuntimeAudioTail(
     tempo,
   });
 
+  const compiled = compileAudioRouting(planningProject);
+  if (!compiled.ok) {
+    const first = compiled.errors[0];
+    throw new Error(
+      `Audio routing is invalid.${first ? ` ${first.path}: ${first.message}` : ''}`,
+    );
+  }
+  const currentMix = resolveAudioRoutingMix(planningProject, compiled.plan);
+
   return planAudioTail(
     planningProject,
     resolvedEvents,
@@ -247,6 +274,11 @@ export function planRuntimeAudioTail(
     endBeat,
     sampleRate,
     audioSources,
+    {
+      plan: compiled.plan,
+      audibleChannelIds: everAudibleTrackIds,
+      activeEdgeIds: everAudibleEdgeIds ?? currentMix.activeEdgeIds,
+    },
   );
 }
 
@@ -377,15 +409,54 @@ export function initAudioBridge(): () => void {
   // topology remain snapshots until the next playback request, as before.
   const unsubProject = useStore.subscribe((next, previous) => {
     if (next.project === previous.project) return;
-    if (!hasLiveMixChanged(previous.project.tracks, next.project.tracks)) return;
+    const trackMixChanged = hasLiveMixChanged(
+      previous.project.tracks,
+      next.project.tracks,
+    );
+    const routingMixChanged = hasLiveRoutingMixChanged(
+      previous.project.audioRouting,
+      next.project.audioRouting,
+    );
+    if (!trackMixChanged && !routingMixChanged) return;
     const session = controller.activeSession;
     if (!session?.scheduler.isRunning) return;
-    for (const trackId of computeAudibleTracks(next.project.tracks)) {
-      if (session.graphs.has(trackId)) session.everAudibleTrackIds.add(trackId);
+    try {
+      // Effect edits are live updates, so they must satisfy the same static-node
+      // budget as startup before Master or any channel is mutated.
+      if (trackMixChanged) {
+        assertRoutingGraphNodeBudget(next.project, session.routingPlan, 'live');
+      }
+      const routingMix = resolveAudioRoutingMix(next.project, session.routingPlan);
+      for (const trackId of routingMix.audibleChannelIds) {
+        if (session.graphs.has(trackId)) {
+          session.everAudibleTrackIds.add(trackId);
+        }
+      }
+      for (const edgeId of routingMix.activeEdgeIds) {
+        session.everAudibleEdgeIds.add(edgeId);
+      }
+      const now = getAudioEngine().now();
+      applyMasterMix(session.master, next.project.tracks, now, 'smoothed');
+      if (trackMixChanged) {
+        applyMixState(session.graphs, next.project, now, session.routingPlan);
+      } else {
+        applyRoutingMixState(
+          session.graphs,
+          next.project,
+          now,
+          session.routingPlan,
+          routingMix,
+        );
+      }
+    } catch {
+      // The Project change remains adopted and undoable, but the old session no
+      // longer matches it. Stop and dispose the whole graph instead of exposing
+      // a partially rebuilt mix or throwing out of the store subscriber.
+      useStore.getState().interruptPlayback(
+        next.transport.playbackRequestId,
+        'audio-resource-limit',
+      );
     }
-    const now = getAudioEngine().now();
-    applyMasterMix(session.master, next.project.tracks, now, 'smoothed');
-    applyMixState(session.graphs, next.project.tracks, now);
   });
 
   bridge.unsub = [unsubTransport, unsubProject];
@@ -461,6 +532,15 @@ async function createRuntimeSession(
   const project = initialStore.project;
   const transport = initialStore.transport;
   const engine = getAudioEngine();
+  const compiledRouting = compileAudioRouting(project);
+  if (!compiledRouting.ok) {
+    const first = compiledRouting.errors[0];
+    throw new Error(
+      `Audio routing is invalid.${first ? ` ${first.path}: ${first.message}` : ''}`,
+    );
+  }
+  const routingPlan = compiledRouting.plan;
+  assertRoutingGraphNodeBudget(project, routingPlan, 'live');
   // Context activation must begin in the originating click/key stack. Asset
   // I/O is asynchronous, so live playback starts this promise immediately and
   // still withholds every TrackGraph/source until preflight and decode succeed.
@@ -606,7 +686,11 @@ async function createRuntimeSession(
 
   try {
     applyMasterMix(master, startupTracks, now, 'immediate');
-    graphs = buildTrackGraphs(context, master, startupTracks, now, 'live');
+    graphs = buildTrackGraphs(context, master, {
+      ...project,
+      tracks: startupTracks,
+      audioRouting: startupStore.project.audioRouting,
+    }, now, 'live', routingPlan);
     let sharedDrumNoise: AudioBuffer | undefined;
     for (const track of startupTracks) {
       const graph = graphs.get(track.id);
@@ -655,7 +739,9 @@ async function createRuntimeSession(
     });
 
     const anchorTime = engine.now();
-    const everAudibleTrackIds = computeAudibleTracks(startupTracks);
+    const startupRoutingMix = resolveAudioRoutingMix(startupStore.project, routingPlan);
+    const everAudibleTrackIds = new Set(startupRoutingMix.audibleChannelIds);
+    const everAudibleEdgeIds = new Set(startupRoutingMix.activeEdgeIds);
     let naturalDrainStarted = false;
 
     const beginNaturalDrain = (onComplete: () => void): void => {
@@ -678,6 +764,10 @@ async function createRuntimeSession(
         lengthBeats,
         everAudibleTrackIds,
         context.sampleRate,
+        everAudibleEdgeIds,
+        latestProject.id === project.id
+          ? latestProject.audioRouting
+          : project.audioRouting,
       );
       const projectEndTime = beatToTime(
         lengthBeats,
@@ -720,8 +810,10 @@ async function createRuntimeSession(
       loop,
       lengthBeats,
       projectSnapshot: project,
+      routingPlan,
       scheduleEvents,
       everAudibleTrackIds,
+      everAudibleEdgeIds,
       positionTimer: null,
       ...(loop ? {} : { beginNaturalDrain }),
       isReady: () =>
@@ -838,7 +930,11 @@ function scheduleAutomationForWindow(
     ? latestProject.tracks
     : session.projectSnapshot.tracks;
   const tracks = new Map(liveTracks.map((track) => [track.id, track]));
-  const audible = computeAudibleTracks(liveTracks);
+  const liveRoutingProject = latestProject.id === session.projectSnapshot.id
+    ? latestProject
+    : session.projectSnapshot;
+  const audible = resolveAudioRoutingMix(liveRoutingProject, session.routingPlan)
+    .audibleChannelIds;
 
   for (const lane of session.projectSnapshot.automationLanes) {
     const track = tracks.get(lane.target.trackId);

@@ -202,6 +202,29 @@ describe('addTrack', () => {
     });
   });
 
+  it('adds an empty Bus with no clip or instrument and a Master output', () => {
+    const project = base();
+    const result = expectSuccess(addTrack(project, 'bus', {
+      idFactory: sequenceFactory('bus'),
+    }));
+    const added = result.project.tracks.find((track) => track.id === result.trackId)!;
+
+    expect(added).toMatchObject({
+      id: 'track-bus-1',
+      name: 'Bus',
+      type: 'bus',
+      role: 'general',
+      clips: [],
+      effects: [],
+    });
+    expect(added).not.toHaveProperty('instrument');
+    expect(result.project.audioRouting.outputs).toContainEqual({
+      sourceTrackId: added.id,
+      destination: { type: 'master' },
+    });
+    expect(validateProject(result.project).ok).toBe(true);
+  });
+
   it('inserts before the first master and appends when no master exists', () => {
     const project = base();
     const originalMaster = project.tracks.at(-1)!;
@@ -243,7 +266,20 @@ describe('addTrack', () => {
         effects: [],
       }),
     );
-    const atLimit = { ...project, tracks: [...filler, ...project.tracks] };
+    const atLimit = {
+      ...project,
+      tracks: [...filler, ...project.tracks],
+      audioRouting: {
+        ...project.audioRouting,
+        outputs: [
+          ...filler.map((track) => ({
+            sourceTrackId: track.id,
+            destination: { type: 'master' as const },
+          })),
+          ...project.audioRouting.outputs,
+        ],
+      },
+    };
     let calls = 0;
     const result = addTrack(atLimit, 'instrument', {
       idFactory: (kind) => `${kind}-${++calls}`,
@@ -369,6 +405,50 @@ describe('duplicateTrack', () => {
     expect(result.project.tracks.at(-1)!.id).toBe(master.id);
   });
 
+  it('clones outgoing routing with fresh send ids but does not clone incoming routes', () => {
+    const project = base();
+    const bus = expectSuccess(addTrack(project, 'bus', {
+      idFactory: sequenceFactory('routing-bus'),
+    }));
+    const source = bus.project.tracks[0]!;
+    const busId = bus.trackId;
+    bus.project.audioRouting.sends.push({
+      id: 'source-send',
+      sourceTrackId: source.id,
+      targetBusId: busId,
+      position: 'pre-fader',
+      gain: 0.5,
+      enabled: true,
+    });
+    const incomingSource = bus.project.tracks[1]!;
+    bus.project.audioRouting.outputs.find(
+      (output) => output.sourceTrackId === incomingSource.id,
+    )!.destination = { type: 'bus', trackId: busId };
+
+    const duplicated = expectSuccess(duplicateTrack(bus.project, source.id, {
+      idFactory: sequenceFactory('routing-copy'),
+    }));
+    const clonedSend = duplicated.project.audioRouting.sends.find(
+      (send) => send.sourceTrackId === duplicated.trackId,
+    );
+
+    expect(clonedSend).toMatchObject({
+      targetBusId: busId,
+      position: 'pre-fader',
+      gain: 0.5,
+      enabled: true,
+    });
+    expect(clonedSend?.id).not.toBe('source-send');
+    expect(duplicated.project.audioRouting.outputs).toContainEqual({
+      sourceTrackId: duplicated.trackId,
+      destination: { type: 'master' },
+    });
+    expect(duplicated.project.audioRouting.outputs.filter(
+      (output) => output.destination.type === 'bus' && output.destination.trackId === busId,
+    )).toHaveLength(1);
+    expect(validateProject(duplicated.project).ok).toBe(true);
+  });
+
   it('protects master, the track cap, and global id uniqueness', () => {
     const project = base();
     const master = project.tracks.find((track) => track.type === 'master')!;
@@ -469,6 +549,53 @@ describe('moveTrack and removeTrack', () => {
     expect(lastRemoval.project.audioAssets).toEqual([]);
     expect(validateProject(lastRemoval.project).ok).toBe(true);
     expect(encodeProjectJson(lastRemoval.project).ok).toBe(true);
+  });
+
+  it('removes Bus-owned and Bus-targeting sends and falls incoming main outputs back to Master', () => {
+    const firstBus = expectSuccess(addTrack(base(), 'bus', {
+      name: 'Return A',
+      idFactory: sequenceFactory('remove-bus-a'),
+    }));
+    const secondBus = expectSuccess(addTrack(firstBus.project, 'bus', {
+      name: 'Return B',
+      idFactory: sequenceFactory('remove-bus-b'),
+    }));
+    const project = secondBus.project;
+    const source = project.tracks[0]!;
+    const sender = project.tracks[1]!;
+    project.audioRouting.outputs.find(
+      (output) => output.sourceTrackId === source.id,
+    )!.destination = { type: 'bus', trackId: firstBus.trackId };
+    project.audioRouting.sends.push(
+      {
+        id: 'incoming-send',
+        sourceTrackId: sender.id,
+        targetBusId: firstBus.trackId,
+        position: 'post-fader',
+        gain: 0.8,
+        enabled: true,
+      },
+      {
+        id: 'outgoing-send',
+        sourceTrackId: firstBus.trackId,
+        targetBusId: secondBus.trackId,
+        position: 'pre-fader',
+        gain: 1,
+        enabled: true,
+      },
+    );
+    expect(validateProject(project).ok).toBe(true);
+
+    const removed = expectSuccess(removeTrack(project, firstBus.trackId));
+
+    expect(removed.project.audioRouting.outputs.find(
+      (output) => output.sourceTrackId === source.id,
+    )?.destination).toEqual({ type: 'master' });
+    expect(removed.project.audioRouting.outputs.some(
+      (output) => output.sourceTrackId === firstBus.trackId,
+    )).toBe(false);
+    expect(removed.project.audioRouting.sends).toEqual([]);
+    expect(validateProject(removed.project).ok).toBe(true);
   });
 
   it.each([

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CURRENT_SCHEMA_VERSION,
   validateProject,
   type AudioClip,
   type Project,
@@ -56,6 +57,10 @@ function projectWithLoop(lengthBeats: number): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],
+      sends: [],
+    },
     tracks: [
       {
         id: 'lead',
@@ -96,7 +101,7 @@ type ReadyAudioFixture = Readonly<{
 }>;
 
 function addReadyAudioFixture(project: Project): ReadyAudioFixture {
-  project.schemaVersion = 3;
+  project.schemaVersion = CURRENT_SCHEMA_VERSION;
   const asset: ReadyAudioAsset = {
     id: 'asset-1',
     availability: 'ready',
@@ -136,6 +141,10 @@ function addReadyAudioFixture(project: Project): ReadyAudioFixture {
   };
   project.audioAssets.push(asset);
   project.tracks.push(track);
+  project.audioRouting.outputs.push({
+    sourceTrackId: track.id,
+    destination: { type: 'master' },
+  });
   return { track, clip, asset };
 }
 

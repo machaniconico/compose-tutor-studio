@@ -40,6 +40,13 @@ function masterMixProject(
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [{
+        sourceTrackId: 'track-deterministic-tone',
+        destination: { type: 'master' },
+      }],
+      sends: [],
+    },
     tracks: [
       {
         id: 'track-deterministic-tone',

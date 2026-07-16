@@ -140,6 +140,23 @@ export function effectConfigSignature(configs: readonly EffectConfig[]): string 
     .join('|');
 }
 
+/**
+ * Exact number of Web Audio nodes allocated by the current insert builder.
+ *
+ * Routing preflight consumes this helper so its static-node ceiling cannot
+ * drift from `createStage` when effects are added or their topology changes.
+ * Disabled and unsupported effects allocate no nodes.
+ */
+export function effectChainNodeCount(configs: readonly EffectConfig[]): number {
+  return normalizeEffectConfigs(configs).reduce((count, config) => {
+    if (!config.enabled || !isInsertEffectType(config.type)) return count;
+    if (config.type === 'delay') return count + 6;
+    if (config.type === 'reverb') return count + 5;
+    if (config.type === 'eq') return count + 3;
+    return count + 1;
+  }, 0);
+}
+
 export function cutoffToFrequency(cutoff: number, sampleRate: number): number {
   const safeCutoff = clamp01(cutoff, DEFAULT_EFFECT_PARAMS.filter.cutoff);
   const nyquistSafeMax = Math.max(FILTER_MIN_HZ, Math.min(FILTER_MAX_HZ, sampleRate * 0.45));

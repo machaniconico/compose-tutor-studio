@@ -189,6 +189,13 @@ function tinyProject(): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: [
+        { sourceTrackId: 'inst', destination: { type: 'master' } },
+        { sourceTrackId: 'drm', destination: { type: 'master' } },
+      ],
+      sends: [],
+    },
     tracks: [
       {
         id: 'inst',
@@ -256,21 +263,29 @@ function tinyProject(): Project {
 const MELODIC_CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15] as const;
 
 function projectWithMelodicTracks(trackCount: number): Project {
+  const tracks = Array.from({ length: trackCount }, (_, index) => ({
+    id: `instrument-${index}`,
+    name: `Instrument ${index + 1}`,
+    type: 'instrument' as const,
+    role: 'general' as const,
+    clips: [],
+    volume: 1,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: [],
+  }));
   return {
     ...tinyProject(),
     title: `${trackCount} melodic tracks`,
-    tracks: Array.from({ length: trackCount }, (_, index) => ({
-      id: `instrument-${index}`,
-      name: `Instrument ${index + 1}`,
-      type: 'instrument' as const,
-      role: 'general' as const,
-      clips: [],
-      volume: 1,
-      pan: 0,
-      mute: false,
-      solo: false,
-      effects: [],
-    })),
+    tracks,
+    audioRouting: {
+      outputs: tracks.map((track) => ({
+        sourceTrackId: track.id,
+        destination: { type: 'master' as const },
+      })),
+      sends: [],
+    },
     chordTrack: [],
   };
 }

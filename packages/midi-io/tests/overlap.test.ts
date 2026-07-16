@@ -70,6 +70,15 @@ function project(tracks: Track[], chordTrack: ChordEvent[] = []): Project {
     }],
     audioAssets: [],
     automationLanes: [],
+    audioRouting: {
+      outputs: tracks
+        .filter((track) => track.type !== 'master')
+        .map((track) => ({
+          sourceTrackId: track.id,
+          destination: { type: 'master' as const },
+        })),
+      sends: [],
+    },
     tracks,
     chordTrack,
     sections: [],

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CURRENT_SCHEMA_VERSION,
   MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS,
+  addTrack,
   buildClipIndex,
   createEmptyProject,
   decodeProject,
@@ -170,6 +171,26 @@ describe('linked clip content', () => {
       t1,
     )).toEqual({ ok: false, reason: 'duplicate-id' });
     expect(project).toEqual(before);
+
+    const bus = addTrack(project, 'bus', {
+      idFactory: () => 'clip-collision-bus',
+    });
+    expect(bus.ok).toBe(true);
+    if (!bus.ok) return;
+    bus.project.audioRouting.sends.push({
+      id: 'clip-collision-send',
+      sourceTrackId: source.trackId,
+      targetBusId: bus.trackId,
+      position: 'post-fader',
+      gain: 1,
+      enabled: true,
+    });
+    expect(duplicateClip(
+      bus.project,
+      source.id,
+      { id: 'clip-collision-send', startBeat: 4, linked: true },
+      t1,
+    )).toEqual({ ok: false, reason: 'duplicate-id' });
   });
 
   it('rejects a duplicate that would cross the persisted effective-event limit', () => {
@@ -606,6 +627,7 @@ describe('project schema v1 to v2 clip migration', () => {
     delete legacy.timeSignatureMap;
     delete legacy.audioAssets;
     delete legacy.automationLanes;
+    delete legacy.audioRouting;
     for (const track of tracks as Array<Record<string, unknown>>) delete track.role;
     tracks[1]!.clips[0]!.aliasOf = 'formerly-ignored';
 

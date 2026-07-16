@@ -29,6 +29,7 @@ function legacyProjectRecord(project: Project, schemaVersion: 1 | 2): Record<str
   delete legacy.timeSignatureMap;
   delete legacy.audioAssets;
   delete legacy.automationLanes;
+  delete legacy.audioRouting;
   for (const track of legacy.tracks as Array<Record<string, unknown>>) {
     delete track.role;
     for (const clip of track.clips as Array<Record<string, unknown>>) {

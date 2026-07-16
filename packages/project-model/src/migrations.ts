@@ -205,9 +205,30 @@ function migrateV2ToV3(
   };
 }
 
+/** Preserve schema-v3's fixed direct-to-Master signal flow explicitly. */
+function migrateV3ToV4(
+  project: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const outputs = Array.isArray(project.tracks)
+    ? project.tracks.flatMap((track) => {
+        if (typeof track !== 'object' || track === null || Array.isArray(track)) return [];
+        const record = track as Readonly<Record<string, unknown>>;
+        if (record.type === 'master' || typeof record.id !== 'string') return [];
+        return [{ sourceTrackId: record.id, destination: { type: 'master' } }];
+      })
+    : [];
+
+  return {
+    ...project,
+    schemaVersion: 4,
+    audioRouting: { outputs, sends: [] },
+  };
+}
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 1, to: 2, migrate: migrateV1ToV2 },
   { from: 2, to: 3, migrate: migrateV2ToV3 },
+  { from: 3, to: 4, migrate: migrateV3ToV4 },
 ]);
 
 export type ProjectMigrationErrorCode =

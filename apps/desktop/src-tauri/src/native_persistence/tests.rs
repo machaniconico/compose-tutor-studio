@@ -130,6 +130,15 @@ fn project_json(project_id: &str, title: &str, revision: u64) -> String {
     .expect("fixture serialization must succeed")
 }
 
+fn migrated_project_json(source: &str, target_version: u64) -> String {
+    let source = serde_json::from_str::<Value>(source).expect("source fixture parses");
+    serde_json::to_string(
+        &migrate_project_for_legacy_proof(source, target_version)
+            .expect("released migration path must exist"),
+    )
+    .expect("migrated fixture serializes")
+}
+
 fn schema_v3_project_value() -> Value {
     json!({
         "id": "schema-v3-project",
@@ -228,6 +237,140 @@ fn schema_v3_project_value() -> Value {
 
 fn schema_v3_project_json() -> String {
     serde_json::to_string(&schema_v3_project_value()).expect("schema-v3 fixture serializes")
+}
+
+fn schema_v4_routing_project_value() -> Value {
+    let mut project = schema_v3_project_value();
+    project["schemaVersion"] = json!(4);
+    let tracks = project["tracks"].as_array_mut().unwrap();
+    let master_index = tracks
+        .iter()
+        .position(|track| track["type"] == "master")
+        .unwrap();
+    tracks.insert(
+        master_index,
+        json!({
+            "id": "bus-a",
+            "name": "Bus A",
+            "type": "bus",
+            "role": "general",
+            "clips": [],
+            "volume": 1,
+            "pan": 0,
+            "mute": false,
+            "solo": false,
+            "effects": []
+        }),
+    );
+    tracks.insert(
+        master_index + 1,
+        json!({
+            "id": "bus-b",
+            "name": "Bus B",
+            "type": "bus",
+            "role": "general",
+            "clips": [],
+            "volume": 1,
+            "pan": 0,
+            "mute": false,
+            "solo": false,
+            "effects": []
+        }),
+    );
+    project.as_object_mut().unwrap().insert(
+        "audioRouting".to_owned(),
+        json!({
+            "outputs": [
+                { "sourceTrackId": "track-chords", "destination": { "type": "master" } },
+                { "sourceTrackId": "track-audio", "destination": { "type": "master" } },
+                { "sourceTrackId": "bus-a", "destination": { "type": "bus", "trackId": "bus-b" } },
+                { "sourceTrackId": "bus-b", "destination": { "type": "master" } }
+            ],
+            "sends": [{
+                "id": "send-audio-a",
+                "sourceTrackId": "track-audio",
+                "targetBusId": "bus-a",
+                "position": "post-fader",
+                "gain": 0.5,
+                "enabled": true
+            }]
+        }),
+    );
+    project
+}
+
+fn schema_v4_routing_limit_project_value() -> Value {
+    let mut project = schema_v4_routing_project_value();
+    {
+        let tracks = project["tracks"].as_array_mut().unwrap();
+        let mut master_index = tracks
+            .iter()
+            .position(|track| track["type"] == "master")
+            .unwrap();
+        for index in 0..17 {
+            tracks.insert(
+                master_index,
+                json!({
+                    "id": format!("routing-limit-bus-{index:02}"),
+                    "name": format!("Routing Limit Bus {index:02}"),
+                    "type": "bus",
+                    "role": "general",
+                    "clips": [],
+                    "volume": 1,
+                    "pan": 0,
+                    "mute": false,
+                    "solo": false,
+                    "effects": []
+                }),
+            );
+            master_index += 1;
+        }
+        for index in 0..106 {
+            tracks.insert(
+                master_index,
+                json!({
+                    "id": format!("routing-limit-source-{index:03}"),
+                    "name": format!("Routing Limit Source {index:03}"),
+                    "type": "instrument",
+                    "role": "general",
+                    "clips": [],
+                    "volume": 1,
+                    "pan": 0,
+                    "mute": false,
+                    "solo": false,
+                    "effects": []
+                }),
+            );
+            master_index += 1;
+        }
+    }
+
+    let outputs = project["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|track| track["type"] != "master")
+        .map(|track| {
+            json!({
+                "sourceTrackId": track["id"].as_str().unwrap(),
+                "destination": { "type": "master" }
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(outputs.len(), 127);
+    project["audioRouting"] = json!({ "outputs": outputs, "sends": [] });
+    project
+}
+
+fn routing_limit_send(send_index: usize, source_index: usize, target_index: usize) -> Value {
+    json!({
+        "id": format!("routing-limit-send-{send_index:04}"),
+        "sourceTrackId": format!("routing-limit-source-{source_index:03}"),
+        "targetBusId": format!("routing-limit-bus-{target_index:02}"),
+        "position": "post-fader",
+        "gain": 1,
+        "enabled": true
+    })
 }
 
 fn linked_clip_project(schema_version: u64, alias_has_payload: bool) -> Vec<u8> {
@@ -640,6 +783,225 @@ fn native_project_validation_accepts_schema_v3_and_keeps_versions_strict() {
     assert!(!validate_project_file_json(
         &serde_json::to_vec(&v2).unwrap()
     ));
+}
+
+#[test]
+fn native_v3_to_v4_routing_migration_is_deterministic_and_direct_to_master() {
+    let source = schema_v3_project_value();
+    let migrated = migrate_project_value_v3_to_v4(source.clone()).expect("v3 migrates");
+    assert_eq!(migrated["schemaVersion"], 4);
+    assert_eq!(
+        migrated["audioRouting"],
+        json!({
+            "outputs": [
+                { "sourceTrackId": "track-chords", "destination": { "type": "master" } },
+                { "sourceTrackId": "track-audio", "destination": { "type": "master" } }
+            ],
+            "sends": []
+        })
+    );
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&migrated).unwrap()
+    ));
+    assert!(legacy_project_matches_migrated(
+        &serde_json::to_string(&source).unwrap(),
+        &serde_json::to_string(&migrated).unwrap(),
+    ));
+
+    let through_all_versions = migrate_project_for_legacy_proof(
+        serde_json::from_str::<Value>(&project_json("legacy-v1-v4", "Legacy", 1)).unwrap(),
+        4,
+    )
+    .expect("v1 migrates through v4");
+    assert_eq!(through_all_versions["schemaVersion"], 4);
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&through_all_versions).unwrap()
+    ));
+
+    let mut smuggled = source;
+    smuggled["audioRouting"] = json!({ "outputs": [], "sends": [] });
+    assert!(migrate_project_value_v3_to_v4(smuggled).is_none());
+}
+
+#[test]
+fn native_project_validation_accepts_schema_v4_routing_and_rejects_cycles() {
+    let fixture = schema_v4_routing_project_value();
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&fixture).unwrap()
+    ));
+
+    let mut disabled_pre_fader_send = fixture.clone();
+    disabled_pre_fader_send["audioRouting"]["sends"][0]["position"] = json!("pre-fader");
+    disabled_pre_fader_send["audioRouting"]["sends"][0]["gain"] = json!(0);
+    disabled_pre_fader_send["audioRouting"]["sends"][0]["enabled"] = json!(false);
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&disabled_pre_fader_send).unwrap()),
+        "disabled zero-gain sends remain valid graph edges"
+    );
+
+    type MutationCase = (&'static str, fn(&mut Value));
+    let cases: Vec<MutationCase> = vec![
+        ("v4 routing on v3", |project: &mut Value| {
+            project["schemaVersion"] = json!(3)
+        }),
+        ("missing routing root", |project: &mut Value| {
+            project.as_object_mut().unwrap().remove("audioRouting");
+        }),
+        ("explicit null routing", |project: &mut Value| {
+            project["audioRouting"] = Value::Null
+        }),
+        ("missing source output", |project: &mut Value| {
+            project["audioRouting"]["outputs"]
+                .as_array_mut()
+                .unwrap()
+                .pop();
+        }),
+        ("duplicate source output", |project: &mut Value| {
+            let duplicate = project["audioRouting"]["outputs"][0].clone();
+            project["audioRouting"]["outputs"]
+                .as_array_mut()
+                .unwrap()
+                .push(duplicate);
+        }),
+        ("master output", |project: &mut Value| {
+            project["audioRouting"]["outputs"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({
+                    "sourceTrackId": "track-master",
+                    "destination": { "type": "master" }
+                }));
+        }),
+        (
+            "master destination carries track id",
+            |project: &mut Value| {
+                project["audioRouting"]["outputs"][0]["destination"]["trackId"] = json!("bus-a")
+            },
+        ),
+        ("bus destination missing track id", |project: &mut Value| {
+            project["audioRouting"]["outputs"][0]["destination"] = json!({ "type": "bus" })
+        }),
+        (
+            "bus destination explicit null track id",
+            |project: &mut Value| {
+                project["audioRouting"]["outputs"][0]["destination"] =
+                    json!({ "type": "bus", "trackId": null })
+            },
+        ),
+        ("output target is not a bus", |project: &mut Value| {
+            project["audioRouting"]["outputs"][0]["destination"] =
+                json!({ "type": "bus", "trackId": "track-audio" })
+        }),
+        ("duplicate global send id", |project: &mut Value| {
+            project["audioRouting"]["sends"][0]["id"] = json!("track-audio")
+        }),
+        ("duplicate source target send", |project: &mut Value| {
+            project["audioRouting"]["sends"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({
+                    "id": "send-audio-a-duplicate",
+                    "sourceTrackId": "track-audio",
+                    "targetBusId": "bus-a",
+                    "position": "pre-fader",
+                    "gain": 1,
+                    "enabled": false
+                }));
+        }),
+        ("send duplicates main output", |project: &mut Value| {
+            project["audioRouting"]["outputs"][1]["destination"] =
+                json!({ "type": "bus", "trackId": "bus-a" })
+        }),
+        ("invalid send position", |project: &mut Value| {
+            project["audioRouting"]["sends"][0]["position"] = json!("after-pan")
+        }),
+        ("invalid send gain", |project: &mut Value| {
+            project["audioRouting"]["sends"][0]["gain"] = json!(2.01)
+        }),
+        ("disabled mixed-edge cycle", |project: &mut Value| {
+            project["audioRouting"]["sends"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({
+                    "id": "send-b-to-a",
+                    "sourceTrackId": "bus-b",
+                    "targetBusId": "bus-a",
+                    "position": "post-fader",
+                    "gain": 0,
+                    "enabled": false
+                }));
+        }),
+        ("output cycle", |project: &mut Value| {
+            project["audioRouting"]["outputs"][3]["destination"] =
+                json!({ "type": "bus", "trackId": "bus-a" })
+        }),
+        ("unknown nested routing field", |project: &mut Value| {
+            project["audioRouting"]["sends"][0]["unknown"] = json!(true)
+        }),
+    ];
+    for (name, mutate) in cases {
+        let mut project = fixture.clone();
+        mutate(&mut project);
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&project).unwrap()),
+            "must reject {name}"
+        );
+    }
+}
+
+#[test]
+fn native_project_validation_enforces_sixteen_sends_per_source_boundary() {
+    let mut at_limit = schema_v4_routing_limit_project_value();
+    at_limit["audioRouting"]["sends"] = Value::Array(
+        (0..16)
+            .map(|target_index| routing_limit_send(target_index, 0, target_index))
+            .collect(),
+    );
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&at_limit).unwrap()),
+        "exactly 16 sends from one source must remain valid"
+    );
+
+    let mut over_limit = at_limit;
+    over_limit["audioRouting"]["sends"]
+        .as_array_mut()
+        .unwrap()
+        .push(routing_limit_send(16, 0, 16));
+    assert!(
+        !validate_project_file_json(&serde_json::to_vec(&over_limit).unwrap()),
+        "a 17th otherwise-valid send from the same source must be rejected"
+    );
+}
+
+#[test]
+fn native_project_validation_enforces_1024_routing_edge_boundary() {
+    let mut at_limit = schema_v4_routing_limit_project_value();
+    let sends = (0..897)
+        .map(|send_index| routing_limit_send(send_index, send_index / 16, send_index % 16))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        at_limit["audioRouting"]["outputs"]
+            .as_array()
+            .unwrap()
+            .len()
+            + sends.len(),
+        1_024
+    );
+    at_limit["audioRouting"]["sends"] = Value::Array(sends);
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&at_limit).unwrap()),
+        "exactly 1,024 combined output and send edges must remain valid"
+    );
+
+    let mut over_limit = at_limit;
+    over_limit["audioRouting"]["sends"]
+        .as_array_mut()
+        .unwrap()
+        .push(routing_limit_send(897, 56, 1));
+    assert!(
+        !validate_project_file_json(&serde_json::to_vec(&over_limit).unwrap()),
+        "a 1,025th otherwise-valid routing edge must be rejected"
+    );
 }
 
 #[test]
@@ -4863,6 +5225,136 @@ fn incomplete_higher_migration_never_supersedes_completed_lower_authority_after_
         raw_native_rows(&repository, project_id),
         native_before_reads
     );
+}
+
+#[test]
+fn protocol_v4_only_supersedes_completed_v3_after_atomic_completion() {
+    let (_directory, repository) = initialized_repository();
+    let project_id = "protocol-v3-to-v4";
+    let source = project_json(project_id, "Protocol rollover", 1);
+    let project_v3 = migrated_project_json(&source, 3);
+    let project_v4 = migrated_project_json(&source, 4);
+    let mirror_key = format!("cts.project.{project_id}");
+    let snapshot = legacy_snapshot(&[(mirror_key.as_str(), source.as_str())], CREATED_AT);
+    repository.backup_legacy_snapshot(snapshot.clone()).unwrap();
+
+    let mut v3 = legacy_head_request_at_version(&snapshot, 3, project_id, "ignored", 1);
+    v3.project_json = Some(project_v3);
+    repository.import_legacy_project(v3).unwrap();
+    repository
+        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 3, 1, 0, 0))
+        .unwrap();
+    assert!(
+        repository
+            .get_legacy_migration_status(snapshot.content_checksum.clone(), 3)
+            .unwrap()
+            .complete
+    );
+    assert!(
+        !repository
+            .get_legacy_migration_status(snapshot.content_checksum.clone(), 4)
+            .unwrap()
+            .complete
+    );
+
+    let mut v4 = legacy_head_request_at_version(&snapshot, 4, project_id, "ignored", 1);
+    v4.project_json = Some(project_v4);
+    repository.import_legacy_project(v4).unwrap();
+    let before_completion = repository.load(project_id.to_owned()).unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&before_completion.project_json).unwrap()["schemaVersion"],
+        3,
+        "a staged v4 candidate must not replace the completed v3 authority"
+    );
+
+    repository.close().unwrap();
+    repository.initialize().unwrap();
+    let after_reopen = repository.load(project_id.to_owned()).unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&after_reopen.project_json).unwrap()["schemaVersion"],
+        3,
+        "a crash before v4 completion must leave v3 live"
+    );
+
+    repository
+        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 4, 1, 0, 0))
+        .unwrap();
+    let migrated = repository.load(project_id.to_owned()).unwrap().unwrap();
+    let migrated_json = serde_json::from_str::<Value>(&migrated.project_json).unwrap();
+    assert_eq!(migrated_json["schemaVersion"], 4);
+    assert_eq!(
+        migrated_json["audioRouting"],
+        json!({ "outputs": [], "sends": [] })
+    );
+    assert!(migrated
+        .head_version
+        .is_some_and(|version| version.contains(":legacy:v4:")));
+}
+
+#[test]
+fn protocol_v4_recovers_from_incomplete_v3_staging_without_promoting_it() {
+    let (_directory, repository) = initialized_repository();
+    let project_id = "incomplete-protocol-v3";
+    let source = project_json(project_id, "Interrupted v3", 1);
+    let project_v3 = migrated_project_json(&source, 3);
+    let project_v4 = migrated_project_json(&source, 4);
+    let mirror_key = format!("cts.project.{project_id}");
+    let snapshot = legacy_snapshot(&[(mirror_key.as_str(), source.as_str())], CREATED_AT);
+    repository.backup_legacy_snapshot(snapshot.clone()).unwrap();
+
+    let mut v3 = legacy_head_request_at_version(&snapshot, 3, project_id, "ignored", 1);
+    v3.project_json = Some(project_v3);
+    repository.import_legacy_project(v3).unwrap();
+    repository.close().unwrap();
+    repository.initialize().unwrap();
+    assert!(repository.load(project_id.to_owned()).unwrap().is_none());
+    assert!(
+        !repository
+            .get_legacy_migration_status(snapshot.content_checksum.clone(), 3)
+            .unwrap()
+            .complete
+    );
+
+    let mut v4 = legacy_head_request_at_version(&snapshot, 4, project_id, "ignored", 1);
+    v4.project_json = Some(project_v4);
+    repository.import_legacy_project(v4).unwrap();
+    repository
+        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 4, 1, 0, 0))
+        .unwrap();
+
+    let migrated = repository.load(project_id.to_owned()).unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&migrated.project_json).unwrap()["schemaVersion"],
+        4
+    );
+    connection_value(&repository, |connection| {
+        let staged_versions = connection
+            .prepare(
+                "SELECT migration_version FROM legacy_project_staging
+                 WHERE content_checksum = ?1 AND project_id = ?2
+                 ORDER BY migration_version",
+            )
+            .unwrap()
+            .query_map(params![snapshot.content_checksum, project_id], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(staged_versions, vec![3, 4]);
+        let completed_v3: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM legacy_migration_runs
+                 WHERE content_checksum = ?1 AND migration_version = 3",
+                params![snapshot.content_checksum],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            completed_v3, 0,
+            "the interrupted v3 stage remains non-authoritative"
+        );
+    });
 }
 
 #[test]
