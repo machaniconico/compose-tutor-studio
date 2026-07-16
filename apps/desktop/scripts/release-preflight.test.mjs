@@ -484,7 +484,7 @@ test('rejects production build hooks, remote assets, platform overrides, and new
   const rootPnpmConfigRoot = await createReleaseSource();
   const rootPackagePath = path.join(rootPnpmConfigRoot, 'package.json');
   const rootPackage = JSON.parse(await readFile(rootPackagePath, 'utf8'));
-  rootPackage.pnpm.overrides.vite = 'file:unreviewed-vite';
+  rootPackage.pnpm = { overrides: { vite: 'file:unreviewed-vite' } };
   await writeFile(rootPackagePath, JSON.stringify(rootPackage));
   await assert.rejects(
     validateDesktopSecurityPolicy({ rootDir: rootPnpmConfigRoot }),

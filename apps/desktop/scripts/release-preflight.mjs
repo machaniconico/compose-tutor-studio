@@ -240,17 +240,10 @@ const productionRootPackageIdentity = Object.freeze({
     'verify:desktop':
       'pnpm desktop:lint && pnpm desktop:test && pnpm desktop:typecheck:native && pnpm desktop:test:size && pnpm desktop:test:release-policy && pnpm desktop:e2e:native && pnpm desktop:build:smoke && pnpm desktop:size:check',
   },
-  packageManager: 'pnpm@10.33.0',
+  packageManager: 'pnpm@11.13.1',
   devDependencies: {
     typescript: '^5.8.0',
     vitest: '^3.1.0',
-  },
-  pnpm: {
-    overrides: {
-      '@wdio/native-utils': '2.5.0',
-      esbuild: '0.28.1',
-      'serialize-javascript': '7.0.7',
-    },
   },
 });
 const productionStudioPackageIdentity = Object.freeze({
@@ -478,7 +471,7 @@ const productionViteConfigSha256 =
 const productionBuildScriptSha256 =
   '5078cafbdfb6fa3d2319411a8d6fbb5e4596ecda596463b361f9b075b6537b70';
 const productionPnpmWorkspaceSha256 =
-  '08d75840c97ab0e72d1d9b5b84a17e47a2e06cb159a5fbec5ee0a6a56682dad7';
+  'ee8721472a25e9a96ce99ed400cdf4db51f97f6c4a092ae3f0b5ff3dc02aa45b';
 const productionPnpmLockSha256 =
   '6f2b5ce87aee0531c88150ead63bd21c556572201e74b91178043fd255171a85';
 const productionRedirectsSource = `# Cloudflare Pages SPA fallback.

@@ -23,16 +23,9 @@
     "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm e2e",
     "verify:desktop": "pnpm desktop:lint && pnpm desktop:test && pnpm desktop:typecheck:native && pnpm desktop:test:size && pnpm desktop:test:release-policy && pnpm desktop:e2e:native && pnpm desktop:build:smoke && pnpm desktop:size:check"
   },
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@11.13.1",
   "devDependencies": {
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "@wdio/native-utils": "2.5.0",
-      "esbuild": "0.28.1",
-      "serialize-javascript": "7.0.7"
-    }
   }
 }
