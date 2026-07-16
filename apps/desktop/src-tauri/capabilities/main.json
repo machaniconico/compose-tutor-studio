@@ -22,6 +22,7 @@
     "allow-persistence-complete-erase-all",
     "allow-file-open-project",
     "allow-file-open-midi",
+    "allow-file-open-audio",
     "allow-file-export-project",
     "allow-file-export-midi",
     "allow-file-export-wav",

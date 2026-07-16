@@ -15,6 +15,7 @@ import {
   type DeferredFeatureLoader,
 } from '../common/DeferredFeature';
 import { handleTabKeyDown } from '../common/tabs';
+import { TrackInspector } from '../tracklist/TrackInspector';
 
 type EmptyProps = Record<string, never>;
 
@@ -151,18 +152,23 @@ function InspectorContent() {
   const chord = project.chordTrack.find((c) => c.id === selectedChordId) ?? null;
   const note = useSelectedNote(selectedNoteIds);
 
-  if (chord) return <ChordInspector key={chord.id} />;
-  if (note) return <NoteInspector note={note.note} startBeat={note.startBeat} />;
   return (
-    <div className="panel-section">
-      <p className="panel-section__title">操作ヒント</p>
-      <ul className="inspector-hints">
-        <li>上のコードトラックでコードを選ぶと、構成音や機能の解説が出ます。</li>
-        <li>空いている小節をクリックするとコードを追加できます。</li>
-        <li>ピアノロールでノートをクリックすると、その音の役割を説明します。</li>
-        <li>「アシスタント」タブからベースやメロディを自動生成できます。</li>
-      </ul>
-    </div>
+    <>
+      <TrackInspector />
+      {chord ? <ChordInspector key={chord.id} /> : null}
+      {!chord && note ? <NoteInspector note={note.note} startBeat={note.startBeat} /> : null}
+      {!chord && !note ? (
+        <div className="panel-section">
+          <p className="panel-section__title">操作ヒント</p>
+          <ul className="inspector-hints">
+            <li>上のコードトラックでコードを選ぶと、構成音や機能の解説が出ます。</li>
+            <li>空いている小節をクリックするとコードを追加できます。</li>
+            <li>ピアノロールでノートをクリックすると、その音の役割を説明します。</li>
+            <li>「アシスタント」タブからベースやメロディを自動生成できます。</li>
+          </ul>
+        </div>
+      ) : null}
+    </>
   );
 }
 

@@ -18,6 +18,7 @@ import {
   type InsertEffectType,
 } from '../../audio/effects';
 import { readMeterLevel, type MeterLevel } from '../../audio/graph';
+import { accessibleTrackName } from '../tracklist/trackPresentation';
 
 type EffectInfo = {
   label: string;
@@ -242,12 +243,20 @@ export function MixerStrip() {
       >
         <div className="mixer-strip__row">
           {channels.map((track) => (
-            <ChannelStrip key={track.id} track={track} />
+            <ChannelStrip
+              key={track.id}
+              track={track}
+              accessibleName={accessibleTrackName(tracks, track)}
+            />
           ))}
         </div>
         {master ? (
           <div className="mixer-strip__master">
-            <ChannelStrip track={master} isMaster />
+            <ChannelStrip
+              track={master}
+              accessibleName={accessibleTrackName(tracks, master)}
+              isMaster
+            />
           </div>
         ) : null}
       </div>
@@ -255,8 +264,8 @@ export function MixerStrip() {
   );
 }
 
-function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
-  const { track, isMaster = false } = props;
+function ChannelStrip(props: { track: Track; accessibleName: string; isMaster?: boolean }) {
+  const { track, accessibleName, isMaster = false } = props;
   const meter = useMeterLevel(track.id);
   const setTrackVolume = useStore((s) => s.setTrackVolume);
   const setTrackPan = useStore((s) => s.setTrackPan);
@@ -277,7 +286,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
       </div>
 
       <div className="mix-ch__fader">
-        <LevelMeter level={meter} trackName={isMaster ? 'マスター' : track.name} />
+        <LevelMeter level={meter} trackName={isMaster ? 'マスター' : accessibleName} />
         <input
           className="mix-ch__volume"
           type="range"
@@ -285,7 +294,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
           max={2}
           step={0.01}
           value={track.volume}
-          aria-label={`${track.name} 音量`}
+          aria-label={`${accessibleName} 音量`}
           onChange={(e) => setTrackVolume(track.id, Number(e.target.value))}
         />
         <span className="mix-ch__db">{gainToDbLabel(track.volume)}</span>
@@ -299,7 +308,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
             max={1}
             step={0.01}
             value={track.pan}
-            aria-label={`${track.name} パン`}
+            aria-label={`${accessibleName} パン`}
             onChange={(e) => setTrackPan(track.id, Number(e.target.value))}
           />
           <span className="mix-ch__pan-label">{panLabel(track.pan)}</span>
@@ -312,7 +321,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
             type="button"
             className={`mini-btn${track.mute ? ' is-active is-mute' : ''}`}
             aria-pressed={track.mute}
-            aria-label={`${track.name} ミュート`}
+            aria-label={`${accessibleName} ミュート`}
             onClick={() => toggleMute(track.id)}
             title="ミュート"
           >
@@ -322,7 +331,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
             type="button"
             className={`mini-btn${track.solo ? ' is-active is-solo' : ''}`}
             aria-pressed={track.solo}
-            aria-label={`${track.name} ソロ`}
+            aria-label={`${accessibleName} ソロ`}
             onClick={() => toggleSolo(track.id)}
             title="ソロ"
           >
@@ -331,7 +340,7 @@ function ChannelStrip(props: { track: Track; isMaster?: boolean }) {
         </div>
       ) : null}
 
-      {!isMaster ? <EffectRack track={track} /> : null}
+      {!isMaster ? <EffectRack track={track} accessibleName={accessibleName} /> : null}
     </div>
   );
 }
@@ -399,18 +408,18 @@ function LevelMeter(props: { level: MeterLevel; trackName: string }) {
   );
 }
 
-function EffectRack({ track }: { track: Track }) {
+function EffectRack({ track, accessibleName }: { track: Track; accessibleName: string }) {
   return (
     <div
       className="mix-ch__effects"
-      aria-label={`${track.name} エフェクト`}
+      aria-label={`${accessibleName} エフェクト`}
       style={{ display: 'grid', gap: 8, minWidth: 0 }}
     >
       <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
         <span>音づくり</span>
         <select
           value=""
-          aria-label={`${track.name} エフェクト追加`}
+          aria-label={`${accessibleName} エフェクト追加`}
           onChange={(e) => {
             const type = e.target.value;
             if (isInsertEffectType(type)) addTrackEffect(track.id, type);
@@ -431,7 +440,7 @@ function EffectRack({ track }: { track: Track }) {
             <EffectEditor
               key={effect.id}
               trackId={track.id}
-              trackName={track.name}
+              trackName={accessibleName}
               effect={effect}
               ordinal={
                 track.effects

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { findLearningTrack } from '@cts/project-model';
 import type { BassMode, GeneratedNote, MelodyAnalysis, MelodyFinding } from '@cts/theory-engine';
 import { analyzeMelody } from '@cts/theory-engine';
 import { useStore } from '../../state/store';
@@ -15,6 +16,7 @@ import {
   melodyNotesOnProjectTimeline,
   type CoachSeverity,
 } from '../../state/coach';
+import { HummingMelodyAssistant } from '../hummingToMelody/HummingMelodyAssistant';
 
 const BASS_MODES: { value: BassMode; label: string; hint: string }[] = [
   { value: 'rootOnly', label: 'ルートのみ', hint: '各コードのルート音を拍頭に置きます。最もシンプルです。' },
@@ -27,6 +29,7 @@ const BASS_MODES: { value: BassMode; label: string; hint: string }[] = [
 export function AssistantPanel() {
   return (
     <div className="assistant">
+      <HummingMelodyAssistant />
       <CoachPanel />
       <BassAssistant />
       <MelodyAssistant />
@@ -156,9 +159,7 @@ function MelodyAssistant() {
   const onReview = () => {
     if (!clip) return;
     const current = useStore.getState().project;
-    const melodyTrack = current.tracks.find(
-      (track) => track.name.toLowerCase() === 'melody',
-    );
+    const melodyTrack = findLearningTrack(current, 'Melody');
     const notes = melodyNotesOnProjectTimeline(current, melodyTrack);
     try {
       const result = analyzeMelody({

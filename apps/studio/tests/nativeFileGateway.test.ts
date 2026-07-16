@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   NATIVE_FILE_COMMANDS,
+  NATIVE_AUDIO_FILE_MAX_BYTES,
   NATIVE_MIDI_FILE_MAX_BYTES,
   MAX_SUGGESTED_FILENAME_UTF8_BYTES,
   NativeFileGateway,
@@ -40,6 +41,12 @@ function wavBytes(): Uint8Array {
   return bytes;
 }
 
+function mp3Bytes(): Uint8Array {
+  const bytes = new Uint8Array(417);
+  bytes.set([0xff, 0xfb, 0x90, 0x00]);
+  return bytes;
+}
+
 describe('NativeFileGateway', () => {
   it('decodes the bounded filename/data envelope without copying its payload', async () => {
     const original = encoder.encode('{"schemaVersion":1}');
@@ -67,6 +74,39 @@ describe('NativeFileGateway', () => {
     expect(() =>
       decodeNativeOpenEnvelope(new Uint8Array([0, 0]).buffer, 'midi'),
     ).toThrowError(NativeFileGatewayError);
+  });
+
+  it('opens bounded source audio with matching filename and container magic', async () => {
+    const bytes = mp3Bytes();
+    const envelope = openedEnvelope('reference.mp3', bytes);
+    const invoke: NativeRawInvoke = vi.fn(async () => envelope);
+    const gateway = new NativeFileGateway(invoke);
+
+    await expect(gateway.openAudio()).resolves.toEqual({
+      status: 'opened',
+      fileName: 'reference.mp3',
+      bytes,
+      descriptor: {
+        format: 'mp3',
+        mimeType: 'audio/mpeg',
+        sampleRate: 44_100,
+        channelCount: 2,
+        decodeChannelCountUpperBound: 2,
+        containerDurationSeconds: 0.026123,
+        decodeDurationSeconds: 0.026123,
+      },
+    });
+    expect(invoke).toHaveBeenCalledWith(NATIVE_FILE_COMMANDS.openAudio);
+    expect(NATIVE_AUDIO_FILE_MAX_BYTES).toBe(128 * 1024 * 1024);
+  });
+
+  it('rejects source-audio extension and magic mismatches at the renderer boundary', () => {
+    expect(() =>
+      decodeNativeOpenEnvelope(openedEnvelope('reference.wav', mp3Bytes()), 'audio'),
+    ).toThrowError(expect.objectContaining({ code: 'invalid-file' }));
+    expect(() =>
+      decodeNativeOpenEnvelope(openedEnvelope('reference.flac', mp3Bytes()), 'audio'),
+    ).toThrowError(expect.objectContaining({ code: 'invalid-filename' }));
   });
 
   it('normalizes Tauri fallback arrays and typed views while keeping strict bytes', () => {

@@ -9,7 +9,7 @@
 - Vite HMR付きのnative開発起動
 - production executableと各OSのunsigned bundle生成
 - SQLite v2 transactionによる通常保存、debounce前crash-draft保護、旧localStorageのfail-closed移行
-- Rust所有のOS file pickerによるproject/MIDI読込とproject/MIDI/WAV atomic書出し
+- Rust所有のOS file pickerによるproject/MIDI/source audio読込とproject/MIDI/WAV atomic書出し
 - macOS WKWebViewで画面描画、再生/停止、SQLite保存、保護ACK直後の`SIGKILL`、process再起動復元を自動検証
 - marker付き二段階protocolによるapp-owned local dataの全消去と、クラッシュ後の起動前再開
 - Ubuntu / macOS / Windowsのdesktop matrixをrequired CIへ接続
@@ -45,7 +45,7 @@ bundle IDまたはschemeは公開後に変えない。native正本はbundle ID�
 - `test:release-policy`は正規TOML parserでCargo feature、direct / build / target dependency、lib / bin / build targetをexact比較する。Studio / packagesのTS / JS source graphとrelative import境界をAST検査し、`fetch`、XHR、WebSocket、EventSource、beacon、WebRTC、WebTransport、Worker、HTTP / STUN / TURN、protocol-relative URL、meta refreshを拒否する。Rustはnetwork crate / std socket、未許可libc / windows-sys、source symlink、root外`#[path]`、conditional path、`include!`を拒否する。fixtureだけでなく現在repository自体を同じtest内で走査する。
 - `renderer-assets` gateは必須の`production` / `e2e` profileでHTMLとhashed entryのexact inventoryを分離し、参照entryの実在、exact `_redirects`、CSS / HTML / JS以外の出力、symlink / file-count / byte境界、RTC・socket primitive、protocol-relative / 未許可remote URLを検査する。Studio production / E2E build、Desktop smoke / bundle、通常3OS CI、signed macOS / Windows / Linux buildの直後にそれぞれ実行し、platform-specificな生成物を署名・staging前に止める。
 
-native file commandはRust内でpickerとI/Oを完結し、pathをrendererへ返さない。raw payloadはformat magicと16 MiB project / 8 MiB MIDI / 192 MiB WAV上限を再検証し、候補名をUTF-8 240 bytesへ制限してatomic overwriteする。
+native file commandはRust内でpickerとI/Oを完結し、pathをrendererへ返さない。raw payloadはformat magic / structureと16 MiB project / 8 MiB MIDI / 128 MiB source audio / 192 MiB WAV上限を再検証し、候補名をUTF-8 240 bytesへ制限してatomic overwriteする。`file_open_audio`はWAV / MP3 / M4A / AACだけを専用permissionで許可し、basenameとbounded bytesだけを返す。
 
 ## 4. Test-only WebDriver isolation
 
@@ -101,6 +101,7 @@ pnpm verify:desktop
 11. process終了後にSQLite本体/WAL/SHM/journal/markerが無く、app data外のsentinelが同一である。
 12. checksum-valid markerと保存済みSQLite database一式、またはmarkerと単独sidecarから起動したWebDriver未登録binaryが、自動再開して正常終了し、family/markerを残さない。
 13. 全消去後の別processではSQLite正本由来の旧titleと保存一覧が戻らない。
+14. source audio pickerはWAV / MP3 / M4A / AACだけを受理し、絶対pathをrendererへ返さず、128 MiB超過と明白な拡張子 / container不一致をRustで予備拒否する。rendererは受け取ったbytesをWeb入力と同じ厳格parserで再検証する。
 
 renderer-only Playwright E2Eは引き続き初回曲、MIDI/WAV/project export、競合・破損復旧を広く検査する。OS picker自体はRust helper testと手動3OS smokeで確認し、自動native E2Eはpathを公開するtest backdoorをproductionへ入れない。
 

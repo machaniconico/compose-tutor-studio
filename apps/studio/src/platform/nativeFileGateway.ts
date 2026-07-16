@@ -1,7 +1,14 @@
 import { invoke as invokeTauriCommand } from '@tauri-apps/api/core';
+import {
+  MAX_SOURCE_AUDIO_FILE_BYTES,
+  SourceAudioFileError,
+  inspectSourceAudioFile,
+  type SourceAudioDescriptor,
+} from '../audio/sourceAudio';
 
 export const NATIVE_PROJECT_FILE_MAX_BYTES = 16 * 1024 * 1024;
 export const NATIVE_MIDI_FILE_MAX_BYTES = 8 * 1024 * 1024;
+export const NATIVE_AUDIO_FILE_MAX_BYTES = MAX_SOURCE_AUDIO_FILE_BYTES;
 export const NATIVE_WAV_FILE_MAX_BYTES = 192 * 1024 * 1024;
 export const SUGGESTED_FILENAME_HEADER = 'x-cts-suggested-filename';
 export const MAX_SUGGESTED_FILENAME_UTF8_BYTES = 240;
@@ -9,6 +16,7 @@ export const MAX_SUGGESTED_FILENAME_UTF8_BYTES = 240;
 export const NATIVE_FILE_COMMANDS = {
   openProject: 'file_open_project',
   openMidi: 'file_open_midi',
+  openAudio: 'file_open_audio',
   exportProject: 'file_export_project',
   exportMidi: 'file_export_midi',
   exportWav: 'file_export_wav',
@@ -20,6 +28,15 @@ export type NativeFileCommand =
 export type NativeOpenFileResult =
   | Readonly<{ status: 'cancelled' }>
   | Readonly<{ status: 'opened'; fileName: string; bytes: Uint8Array }>;
+
+export type NativeOpenAudioFileResult =
+  | Readonly<{ status: 'cancelled' }>
+  | Readonly<{
+      status: 'opened';
+      fileName: string;
+      bytes: Uint8Array;
+      descriptor: SourceAudioDescriptor;
+    }>;
 
 export type NativeExportFileResult = Readonly<{
   status: 'saved' | 'cancelled';
@@ -54,7 +71,7 @@ export class NativeFileGatewayError extends Error {
   }
 }
 
-type FileFormat = 'project' | 'midi' | 'wav';
+type FileFormat = 'project' | 'midi' | 'audio' | 'wav';
 
 const OPEN_CANCELLED_TAG = 0;
 const OPEN_FILE_TAG = 1;
@@ -123,10 +140,24 @@ function validateProjectMagic(bytes: Uint8Array): boolean {
   }
 }
 
-function validateFileMagic(format: FileFormat, bytes: Uint8Array): boolean {
+function validateFileMagic(
+  format: FileFormat,
+  bytes: Uint8Array,
+  fileName?: string,
+): boolean {
   if (format === 'project') return validateProjectMagic(bytes);
   if (format === 'midi') {
     return bytes.byteLength >= 14 && hasAscii(bytes, 0, 'MThd');
+  }
+  if (format === 'audio') {
+    if (!fileName) return false;
+    try {
+      inspectSourceAudioFile(fileName, bytes, bytes.byteLength);
+      return true;
+    } catch (error) {
+      if (error instanceof SourceAudioFileError) return false;
+      throw error;
+    }
   }
   return (
     bytes.byteLength >= 12 &&
@@ -138,6 +169,7 @@ function validateFileMagic(format: FileFormat, bytes: Uint8Array): boolean {
 function maximumBytes(format: FileFormat): number {
   if (format === 'project') return NATIVE_PROJECT_FILE_MAX_BYTES;
   if (format === 'midi') return NATIVE_MIDI_FILE_MAX_BYTES;
+  if (format === 'audio') return NATIVE_AUDIO_FILE_MAX_BYTES;
   return NATIVE_WAV_FILE_MAX_BYTES;
 }
 
@@ -161,6 +193,10 @@ function extensionFor(format: FileFormat, fileName: string): string | null {
       : null;
   if (format === 'midi') {
     const match = fileName.match(/\.(?:mid|midi)$/i);
+    return match?.[0] ?? null;
+  }
+  if (format === 'audio') {
+    const match = fileName.match(/\.(?:wav|mp3|m4a|aac)$/i);
     return match?.[0] ?? null;
   }
   return fileName.toLowerCase().endsWith('.wav') ? fileName.slice(-'.wav'.length) : null;
@@ -205,6 +241,7 @@ function normalizeSuggestedFileName(format: FileFormat, fileName: string): strin
 function hasExpectedExtension(format: FileFormat, fileName: string): boolean {
   if (format === 'project') return fileName.toLowerCase().endsWith('.json');
   if (format === 'midi') return /\.(?:mid|midi)$/i.test(fileName);
+  if (format === 'audio') return /\.(?:wav|mp3|m4a|aac)$/i.test(fileName);
   return fileName.toLowerCase().endsWith('.wav');
 }
 
@@ -228,19 +265,48 @@ function validateFileName(format: FileFormat, fileName: string): void {
   }
 }
 
-function validateFileBytes(format: FileFormat, bytes: Uint8Array): void {
+function validateFileBytes(
+  format: FileFormat,
+  bytes: Uint8Array,
+  fileName?: string,
+): SourceAudioDescriptor | null {
   if (bytes.byteLength > maximumBytes(format)) {
     throw new NativeFileGatewayError('file-too-large');
   }
-  if (bytes.byteLength === 0 || !validateFileMagic(format, bytes)) {
+  if (bytes.byteLength === 0) {
     throw new NativeFileGatewayError('invalid-file');
   }
+  if (format === 'audio') {
+    if (!fileName) throw new NativeFileGatewayError('invalid-file');
+    try {
+      return inspectSourceAudioFile(fileName, bytes, bytes.byteLength);
+    } catch (error) {
+      if (error instanceof SourceAudioFileError) {
+        throw new NativeFileGatewayError(
+          error.code === 'file-too-large' ? 'file-too-large' : 'invalid-file',
+        );
+      }
+      throw error;
+    }
+  }
+  if (!validateFileMagic(format, bytes, fileName)) {
+    throw new NativeFileGatewayError('invalid-file');
+  }
+  return null;
 }
 
 export function decodeNativeOpenEnvelope(
   value: unknown,
+  format: 'audio',
+): NativeOpenAudioFileResult;
+export function decodeNativeOpenEnvelope(
+  value: unknown,
+  format: 'project' | 'midi',
+): NativeOpenFileResult;
+export function decodeNativeOpenEnvelope(
+  value: unknown,
   format: Exclude<FileFormat, 'wav'>,
-): NativeOpenFileResult {
+): NativeOpenFileResult | NativeOpenAudioFileResult {
   const maximumEnvelopeBytes = OPEN_FILE_HEADER_BYTES + MAX_FILENAME_UTF8_BYTES + maximumBytes(format);
   let envelope: Uint8Array;
   if (value instanceof ArrayBuffer) {
@@ -294,7 +360,11 @@ export function decodeNativeOpenEnvelope(
   validateFileName(format, fileName);
 
   const bytes = envelope.subarray(dataOffset);
-  validateFileBytes(format, bytes);
+  const descriptor = validateFileBytes(format, bytes, fileName);
+  if (format === 'audio') {
+    if (!descriptor) throw new NativeFileGatewayError('invalid-file');
+    return { status: 'opened', fileName, bytes, descriptor };
+  }
   return { status: 'opened', fileName, bytes };
 }
 
@@ -312,6 +382,13 @@ export class NativeFileGateway {
     return decodeNativeOpenEnvelope(
       await this.invokeChecked(NATIVE_FILE_COMMANDS.openMidi),
       'midi',
+    );
+  }
+
+  async openAudio(): Promise<NativeOpenAudioFileResult> {
+    return decodeNativeOpenEnvelope(
+      await this.invokeChecked(NATIVE_FILE_COMMANDS.openAudio),
+      'audio',
     );
   }
 

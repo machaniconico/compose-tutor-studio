@@ -45,6 +45,7 @@ const productionPermissions = [
   'allow-persistence-complete-erase-all',
   'allow-file-open-project',
   'allow-file-open-midi',
+  'allow-file-open-audio',
   'allow-file-export-project',
   'allow-file-export-midi',
   'allow-file-export-wav',
@@ -298,6 +299,15 @@ test('fails release preflight when network or broad native authority is added', 
   await writeFile(tauriPath, JSON.stringify(secureTauriConfig('1.2.3')));
   const capability = JSON.parse(await readFile(capabilityPath, 'utf8'));
   capability.permissions.push('core:default');
+  await writeFile(capabilityPath, JSON.stringify(capability));
+  await assert.rejects(
+    validateDesktopSecurityPolicy({ rootDir }),
+    /capability permissions.*allowlist/,
+  );
+
+  capability.permissions = productionPermissions.filter(
+    (permission) => permission !== 'allow-file-open-audio',
+  );
   await writeFile(capabilityPath, JSON.stringify(capability));
   await assert.rejects(
     validateDesktopSecurityPolicy({ rootDir }),

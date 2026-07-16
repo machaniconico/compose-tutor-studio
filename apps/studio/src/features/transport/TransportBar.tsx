@@ -9,6 +9,7 @@ import { formatPosition } from '../timeline';
 import { initAudioBridge } from '../../audio/playback';
 import { ProjectMenu } from '../projectMenu/ProjectMenu';
 import { ExportMenu } from '../export/ExportMenu';
+import { VocalCutTool } from '../vocalCut/VocalCutTool';
 import { downloadBlob } from '../export/download';
 import { exportEmergencyProjectBackup } from '../export/emergencyProjectBackup';
 import { SaveControl } from './SaveControl';
@@ -263,6 +264,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
         />
 
         <ExportMenu />
+        <VocalCutTool />
       </div>
     </header>
   );

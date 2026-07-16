@@ -169,6 +169,27 @@ live drainの所有権はProject schemaではなく`PlaybackController`のtransi
 
 停止中のplay位置は`0 <= positionBeat < projectLengthBeats`の有限値だけを保持し、それ以外を同じtransport更新内で0へ補正する。projectLengthは拍子分母を含むquarter-note beatで求める。このruntime補正はloop bounds、Project、history、revision、save stateへ永続差分を作らない。drum `Clip.loop`の未展開とbrowser / OS / WebView / sample rateが異なるWeb Audio engine間のPCM差は、このtransient契約とは別の既知制約である。同じapp build・engine/version・sample rateの再WAVは固定noise PCMとsample-frame offsetを共有し、全bytes一致を回帰条件にする。
 
+### 2.5 Transient vocal-cut projection
+
+カラオケ作成はProject entityではない。`SourceAudio`はbasename、extension、container、正規sample rate / channel metadata、byte length、browser presentation時間、正規container時間、decoder再同期候補を含むdecode時間・channel上限だけをfile選択中に保持する。decode前後の`VocalCutPlan`はsample rate、frame count、duration、phase別の推定working / output bytes、`VocalCutOptions`はpreset由来の中央軽減率と低域保護cutoffを一時値として持つ。入力は128 MiB以下、presentation / container時間は300秒＋format / sample rate別codec padding以下、decode上限はcontainer＋2秒以下、channel数はexact 2とする。duration tableのないADTS AACでは完全走査したframe列をbrowserの過大なpresentation推定より優先する。decode後に実frame時間が300秒を超える場合は許容codec padding分だけzero-copyで300秒へ切り詰める。mono、多channel、non-finite sample、near-mono、その他の上限超過をPCM出力作成前に拒否する。
+
+処理中のphase / progress / cancellation generation、元音源と結果のobject URL、decode済みAudioBuffer、生成PCM / WAV bytesもdialog所有のtransient stateである。source変更、cancel、dialog終了時に破棄し、Project、history、revision、autosave queue、SQLite、`.ctsproj.json`、tutorial進捗へ投影しない。保存されるのは利用者が明示的にexportした独立PCM 16-bit stereo WAVだけである。
+
+### 2.6 Transient humming transcription
+
+`HummingMelodyNote`は`startSeconds / durationSeconds / midi / confidence`だけを持つ解析候補で、確定前はProject entityではない。file metadata、decode済みPCM、8 kHz analysis signal、pitch frames、progress、Abort generation、候補pitch修正 / 除外、target Clip、quantizeもAssistant component所有のtransient stateとする。
+
+確定時に現在のProject BPMでsecondsをclip-local beatへ写し、fresh ID、pitch、startBeat、durationBeats、confidence由来velocityを持つ`NoteEvent`へ変換する。clip終端、event数、MIDI範囲を検査し、対象MIDI Clipのnotesを1回だけ置換する。成功した`NoteEvent`だけが通常のProject / history / autosave / SQLite / `.ctsproj.json`へ保存され、source fileや解析中間値は保存しない。
+
+### 2.7 Track管理とpreset（schema v2）
+
+- productionで新規生成するTrackはinstrumentまたはdrumで、開始0・長さ`Project.lengthBars * beatsPerBar(Project.timeSignature)`の空MIDI / Drum Clipを1つ持つ。先頭Masterがあればその直前、Masterがないlegacy Projectでは末尾へ置く。Audio / Busの型は将来互換用のままであり、Batch 3は対応Asset / routing entityを生成しない
+- Track複製はTrack、全Clip、正本が所有する全Note / DrumEvent、全EffectのIDを新規発行する。同じ複製元Track内の旧Clip ID→新Clip ID mapを作ってから`aliasOf`を張り替え、複製元IDへの参照を残さない。payloadとparameterは値として複製し、identityだけを分離する
+- production synth selectorが新規保存するpreset keyは`softPad` / `brightPluck` / `warmBass` / `brightLead`の4つである。旧`pad` / `bass` / `lead`系aliasは互換入力として保持できるが、UI表示のcanonical解決だけではProject bytesを変えない
+- schema v2にはTrackのsemantic role fieldがない。教材と伴奏の名前依存を壊さないため、正規化後の名前が`Chords` / `Bass` / `Melody`であるinstrument Trackは名称固定かつ削除不可とし、それ以外のnon-masterだけを改名・削除できる。欠落roleを同じ意味で復元できないschema v2では存在も保護し、Batch 4でroleを永続化してからmigrationと再作成規則を導入する
+- Master TrackはTrack管理mutationの対象外とする。既存の「複数Masterでは配列先頭だけが音声上有効」という互換契約は維持し、Batch 3の操作でMaster identity、数、相対順を変更しない
+- 候補Projectは128 Track上限を含む既存codec / validationを全体で通過した時だけ採用する。拒否時はProject、history、revision、autosave、selectionを一切変更せず、採用時は1 commandをUndo 1回へ対応させる。runtimeの選択、dialog draft、playback sessionはschemaへ保存しない
+
 ## 3. SQLite v2スキーマ
 
 SQLiteは編集用domain modelを別表へ再解釈せず、`project-model` codecのcanonical JSONをimmutable aggregate snapshotとして保存する。これによりWeb/nativeで同じschema migration・validationを使い、track/clip表とJSON codecの二重正本を作らない。
@@ -223,6 +244,9 @@ exact snapshotから特定projectらしいbytesだけを抜くと、snapshot che
 | time signature numerator | 1〜32 |
 | project length | 1〜256小節 |
 | tracks | 128以下 |
+| production Track追加 | instrument / drumのみ。全曲長の対応Clipを1つ持ち、先頭Master直前へ挿入 |
+| Track管理対象 | 複製・並べ替えはnon-master。改名・削除はChords / Bass / Melody instrumentを除く一般non-master。3つの学習Trackはschema v2で名称・存在を保護 |
+| synth preset command | softPad / brightPluck / warmBass / brightLead |
 | clips | 1トラックあたり1,024以下 |
 | note/drum events | 1クリップあたり20,000以下 |
 | drum resolution | 1〜128 steps/bar |

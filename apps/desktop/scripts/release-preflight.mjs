@@ -105,6 +105,7 @@ const productionCapabilityPermissions = Object.freeze([
   'allow-persistence-complete-erase-all',
   'allow-file-open-project',
   'allow-file-open-midi',
+  'allow-file-open-audio',
   'allow-file-export-project',
   'allow-file-export-midi',
   'allow-file-export-wav',
@@ -475,7 +476,7 @@ const forbiddenPnpmConfigPaths = Object.freeze([
 const productionViteConfigSha256 =
   '459066c044ee244af72e720aaca9cbb59d7c90b469e84fee8ac784e9348c841b';
 const productionBuildScriptSha256 =
-  'b9cb97fb9ceb67535dd79173bf5dbcfccd89231d5ab808923d7c81e784af5b2f';
+  '5078cafbdfb6fa3d2319411a8d6fbb5e4596ecda596463b361f9b075b6537b70';
 const productionPnpmWorkspaceSha256 =
   '08d75840c97ab0e72d1d9b5b84a17e47a2e06cb159a5fbec5ee0a6a56682dad7';
 const productionPnpmLockSha256 =

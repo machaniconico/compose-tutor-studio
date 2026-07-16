@@ -147,20 +147,36 @@ const brightLeadPreset: SynthPreset = {
   env: { attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.18 },
 };
 
-/**
- * Preset table. Keys cover beginner-facing names plus the existing default
- * project names (warmPad / roundBass / brightLead / subBass / leadSine).
- */
-export const SYNTH_PRESETS: Readonly<Record<string, SynthPreset>> = {
+type CanonicalSynthPresetName = 'softPad' | 'brightPluck' | 'warmBass' | 'brightLead';
+
+const CANONICAL_SYNTH_PRESETS: Readonly<Record<CanonicalSynthPresetName, SynthPreset>> = {
   softPad: softPadPreset,
-  warmPad: softPadPreset,
   brightPluck: brightPluckPreset,
   warmBass: warmBassPreset,
-  roundBass: warmBassPreset,
-  subBass: warmBassPreset,
   brightLead: brightLeadPreset,
-  leadSine: brightLeadPreset,
 };
+
+/** One alias registry drives both playback and inspector presentation. */
+const SYNTH_PRESET_ALIASES = new Map<string, CanonicalSynthPresetName>([
+  ['softPad', 'softPad'],
+  ['warmPad', 'softPad'],
+  ['pad', 'softPad'],
+  ['brightPluck', 'brightPluck'],
+  ['warmBass', 'warmBass'],
+  ['roundBass', 'warmBass'],
+  ['subBass', 'warmBass'],
+  ['bass', 'warmBass'],
+  ['brightLead', 'brightLead'],
+  ['leadSine', 'brightLead'],
+  ['lead', 'brightLead'],
+]);
+
+/** Playback table includes every persisted legacy alias. */
+const synthPresetTable = Object.create(null) as Record<string, SynthPreset>;
+for (const [alias, canonical] of SYNTH_PRESET_ALIASES) {
+  synthPresetTable[alias] = CANONICAL_SYNTH_PRESETS[canonical];
+}
+export const SYNTH_PRESETS: Readonly<Record<string, SynthPreset>> = Object.freeze(synthPresetTable);
 
 export const BEGINNER_SYNTH_PRESETS = ['softPad', 'brightPluck', 'warmBass'] as const;
 
@@ -169,7 +185,13 @@ export const DEFAULT_PRESET = 'warmPad';
 
 /** Resolve a preset by name, falling back to the default. */
 export function resolvePreset(preset: string | undefined): SynthPreset {
-  return clonePreset((preset ? SYNTH_PRESETS[preset] : undefined) ?? softPadPreset);
+  const canonical = preset ? SYNTH_PRESET_ALIASES.get(preset) : undefined;
+  return clonePreset(canonical ? CANONICAL_SYNTH_PRESETS[canonical] : softPadPreset);
+}
+
+/** Resolve saved aliases for UI display without rewriting the project. */
+export function canonicalSynthPresetName(value: string): string | null {
+  return SYNTH_PRESET_ALIASES.get(value) ?? null;
 }
 
 export function listSynthPresets(): readonly SynthPresetSummary[] {

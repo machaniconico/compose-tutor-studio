@@ -10,8 +10,10 @@
 
 import {
   buildClipIndex,
+  findLearningTrack,
   resolveClipContent,
   type ClipIndex,
+  type LearningTrackName,
   type Project,
   type Track,
 } from '@cts/project-model';
@@ -65,10 +67,9 @@ function progressionSymbols(project: Project): string[] {
     .map((c) => c.symbol);
 }
 
-/** name のトラックを返す(大文字小文字無視)。 */
-function trackByName(project: Project, name: string): Track | undefined {
-  const lower = name.toLowerCase();
-  return project.tracks.find((t) => t.name.toLowerCase() === lower);
+/** schema v2の学習roleを共有のtrim・case-fold規則で探す。 */
+function trackByName(project: Project, name: LearningTrackName): Track | undefined {
+  return findLearningTrack(project, name);
 }
 
 /** トラックが持つノートの総数。 */

@@ -326,6 +326,104 @@ function safeLoopBounds(
     : { startBeat: 0, endBeat: projectLength };
 }
 
+function numberRecordsEqual(
+  left: Readonly<Record<string, number>> | undefined,
+  right: Readonly<Record<string, number>> | undefined,
+): boolean {
+  if (left === right) return true;
+  const leftKeys = left ? Object.keys(left) : [];
+  const rightKeys = right ? Object.keys(right) : [];
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every(
+    (key) =>
+      Object.prototype.hasOwnProperty.call(right, key) &&
+      Object.is(left?.[key], right?.[key]),
+  );
+}
+
+function instrumentTopologyEqual(left: Track, right: Track): boolean {
+  if (left.instrument === right.instrument) return true;
+  if (!left.instrument || !right.instrument) return false;
+  return (
+    left.instrument.type === right.instrument.type &&
+    left.instrument.preset === right.instrument.preset &&
+    numberRecordsEqual(left.instrument.params, right.instrument.params)
+  );
+}
+
+function clipTopologyEqual(
+  left: Track['clips'][number],
+  right: Track['clips'][number],
+): boolean {
+  if (left === right) return true;
+  const leftGroove = left.drumGroove;
+  const rightGroove = right.drumGroove;
+  const grooveEqual =
+    leftGroove === rightGroove ||
+    (leftGroove !== undefined &&
+      rightGroove !== undefined &&
+      leftGroove.swing === rightGroove.swing &&
+      leftGroove.probability === rightGroove.probability &&
+      leftGroove.humanizeVelocity === rightGroove.humanizeVelocity &&
+      leftGroove.seed === rightGroove.seed);
+
+  return (
+    left.id === right.id &&
+    left.trackId === right.trackId &&
+    left.type === right.type &&
+    left.startBeat === right.startBeat &&
+    left.lengthBeats === right.lengthBeats &&
+    left.loop === right.loop &&
+    left.aliasOf === right.aliasOf &&
+    left.stepsPerBar === right.stepsPerBar &&
+    left.audioAssetId === right.audioAssetId &&
+    grooveEqual
+  );
+}
+
+/**
+ * Whether an adopted project edit invalidates the topology captured by the
+ * current playback session. Live mixer fields are applied by the audio bridge;
+ * names/colors, effects, and note contents are deliberately outside this
+ * structural policy. Track and clip ordering is significant because tied
+ * events are scheduled in project order.
+ */
+export function hasPlaybackTopologyChanged(current: Project, next: Project): boolean {
+  if (current === next) return false;
+  if (current.tracks.length !== next.tracks.length) return true;
+
+  return current.tracks.some((track, trackIndex) => {
+    const nextTrack = next.tracks[trackIndex];
+    if (!nextTrack) return true;
+    if (
+      track.id !== nextTrack.id ||
+      track.type !== nextTrack.type ||
+      !instrumentTopologyEqual(track, nextTrack) ||
+      track.clips.length !== nextTrack.clips.length
+    ) {
+      return true;
+    }
+
+    return track.clips.some((clip, clipIndex) => {
+      const nextClip = nextTrack.clips[clipIndex];
+      return !nextClip || !clipTopologyEqual(clip, nextClip);
+    });
+  });
+}
+
+function transportAfterProjectChange(
+  transport: TransportState,
+  topologyChanged: boolean,
+): TransportState {
+  if (!topologyChanged || transport.phase === 'stopped') return transport;
+  return {
+    ...transport,
+    phase: 'stopped',
+    isPlaying: false,
+    playbackRequestId: transport.playbackRequestId + 1,
+  };
+}
+
 function makeEditor(project: Project): EditorState {
   const firstTrack = project.tracks[0];
   const firstClip = firstTrack?.clips[0];
@@ -349,15 +447,22 @@ function reconcileEditorSelection(
   const located = editor.selectedClipId
     ? findProjectClip(project, editor.selectedClipId)
     : undefined;
-  const effective = located
-    ? resolveClipContent(project, located.clip)
+  const selectedTrackStillExists = project.tracks.some(
+    (track) => track.id === editor.selectedTrackId,
+  );
+  const fallbackTrack = located?.track
+    ?? project.tracks.find((track) => track.type !== 'master')
+    ?? project.tracks[0]
+    ?? null;
+  const selectedTrackId = selectedTrackStillExists
+    ? editor.selectedTrackId
+    : fallbackTrack?.id ?? null;
+  const selectedClip = located?.clip
+    ?? (!selectedTrackStillExists ? fallbackTrack?.clips[0] : undefined);
+  const effective = selectedClip
+    ? resolveClipContent(project, selectedClip)
     : null;
   const noteIds = new Set(effective?.notes?.map((note) => note.id) ?? []);
-  const selectedTrackId = project.tracks.some(
-    (track) => track.id === editor.selectedTrackId,
-  )
-    ? editor.selectedTrackId
-    : (located?.track.id ?? null);
   const selectedChordId = project.chordTrack.some(
     (chord) => chord.id === editor.selectedChordId,
   )
@@ -367,7 +472,7 @@ function reconcileEditorSelection(
   return {
     ...editor,
     selectedTrackId,
-    selectedClipId: located?.clip.id ?? null,
+    selectedClipId: selectedClip?.id ?? null,
     selectedChordId,
     selectedNoteIds: located
       ? editor.selectedNoteIds.filter((id) => noteIds.has(id))
@@ -1115,11 +1220,13 @@ export function createStudioStore(
     const past = [...get().past, current].slice(-HISTORY_CAP);
     const revision = get().saveState.revision + 1;
     if (!scheduleSave(stamped, revision)) return false;
+    const topologyChanged = hasPlaybackTopologyChanged(current, stamped);
     set((state) => ({
       project: stamped,
       past,
       future: [],
       editor: reconcileEditorSelection(state.editor, stamped),
+      transport: transportAfterProjectChange(state.transport, topologyChanged),
     }));
     if (stamped.key !== current.key || stamped.scale !== current.scale) {
       publishScaleSnapStateIfEnabled();
@@ -1549,11 +1656,13 @@ export function createStudioStore(
       const restored = { ...previous, updatedAt: nowIso() };
       const revision = get().saveState.revision + 1;
       if (!scheduleSave(restored, revision)) return;
+      const topologyChanged = hasPlaybackTopologyChanged(project, restored);
       set((state) => ({
         project: restored,
         past: past.slice(0, -1),
         future: [project, ...future].slice(0, HISTORY_CAP),
         editor: reconcileEditorSelection(state.editor, restored),
+        transport: transportAfterProjectChange(state.transport, topologyChanged),
       }));
       if (restored.key !== project.key || restored.scale !== project.scale) {
         publishScaleSnapStateIfEnabled();
@@ -1567,11 +1676,13 @@ export function createStudioStore(
       const restored = { ...next, updatedAt: nowIso() };
       const revision = get().saveState.revision + 1;
       if (!scheduleSave(restored, revision)) return;
+      const topologyChanged = hasPlaybackTopologyChanged(project, restored);
       set((state) => ({
         project: restored,
         past: [...past, project].slice(-HISTORY_CAP),
         future: future.slice(1),
         editor: reconcileEditorSelection(state.editor, restored),
+        transport: transportAfterProjectChange(state.transport, topologyChanged),
       }));
       if (restored.key !== project.key || restored.scale !== project.scale) {
         publishScaleSnapStateIfEnabled();

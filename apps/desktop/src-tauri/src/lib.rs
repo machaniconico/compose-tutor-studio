@@ -35,6 +35,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             native_files::file_open_project,
             native_files::file_open_midi,
+            native_files::file_open_audio,
             native_files::file_export_project,
             native_files::file_export_midi,
             native_files::file_export_wav,

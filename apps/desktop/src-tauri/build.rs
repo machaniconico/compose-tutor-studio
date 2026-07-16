@@ -2,6 +2,7 @@ fn main() {
     const APPLICATION_COMMANDS: &[&str] = &[
         "file_open_project",
         "file_open_midi",
+        "file_open_audio",
         "file_export_project",
         "file_export_midi",
         "file_export_wav",

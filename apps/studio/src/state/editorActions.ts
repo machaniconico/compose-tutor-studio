@@ -27,6 +27,8 @@ import {
   MIN_EVENT_DURATION_BEATS,
   beatsPerBar as beatsPerBarOf,
   clipContentOwnerId,
+  findLearningTrack,
+  normalizeLearningTrackName,
   resolveClipContent,
 } from '@cts/project-model';
 import {
@@ -177,10 +179,10 @@ export function findClip(project: Project, clipId: string | null): Clip | null {
   return null;
 }
 
-/** Find a track by name (case-insensitive) — used to target Bass/Melody. */
+/** Find a schema-v2 learning track after shared role-name normalization. */
 export function findTrackByName(project: Project, name: string): Track | null {
-  const lower = name.toLowerCase();
-  return project.tracks.find((t) => t.name.toLowerCase() === lower) ?? null;
+  const role = normalizeLearningTrackName(name);
+  return role ? (findLearningTrack(project, role) ?? null) : null;
 }
 
 /** The first MIDI clip of a named track, if any. */

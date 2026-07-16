@@ -39,6 +39,35 @@ function chordsClipId(): string {
   return clip?.id ?? '';
 }
 
+describe('learning track role lookup', () => {
+  it('finds Chords, Bass, and Melody after shared trim and case normalization', () => {
+    const project = structuredClone(useStore.getState().project);
+    const roles = [
+      ['Chords', '  cHoRdS\n', '\tCHORDS '],
+      ['Bass', '\tBaSs ', ' bass\n'],
+      ['Melody', '  mElOdY  ', ' MELODY '],
+    ] as const;
+
+    for (const [canonical, storedVariant] of roles) {
+      const track = project.tracks.find((candidate) => candidate.name === canonical);
+      if (!track) throw new Error(`${canonical} track fixture is missing`);
+      track.name = storedVariant;
+    }
+    const drums = project.tracks.find((track) => track.type === 'drum');
+    if (!drums) throw new Error('Drum track fixture is missing');
+    drums.name = 'Melody';
+    project.tracks = [drums, ...project.tracks.filter((track) => track.id !== drums.id)];
+
+    for (const [canonical, , queryVariant] of roles) {
+      const expected = project.tracks.find(
+        (track) => track.type === 'instrument' && track.name.trim().toLowerCase() === canonical.toLowerCase(),
+      );
+      expect(actions.findTrackByName(project, queryVariant)?.id).toBe(expected?.id);
+      expect(actions.firstMidiClipOfTrack(project, queryVariant)?.trackId).toBe(expected?.id);
+    }
+  });
+});
+
 describe('addTrackEffect commit boundary', () => {
   it('publishes only after the generated effect is adopted', () => {
     const track = useStore.getState().project.tracks.find(

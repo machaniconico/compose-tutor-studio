@@ -11,6 +11,8 @@
 | project-model | unit/migration | 保存/読み込み/移行の安全性 |
 | UI | component/e2e | 主要操作フロー |
 | audio | integration/golden | 再生イベント、レンダー結果 |
+| vocal-cut | unit/integration/e2e | container検証、中央軽減DSP、cancel、A/B試聴、WAV出力、Project分離 |
+| track-management | unit/component/e2e | ID再発行、alias remap、Master / role名称・削除保護、atomic拒否、Undo / autosave / selection / playback |
 | midi-io | unit/integration | Format 0 / 1 import、Format 1 export、lossy境界、攻撃的fileの上限制御 |
 | export | integration | MIDI/WAVの独立playerでの読み出し可能性 |
 
@@ -64,6 +66,36 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 - 書き出しファイルが存在
 - プロジェクトのノート/コード数が保存前後で一致
 
+### E2E-002: カラオケ用音源を作る
+
+1. Top Barから「カラオケ」を開く
+2. 中央1 kHzと左右差2 kHzを持つ短い合成stereo WAVを選ぶ
+3. 「標準」で作成し、元音源 / カラオケをA/B試聴する
+4. PCM 16-bit WAVを保存する
+
+期待結果:
+
+- 中央1 kHzが十分に減衰し、左右差2 kHzが維持される
+- outputがRIFF / stereo PCM 16-bitとして独立parserで読める
+- source名由来の`_karaoke.wav`で保存され、Project / history / save状態は変化しない
+- near-mono fixtureは出力とdownloadを作らず、理由を表示する
+
+### E2E-003: Trackを追加・整理して音色を保存する
+
+1. 停止中に楽器Trackを追加し、`brightPluck`を選ぶ
+2. 新Trackを改名し、複製、上下移動、削除、Undo / Redoを行う
+3. drum Trackも追加し、Projectを保存して再読込する
+4. 再生中に別のcanonical音色へ変更し、もう一度再生する
+
+期待結果:
+
+- instrument / drumは全曲長の対応Clipを1つ持って先頭Master直前へ追加され、追加・複製後の新Track / Clipが選択される
+- Audio / Busは作成されず、Asset / routingが必要という理由を追加前に確認できる
+- 複製したTrack / Clip / Note / DrumEvent / EffectのIDは元と重ならず、Track内aliasは複製先Clipを参照する
+- Masterは変更対象にならず、Chords / Bass / Melodyは名称・削除を保護する理由を表示して削除commandもatomicに拒否し、それ以外の改名・削除はUndo 1回で戻る
+- 採用された構造 / preset変更は再生を停止してplayheadを保持し、次の再生、保存後の再読込、WAVで同じ音色と構成を使う
+- 削除後、Undo / Redo後、再読込後のselectionは存在するTrack / Clipだけを参照する
+
 ## 5. 音声テスト
 
 | テスト | 内容 |
@@ -108,6 +140,13 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 | async generation race | A開始→停止→B開始を両解決順で完了しても、Bのsessionだけが残るか |
 | context interruption | suspended/interrupted/closedでsession資源を破棄し、編集を保持した中断案内へ戻るか |
 | session cleanup | lookahead済みのnote/drum/metronomeを含め、停止後に旧sessionの音が新sessionへ重ならないか |
+| vocal-cut center/side | 同相の中央成分がpresetどおり減衰し、逆相を含むSide成分は保持されるか。90%軽減が約-20 dBになるか |
+| vocal-cut bass preservation | cutoff以下の中央低域を高域の中央声より多く残し、3 presetのstrength / cutoffが仕様値と一致するか |
+| vocal-cut safety | exact stereo / 5分 / memoryをallocation前に検査し、non-finiteとnear-monoを拒否するか。WAV `fmt`、MP3 Xing/Info・frame length、ADTS frame length、M4A `mdhd` / `stts` / `stsz` / `stsc` / sample rateを短く見せても、decoder再同期候補 / sample table由来のdecode時間上限を実ChromiumのAudioBufferより短くしないか。Info偽装10分MP3とouter-frame内の連続chainをdecode前に拒否し、孤立したMP3 payload headerは過大計上しないか。正規exact 5分WAV / MP3 / ffmpeg M4A / macOS AudioToolbox M4Aをbounded padding込みで受理し、browser durationが過大なADTS AACもframe列で受理してdecode後paddingだけをzero-copyで300秒へtrimするか。peak 1以下は持ち上げず、超過時だけ減衰するか |
+| vocal-cut chunk/cancel | processingとWAV encodeがchunkごとに進捗を単調更新し、cancel後に古いgenerationが結果やdownloadを公開しないか |
+| humming pitch core | 50 / 1,000 Hz境界、2音＋無声、vibrato、強い第2倍音、逆相stereo、192 kHz downsampleのaliasingを合成fixtureで検査し、同入力 / 異chunkで結果が一致するか |
+| humming safety | 60秒UI上限、256 MiB PCM / working上限、NaN / Inf、32ch core上限、mono / stereo UI上限、巨大chunk、cancelをallocation / commit前に拒否するか |
+| humming E2E | local mono WAVをAssistantから解析し、候補修正 / 除外、target / quantize確認後に2音をUndo 1回のProject changeとしてPiano Rollへ反映するか。失敗 / cancelではProjectが不変か |
 
 ## 6. パフォーマンステスト
 
@@ -197,6 +236,19 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 | play-at-end rewind | 4/4のexact end / beyond、負値、NaNと、6/8のdenominator-aware endを0へ補正する。valid位置、loop bounds、Project identity、past / future、save stateを保持し、endからの開始失敗後も新request IDで0から再試行・confirmできる |
 | explicit determinism limits | tailはPCM silence scanではなく解析値で、40秒capへ達する病的insertはfadeされる。drum source noise / offsetは決定的でもWeb Audio engine間bit identityは別保証であり、別契約のdrum `Clip.loop`未展開とも混同しない |
 
+### 7.4 Vocal cut contract
+
+| テスト | 必須検証 |
+|---|---|
+| source structure | Rust境界はWAV / MP3 / M4A / AACの拡張子、主要container構造、申告byte長、128 MiBを予備検証し、rendererのTypeScript境界がnative / Web両方のbytesを厳格再検証して同じ最終可否にする。WAVはPCM / IEEE float32に限定する。M4Aは非fragmented AAC-LCのcodec設定、`mdhd` / `stts` / `stsz`または`stz2` / `stsc` / `stco`または`co64` / 単一`mdat` exact coverを一致必須とし、ALAC / HE-AAC / `moof`を拒否する |
+| native permission | `file_open_audio`だけをmain capabilityへ追加し、汎用fs/dialog/shell/opener、path返却、network permissionを追加しない。basenameとbounded bytesだけを返す |
+| input plan | exact stereo・300秒以下・有限sample・working/output memory内を受理し、mono、多channel、near-mono、non-finite、duration / memory超過を処理前に型付き拒否する |
+| preset DSP | 自然75% / 150Hz、標準90% / 120Hz、強め100% / 100Hzをtable-drivenで確認し、Side保持、低域保護、no upward normalizeを数値比較する |
+| asynchronous lifecycle | source read / metadata / decode / analysis / processing / encodeのphase、単調progress、cancel、source差替え、dialog unmount、stale generationを検査する。dialog close後も実source job / decode jobがsettleするまで各single-flight leaseを保持して同種jobを1件へ制限し、30秒後の安全な復旧案内とsettle時live statusを出し、古い結果・object URL・buffer・未追跡Promiseを残さない |
+| UI / export | A/Bが同じ再生位置を維持し、最小375×667と1024×640でtrigger / dialog / cancel / saveへkeyboard到達できる。出力は2 channel PCM 16-bit WAVで、保存cancel / 失敗を成功表示しない |
+| persistence / privacy | 成功、失敗、cancelの全経路でProject identity / history / revision / autosave / SQLite / `.ctsproj.json`を変更せず、音源・結果のnetwork requestが0件である |
+| limitation copy | ML stem分離ではないこと、声が残る・中央の楽器も弱くなり得ること、権利のある音源だけを使うことを作成前から表示する |
+
 - 既存プロジェクト読み込み
 - Lesson DSL schema
 - Chord parser
@@ -246,6 +298,26 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 - live再生中にWAV exportを成功させた後も、開始前と同じtransport session、per-track analyser、Master analyser、各meter registry entryが残り、meter更新と再生が継続すること。renderまたはencodeを失敗させた場合も同じで、offline処理はper-track / Master analyserの作成・登録・置換・削除を一度も行わないこと
 - unit / integrationの両層で、offline WAVの成功・失敗ごとに独立TrackGraph、Master gain、limiterが一度だけ解放され、live所有のTrackGraph / master source / analyser / transportは解放・置換されないこと
 
+### 7.5 Track管理 / preset contract（Batch 3部分）
+
+- instrument / drum追加は0拍から拍子分母を含むsong endまでの対応Clipをexact 1件作り、先頭Master直前へ挿入すること。Masterなしlegacyでは末尾へ追加し、Audio / BusはProjectを変えず、AudioはBatch 5の配置・再生、BusはBatch 6のrouting後に提供する理由を返すこと
+- duplicateはTrack / Clip / Note / DrumEvent / Effectの全IDを新規にし、正本とaliasを混在させたTrackでも複製先`aliasOf`が複製先正本だけを直接参照すること。元Trackの編集が複製先へ漏れず、codec roundtrip後も同じであること
+- 127 Trackから追加して128件は成功し、128件からの追加 / 複製はProject参照、history、revision、autosave予約、selection、active playbackを変えず拒否すること。codecがevent budgetや文字列上限で拒否するfixtureも同じatomic保証を満たすこと
+- 全Masterに改名 / 複製 / 移動 / 削除 / preset commandを適用できず、複数Master fixtureのidentityと相対順が変わらないこと。Chords / Bass / Melodyの大文字小文字・前後空白variantは改名・削除を拒否し、Project / history / revision / autosave / selectionを変えないこと。一般non-masterのlocal draftは入力中0 commit、確定時1 commit、Undo 1回で戻ること
+- canonical 4 presetを順に確定し、保存値、live event plan、offline WAV、Undo/Redo、`.ctsproj.json`とSQLite再読込後の値が一致すること。legacy aliasの表示だけではrevision / save bytesを変えないこと
+- active playback中に採用された追加 / 複製 / reorder / delete / presetだけがsessionを停止し、停止前の有限playhead beatを保持すること。rename、拒否、no-opはsessionを停止せず、次のplayが採用済みTrack topology / presetだけからgraphを再構築すること
+- deleteした選択Track / Clip IDを残さず、隣接する生存Trackまたはnullへreconcileすること。追加 / 複製後の対象行、reorder後の同一行、削除確認cancel後の起点へkeyboard focusが移るか保持され、status / alertがscreen readerで区別できること
+
+#### 7.5.1 Batch 3の現時点の自動化状況
+
+Batch 3はproduction導線を持つ「部分実装」であり、この節の全契約を検証済みという意味ではない。完了判定では、既存のdomain / store / component / browser回帰に加えて、次の未実施gateを個別に閉じる。
+
+- [ ] 127 Trackから128 Trackへの追加成功と、128 Trackからの追加・複製拒否を同じatomic fingerprintで検証する
+- [ ] event budget / 文字列上限で候補Projectだけがcodec拒否されるfixtureを作り、active playbackを含む全付随stateが不変であることを検証する
+- [ ] canonical 4 presetを順に確定し、live event plan、offline WAV、Undo/Redo、`.ctsproj.json`、native SQLite再読込で同じ値と音色になることを検証する
+- [ ] active playback中の追加・複製・並べ替え・一般Track削除をそれぞれ検証し、rename・拒否・no-opとの停止条件差を確認する
+- [ ] instrumentだけでなくdrum追加をbrowser E2Eの保存・再読込まで通し、学習Trackの改名・削除拒否と可視alertもkeyboard / screen reader経路で確認する
+
 ## 8. 手動QAチェックリスト
 
 - 初心者が説明なしでStart Screenから再生まで到達できる
@@ -256,6 +328,9 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 - 書き出し前チェックリストが役に立つ
 - 予期しない起動・描画エラーで空画面にならず、キーボードで再読み込みと診断情報の明示コピーができる
 - 診断情報に曲名、project bytes、取り込みfile名、端末path、raw error message/stackが入らず、自動送信も行われない
+- カラオケ作成で3 presetを比較し、A/Bの位置がずれず、cancel後に結果が現れず、mono / near-mono / 5分超過 / 128 MiB超過が具体的な案内になる
+- カラオケ作成前から品質限界と権利注意が読め、処理中もNetwork requestがなく、閉じた後に音声再生や一時URLが残らない
+- Track追加で楽器 / ドラムと4音色を迷わず選べ、Audio / Busが未提供である理由を事前に理解できる。MasterとChords / Bass / Melodyの名称・削除保護理由、一般Trackの削除確認、再生停止後も位置を保持する案内をkeyboard / screen readerで確認できる
 
 ### 8.1 Native release candidate（macOS / Windows / Linux共通）
 
@@ -264,6 +339,7 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 - `.ctsproj.json`をnative pickerで開き、曲名・BPM・ノート・コードが一致する
 - 不正JSON、future schema、16 MiB超過projectを拒否し、元プロジェクトを変更しない
 - `.mid` / `.midi`をnative pickerで開き、Format 0 / 1のmixed channelが複数Trackとして順序どおり追加される。無効header、8 MiB超過、128 Track超過、commit拒否は元Project・選択・表示を変更せず拒否する
+- `.wav` / `.mp3` / `.m4a` / `.aac`をnative pickerからカラオケ作成へ読み込み、構造偽装、128 MiB超過、mono / near-mono、5分超過を拒否する。pathを画面 / console / IPC responseへ表示せず、生成PCM 16-bit WAVを独立playerで再生できる
 - invalid UTF-8、duration 0、未完了Note On、孤立Note Off、画面外note、drum fallback、非対応metadataの複数warningを発生させ、成功件数とwarning詳細をキーボードとscreen readerで確認できる
 - native picker応答とimport commitを意図的に遅延し、処理中のProject dialogで全Project操作とX / Escape / backdropがdisabledになり、warning成功後はunlockされた全warning result cardを確認してから閉じられる
 - project / MIDI / WAVを書き出し、既存fileへの上書き確認、cancel、権限拒否、空き容量不足を初心者向けに処理する

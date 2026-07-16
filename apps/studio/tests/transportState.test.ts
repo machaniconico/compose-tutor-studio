@@ -3,7 +3,219 @@ import { MemoryProjectRepository } from '@cts/project-persistence';
 import { beatsPerBar } from '@cts/project-model';
 import type { AppEvent } from '@cts/tutorial-engine';
 import { subscribeAppEvents } from '../src/state/appEvents';
-import { createStudioStore } from '../src/state/store';
+import { createDefaultProject } from '../src/state/defaultProject';
+import {
+  createStudioStore,
+  hasPlaybackTopologyChanged,
+} from '../src/state/store';
+
+describe('playback topology changes', () => {
+  it('detects track ordering, instrument configuration, and clip layout changes', () => {
+    const project = createDefaultProject();
+    const [first, second] = project.tracks;
+    if (!first || !second || !first.clips[0]) throw new Error('track fixture missing');
+
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      tracks: [second, first, ...project.tracks.slice(2)],
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      tracks: project.tracks.map((track, index) =>
+        index === 0
+          ? {
+              ...track,
+              instrument: {
+                type: 'synth',
+                preset: 'brightLead',
+                params: { attack: 0.1 },
+              },
+            }
+          : track,
+      ),
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      tracks: project.tracks.map((track, index) =>
+        index === 0 && track.instrument
+          ? {
+              ...track,
+              instrument: { ...track.instrument, params: { attack: 0.1 } },
+            }
+          : track,
+      ),
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      tracks: project.tracks.map((track, index) =>
+        index === 0
+          ? {
+              ...track,
+              clips: track.clips.map((clip, clipIndex) =>
+                clipIndex === 0 ? { ...clip, startBeat: clip.startBeat + 1 } : clip,
+              ),
+            }
+          : track,
+      ),
+    })).toBe(true);
+  });
+
+  it('ignores names, mixer state, effects, and event-content-only changes', () => {
+    const project = createDefaultProject();
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      tracks: project.tracks.map((track, index) =>
+        index === 0
+          ? {
+              ...track,
+              name: 'Renamed',
+              color: '#123456',
+              volume: 0.25,
+              pan: 0.5,
+              mute: !track.mute,
+              solo: !track.solo,
+              effects: [
+                {
+                  id: 'effect-test',
+                  type: 'reverb',
+                  enabled: true,
+                  params: { mix: 0.25 },
+                },
+              ],
+              clips: track.clips.map((clip, clipIndex) =>
+                clipIndex === 0
+                  ? {
+                      ...clip,
+                      notes: [
+                        ...(clip.notes ?? []),
+                        {
+                          id: 'note-test',
+                          pitch: 60,
+                          startBeat: 0,
+                          durationBeats: 1,
+                          velocity: 100,
+                        },
+                      ],
+                    }
+                  : clip,
+              ),
+            }
+          : track,
+      ),
+    })).toBe(false);
+  });
+
+  it.each(['starting', 'playing'] as const)(
+    'stops an active %s generation atomically when topology is adopted',
+    (phase) => {
+      const store = createStudioStore(new MemoryProjectRepository());
+      store.getState().setPosition(3.5);
+      store.getState().play();
+      const requestId = store.getState().transport.playbackRequestId;
+      if (phase === 'playing') store.getState().confirmPlaybackStarted(requestId);
+
+      expect(store.getState().applyProjectChange((project) => ({
+        ...project,
+        tracks: project.tracks.map((track, index) =>
+          index === 0
+            ? {
+                ...track,
+                instrument: track.instrument
+                  ? { ...track.instrument, preset: 'brightLead' }
+                  : track.instrument,
+              }
+            : track,
+        ),
+      }))).toBe(true);
+
+      expect(store.getState().transport).toMatchObject({
+        phase: 'stopped',
+        isPlaying: false,
+        playbackRequestId: requestId + 1,
+        positionBeat: 3.5,
+      });
+    },
+  );
+
+  it('keeps active playback for adopted rename and mixer changes', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const track = store.getState().project.tracks[0];
+    if (!track) throw new Error('track fixture missing');
+    store.getState().play();
+    const requestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(requestId);
+
+    expect(store.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((candidate) =>
+        candidate.id === track.id
+          ? {
+              ...candidate,
+              name: 'Renamed',
+              effects: [
+                {
+                  id: 'effect-live-edit',
+                  type: 'reverb',
+                  enabled: true,
+                  params: { mix: 0.25 },
+                },
+              ],
+            }
+          : candidate,
+      ),
+    }))).toBe(true);
+    store.getState().setTrackVolume(track.id, 0.5);
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'playing',
+      isPlaying: true,
+      playbackRequestId: requestId,
+    });
+  });
+
+  it('stops active playback when undo and redo restore different topology', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    expect(store.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: [project.tracks[1]!, project.tracks[0]!, ...project.tracks.slice(2)],
+    }))).toBe(true);
+
+    store.getState().play();
+    const undoRequestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(undoRequestId);
+    store.getState().undo();
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      playbackRequestId: undoRequestId + 1,
+    });
+
+    store.getState().play();
+    const redoRequestId = store.getState().transport.playbackRequestId;
+    store.getState().redo();
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      playbackRequestId: redoRequestId + 1,
+    });
+  });
+
+  it('does not disturb transport for rejected or referential no-op edits', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    store.getState().play();
+    const before = store.getState();
+
+    expect(store.getState().applyProjectChange((project) => ({
+      ...project,
+      // Duplicate ownership IDs are rejected by the canonical project boundary.
+      tracks: [...project.tracks, project.tracks[0]!],
+    }))).toBe(false);
+    expect(store.getState().applyProjectChange((project) => project)).toBe(true);
+
+    expect(store.getState().project).toBe(before.project);
+    expect(store.getState().transport).toBe(before.transport);
+  });
+});
 
 describe('transport playback lifecycle', () => {
   it('publishes transport.played only after the matching start is confirmed', () => {

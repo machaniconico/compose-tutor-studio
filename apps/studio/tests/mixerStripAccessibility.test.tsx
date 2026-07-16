@@ -41,6 +41,7 @@ describe('Mixer mute/solo accessibility', () => {
     }
     expect(html).not.toContain('aria-label="Master ミュート"');
     expect(html).not.toContain('aria-label="Master ソロ"');
+    expect(html).toContain('aria-label="マスター レベル RMS -∞ dB / Peak -∞ dB"');
   });
 
   it('gives repeated effects unique track-scoped groups and control names', () => {
@@ -57,5 +58,27 @@ describe('Mixer mute/solo accessibility', () => {
       expect(html).toContain(`aria-label="Chords フィルター ${ordinal} 明るさ"`);
       expect(html).toContain(`aria-label="Chords フィルター ${ordinal} くせ"`);
     }
+  });
+
+  it('disambiguates controls owned by same-name tracks', () => {
+    const tracks = useStore.getState().project.tracks.filter((track) => track.type !== 'master');
+    const first = tracks[0];
+    const second = tracks[1];
+    if (!first || !second) throw new Error('track fixtures missing');
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.id === first.id || track.id === second.id
+          ? { ...track, name: 'Harmony' }
+          : track,
+      ),
+    }))).toBe(true);
+    Object.assign(useStore.getInitialState(), useStore.getState());
+
+    const html = renderToStaticMarkup(<MixerStrip />);
+    expect(html).toContain('aria-label="Harmony（同名 1/2） 音量"');
+    expect(html).toContain('aria-label="Harmony（同名 2/2） 音量"');
+    expect(html).toContain('aria-label="Harmony（同名 1/2） ミュート"');
+    expect(html).toContain('aria-label="Harmony（同名 2/2） ミュート"');
   });
 });

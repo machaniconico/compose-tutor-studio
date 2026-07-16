@@ -1,17 +1,18 @@
+import { useState } from 'react';
 import { useStore } from '../../state/store';
-import type { TrackType } from '@cts/project-model';
-
-/** Tiny text label for each track type (no emoji, no SVG — simple shapes). */
-const TYPE_LABEL: Record<TrackType, string> = {
-  instrument: '鍵',
-  drum: '打',
-  audio: '音',
-  bus: '束',
-  master: '主',
-};
+import { AddTrackDialog } from './AddTrackDialog';
+import {
+  TRACK_ADD_CONTROL_ID,
+  TRACK_TYPE_BADGE,
+  TRACK_TYPE_LABEL,
+  accessibleTrackName,
+  focusTrackSelectionControl,
+  trackSelectionControlId,
+} from './trackPresentation';
 
 /** Left column listing tracks with volume plus sound-track mute/solo controls. */
 export function TrackList() {
+  const [addOpen, setAddOpen] = useState(false);
   const tracks = useStore((s) => s.project.tracks);
   const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
   const selectTrack = useStore((s) => s.selectTrack);
@@ -22,93 +23,98 @@ export function TrackList() {
 
   return (
     <nav className="track-list" aria-label="トラック一覧">
-      {tracks.map((track) => {
-        const isSelected = track.id === selectedTrackId;
-        const selectThisTrack = () => {
-          selectTrack(track.id);
-          const firstClip = track.clips[0];
-          selectClip(firstClip ? firstClip.id : null);
-        };
-        return (
-          <div
-            key={track.id}
-            className={`track-row${isSelected ? ' is-selected' : ''}`}
-            onClick={selectThisTrack}
-          >
-            <button
-              type="button"
-              aria-label={`${track.name} トラックを選択`}
-              aria-pressed={isSelected}
-              onClick={(e) => {
-                e.stopPropagation();
-                selectThisTrack();
-              }}
-              style={{
-                gridColumn: '1 / -1',
-                display: 'grid',
-                gridTemplateColumns: '18px 1fr',
-                gap: 'var(--sp-2)',
-                alignItems: 'center',
-                padding: 0,
-                border: 0,
-                background: 'transparent',
-                color: 'inherit',
-                font: 'inherit',
-                textAlign: 'left',
-                cursor: 'pointer',
-              }}
+      <header className="track-list__header">
+        <h2>トラック</h2>
+        <button
+          id={TRACK_ADD_CONTROL_ID}
+          type="button"
+          className="track-list__add"
+          onClick={() => setAddOpen(true)}
+        >
+          ＋ 追加
+        </button>
+      </header>
+      <ol className="track-list__items">
+        {tracks.map((track) => {
+          const isSelected = track.id === selectedTrackId;
+          const controlName = accessibleTrackName(tracks, track);
+          const selectThisTrack = () => {
+            selectTrack(track.id);
+            const firstClip = track.clips[0];
+            selectClip(firstClip ? firstClip.id : null);
+          };
+          return (
+            <li
+              key={track.id}
+              className={`track-row${isSelected ? ' is-selected' : ''}`}
             >
-              <span
-                className="track-row__swatch"
-                style={{ background: track.color ?? 'var(--accent)' }}
-                aria-hidden="true"
-              />
-              <div>
-                <div className="track-row__name">{track.name}</div>
-                <div className="track-row__type">
-                  <span className="badge">{TYPE_LABEL[track.type]}</span> {track.type}
-                </div>
-              </div>
-            </button>
+              <button
+                id={trackSelectionControlId(track.id)}
+                type="button"
+                className="track-row__select"
+                aria-label={`${controlName} トラックを選択`}
+                aria-pressed={isSelected}
+                onClick={selectThisTrack}
+              >
+                <span
+                  className="track-row__swatch"
+                  style={{ background: track.color ?? 'var(--accent)' }}
+                  aria-hidden="true"
+                />
+                <span>
+                  <span className="track-row__name">{track.name}</span>
+                  <span className="track-row__type">
+                    <span className="badge">{TRACK_TYPE_BADGE[track.type]}</span>{' '}
+                    {TRACK_TYPE_LABEL[track.type]}
+                  </span>
+                </span>
+              </button>
 
-            <div className="track-row__controls" onClick={(e) => e.stopPropagation()}>
-              <input
-                type="range"
-                min={0}
-                max={2}
-                step={0.01}
-                value={track.volume}
-                aria-label={`${track.name} 音量`}
-                onChange={(e) => setTrackVolume(track.id, Number(e.target.value))}
-              />
-              {track.type !== 'master' ? (
-                <>
-                  <button
-                    type="button"
-                    className={`mini-btn${track.mute ? ' is-active' : ''}`}
-                    aria-pressed={track.mute}
-                    aria-label={`${track.name} ミュート`}
-                    onClick={() => toggleMute(track.id)}
-                    title="ミュート"
-                  >
-                    M
-                  </button>
-                  <button
-                    type="button"
-                    className={`mini-btn${track.solo ? ' is-active' : ''}`}
-                    aria-pressed={track.solo}
-                    aria-label={`${track.name} ソロ`}
-                    onClick={() => toggleSolo(track.id)}
-                    title="ソロ"
-                  >
-                    S
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
+              <div className="track-row__controls">
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.01}
+                  value={track.volume}
+                  aria-label={`${controlName} 音量`}
+                  onChange={(event) => setTrackVolume(track.id, Number(event.target.value))}
+                />
+                {track.type !== 'master' ? (
+                  <>
+                    <button
+                      type="button"
+                      className={`mini-btn${track.mute ? ' is-active' : ''}`}
+                      aria-pressed={track.mute}
+                      aria-label={`${controlName} ミュート`}
+                      onClick={() => toggleMute(track.id)}
+                      title="ミュート"
+                    >
+                      M
+                    </button>
+                    <button
+                      type="button"
+                      className={`mini-btn${track.solo ? ' is-active' : ''}`}
+                      aria-pressed={track.solo}
+                      aria-label={`${controlName} ソロ`}
+                      onClick={() => toggleSolo(track.id)}
+                      title="ソロ"
+                    >
+                      S
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {addOpen ? (
+        <AddTrackDialog
+          onClose={() => setAddOpen(false)}
+          onCreated={focusTrackSelectionControl}
+        />
+      ) : null}
     </nav>
   );
 }

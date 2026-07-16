@@ -124,13 +124,65 @@ export function encodeWav(
   source: AudioBuffer | Float32Array[],
   sampleRate?: number,
 ): ArrayBuffer {
+  const encoder = prepareWavPcm16Encoder(source, sampleRate);
+  encoder.writeFrames(0, encoder.numFrames);
+  return encoder.buffer;
+}
+
+export type EncodeWavAsyncOptions = Readonly<{
+  signal?: AbortSignal;
+  onProgress?: (progress: number) => void;
+  /** Test seam and host-specific scheduling hook. */
+  yieldControl?: () => Promise<void>;
+  chunkFrames?: number;
+}>;
+
+/**
+ * Encode the same PCM16 contract as `encodeWav`, yielding between bounded frame
+ * ranges so multi-minute local transforms do not freeze the editor UI.
+ */
+export async function encodeWavAsync(
+  source: AudioBuffer | Float32Array[],
+  sampleRate?: number,
+  options: EncodeWavAsyncOptions = {},
+): Promise<ArrayBuffer> {
+  const encoder = prepareWavPcm16Encoder(source, sampleRate);
+  const chunkFrames =
+    Number.isSafeInteger(options.chunkFrames) && (options.chunkFrames ?? 0) > 0
+      ? (options.chunkFrames as number)
+      : 524_288;
+  const yieldControl = options.yieldControl ?? yieldToEventLoop;
+  throwIfEncodingAborted(options.signal);
+  options.onProgress?.(0);
+
+  for (let start = 0; start < encoder.numFrames; start += chunkFrames) {
+    throwIfEncodingAborted(options.signal);
+    const end = Math.min(encoder.numFrames, start + chunkFrames);
+    encoder.writeFrames(start, end);
+    options.onProgress?.(encoder.numFrames === 0 ? 1 : end / encoder.numFrames);
+    if (end < encoder.numFrames) await yieldControl();
+  }
+  throwIfEncodingAborted(options.signal);
+  options.onProgress?.(1);
+  return encoder.buffer;
+}
+
+type WavPcm16Encoder = Readonly<{
+  buffer: ArrayBuffer;
+  numFrames: number;
+  writeFrames: (startFrame: number, endFrame: number) => void;
+}>;
+
+function prepareWavPcm16Encoder(
+  source: AudioBuffer | Float32Array[],
+  sampleRate?: number,
+): WavPcm16Encoder {
   const channels: Float32Array[] = Array.isArray(source)
     ? source
     : collectChannels(source);
   const rate = sampleRate ?? (Array.isArray(source) ? RENDER_SAMPLE_RATE : source.sampleRate);
-
   const numChannels = channels.length;
-  const numFrames = channels.reduce((max, ch) => Math.max(max, ch.length), 0);
+  const numFrames = channels.reduce((max, channel) => Math.max(max, channel.length), 0);
   const bytesPerSample = 2;
   const blockAlign = numChannels * bytesPerSample;
   const byteRate = rate * blockAlign;
@@ -138,37 +190,46 @@ export function encodeWav(
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
 
-  // RIFF header.
   writeAscii(view, 0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true); // chunk size = file size - 8
+  view.setUint32(4, 36 + dataSize, true);
   writeAscii(view, 8, 'WAVE');
-
-  // fmt subchunk.
   writeAscii(view, 12, 'fmt ');
-  view.setUint32(16, 16, true); // PCM fmt chunk size
-  view.setUint16(20, 1, true); // audio format = PCM
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
   view.setUint16(22, numChannels, true);
   view.setUint32(24, rate, true);
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true); // bits per sample
-
-  // data subchunk.
+  view.setUint16(34, 16, true);
   writeAscii(view, 36, 'data');
   view.setUint32(40, dataSize, true);
 
-  // Interleave channels, sample by sample.
-  let offset = 44;
-  for (let frame = 0; frame < numFrames; frame += 1) {
-    for (let ch = 0; ch < numChannels; ch += 1) {
-      const channel = channels[ch];
-      const sample = channel && frame < channel.length ? (channel[frame] ?? 0) : 0;
-      view.setInt16(offset, floatToInt16(sample), true);
-      offset += 2;
-    }
-  }
+  return {
+    buffer,
+    numFrames,
+    writeFrames(startFrame, endFrame) {
+      let offset = 44 + startFrame * blockAlign;
+      for (let frame = startFrame; frame < endFrame; frame += 1) {
+        for (let channelIndex = 0; channelIndex < numChannels; channelIndex += 1) {
+          const channel = channels[channelIndex];
+          const sample = channel && frame < channel.length ? (channel[frame] ?? 0) : 0;
+          view.setInt16(offset, floatToInt16(sample), true);
+          offset += bytesPerSample;
+        }
+      }
+    },
+  };
+}
 
-  return buffer;
+function throwIfEncodingAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const error = new Error('WAV encoding was cancelled');
+  error.name = 'AbortError';
+  throw error;
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /** Read all channels of an AudioBuffer into Float32Arrays. */

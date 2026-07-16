@@ -3,6 +3,7 @@ import {
   BEGINNER_SYNTH_PRESETS,
   SynthVoiceManager,
   buildOscillatorPlan,
+  canonicalSynthPresetName,
   createAdsrCurve,
   listSynthPresets,
   midiToFreq,
@@ -195,10 +196,21 @@ describe('synth presets', () => {
   });
 
   it('keeps legacy preset names working through aliases', () => {
+    expect(resolvePreset('pad').label).toBe('Soft Pad');
     expect(resolvePreset('subBass').label).toBe('Warm Bass');
     expect(resolvePreset('roundBass').label).toBe('Warm Bass');
+    expect(resolvePreset('bass').label).toBe('Warm Bass');
     expect(resolvePreset('leadSine').label).toBe('Bright Lead');
+    expect(resolvePreset('lead').label).toBe('Bright Lead');
     expect(resolvePreset('missing-preset').label).toBe(resolvePreset('warmPad').label);
+    expect(canonicalSynthPresetName('pad')).toBe('softPad');
+    expect(canonicalSynthPresetName('bass')).toBe('warmBass');
+    expect(canonicalSynthPresetName('lead')).toBe('brightLead');
+    expect(canonicalSynthPresetName('missing-preset')).toBeNull();
+    for (const inheritedKey of ['__proto__', 'constructor', 'toString']) {
+      expect(canonicalSynthPresetName(inheritedKey)).toBeNull();
+      expect(resolvePreset(inheritedKey).label).toBe('Soft Pad');
+    }
   });
 
   it('returns independent preset copies', () => {

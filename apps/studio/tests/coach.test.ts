@@ -85,6 +85,31 @@ describe('analyzeProjectForCoaching', () => {
     expect(ids(suggestions)).toContain('melody-empty');
   });
 
+  it('recognizes whitespace and case variants of the Melody and Bass roles', () => {
+    const project = clone(createDefaultProject());
+    const melody = project.tracks.find((track) => track.name === 'Melody');
+    const bass = project.tracks.find((track) => track.name === 'Bass');
+    const melodyClip = melody?.clips[0];
+    if (!melody || !bass || !melodyClip) throw new Error('Learning track fixture is missing');
+
+    melody.name = '  mElOdY\n';
+    bass.name = '\tBaSs  ';
+    melodyClip.notes = [
+      {
+        id: 'normalized-role-note',
+        pitch: 60,
+        startBeat: 0,
+        durationBeats: 1,
+        velocity: 100,
+      },
+    ];
+    bass.clips = bass.clips.map((clip) => ({ ...clip, notes: [] }));
+
+    const suggestionIds = ids(analyzeProjectForCoaching(project));
+    expect(suggestionIds).not.toContain('melody-empty');
+    expect(suggestionIds).toContain('arr-bass');
+  });
+
   it('resolves linked melody instances at their absolute project beats', () => {
     const project = clone(createDefaultProject());
     const melodyTrack = project.tracks.find(

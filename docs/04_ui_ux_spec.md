@@ -6,7 +6,8 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ Top Bar: Project / BPM / Key / Scale / Transport / Export     │
+│ Top Bar: Project / BPM / Key / Scale / Transport             │
+│          Export / カラオケ                                   │
 ├───────────────┬──────────────────────────────────┬───────────┤
 │ Track List    │ Timeline + Chord Track            │ Learn     │
 │               │                                  │ /Theory   │
@@ -50,6 +51,15 @@
 - Clip/Pattern Lane
 - Editor Pane
 - Learn Panel
+
+Track Listの管理UI:
+
+- 見出しの「追加」からdialogを開き、楽器 / ドラム、名前、楽器の場合は4つの内蔵音色を選ぶ。作成後は新しいTrack行へfocusを移し、全曲長の空Clipをすぐ編集できる状態にする
+- 同dialog内でAudio Trackは「音声素材管理」、Bus Trackは「ルーティング」の実装後に利用できると説明する。選べない種類を単にdisabledにするだけでなく、未提供理由を選択前から読めるようにする
+- 選択したnon-master Trackに、名前の確定、音色選択、複製、上へ / 下への操作をまとめ、一般Trackには削除も表示する。Masterにはこれらを表示せず、学習上の役割を名前で識別するChords / Bass / Melodyには名称・削除を保護する理由を表示する
+- 名前入力はlocal draftとし、入力途中にUndo / autosaveを増やさない。「名前を保存」または同等の明示確定でtrim済み名称を1回commitし、失敗時はdraftと再試行手段を残す
+- 一般Trackの削除は対象名を含む確認dialogを経由する。Chords / Bass / Melodyには削除buttonを表示せず、domain commandを直接呼ばれても拒否する。成功後は生存する隣接Trackへ、追加・複製後は新Trackへfocusを移し、並べ替え後は同じTrackの操作にfocusを保つ。dialogをcancelした場合は起点buttonへ戻す
+- commandの成功はpolite status、codec / 128 Track上限 / Master保護などの拒否はalertで理由を通知する。採用された構造・音色変更が再生を停止した時は、再生位置を保持したことと再度再生できることを知らせる
 
 ### 2.3 Piano Roll Editor
 
@@ -128,6 +138,7 @@
 - MasterでMVP中に表示・操作するのは0.0〜2.0のvolumeだけとし、将来互換用のMaster `pan` / `mute` / `solo`はUIへ表示しない
 - Master trackを持たないlegacy projectはvolume 1.0として扱う。非有限のMaster volumeを検出した場合は音を出さず、破損値を有効な音量として表示しない
 - メトロノームはMaster volumeに追従し、Master meterはpost-faderの実出力レベルを表示する
+- Track Listで変更したcanonical synth音色は保存済みProjectを正本とし、次のライブ再生とWAV書き出しで同じ音色を使う。Masterとdrum Trackにはsynth音色selectorを表示しない
 
 ### 2.7 Project / MIDI交換
 
@@ -144,6 +155,22 @@
 - 選択したdrum Clipを優先して表示し、選択がない場合だけ先頭のdrum Clipへfallbackする
 - 表示小節数は`max(1, ceil(clip.lengthBeats / beatsPerBar))`とする。小節途中で終わるimported clipでも最終partial barを表示し、step開始beatがclip終端より前のcellだけを編集可能にする。終端と同じまたは後のcellはdisabledにして範囲外と読み上げる
 - 表示のためにclip length、stepsPerBar、DrumEventをpaddingまたは丸めない
+
+### 2.9 カラオケ作成（ボーカルカット）
+
+- Top Barの常時表示buttonは可視ラベルを「カラオケ」、accessible nameを「カラオケ用音源を作る」とし、Exportの隣に置く。dialog見出しは「カラオケ作成（ボーカルカット）」とする
+- dialogは「音源を選ぶ」→3つの軽減presetから選ぶ→「ボーカルカットを作成」→元音源 / カラオケを同じ位置でA/B試聴→WAV保存の順で迷わず進める。選択file名、形式、容量、長さ、処理結果の適合情報を表示する
+- 処理phaseと実進捗を`aria-live`で通知し、cancelを用意する。処理中はdialogを`aria-busy`にし、閉じるbutton、Escape、backdrop dismiss、音源 / preset変更、再実行を一括で無効化する
+- cancel後もAbort不能な端末処理が残る間は、dialogを閉じられる一方で音源選択 / 再実行をdisabledにする。30秒を超えた場合は保存後の再読み込み / 再起動を案内し、完了時は再作成可能か音源再選択が必要かをlive statusで通知する
+- 結果見出しへfocusを移し、A/B切替と保存をkeyboardだけで操作できる。最小375×667でも横overflowを作らず、内容はdialog内で縦scrollできる
+- 「端末内だけで処理」「ML分離ではない品質限界」「自作または利用許諾のある音源のみ」の3点を作成前から明示する
+
+### 2.10 鼻歌からメロディ
+
+- Assistant内に「鼻歌からメロディ」を置き、「端末内」「録音済みfile」「単音限定」「32 MB・60秒」を選択前から表示する
+- file確認、decode、sample検証、channel極性整合、mix、pitch解析を総合progressと`aria-live`で通知し、解析中はcancelを表示する
+- 成功時は音符候補をscroll可能な一覧で表示し、音名、編集可能なMIDI note、候補除外、反映先clip、リズム補正をkeyboardだけで操作できる
+- 反映buttonの直前に既存notesを置き換えることとUndo対応を明示する。確定後はPiano Rollへ移動し、反映件数をlive statusとtoastで通知する
 
 ## 3. ナビゲーション
 
@@ -196,6 +223,9 @@ Chord Track のコンテキスト内操作:
 | MIDI読み込み成功 | `Nトラック・M音を追加しました`。warningがあればdialog内のresult cardへ種類別の概要、件数、全warning、確認後に閉じる導線を続ける |
 | MIDI読み込みの一部非対応 | 現在のBPM / 拍子 / key / scaleを維持したこと、FF 59を含む差異・除外・fallback・保持内容を件数category付きwarningにし、Project全体をexactに戻すには`.ctsproj.json`を案内する |
 | MIDI読み込み失敗 | 全failure pathで`MIDI読み込みによる曲・選択・表示の変更はありません。`を一度だけ伝え、上限、破損、対応形式、再試行を初心者向けに案内する |
+| カラオケ音源が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、5分以下、stereoという条件と、端末codecでdecodeできなかった可能性を分けて案内する |
+| カラオケ音源がmono / near-mono | stereo中央定位の差分を利用する処理であることを説明し、左右に広がりのあるstereo音源を案内する |
+| ボーカル軽減の品質 | 声が残る場合や中央の楽器も弱くなる場合があることを失敗扱いにせず、preset比較とA/B試聴を案内する |
 | スケール外音 | 学習モードでは警告、通常モードでは情報表示 |
 | クリッピング | Master meterを赤表示。下げる候補を提示 |
 | LLM送信 | 送信されるデータを表示し、明示的同意を取る |

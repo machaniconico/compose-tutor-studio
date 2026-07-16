@@ -13,6 +13,8 @@ export * from './clip-content';
 export * from './chord-realization';
 export * from './schedule-budget';
 export * from './midi-clip-loop';
+export * from './learning-track';
+export * from './track-mutations';
 // Persistable id helper with a per-realm nonce and monotonic local counter.
 export * from './ids';
 // New factory helpers (createDefaultProject, createInstrumentTrack, createDrumTrack,

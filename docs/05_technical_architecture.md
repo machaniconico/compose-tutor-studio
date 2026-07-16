@@ -45,6 +45,7 @@ flowchart LR
   Store --> Tutorial[Tutorial Engine]
   Store --> Audio[Audio Scheduler]
   Audio --> Worklet[AudioWorklet DSP]
+  UI --> VocalCut[Local Center Vocal Reduction]
   Store --> BrowserRepo[Web: localStorage Repository]
   Store --> IPC[Tauri: application-owned IPC]
   IPC --> Rust[Rust Persistence and File Backend]
@@ -104,6 +105,7 @@ Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/R
 - Built-in synth/drum playback
 - Basic effects
 - Offline render
+- Transient center-vocal reduction and PCM 16-bit WAV encode
 
 ## 5. データフロー
 
@@ -176,11 +178,42 @@ drum Clipの表示小節数はdomain値を変更せず`max(1, ceil(lengthBeats /
 - MIDI codecの契約はnormalized projectionである。clip / loop / alias / preset / effects / mute / solo / groove / section / chord semanticsを含むProject集約のexact roundtripはproject-model codecと`.ctsproj.json`だけが担う
 - drum MIDI writerはaudio occurrence resolverを呼ばず、保存済みstep / velocityを1回だけSMFへ写す。swing、probability、humanize、seed、mute / soloをbakeせず、drum `Clip.loop`も展開しない。このlossy境界はWAVおよびexactな`.ctsproj.json`と区別する
 
+### 5.5 カラオケ作成transaction
+
+1. browser `File`またはnative専用`file_open_audio` commandから、128 MiB以下のWAV / MP3 / M4A / AACを取得し、拡張子とcontainer構造、実byte長を検証する。native responseはbasenameとbytesだけで、絶対pathを含めない
+2. containerのchannel metadataに加え、WAVのPCM / IEEE float32 frame数、MP3 / ADTS AACの宣言frame列とdecoder再同期候補、非fragmented AAC-LC M4Aのcodec設定・time-to-sample・sample count・chunk layout・`mdat` exact coverから、正規container時間とdecode allocation時間上限を分けて導出する。MP3は同一stream構成で前後に連続する再同期候補だけを数え、payload内の孤立したheader類似byte列による過大見積りを避ける。`AudioContext.decodeAudioData`前にbrowser presentation時間と正規container時間を300秒＋format / sample rate別のbounded codec padding以下、decode上限をcontainer＋2秒以下へ制限する。duration tableのないADTS AACはbrowser presentationの過大推定を許し、完全走査したframe列を正本にする。正規container / 再同期上限はdecode phaseと最大5分のoutput phaseを別々に積算した384 MiB working memoryへ使う。decode後に残ったcodec paddingだけはchannel dataのzero-copy prefix viewで300秒へ切り詰め、それ以外の超過、container内の時間・sample rate・sample数・offset不一致、ALAC / HE-AAC / fragmented MP4を拒否する。192 MiB output上限をdecode前後で検証し、左右差RMSが閾値未満のnear-monoはoutput allocation前に拒否する
+3. chunk単位でMid / Sideへ変換し、presetの中央軽減率を適用する。2次Butterworth low-passで中央低域を保護し、peak超過時だけ全体を減衰する
+4. chunk単位でPCM 16-bit WAVへencodeし、phase / progressをUIへ返す。各chunk間でevent loopへyieldし、AbortSignal / generation不一致なら一時結果を破棄する。Abort APIを持たない音源確認用Blob readと、decode用Blob read + `decodeAudioData`は別々のapp-scoped single-flight leaseで実settleまで追跡し、dialogを閉じた後の並行read / decodeとmemory budget迂回を禁止する
+5. 元音源と生成WAVのobject URLをA/B previewで共有位置へ同期し、nativeは既存のatomic WAV export、Webはdownloadを使って`<source>_karaoke.wav`を保存する
+
+このtransactionはtool-local stateだけを所有し、Project Store、history、revision、autosave、repositoryへdispatchしない。source変更、cancel、dialog unmountの全経路で世代を無効化し、追跡中のdecode jobがsettleした時点でobject URL、AudioBuffer、生成bytesへの参照を解放する。network APIは呼ばず、ML stem separationとは別機能である。
+
+### 5.6 鼻歌transcription transaction
+
+1. Vocal-cutと同じstrict source parser / native basename+bytes gatewayを使い、32 MiB、60秒、mono / stereo、256 MiB working memoryへ狭めてpreflightする
+2. decode後PCMを非破壊で検証し、極性整合mix、anti-alias low-pass、8 kHz resample、50〜1,000 Hz pitch frame解析をchunked async pipelineで実行する。全sampleの有限性とPCM byte上限は解析signal確保前に検査する
+3. pitch frameを無声区間、中央値、semitone hysteresisで単音note候補へまとめる。強い第2倍音はfundamental energyと倍周期scoreを併用してoctave候補を補正する
+4. 候補修正、除外、target Clip、quantizeはReact local stateに保持する。確定時だけseconds→beats mappingとproject validationを行い、`replaceClipNotes`の単一changeで全notesを採用する
+
+decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否ではProject fingerprintを変えない。初期版は固定Project BPMを使い、Tempo Map導入後は共通beat↔seconds resolverへ置き換える。
+
+### 5.7 Track管理transaction（Batch 3部分）
+
+1. UIはcommand引数だけを組み立て、追加・複製・改名・並べ替え・削除・preset変更の候補Projectをdomain actionで作る。production追加はinstrument / drumに限定し、0..project song endの空Clipを1つ持たせて先頭Master直前へ挿入する。Audio / Busの追加commandはAsset / routing完成まで公開しない
+2. 複製はTrack ID、Clip ID、Note / DrumEvent ID、Effect IDをすべて新規発行し、先に作ったTrack内Clip ID mapで`aliasOf`を複製先へ張り替える。Master対象、外部Trackへのalias、dangling / chainを候補生成段階で拒否し、codec検証も省略しない
+3. 改名はReact local draftで保持し、確定時だけtrimした値を渡す。schema v2の教材 / 伴奏が名前依存である間は、正規化後の`Chords` / `Bass` / `Melody` instrument Trackへの改名と削除をdomain境界でも拒否する。UI非表示だけを保護境界にせず、欠落roleを再作成できないschema v2で学習導線を不可逆に失わせない
+4. synth preset actionは`listSynthPresets()`が返すcanonical 4 keyだけを受理する。既存aliasの表示解決とProjectへの書換えを分離し、利用者の確定操作なしにlegacy値をmigrationしない
+5. `commitProject`は候補全体をcanonical encode / validationし、採用時だけhistory、revision、autosaveとselection reconciliationを1回進める。128 Trackまたはcodec上限超過、stale ID、Master / 学習role保護、invalid name / preset、no-opではProject参照と全付随stateを変えない
+6. playback scheduleとTrackGraphはsession開始時snapshotであるため、採用された構造変更またはpreset変更だけをcommit境界で停止し、有限な現在playheadを保持する。次のplayが新snapshotからtopology / voiceを再構築する。改名、拒否、no-opではsessionを停止しない
+
+このBatchはschema v2のTrack集約だけを変更し、Audio Asset / routing fieldを先取りしない。Undo/Redo、SQLite autosave、`.ctsproj.json`は既存のaggregate codecをそのまま正本とする。Batch 4でTrack semantic roleとAudio Assetをschema v3へ追加し、role migrationが完了するまでは学習Trackの名称・削除保護を解除しない。
+
 ## 6. Audio実装方針
 
 ### 6.1 MVP
 
 - Web Audio APIのAudioContextを使用
+- ステレオ中央定位ボーカル軽減はrenderer内のchunked pure DSPで行い、入力音源と結果を外部送信しない
 - AudioWorkletで簡易シンセ/ドラムサンプラー/エフェクトを処理
 - サンプルはライセンスクリアな最小セットのみ同梱
 - 正確なスケジューリングは lookahead scheduler で実装
