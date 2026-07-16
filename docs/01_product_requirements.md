@@ -57,6 +57,7 @@
 | US-010 | 上級者として、外部VSTを使いたい | Could/Future | VST3 SDK/ライセンス確認後に実装判断 |
 | US-011 | 動画制作者・学習者として、利用許諾のある既存曲からカラオケ練習用音源を作りたい | Should | 対応するステレオ音源を端末内で中央定位軽減し、A/B試聴後にWAVを書き出せる |
 | US-012 | 作曲者として、曲に楽器やドラムを足して音色と並びを整えたい | Must | production UIから安全に追加・複製・並べ替え・一般Track削除を行い、内蔵音色を選んで保存・Undo・再生できる。schema v3では学習role Trackも改名できてroleを保持し、削除だけを保護する |
+| US-013 | 作曲者として、手元の音声を曲へ置いて非破壊編集したい | Must | WAV / MP3 / M4A / AACをAudio Trackへ読み込み、移動、左右trim、gain、fade、loop、split、独立複製、削除をUndo/Redoでき、live再生・WAV・再読込で同じ範囲を使う |
 
 ## 3. MVP機能範囲
 
@@ -76,7 +77,8 @@
 - Bass Assistant: コードルート、5度、オクターブ、経過音候補
 - Melody Assistant: コードトーン、アプローチノート、モチーフ反復の可視化
 - Pattern/Clip: 1〜4小節単位の素材を組み合わせる
-- Track管理（部分実装）: instrument / drum追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v3の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない
+- Track管理（部分実装）: instrument / drum追加、音源fileからのAudio Track追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v3の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない。Bus / Folder / routingは後続とする
+- Audio Clip: app-ownedな48 kHz mono/stereo PCM 16-bit WAVへ正規化し、移動、trim、gain、fade、loop、split、独立複製、削除を非破壊に行う。loop中は位相fieldがまだないためleft trimとsplitを無効にする
 
 ### 3.3 Learning
 
@@ -94,6 +96,7 @@
 - 音量、パン、ミュート、ソロ
 - 簡易エフェクト: EQ/Filter、Delay、Reverb、Compressorの最小版
 - WAVレンダリング
+- app-owned Audio Assetのlive再生とoffline WAV取り込み。Project単体JSONには音声binaryを同梱せず、欠落・変更・storage不可を音声素材ごとに表示する
 - WAV/MP3/M4A/AACのステレオ音源を使う、ローカル完結の中央定位ボーカル軽減
 
 ### 3.5 Export
@@ -113,7 +116,7 @@
 | 自動マスタリング本実装 | 音質評価・責任範囲が大きい | まずはラウドネス/ピーク診断に限定 |
 | 楽譜エディタ | 実装量が大きい | MIDI編集が安定後 |
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
-| Audio / Bus Trackのproduction追加 | schema v3のAudioAsset metadataはあるが、実binary transaction / playbackとroutingがなく、追加できても音声配置・経路として成立しない | 次Batchでassets directoryとAudio配置・再生、その後にroutingを導入して有効化 |
+| Bus / send / return routing | Audio Trackは利用可能になったが、明示routing graph、循環拒否、pre/post-fader send、live/offline parityが未完成 | Batch 6でstereo Busとsend/returnを導入してからproduction追加を有効化 |
 
 ## 5. 非機能要件
 
@@ -123,6 +126,7 @@
 | 性能 | UI操作 | ノート移動/ズーム/スクロールで目視カクつきが少ない |
 | 安定性 | 自動保存 | 編集後30秒以内。デスクトップ版は編集受付後1秒未満を目標にクラッシュ保護ACKを表示し、ACK済み内容をOS強制終了後に復元 |
 | 安定性 | 音声開始/中断 | 開始完了前は再生中と表示せず、失敗・出力中断後も編集を保持して再試行できる |
+| 安定性 | Audio Asset | 1 object 128 MiB以下、canonical 48 kHz / 1〜2 channel PCM16 WAV、SHA-256と実byte lengthを保存・読込・再生前に照合する。decode済みcacheは256 MiB以下 |
 | 互換性 | OS | Windows/macOS 優先 |
 | アクセシビリティ | キーボード操作 | 主要操作はショートカット対応。単一文字キーは対応コントロールへのフォーカス中だけ有効にする |
 | プライバシー | ローカル保存 | デフォルトではプロジェクトを外部送信しない |
@@ -137,5 +141,6 @@
 - MIDI/WAVを書き出せる
 - 利用許諾のあるステレオ音源から、ローカル処理でカラオケ用WAVを作成できる
 - instrument / drum Trackの管理と音色変更が、Master保護、schema v3学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
+- Audio Trackへ取り込んだ音声を非破壊編集でき、live再生とWAVが同じsource range / gain / fade / loopを使う。欠落・変更されたbinaryは別素材へ黙って置換せず、Project metadataを保持して説明する
 - 主要ロジックにテストがある
 - 既存DAWのUIコピーではなく、独自デザインである

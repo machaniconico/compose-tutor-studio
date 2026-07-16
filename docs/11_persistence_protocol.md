@@ -23,13 +23,13 @@
   - project切替前flush
   - lifecycle接続と復旧通知
 
-### 2.1 Project schema v3 metadata boundary
+### 2.1 Project schema v3 / Audio Asset boundary
 
 - Project schemaのcurrent valueは3。rendererとRust native境界はcanonical JSONをversion判定し、`v1 → v2 → v3`を順にmigrationしてからrequired / unknown fieldとdomain不変条件を検証する。SQLiteの`user_version = 2`はrepository table schemaのversionであり、Project JSONの`schemaVersion = 3`とは別である。
 - v3 snapshotはTrack role、`lengthBeats`、tempo / 拍子map、AudioAsset metadata、AutomationLane、Audio Clipのasset ID / frame range / fade / gainを含む。`bpm` / `timeSignature` / `lengthBars`はmapから導くcompatibility mirrorとして同時に検証する。
 - v2→v3は固定tempo / 拍子をbeat 0 mapへ移し、保存順で最初に正規化名Chords / Bass / Melodyへ一致するinstrument Trackへroleを割り当てる。legacy audio参照は決定的な`unresolved` AudioAssetへ残すため、binaryが未解決でもproject metadataを失わず再保存できる。
 
-このprotocolが現在atomicにcommitするのはcanonical Project JSON metadataだけである。AudioAssetの実binary、application-owned assets directory、checksum検証付きstaging / move / rollback / orphan cleanupはまだcommit対象ではなく、Audio Clipの実再生も未実装である。次Batchではbinaryを一時領域へ書く→checksum / metadata検証→Project JSONをCAS commitする→fileを確定する順序と、各crash pointのroll-forward / rollbackを別途定義する。
+Project JSON transactionとAudio Asset objectは正本を分離する。production importは入力を48 kHz mono/stereo PCM16 WAVへ正規化し、binaryをSHA-256 content-addressed repositoryへ確定してから、開始時Projectがcurrentの場合だけready metadata / Audio Track / Audio Clipを1回のProject CASへ採用する。JSON transactionへbinaryを埋め込まないため単一filesystem transactionではないが、Projectが存在しないobjectを先に参照する順序を作らない。binary確定後にcancel / stale CAS / codec拒否となったobjectはorphanとして安全に残し、native起動時のgeneration-aware GCで回収する。
 
 ## 3. localStorageレコード
 
@@ -65,7 +65,7 @@ cts.persistence.v1.project.<id>.recovery.<activation-id>
 10. 旧版mirrorをbest effortで更新する。
 11. commit成功後だけ古いgenerationをGCする。currentから`parentHeadVersion`をたどったcommit済み祖先を失敗兄弟より優先し、最低3レコードを残す。
 
-上記のcommit/read-back/checksumはschema v3のAudioAsset **metadata** をProject JSONの一部として保護するが、参照先binary fileはまだ同じtransactionへ参加しない。metadataが`ready`でも、現行releaseがapplication-owned binaryの存在や再生可能性を保証するものではない。
+上記のcommit/read-back/checksumはschema v3のAudioAsset metadataをProject JSONの一部として保護する。Tauriのcanonical save / crash draftは、SQLite transactionへ入る前に全`ready` assetのapplication-owned objectを実byte length / SHA-256まで再検証し、missing / changed objectを含むsnapshotを成功扱いにしない。Webではimport時にIndexedDB objectを先に保存・検証し、load / playback時にもruntime availabilityを再検査する。
 
 `expectedHeadVersion` は3状態を区別する。`null` は「証拠が何もないEmpty」を意味し、初回作成・初回削除だけに使う。省略は「head欠損・破損を明示的に直すRepair」であり、復旧可能なprojectの保存、またはcorrupt/conflict証拠の明示削除だけに使う。文字列はそのcommit tokenとのMatchである。EmptyをRepairの代用にはしない。
 
@@ -84,6 +84,34 @@ Tauri版は通常保存の2秒idle debounceを維持しつつ、受理した各r
 - 因果関係を検証できる未解決draftがproject内に1件なら`interrupted-save` generationとしてcanonical headへ昇格する。base/predecessorがcurrent headと比較不能、または複数activationの候補がある場合は全候補を`interrupted-save` branchへmaterializeし、端末時計で勝者を選ばない。
 - verified deleted headはstageを拒否し、起動時に残留draftがあっても復活させない。通常removeと端末全消去も対象draftを削除する。
 - native repositoryを包む層はdelegateが対応する場合だけcrash protection capabilityを公開する。legacy migrationがreadyになる前とclose開始後はstageを拒否し、closeはすでに受理したstage flightの物理完了を待つ。close失敗後はreadyへ戻して再試行できる。emergency journalのfuture/migration evidenceはcanonical saveと同じsticky規則でstageを止めるが、journal列挙自体が利用不能な場合はSQLiteの保護能力を不必要に無効化しない。
+
+### 4.2 Audio Asset object protocol
+
+共通上限はcanonical object 128 MiB、SHA-256 lowercase hex 64桁、正のexact byte lengthである。rendererはWeb Cryptoでbytesからidentityを計算し、repositoryへbytes / checksum / lengthを同時に渡す。read / verifyも呼出し側metadataだけを信用せず、返却bytesを再hashする。
+
+Web版:
+
+- 専用IndexedDB `compose-tutor-studio-audio-assets-v1` / object store `assets`を使い、keyを`checksumSha256`にする
+- 保存前後にlength / SHA-256を検証し、既存同一objectはdeduplicateする。返却bytesはdefensive copyにし、呼出し側のmutationで保存内容を変えない
+- Project JSONはlocalStorageに残し、Audio bytesをlocalStorageや`.ctsproj.json`へbase64埋め込みしない
+- nativeと同じgeneration-aware orphan GCはまだ実装していない。browser側GCを追加するまでは、取消後の未参照objectがorigin storageへ残り得る
+
+Tauri版:
+
+```text
+app-data/
+  audio-assets-v1/
+    sha256/<64-lowercase-hex>
+    .staging/<64-lowercase-hex>.tmp
+```
+
+1. rendererからはraw request bodyとexact checksum / length headerだけを受け、main WebView callerと128 MiB上限を検証する。任意pathは受け取らない。
+2. memory上のbytesをlength / SHA-256検証した後だけapp-owned directoryを作る。directory / fileはsymlink、reparse point、複数hardlink、path / opened-handle identity差を拒否し、private permissionsを適用する。
+3. `.staging/<checksum>.tmp`へexclusive writeし、file `sync_all`、再open、length / SHA-256、single-link identityを検証する。その後`sha256/<checksum>`へrenameし、両parent directoryをsyncしてfinal objectも再検証する。既存final objectは同じ検証に通った場合だけdeduplicate成功にする。
+4. 起動時はSQLite公開前にstagingを走査する。名前・size・hash・file identityが正しいtempはfinalへroll forwardし、同じvalid finalがあればtempだけ削除する。内容不正tempは削除し、unsafe entry / directoryは初期化をfail closedする。
+5. staging recovery後、全`project_generations.payload_json`と`project_crash_drafts.payload_json`からready checksumを集める。全retained generation / branch / draftをrootとし、未到達final objectだけを削除する。いずれかの走査queryが100,000行を超過、またはfuture / corrupt / 解釈不能payloadが1件でもあればGCを中止して全objectを保持し、65,536 storage entry超過はbounded初期化失敗にする。
+
+通常のproject削除はtombstoneであり、直ちにasset objectを消す命令ではない。Audio ClipまたはAudio Track削除は、現行Projectで最後の参照が消えたAudioAsset metadataを同じsnapshotから除くが、Undo前snapshotを含むretained generationやbranchから参照が消えたことを起動時GCが証明して初めてbinary objectを回収する。これにより別Project、過去世代、crash draftが共有するchecksumを誤削除しない。
 
 ## 5. 削除
 
@@ -128,6 +156,7 @@ committed headまたは最新候補がfuture schemaの場合、古いgeneration�
 - 全project head/generation/tombstone、recovery branch、中断save、unreadable/future診断
 - checksum付きの旧localStorage exact snapshotとmigration staging/run
 - `projects-v1.sqlite3`とWAL/SHM/journalを含むSQLite database family
+- `audio-assets-v1`のcontent-addressed objectsとstaging
 - rendererのemergency recovery、tutorial/onboarding進捗、WebView local storage/cache
 
 対象外:
@@ -142,7 +171,7 @@ committed headまたは最新候補がfuture schemaの場合、古いgeneration�
 1. rendererは通常終了と全消去の共有lifecycle gateを同期的に取得し、新規編集・保存・project切替を止めて、同じ`eraseId`でsingle-flightの消去を開始する。通常終了が先にgateを取得済みなら消去は不可逆処理へ入らず、消去が先なら通常終了はstorageへ触れず停止する。
 2. nativeはapp dataのprocess lockを保持したまま、version・`eraseId`・checksumを持つbounded markerをdatabase外へatomic writeする。lock entryは空の通常ファイルかつ単一linkだけをno-followで開き、handleとpathの同一性をlock取得前後に確認する。Unixではlink安全性の確認後、最終app data directoryを`0700`、lockとmarkerを`0600`へ制限する。Windowsでは最終directoryを`FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS`かつshare-delete無しで保持し、junction/reparseとpath/handle差替えを拒否する。markerのdurabilityを確認する前にdatabaseを消さない。
 3. repository connectionを閉じて`Pending(eraseId)`へsealする。以後、通常のinitialize/list/load/save/remove/migrationは拒否し、消去のstatus/retry/completeだけを受け付ける。
-4. nativeはSQLite database familyをすべて削除する。存在しないfileはidempotent successとする。symlink/reparse pointは外部targetを追跡せずentryだけをunlinkする。通常ファイルはno-followで再確認した単一linkだけを削除し、hardlink、同じpathのdirectory、path/handle差替えなど安全に全別名を否定できない場合はmarkerを残してfail closedする。hardlink先のbytesや別名は削除しない。
+4. nativeはSQLite database familyと`audio-assets-v1`をすべて削除する。存在しないentryはidempotent successとする。Audio rootはexpectedな`sha256` / `.staging` directoryとchecksum規則に合うsingle-link regular fileだけを削除する。symlink / reparse / hardlink、unknown member、同じpathのdirectory、path/handle差替えなど安全に所有範囲を証明できない場合はmarkerを残してfail closedし、外部targetや別名を追跡しない。
 5. renderer/native shellはemergency recovery、tutorial/onboardingを含むWebView browsing dataとcacheを消去する。成功するまでmarkerとsealを維持し、editorへ戻さない。
 6. WebView側の完了後だけnativeがmarkerを削除して完了を確定し、アプリを終了する。
 
@@ -170,7 +199,7 @@ main actual handleを検証した直後、最初のschema/WAL accessより前に
 - close-first race: erase未開始の同期拒否ではmodalをlockせず、final close応答不明では`close-handoff`のOS終了専用alertへ切り替わりretry controlが無いことを検査する。
 - close grace: `erase-close-accepted`へ遷移してからwindowが実際に破棄されるまでstatus表示だけであること、retry controlが無いこと、Store action再呼出しがclose IPCを増やさないことを検査する。
 - close authorization: OS close event前のclaimが空、誤ID・再利用ID・repository close前のfinishが拒否されること、正しいIDでも一度だけclose/destroyへ進むことを検査する。false/reject/never-settling responseは`erase-close-unknown`またはstartup terminal outcomeとなり、画面内retryが無いことも検査する。
-- Rust: marker atomicity/checksum/size/version、process lock、repository seal、database family列挙、guard VFS、SQLite `NOFOLLOW` open、初期化前後の単一link・path/actual-handle検証、main/WALのxOpen中瞬間差替えと外部bytes不変、exclusive WALで`-shm`不生成、symlink/reparse、非empty/multi-link lock、hardlinked database family、安全でないsidecar、Unix private mode、Windows directory reparse、同一`eraseId` retry、異なるID競合を検査する。
+- Rust: marker atomicity/checksum/size/version、process lock、repository seal、database familyとAudio Asset root列挙、guard VFS、SQLite `NOFOLLOW` open、初期化前後の単一link・path/actual-handle検証、main/WALのxOpen中瞬間差替えと外部bytes不変、exclusive WALで`-shm`不生成、asset staging recovery / generation-aware GC、symlink/reparse、非empty/multi-link lock、hardlinked database / asset、安全でないsidecar / unknown asset entry、Unix private mode、Windows directory reparse、同一`eraseId` retry、異なるID競合を検査する。
 - crash matrix: marker前、marker直後、connection close後、各database file削除中、WebView cleanup前後、marker完了前で停止し、再起動時に通常project APIを公開せず再開することを検査する。
 - native WebView E2E（自動）: 保存済みprojectと、onboarding・tutorial・emergency recovery namespaceを含むlocal/session sentinelをUI操作で消去する。SQLite family/marker不在、app data外sentinel維持、close handoff、正しいmarkerからの「完全な保存済みDB」「単独sidecar」起動再開、最後の空再起動を別process間で検査する。
 - native WebView E2E（配布前3OS）: 自動testはincognito WebViewのため、production profileのcache/cookie、branch・future/unreadable・exact archiveの全組合せ、実際の外部export fileが変わらないことはsigned candidateで検査する。
@@ -178,7 +207,7 @@ main actual handleを検証した直後、最初のschema/WAL accessより前に
 ## 9. 現在の制約
 
 - localStorage自体にはatomic compare-and-swapがないため、Web Locks非対応ブラウザではcanonical更新を無効化する。完全なmulti-writer保証の次段階はTauri/SQLite transactionで行う。
-- ブラウザ版JSONはcompact canonical payloadで保存・通常書出し・緊急書出し・再読込を同じ16MB上限に揃える。AudioAsset metadataはschema v3 JSONへ含めるが、実binaryはまだproject bundleへ含めない。
+- ブラウザ版JSONはcompact canonical payloadで保存・通常書出し・緊急書出し・再読込を同じ16MB上限に揃える。AudioAsset metadataはschema v3 JSON、実binaryはIndexedDBへ保存し、現行の`.ctsproj.json`には同梱しない。binaryを`assets/`へ同梱するportable project bundleは未実装の将来案である。単体JSONのimportは対応objectが同じrepositoryに存在しない限り現在Projectを置換しない。
 - untrusted projectはUI展開前に、最大256小節かつ8192四分音符拍、拍子分子32、128 steps/bar、128 tracks、20,000 events/clip、最小event長1/960拍などの実用上限を検証する。track colorは外部URLを解釈できないhex色だけを許可する。
 - Tauri版はSQLite正本へ切替済み。旧localStorage snapshotはcontent checksumだけを信用せず、全key/value/checksumをnative側で再検証し、候補のsource provenanceを証明してからmigration version単位でatomic公開する。future/corrupt recordは診断として保持し、decoder更新時はmigration versionを上げて再評価する。
 - native repositoryはlegacy persistence migration v1/v2を受理し、同一snapshot/projectでは完了済みの最高versionだけをlive authorityとして扱う。これはSQLite移行versionであり、payloadはProject schema `v1 → v2 → v3`をcanonical metadataへ変換する。これにより旧projectのunsupported/migration診断や旧branch/headはlive判定から外れる一方、異なるsnapshotのsticky evidenceとexact raw archiveは保持される。未完了の上位versionは下位versionを置き換えず、未知の将来versionがrunまたはstagingに残るdatabaseは初期化・全操作ともmutation前にfail closedする。rendererとnativeはschema v3 metadataを検証し、完了済みv1 markerがあってもexact raw archiveを新decoderで再評価する。

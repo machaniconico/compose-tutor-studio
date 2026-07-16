@@ -54,9 +54,10 @@
 
 Track Listの管理UI:
 
-- 見出しの「追加」からdialogを開き、楽器 / ドラム、名前、楽器の場合は4つの内蔵音色を選ぶ。作成後は新しいTrack行へfocusを移し、全曲長の空Clipをすぐ編集できる状態にする
-- 同dialog内でAudio Trackは「音声素材管理」、Bus Trackは「ルーティング」の実装後に利用できると説明する。選べない種類を単にdisabledにするだけでなく、未提供理由を選択前から読めるようにする
-- 選択したnon-master Trackに、名前の確定、音色選択、複製、上へ / 下への操作をまとめ、一般Trackには削除も表示する。Masterにはこれらを表示せず、学習上の役割を名前で識別するChords / Bass / Melodyには名称・削除を保護する理由を表示する
+- 見出しの「追加」からdialogを開き、楽器 / ドラム / オーディオ、名前、楽器の場合は4つの内蔵音色を選ぶ。楽器 / ドラム作成後は全曲長の空Clip、オーディオ作成後はasset全rangeのAudio Clipを選択してArrangerへ移す
+- オーディオ選択時はWeb file inputまたはnative pickerでWAV / MP3 / M4A / AACを選ぶ。「端末内で48 kHz PCM 16-bit WAVへ変換し、Project JSON単体には音声を含めない」ことを選択前から表示する。読込・decode・resample・encode・保存中はdialogを`aria-busy`にし、競合操作を無効化しつつcancelを提供する
+- Bus Trackは「ルーティング」の実装後に利用できると説明する。選べない種類を単にdisabledにするだけでなく、未提供理由を選択前から読めるようにする
+- 選択したnon-master Trackに、名前の確定、音色選択、複製、上へ / 下への操作をまとめ、一般Trackには削除も表示する。Masterにはこれらを表示せず、schema v3の学習`role`を持つTrackは名前に関係なく削除を保護する理由を表示する
 - 名前入力はlocal draftとし、入力途中にUndo / autosaveを増やさない。「名前を保存」または同等の明示確定でtrim済み名称を1回commitし、失敗時はdraftと再試行手段を残す
 - 一般Trackの削除は対象名を含む確認dialogを経由する。Chords / Bass / Melodyには削除buttonを表示せず、domain commandを直接呼ばれても拒否する。成功後は生存する隣接Trackへ、追加・複製後は新Trackへfocusを移し、並べ替え後は同じTrackの操作にfocusを保つ。dialogをcancelした場合は起点buttonへ戻す
 - commandの成功はpolite status、codec / 128 Track上限 / Master保護などの拒否はalertで理由を通知する。採用された構造・音色変更が再生を停止した時は、再生位置を保持したことと再度再生できることを知らせる
@@ -94,6 +95,13 @@ Track Listの管理UI:
 - 独立/連動コピーまたは連動解除をkeyboardで実行して起点buttonが消える場合は、成功後の対象Clip buttonへフォーカスを移す。loop checkboxはSpace操作後もフォーカスを保ち、transportのSpace shortcutを起動しない
 - 成功`status`は採用済みProject上の対象Clip IDと期待状態へ結び付ける。UndoやProject切替で成立しなくなった通知は除去し、後のRedoで古い成功通知を再表示・再読み上げしない
 - Drum Clipには同checkboxを表示しない。drum `Clip.loop`は現行再生で未展開のため、利用できない操作を示唆しない
+
+Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材名・状態と次の非破壊操作をまとめて表示する。
+
+- 配置、左端、右端はmap-awareな小節番号、gainは-96〜+24 dB、fade in / outはミリ秒で入力し、確定時にframeへ変換する。入力途中はlocal draftに留め、Enterまたはフォーカス移動で1回だけcommitする
+- loop checkbox、分割位置、「右へ独立コピー」、削除確認をkeyboardで操作できるようにする。Audio Clipのコピーはimmutable bytesだけを共有し、編集値は常に独立することを補足する
+- loop中は左端trimとsplitをdisabledにし、source loop phaseをまだ保存していない理由を説明する。右端trimは反復の外側窓として利用できる
+- `ready` metadataでも実binaryがmissing / changed / unavailableならClip上とpanel内で色以外の状態文を表示し、素材を必要とする配置 / trim / gain / fade / loop / split / duplicate controlを無効にする。削除は利用可能にし、最後の参照なら現行ProjectのAudioAsset metadataも安全に外す。保存場所の確認または元の環境で開く案内を出す
 
 #### 2.3.2 Section編集
 
@@ -223,6 +231,10 @@ Chord Track のコンテキスト内操作:
 | MIDI読み込み成功 | `Nトラック・M音を追加しました`。warningがあればdialog内のresult cardへ種類別の概要、件数、全warning、確認後に閉じる導線を続ける |
 | MIDI読み込みの一部非対応 | 現在のBPM / 拍子 / key / scaleを維持したこと、FF 59を含む差異・除外・fallback・保持内容を件数category付きwarningにし、Project全体をexactに戻すには`.ctsproj.json`を案内する |
 | MIDI読み込み失敗 | 全failure pathで`MIDI読み込みによる曲・選択・表示の変更はありません。`を一度だけ伝え、上限、破損、対応形式、再試行を初心者向けに案内する |
+| Audio Track読み込み中 | dialogを`aria-busy`にし、検査 / decode / resample / encode / 保存の進捗とcancelを表示する。別Track追加、閉じる、再importを競合させない |
+| Audio Track入力が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、1〜2 channel、canonical output 128 MiB以下、decode PCM 256 MiB以下、source / decode / resample / WAV / 保存copyを含むphase peak 384 MiB以下という条件と、端末codecでdecodeできなかった可能性を分けて案内する。失敗時は曲・履歴・選択が不変であることを伝える |
+| Audio Assetが見つからない / 変更された | 素材名と`見つかりません` / `内容が変わっています` / `保存場所を利用できません`をClipと編集panelに表示する。別fileへ黙って置換せず、元のprofile / 端末で開き直すよう案内する。保存場所を利用できない場合はstorage / 権限を確認して再読込する。配置と編集metadataは保持し、素材を必要とする編集controlを無効にするが、最後の参照を安全に外せる削除は利用可能にする |
+| Project JSONへ音声がない | `.ctsproj.json`は音声binaryを同梱しないことをimport前に説明し、対応objectがlocal repositoryにない場合は現在のProjectを置換しない |
 | カラオケ音源が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、5分以下、stereoという条件と、端末codecでdecodeできなかった可能性を分けて案内する |
 | カラオケ音源がmono / near-mono | stereo中央定位の差分を利用する処理であることを説明し、左右に広がりのあるstereo音源を案内する |
 | ボーカル軽減の品質 | 声が残る場合や中央の楽器も弱くなる場合があることを失敗扱いにせず、preset比較とA/B試聴を案内する |

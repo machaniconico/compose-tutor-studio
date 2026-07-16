@@ -17,6 +17,8 @@
     "desktop:e2e:native": "pnpm --dir apps/desktop e2e:native",
     "desktop:build:smoke": "pnpm --dir apps/desktop build:smoke",
     "desktop:build:bundle": "pnpm --dir apps/desktop build:bundle",
+    "docs:combine": "node scripts/generate-combined-spec.mjs",
+    "docs:combine:check": "node scripts/generate-combined-spec.mjs --check",
     "e2e": "pnpm --dir apps/studio e2e",
     "test": "pnpm --workspace-concurrency=2 -r test --maxWorkers=2",
     "typecheck": "pnpm --workspace-concurrency=2 -r typecheck",

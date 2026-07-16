@@ -230,15 +230,40 @@ components:
     Project:
       type: object
       description: >-
-        Schema-v2 aggregate. Across non-Master clips, resolved stored MIDI-note
+        Current schema-v3 aggregate. lengthBeats, tempoMap, and timeSignatureMap
+        are the musical-time authority; bpm, timeSignature, and lengthBars are
+        validated compatibility mirrors. Across non-Master clips, resolved stored MIDI-note
         and drum-event occurrences (linked source payload multiplied by clip
-        instances) must not exceed 200000. Runtime additionally limits the
-        audible projection, including realized chord notes, to 20000 for live
-        playback and 10000 for WAV, with at most 256 occurrences in any rolling
-        0.75-beat window, before schedule arrays and per-track/per-event nodes
-        (and WAV OfflineAudioContext) are allocated.
+        instances) must not exceed 200000. Runtime limits the MIDI, drum, and
+        realized-chord audible projection to 20000 events for live playback.
+        Playable Audio Clip regions and one Audio planning window are each
+        capped at 10000. Both live and WAV cap MIDI/drum/chord occurrences at
+        256 in any rolling 0.75-beat window; WAV additionally caps its combined
+        resolved events and Audio source plans at 10000. Live region overflow is rejected before
+        TrackGraph allocation; a later live planning-window overflow schedules
+        none of that window and interrupts the session, although prior windows
+        may already have played. WAV rejects its whole-song limits before the
+        OfflineAudioContext is allocated.
       additionalProperties: false
-      required: [id, schemaVersion, title, bpm, timeSignature, key, scale, lengthBars, tracks, chordTrack, sections, createdAt, updatedAt]
+      required:
+        - id
+        - schemaVersion
+        - title
+        - bpm
+        - timeSignature
+        - key
+        - scale
+        - lengthBars
+        - lengthBeats
+        - tempoMap
+        - timeSignatureMap
+        - audioAssets
+        - automationLanes
+        - tracks
+        - chordTrack
+        - sections
+        - createdAt
+        - updatedAt
       properties:
         id:
           type: string
@@ -246,7 +271,7 @@ components:
           maxLength: 4096
         schemaVersion:
           type: integer
-          const: 2
+          const: 3
         title:
           type: string
           maxLength: 4096
@@ -274,6 +299,40 @@ components:
           type: integer
           minimum: 1
           maximum: 256
+        lengthBeats:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 8192
+          description: Authoritative project length in quarter-note beats; must end on a bar boundary.
+        tempoMap:
+          type: array
+          minItems: 1
+          maxItems: 4096
+          items:
+            $ref: '#/components/schemas/TempoMapEvent'
+          description: Strictly beat-ascending; the first event is at beat 0 and its bpm mirrors Project.bpm.
+        timeSignatureMap:
+          type: array
+          minItems: 1
+          maxItems: 1024
+          items:
+            $ref: '#/components/schemas/TimeSignatureMapEvent'
+          description: Strictly beat-ascending bar-boundary events; the first event is at beat 0 and mirrors Project.timeSignature.
+        audioAssets:
+          type: array
+          maxItems: 4096
+          description: >-
+            Content identity and metadata only. Project JSON never embeds audio
+            bytes, filesystem paths, Blob values, or ArrayBuffers. Ready binary
+            objects live in the app-owned Web IndexedDB or native
+            content-addressed repository and are resolved by checksum.
+          items:
+            $ref: '#/components/schemas/AudioAsset'
+        automationLanes:
+          type: array
+          maxItems: 2048
+          items:
+            $ref: '#/components/schemas/AutomationLane'
         tracks:
           type: array
           maxItems: 128
@@ -300,7 +359,7 @@ components:
     Track:
       type: object
       additionalProperties: false
-      required: [id, name, type, clips, volume, pan, mute, solo, effects]
+      required: [id, name, type, role, clips, volume, pan, mute, solo, effects]
       properties:
         id:
           type: string
@@ -311,6 +370,11 @@ components:
           maxLength: 4096
         type:
           enum: [instrument, drum, audio, bus, master]
+        role:
+          enum: [general, learning.chords, learning.bass, learning.melody]
+          description: >-
+            Semantic learning role, independent from the display name. A
+            non-general role is unique and is valid only on an instrument Track.
         color:
           type: string
           maxLength: 9
@@ -378,6 +442,28 @@ components:
       required: [id, trackId, type, startBeat, lengthBeats, loop]
       allOf:
         - if:
+            properties:
+              type:
+                const: audio
+            required: [type]
+          then:
+            required:
+              - audioAssetId
+              - sourceStartFrame
+              - sourceFrameCount
+              - fadeInFrames
+              - fadeOutFrames
+              - gainDb
+          else:
+            not:
+              anyOf:
+                - required: [audioAssetId]
+                - required: [sourceStartFrame]
+                - required: [sourceFrameCount]
+                - required: [fadeInFrames]
+                - required: [fadeOutFrames]
+                - required: [gainDb]
+        - if:
             required: [aliasOf]
           then:
             properties:
@@ -390,6 +476,11 @@ components:
                 - required: [stepsPerBar]
                 - required: [drumGroove]
                 - required: [audioAssetId]
+                - required: [sourceStartFrame]
+                - required: [sourceFrameCount]
+                - required: [fadeInFrames]
+                - required: [fadeOutFrames]
+                - required: [gainDb]
       properties:
         id:
           type: string
@@ -407,7 +498,8 @@ components:
           maximum: 8192
         lengthBeats:
           type: number
-          minimum: 0.001041666666667
+          minimum: 0.0010416666666666
+          description: Domain validation enforces the exact minimum of 1/960 beat.
           maximum: 8192
         loop:
           type: boolean
@@ -415,18 +507,22 @@ components:
             Per-instance projection flag. For MIDI clips, notes repeat to the
             half-open clip end using their natural max(start + duration)
             pattern length; the final partial note is shortened. Linked clips
-            share source notes but retain this instance-local flag. Drum loop
-            expansion is not implemented in the current playback/MIDI contract.
+            share source notes but retain this instance-local flag. Audio clips
+            repeat their persisted source frame range at rate 1.0 inside the
+            outer timeline window. Drum loop expansion is not implemented in
+            the current playback/MIDI contract.
         aliasOf:
           type: string
           minLength: 1
           maxLength: 4096
           description: >-
-            schema v2 linked-clip source id. MIDI/drum only; the source must be
+            Linked-clip source id retained by current schema v3. MIDI/drum only;
+            the source must be
             a direct same-track, same-type non-alias clip of identical length.
             Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and
-            audioAssetId. Version 1 aliasOf values are removed during migration
-            to preserve their formerly independent playback behaviour.
+            every Audio Clip payload field. Version 1 aliasOf values are removed
+            by the v1-to-v2 migration to preserve their formerly independent
+            playback behaviour; this is not a schema-v2-only field.
         notes:
           type: array
           maxItems: 20000
@@ -445,7 +541,187 @@ components:
           $ref: '#/components/schemas/DrumGrooveSettings'
         audioAssetId:
           type: string
+          minLength: 1
           maxLength: 4096
+        sourceStartFrame:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        sourceFrameCount:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Positive for a ready asset; zero only for an unresolved legacy reference.
+        fadeInFrames:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        fadeOutFrames:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        gainDb:
+          type: number
+          minimum: -96
+          maximum: 24
+    TempoMapEvent:
+      type: object
+      additionalProperties: false
+      required: [id, beat, bpm]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        beat:
+          type: number
+          minimum: 0
+          maximum: 8192
+        bpm:
+          type: number
+          minimum: 20
+          maximum: 300
+    TimeSignatureMapEvent:
+      type: object
+      additionalProperties: false
+      required: [id, beat, numerator, denominator]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        beat:
+          type: number
+          minimum: 0
+          maximum: 8192
+        numerator:
+          type: integer
+          minimum: 1
+          maximum: 32
+        denominator:
+          type: integer
+          enum: [2, 4, 8, 16]
+    AudioAsset:
+      oneOf:
+        - $ref: '#/components/schemas/ReadyAudioAsset'
+        - $ref: '#/components/schemas/UnresolvedAudioAsset'
+    ReadyAudioAsset:
+      type: object
+      additionalProperties: false
+      required: [id, availability, checksumSha256, originalName, mediaType, byteLength, sampleRate, channelCount, frameCount]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        availability:
+          const: ready
+        checksumSha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        originalName:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        mediaType:
+          enum: [audio/wav, audio/mpeg, audio/mp4, audio/aac]
+        byteLength:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        sampleRate:
+          type: integer
+          minimum: 8000
+          maximum: 384000
+        channelCount:
+          type: integer
+          minimum: 1
+          maximum: 32
+        frameCount:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+      description: >-
+        Persisted metadata. Production Audio Track imports currently create a
+        content-addressed audio/wav asset in canonical 48000 Hz, mono/stereo,
+        PCM16 form and cap the stored object at 128 MiB.
+    UnresolvedAudioAsset:
+      type: object
+      additionalProperties: false
+      required: [id, availability, reason]
+      allOf:
+        - if:
+            properties:
+              reason:
+                const: legacy-reference
+            required: [reason]
+          then:
+            required: [legacyAssetId]
+          else:
+            not:
+              required: [legacyAssetId]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        availability:
+          const: unresolved
+        legacyAssetId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        reason:
+          enum: [legacy-reference, missing-reference]
+    AutomationLane:
+      type: object
+      additionalProperties: false
+      required: [id, target, points]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        target:
+          $ref: '#/components/schemas/AutomationTarget'
+        points:
+          type: array
+          maxItems: 20000
+          items:
+            $ref: '#/components/schemas/AutomationPoint'
+          description: Strictly beat-ascending.
+    AutomationTarget:
+      type: object
+      additionalProperties: false
+      required: [type, trackId]
+      properties:
+        type:
+          enum: [track-volume, track-pan]
+        trackId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Must reference a non-Master Track; only one lane is allowed per target.
+    AutomationPoint:
+      type: object
+      additionalProperties: false
+      required: [id, beat, value, interpolation]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        beat:
+          type: number
+          minimum: 0
+          maximum: 8192
+        value:
+          type: number
+          minimum: -1
+          maximum: 2
+          description: Track volume uses 0..2; Track pan uses -1..1.
+        interpolation:
+          enum: [hold, linear]
     NoteEvent:
       type: object
       additionalProperties: false
@@ -465,7 +741,8 @@ components:
           maximum: 8192
         durationBeats:
           type: number
-          minimum: 0.001041666666667
+          minimum: 0.0010416666666666
+          description: Domain validation enforces the exact minimum of 1/960 beat.
           maximum: 8192
         velocity:
           type: integer
@@ -528,7 +805,8 @@ components:
           maximum: 8192
         durationBeats:
           type: number
-          minimum: 0.001041666666667
+          minimum: 0.0010416666666666
+          description: Domain validation enforces the exact minimum of 1/960 beat.
           maximum: 8192
         symbol:
           type: string
