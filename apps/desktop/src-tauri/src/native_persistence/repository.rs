@@ -35,12 +35,12 @@ const PROCESS_LOCK_FILE_NAME: &str = ".compose-tutor-studio.lock";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 2;
+const PROJECT_SCHEMA_VERSION: u64 = 3;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
 const LEGACY_STORAGE_VERSION: u64 = 1;
-const LEGACY_MIGRATION_VERSION: u64 = 2;
+const LEGACY_MIGRATION_VERSION: u64 = 3;
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const APPLICATION_ID: i64 = 0x4354_5331; // "CTS1"
 const MAX_PROJECT_JSON_BYTES: usize = 16 * 1024 * 1024;
@@ -559,7 +559,7 @@ struct LegacyDeletedEvidence {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ProjectV1Dto {
+struct ProjectDto {
     id: String,
     schema_version: u64,
     title: String,
@@ -568,35 +568,41 @@ struct ProjectV1Dto {
     key: String,
     scale: String,
     length_bars: u64,
-    tracks: Vec<TrackV1Dto>,
-    chord_track: Vec<ChordV1Dto>,
-    sections: Vec<SectionV1Dto>,
+    length_beats: Option<f64>,
+    tempo_map: Option<Vec<TempoMapEventDto>>,
+    time_signature_map: Option<Vec<TimeSignatureMapEventDto>>,
+    audio_assets: Option<Vec<AudioAssetDto>>,
+    automation_lanes: Option<Vec<AutomationLaneDto>>,
+    tracks: Vec<TrackDto>,
+    chord_track: Vec<ChordDto>,
+    sections: Vec<SectionDto>,
     created_at: String,
     updated_at: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TrackV1Dto {
+struct TrackDto {
     id: String,
     name: String,
     #[serde(rename = "type")]
     kind: String,
+    role: Option<String>,
     color: Option<String>,
-    clips: Vec<ClipV1Dto>,
+    clips: Vec<ClipDto>,
     volume: f64,
     pan: f64,
     #[serde(rename = "mute")]
     _mute: bool,
     #[serde(rename = "solo")]
     _solo: bool,
-    instrument: Option<InstrumentV1Dto>,
-    effects: Vec<EffectV1Dto>,
+    instrument: Option<InstrumentDto>,
+    effects: Vec<EffectDto>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct InstrumentV1Dto {
+struct InstrumentDto {
     #[serde(rename = "type")]
     kind: String,
     preset: String,
@@ -605,7 +611,7 @@ struct InstrumentV1Dto {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EffectV1Dto {
+struct EffectDto {
     id: String,
     #[serde(rename = "type")]
     kind: String,
@@ -616,7 +622,7 @@ struct EffectV1Dto {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ClipV1Dto {
+struct ClipDto {
     id: String,
     track_id: String,
     #[serde(rename = "type")]
@@ -626,16 +632,21 @@ struct ClipV1Dto {
     #[serde(rename = "loop")]
     _loop: bool,
     alias_of: Option<String>,
-    notes: Option<Vec<NoteV1Dto>>,
-    drum_events: Option<Vec<DrumEventV1Dto>>,
+    notes: Option<Vec<NoteDto>>,
+    drum_events: Option<Vec<DrumEventDto>>,
     steps_per_bar: Option<u64>,
-    drum_groove: Option<DrumGrooveV1Dto>,
+    drum_groove: Option<DrumGrooveDto>,
     audio_asset_id: Option<String>,
+    source_start_frame: Option<u64>,
+    source_frame_count: Option<u64>,
+    fade_in_frames: Option<u64>,
+    fade_out_frames: Option<u64>,
+    gain_db: Option<f64>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct NoteV1Dto {
+struct NoteDto {
     id: String,
     pitch: i64,
     start_beat: f64,
@@ -645,7 +656,7 @@ struct NoteV1Dto {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DrumEventV1Dto {
+struct DrumEventDto {
     id: String,
     lane: String,
     step_index: i64,
@@ -655,7 +666,7 @@ struct DrumEventV1Dto {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DrumGrooveV1Dto {
+struct DrumGrooveDto {
     swing: f64,
     probability: f64,
     humanize_velocity: i64,
@@ -664,7 +675,7 @@ struct DrumGrooveV1Dto {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ChordV1Dto {
+struct ChordDto {
     id: String,
     start_beat: f64,
     duration_beats: f64,
@@ -679,13 +690,88 @@ struct ChordV1Dto {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SectionV1Dto {
+struct SectionDto {
     id: String,
     name: String,
     #[serde(rename = "type")]
     kind: String,
     start_bar: i64,
     length_bars: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TempoMapEventDto {
+    id: String,
+    beat: f64,
+    bpm: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TimeSignatureMapEventDto {
+    id: String,
+    beat: f64,
+    numerator: u64,
+    denominator: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "availability",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum AudioAssetDto {
+    Ready {
+        id: String,
+        checksum_sha256: String,
+        original_name: String,
+        media_type: String,
+        byte_length: u64,
+        sample_rate: u64,
+        channel_count: u64,
+        frame_count: u64,
+    },
+    Unresolved {
+        id: String,
+        legacy_asset_id: Option<String>,
+        reason: String,
+    },
+}
+
+impl AudioAssetDto {
+    fn id(&self) -> &str {
+        match self {
+            Self::Ready { id, .. } | Self::Unresolved { id, .. } => id,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationLaneDto {
+    id: String,
+    target: AutomationTargetDto,
+    points: Vec<AutomationPointDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationTargetDto {
+    #[serde(rename = "type")]
+    kind: String,
+    track_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationPointDto {
+    id: String,
+    beat: f64,
+    value: f64,
+    interpolation: String,
 }
 
 #[derive(Clone, Debug)]
@@ -3144,33 +3230,51 @@ fn validate_legacy_provenance(
     }
 }
 
-/**
- * Prove the sole released Project migration without weakening archived-byte
- * provenance. v1 `aliasOf` was inert, so v2 removes only that key and updates
- * schemaVersion; every other JSON value must remain exactly equal.
- */
+/** Prove every released Project migration without weakening archived-byte provenance. */
 fn legacy_project_matches_migrated(source: &str, expected: &str) -> bool {
     if source == expected {
         return true;
     }
-    let (Ok(mut source), Ok(expected)) = (
+    let (Ok(source), Ok(expected)) = (
         serde_json::from_str::<Value>(source),
         serde_json::from_str::<Value>(expected),
     ) else {
         return false;
     };
-    let Some(source_record) = source.as_object_mut() else {
-        return false;
-    };
     let Some(expected_record) = expected.as_object() else {
         return false;
     };
-    if source_record.get("schemaVersion").and_then(Value::as_u64) != Some(1)
-        || expected_record.get("schemaVersion").and_then(Value::as_u64) != Some(2)
-    {
+    let Some(target_version) = expected_record.get("schemaVersion").and_then(Value::as_u64) else {
         return false;
+    };
+    migrate_project_for_legacy_proof(source, target_version).is_some_and(|value| value == expected)
+}
+
+fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> Option<Value> {
+    let mut version = project.get("schemaVersion")?.as_u64()?;
+    if !(MIN_PROJECT_SCHEMA_VERSION..=PROJECT_SCHEMA_VERSION).contains(&target_version)
+        || version >= target_version
+    {
+        return None;
     }
-    if let Some(Value::Array(tracks)) = source_record.get_mut("tracks") {
+    while version < target_version {
+        project = match version {
+            1 => migrate_project_value_v1_to_v2(project)?,
+            2 => migrate_project_value_v2_to_v3(project)?,
+            _ => return None,
+        };
+        version += 1;
+    }
+    Some(project)
+}
+
+/** v1 `aliasOf` was inert, so v2 makes every legacy clip independent. */
+fn migrate_project_value_v1_to_v2(mut project: Value) -> Option<Value> {
+    let project_record = project.as_object_mut()?;
+    if project_record.get("schemaVersion").and_then(Value::as_u64) != Some(1) {
+        return None;
+    }
+    if let Some(Value::Array(tracks)) = project_record.get_mut("tracks") {
         for track in tracks {
             let Some(track) = track.as_object_mut() else {
                 continue;
@@ -3185,8 +3289,233 @@ fn legacy_project_matches_migrated(source: &str, expected: &str) -> bool {
             }
         }
     }
-    source_record.insert("schemaVersion".to_owned(), Value::from(2));
-    source == expected
+    project_record.insert("schemaVersion".to_owned(), Value::from(2));
+    Some(project)
+}
+
+fn value_contains_v3_project_fields(project: &serde_json::Map<String, Value>) -> bool {
+    const ROOT_FIELDS: &[&str] = &[
+        "lengthBeats",
+        "tempoMap",
+        "timeSignatureMap",
+        "audioAssets",
+        "automationLanes",
+    ];
+    const CLIP_FIELDS: &[&str] = &[
+        "sourceStartFrame",
+        "sourceFrameCount",
+        "fadeInFrames",
+        "fadeOutFrames",
+        "gainDb",
+    ];
+    ROOT_FIELDS.iter().any(|key| project.contains_key(*key))
+        || project
+            .get("tracks")
+            .and_then(Value::as_array)
+            .is_some_and(|tracks| {
+                tracks.iter().any(|track| {
+                    track.as_object().is_some_and(|track| {
+                        track.contains_key("role")
+                            || track
+                                .get("clips")
+                                .and_then(Value::as_array)
+                                .is_some_and(|clips| {
+                                    clips.iter().any(|clip| {
+                                        clip.as_object().is_some_and(|clip| {
+                                            CLIP_FIELDS.iter().any(|key| clip.contains_key(*key))
+                                        })
+                                    })
+                                })
+                    })
+                })
+            })
+}
+
+fn collect_value_ids(value: &Value, ids: &mut HashSet<String>) {
+    match value {
+        Value::Object(record) => {
+            if let Some(id) = record.get("id").and_then(Value::as_str) {
+                ids.insert(id.to_owned());
+            }
+            for child in record.values() {
+                collect_value_ids(child, ids);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_value_ids(item, ids);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn next_migrated_id(base: &str, counter: &mut u64, ids: &mut HashSet<String>) -> String {
+    loop {
+        *counter = counter.saturating_add(1);
+        let candidate = format!("{base}-{counter}");
+        if ids.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+}
+
+fn is_javascript_trim_character(value: char) -> bool {
+    matches!(
+        value,
+        '\u{0009}'..='\u{000d}'
+            | '\u{0020}'
+            | '\u{00a0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200a}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202f}'
+            | '\u{205f}'
+            | '\u{3000}'
+            | '\u{feff}'
+    )
+}
+
+fn migrated_learning_role(track: &serde_json::Map<String, Value>) -> Option<&'static str> {
+    if track.get("type").and_then(Value::as_str) != Some("instrument") {
+        return None;
+    }
+    let normalized = track
+        .get("name")?
+        .as_str()?
+        .trim_matches(is_javascript_trim_character)
+        .to_lowercase();
+    match normalized.as_str() {
+        "chord" | "chords" | "コード" => Some("learning.chords"),
+        "bass" => Some("learning.bass"),
+        "melody" => Some("learning.melody"),
+        _ => None,
+    }
+}
+
+/** Match JSON.stringify's integer representation for finite JavaScript numbers. */
+fn migrated_json_number(value: f64) -> Option<Value> {
+    if !value.is_finite() || value.abs() > JS_MAX_SAFE_INTEGER as f64 {
+        return None;
+    }
+    if value.fract() == 0.0 {
+        return Some(if value >= 0.0 {
+            Value::from(value as u64)
+        } else {
+            Value::from(value as i64)
+        });
+    }
+    serde_json::Number::from_f64(value).map(Value::Number)
+}
+
+/**
+ * v3 adds explicit timeline maps, semantic track roles, managed/unresolved
+ * audio assets, and automation storage. Migration preserves v2's first-match
+ * learning-track resolver and never fabricates ready audio metadata.
+ */
+fn migrate_project_value_v2_to_v3(mut project: Value) -> Option<Value> {
+    let project_record = project.as_object()?;
+    if project_record.get("schemaVersion").and_then(Value::as_u64) != Some(2)
+        || value_contains_v3_project_fields(project_record)
+    {
+        return None;
+    }
+    let bpm = project_record.get("bpm")?.as_f64()?;
+    let length_bars = project_record.get("lengthBars")?.as_u64()?;
+    let signature = project_record.get("timeSignature")?.as_array()?;
+    if signature.len() != 2 {
+        return None;
+    }
+    let numerator = signature[0].as_u64()?;
+    let denominator = signature[1].as_u64()?;
+    if denominator == 0 {
+        return None;
+    }
+    let length_beats = length_bars as f64 * numerator as f64 * 4.0 / denominator as f64;
+    let length_beats_value = migrated_json_number(length_beats)?;
+    let bpm_value = migrated_json_number(bpm)?;
+
+    let mut ids = HashSet::new();
+    collect_value_ids(&project, &mut ids);
+    let mut tempo_counter = 0;
+    let mut signature_counter = 0;
+    let mut audio_counter = 0;
+    let tempo_id = next_migrated_id("migrated-tempo", &mut tempo_counter, &mut ids);
+    let signature_id = next_migrated_id("migrated-signature", &mut signature_counter, &mut ids);
+    let mut migrated_assets = Vec::new();
+    let mut assets_by_legacy_id = HashMap::<String, String>::new();
+    let mut assigned_roles = HashSet::<&'static str>::new();
+
+    let project_record = project.as_object_mut()?;
+    let tracks = project_record.get_mut("tracks")?.as_array_mut()?;
+    for track in tracks {
+        let track = track.as_object_mut()?;
+        let role = migrated_learning_role(track)
+            .filter(|role| assigned_roles.insert(*role))
+            .unwrap_or("general");
+        track.insert("role".to_owned(), Value::String(role.to_owned()));
+        let clips = track.get_mut("clips")?.as_array_mut()?;
+        for clip in clips {
+            let clip = clip.as_object_mut()?;
+            if clip.get("type").and_then(Value::as_str) != Some("audio") {
+                continue;
+            }
+            let legacy_asset_id = clip
+                .get("audioAssetId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+            let migrated_asset_id = legacy_asset_id
+                .as_ref()
+                .and_then(|legacy| assets_by_legacy_id.get(legacy).cloned())
+                .unwrap_or_else(|| {
+                    let id = next_migrated_id("migrated-audio", &mut audio_counter, &mut ids);
+                    let asset = if let Some(legacy) = legacy_asset_id.as_ref() {
+                        assets_by_legacy_id.insert(legacy.clone(), id.clone());
+                        serde_json::json!({
+                            "id": id,
+                            "availability": "unresolved",
+                            "legacyAssetId": legacy,
+                            "reason": "legacy-reference"
+                        })
+                    } else {
+                        serde_json::json!({
+                            "id": id,
+                            "availability": "unresolved",
+                            "reason": "missing-reference"
+                        })
+                    };
+                    migrated_assets.push(asset);
+                    id
+                });
+            clip.insert("audioAssetId".to_owned(), Value::String(migrated_asset_id));
+            clip.insert("sourceStartFrame".to_owned(), Value::from(0));
+            clip.insert("sourceFrameCount".to_owned(), Value::from(0));
+            clip.insert("fadeInFrames".to_owned(), Value::from(0));
+            clip.insert("fadeOutFrames".to_owned(), Value::from(0));
+            clip.insert("gainDb".to_owned(), Value::from(0));
+        }
+    }
+
+    project_record.insert("schemaVersion".to_owned(), Value::from(3));
+    project_record.insert("lengthBeats".to_owned(), length_beats_value);
+    project_record.insert(
+        "tempoMap".to_owned(),
+        serde_json::json!([{ "id": tempo_id, "beat": 0, "bpm": bpm_value }]),
+    );
+    project_record.insert(
+        "timeSignatureMap".to_owned(),
+        serde_json::json!([{
+            "id": signature_id,
+            "beat": 0,
+            "numerator": numerator,
+            "denominator": denominator
+        }]),
+    );
+    project_record.insert("audioAssets".to_owned(), Value::Array(migrated_assets));
+    project_record.insert("automationLanes".to_owned(), Value::Array(Vec::new()));
+    Some(project)
 }
 
 fn validate_legacy_diagnostic_provenance(
@@ -6712,7 +7041,7 @@ fn canonical_project_for_validation(value: Value) -> Result<CanonicalProject, Ge
     if !(MIN_PROJECT_SCHEMA_VERSION..=PROJECT_SCHEMA_VERSION).contains(&schema_version) {
         return Err(GenerationIssue::Corrupt);
     }
-    validate_project_v1(&value)?;
+    validate_project(&value)?;
     let project_id = record
         .get("id")
         .and_then(Value::as_str)
@@ -6745,16 +7074,173 @@ fn canonical_project_for_validation(value: Value) -> Result<CanonicalProject, Ge
     })
 }
 
-fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
+fn validate_project_versioned_presence(
+    value: &Value,
+    schema_version: u64,
+) -> Result<(), GenerationIssue> {
+    const V3_PROJECT_FIELDS: &[&str] = &[
+        "lengthBeats",
+        "tempoMap",
+        "timeSignatureMap",
+        "audioAssets",
+        "automationLanes",
+    ];
+    const V3_AUDIO_CLIP_FIELDS: &[&str] = &[
+        "sourceStartFrame",
+        "sourceFrameCount",
+        "fadeInFrames",
+        "fadeOutFrames",
+        "gainDb",
+    ];
+    let project = value.as_object().ok_or(GenerationIssue::Corrupt)?;
+    let is_v3 = schema_version == 3;
+    if V3_PROJECT_FIELDS
+        .iter()
+        .any(|key| project.contains_key(*key) != is_v3)
+    {
+        return Err(GenerationIssue::Corrupt);
+    }
+    let tracks = project
+        .get("tracks")
+        .and_then(Value::as_array)
+        .ok_or(GenerationIssue::Corrupt)?;
+    for track in tracks {
+        let track = track.as_object().ok_or(GenerationIssue::Corrupt)?;
+        if track.contains_key("role") != is_v3 {
+            return Err(GenerationIssue::Corrupt);
+        }
+        let clips = track
+            .get("clips")
+            .and_then(Value::as_array)
+            .ok_or(GenerationIssue::Corrupt)?;
+        for clip in clips {
+            let clip = clip.as_object().ok_or(GenerationIssue::Corrupt)?;
+            let is_v3_audio = is_v3 && clip.get("type").and_then(Value::as_str) == Some("audio");
+            if V3_AUDIO_CLIP_FIELDS
+                .iter()
+                .any(|key| clip.contains_key(*key) != is_v3_audio)
+                || (is_v3_audio && !clip.contains_key("audioAssetId"))
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DrumStepProjectionSegment {
+    start_bar: u64,
+    start_beat: f64,
+    beats_per_bar: f64,
+}
+
+/// Reusable clip-local thresholds for drum-step projection. Compilation walks
+/// signature boundaries once; each event performs only a binary search.
+struct DrumStepTimelineProjector {
+    steps_per_bar: u64,
+    segments: Vec<DrumStepProjectionSegment>,
+}
+
+impl DrumStepTimelineProjector {
+    fn compile(
+        steps_per_bar: u64,
+        clip_start_beat: f64,
+        signature_map: &[TimeSignatureMapEventDto],
+    ) -> Option<Self> {
+        if steps_per_bar == 0 || !clip_start_beat.is_finite() || signature_map.is_empty() {
+            return None;
+        }
+        let mut segments = Vec::with_capacity(signature_map.len());
+        let mut start_bar = 0u64;
+        let mut start_beat = clip_start_beat;
+
+        for _ in 0..=signature_map.len() {
+            let signature_index = signature_map
+                .partition_point(|event| event.beat <= start_beat)
+                .checked_sub(1)?;
+            let signature = &signature_map[signature_index];
+            let beats_per_bar = signature.numerator as f64 * 4.0 / signature.denominator as f64;
+            if !beats_per_bar.is_finite() || beats_per_bar <= 0.0 {
+                return None;
+            }
+            segments.push(DrumStepProjectionSegment {
+                start_bar,
+                start_beat,
+                beats_per_bar,
+            });
+
+            let Some(next_signature) = signature_map.get(signature_index + 1) else {
+                break;
+            };
+            let beats_until_next_signature = next_signature.beat - start_beat;
+            if !beats_until_next_signature.is_finite() || beats_until_next_signature <= 0.0 {
+                return None;
+            }
+            let bars_until_next_signature =
+                ((beats_until_next_signature / beats_per_bar).ceil() as u64).max(1);
+            start_bar = start_bar.checked_add(bars_until_next_signature)?;
+            start_beat += bars_until_next_signature as f64 * beats_per_bar;
+            if !start_beat.is_finite() {
+                return None;
+            }
+        }
+
+        (!segments.is_empty()).then_some(Self {
+            steps_per_bar,
+            segments,
+        })
+    }
+
+    fn project(&self, step_index: i64) -> Option<f64> {
+        let safe_step = u64::try_from(step_index).ok()?;
+        let local_bar = safe_step / self.steps_per_bar;
+        let step_in_bar = safe_step - local_bar * self.steps_per_bar;
+        let segment_index = self
+            .segments
+            .partition_point(|segment| segment.start_bar <= local_bar)
+            .checked_sub(1)?;
+        let segment = self.segments.get(segment_index)?;
+        let bar_start_beat =
+            segment.start_beat + (local_bar - segment.start_bar) as f64 * segment.beats_per_bar;
+        let beat = bar_start_beat
+            + step_in_bar as f64 * (segment.beats_per_bar / self.steps_per_bar as f64);
+        beat.is_finite().then_some(beat)
+    }
+}
+
+/// Compatibility wrapper for one-off callers.
+#[allow(dead_code)]
+fn drum_step_to_beat_on_timeline(
+    step_index: i64,
+    steps_per_bar: u64,
+    clip_start_beat: f64,
+    signature_map: &[TimeSignatureMapEventDto],
+) -> Option<f64> {
+    DrumStepTimelineProjector::compile(steps_per_bar, clip_start_beat, signature_map)?
+        .project(step_index)
+}
+
+fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
     const MAX_STRING_CHARS: usize = 4_096;
     const MAX_ARRAY_ITEMS: usize = 100_000;
     const MAX_TOTAL_ITEMS: usize = 200_000;
     const MAX_TIMELINE_BEATS: f64 = 8_192.0;
     const MIN_DURATION: f64 = 1.0 / 960.0;
+    const MAX_TEMPO_MAP_EVENTS: usize = 4_096;
+    const MAX_TIME_SIGNATURE_MAP_EVENTS: usize = 1_024;
+    const MAX_AUDIO_ASSETS: usize = 4_096;
+    const MAX_AUTOMATION_LANES: usize = 2_048;
+    const MAX_AUTOMATION_POINTS: usize = 20_000;
     if project_has_explicit_null_optionals(value) {
         return Err(GenerationIssue::Corrupt);
     }
-    let project: ProjectV1Dto =
+    let schema_version = value
+        .get("schemaVersion")
+        .and_then(Value::as_u64)
+        .ok_or(GenerationIssue::Corrupt)?;
+    validate_project_versioned_presence(value, schema_version)?;
+    let project: ProjectDto =
         serde_json::from_value(value.clone()).map_err(|_| GenerationIssue::Corrupt)?;
     if !(MIN_PROJECT_SCHEMA_VERSION..=PROJECT_SCHEMA_VERSION).contains(&project.schema_version)
         || !valid_project_string(&project.id, MAX_STRING_CHARS, false)
@@ -6804,7 +7290,11 @@ fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
         return Err(GenerationIssue::Corrupt);
     }
     let beats_per_bar = project.time_signature[0] as f64 * 4.0 / project.time_signature[1] as f64;
-    let project_length_beats = project.length_bars as f64 * beats_per_bar;
+    let project_length_beats = if project.schema_version == 3 {
+        project.length_beats.ok_or(GenerationIssue::Corrupt)?
+    } else {
+        project.length_bars as f64 * beats_per_bar
+    };
     if !project_length_beats.is_finite()
         || project_length_beats <= 0.0
         || project_length_beats > MAX_TIMELINE_BEATS
@@ -6816,8 +7306,166 @@ fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
     if !ids.insert(project.id.as_str()) {
         return Err(GenerationIssue::Corrupt);
     }
-    let mut track_ids = HashSet::new();
     let mut total_items = project.tracks.len() + project.chord_track.len() + project.sections.len();
+    let mut audio_assets_by_id = HashMap::<&str, &AudioAssetDto>::new();
+    if project.schema_version == 3 {
+        let tempo_map = project
+            .tempo_map
+            .as_deref()
+            .ok_or(GenerationIssue::Corrupt)?;
+        let signature_map = project
+            .time_signature_map
+            .as_deref()
+            .ok_or(GenerationIssue::Corrupt)?;
+        let audio_assets = project
+            .audio_assets
+            .as_deref()
+            .ok_or(GenerationIssue::Corrupt)?;
+        let automation_lanes = project
+            .automation_lanes
+            .as_deref()
+            .ok_or(GenerationIssue::Corrupt)?;
+        if tempo_map.is_empty()
+            || tempo_map.len() > MAX_TEMPO_MAP_EVENTS
+            || signature_map.is_empty()
+            || signature_map.len() > MAX_TIME_SIGNATURE_MAP_EVENTS
+            || audio_assets.len() > MAX_AUDIO_ASSETS
+            || automation_lanes.len() > MAX_AUTOMATION_LANES
+        {
+            return Err(GenerationIssue::Corrupt);
+        }
+        total_items = total_items
+            .checked_add(
+                tempo_map.len() + signature_map.len() + audio_assets.len() + automation_lanes.len(),
+            )
+            .ok_or(GenerationIssue::Corrupt)?;
+
+        let mut previous_beat = None;
+        for event in tempo_map {
+            if !valid_project_string(&event.id, MAX_STRING_CHARS, false)
+                || !ids.insert(event.id.as_str())
+                || !event.beat.is_finite()
+                || event.beat < 0.0
+                || event.beat > project_length_beats
+                || previous_beat.is_some_and(|previous| event.beat <= previous)
+                || !event.bpm.is_finite()
+                || !(20.0..=300.0).contains(&event.bpm)
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+            previous_beat = Some(event.beat);
+        }
+        if tempo_map
+            .first()
+            .is_none_or(|event| event.beat != 0.0 || event.bpm != project.bpm)
+        {
+            return Err(GenerationIssue::Corrupt);
+        }
+
+        let mut previous_beat = None;
+        let mut derived_bars = 0u64;
+        for (index, event) in signature_map.iter().enumerate() {
+            if !valid_project_string(&event.id, MAX_STRING_CHARS, false)
+                || !ids.insert(event.id.as_str())
+                || !event.beat.is_finite()
+                || event.beat < 0.0
+                || event.beat > project_length_beats
+                || previous_beat.is_some_and(|previous| event.beat <= previous)
+                || event.numerator == 0
+                || event.numerator > 32
+                || !matches!(event.denominator, 2 | 4 | 8 | 16)
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+            let next_beat = signature_map
+                .get(index + 1)
+                .map_or(project_length_beats, |next| next.beat);
+            let segment_beats = next_beat - event.beat;
+            let segment_beats_per_bar = event.numerator as f64 * 4.0 / event.denominator as f64;
+            let segment_bars = segment_beats / segment_beats_per_bar;
+            if !segment_bars.is_finite()
+                || segment_bars < 0.0
+                || segment_bars.fract() != 0.0
+                || segment_bars > JS_MAX_SAFE_INTEGER as f64
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+            derived_bars = derived_bars
+                .checked_add(segment_bars as u64)
+                .ok_or(GenerationIssue::Corrupt)?;
+            previous_beat = Some(event.beat);
+        }
+        if signature_map.first().is_none_or(|event| {
+            event.beat != 0.0
+                || event.numerator != project.time_signature[0]
+                || event.denominator != project.time_signature[1]
+        }) || derived_bars != project.length_bars
+        {
+            return Err(GenerationIssue::Corrupt);
+        }
+
+        for asset in audio_assets {
+            if !valid_project_string(asset.id(), MAX_STRING_CHARS, false)
+                || !ids.insert(asset.id())
+                || audio_assets_by_id.insert(asset.id(), asset).is_some()
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+            match asset {
+                AudioAssetDto::Ready {
+                    checksum_sha256,
+                    original_name,
+                    media_type,
+                    byte_length,
+                    sample_rate,
+                    channel_count,
+                    frame_count,
+                    ..
+                } => {
+                    if !valid_sha256(checksum_sha256)
+                        || !valid_project_string(original_name, MAX_STRING_CHARS, false)
+                        || !matches!(
+                            media_type.as_str(),
+                            "audio/wav" | "audio/mpeg" | "audio/mp4" | "audio/aac"
+                        )
+                        || *byte_length == 0
+                        || *byte_length > JS_MAX_SAFE_INTEGER
+                        || !(8_000..=384_000).contains(sample_rate)
+                        || !(1..=32).contains(channel_count)
+                        || *frame_count == 0
+                        || *frame_count > JS_MAX_SAFE_INTEGER
+                    {
+                        return Err(GenerationIssue::Corrupt);
+                    }
+                }
+                AudioAssetDto::Unresolved {
+                    legacy_asset_id,
+                    reason,
+                    ..
+                } => {
+                    if legacy_asset_id.as_deref().is_some_and(|legacy| {
+                        !valid_project_string(legacy, MAX_STRING_CHARS, false)
+                    }) || !matches!(reason.as_str(), "legacy-reference" | "missing-reference")
+                        || (reason == "legacy-reference" && legacy_asset_id.is_none())
+                        || (reason == "missing-reference" && legacy_asset_id.is_some())
+                    {
+                        return Err(GenerationIssue::Corrupt);
+                    }
+                }
+            }
+        }
+    } else if project.length_beats.is_some()
+        || project.tempo_map.is_some()
+        || project.time_signature_map.is_some()
+        || project.audio_assets.is_some()
+        || project.automation_lanes.is_some()
+    {
+        return Err(GenerationIssue::Corrupt);
+    }
+
+    let mut track_ids = HashSet::new();
+    let mut track_kinds_by_id = HashMap::new();
+    let mut learning_roles = HashSet::new();
     for track in &project.tracks {
         if !valid_project_string(&track.id, MAX_STRING_CHARS, false)
             || !valid_project_string(&track.name, MAX_STRING_CHARS, true)
@@ -6833,10 +7481,22 @@ fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
             || track.effects.len() > 64
             || !ids.insert(track.id.as_str())
             || !track_ids.insert(track.id.as_str())
+            || track_kinds_by_id
+                .insert(track.id.as_str(), track.kind.as_str())
+                .is_some()
             || track
                 .color
                 .as_deref()
                 .is_some_and(|color| !valid_track_color(color))
+            || (project.schema_version == 3
+                && match track.role.as_deref() {
+                    Some("general") => false,
+                    Some(role @ ("learning.chords" | "learning.bass" | "learning.melody")) => {
+                        track.kind != "instrument" || !learning_roles.insert(role)
+                    }
+                    _ => true,
+                })
+            || (project.schema_version < 3 && track.role.is_some())
         {
             return Err(GenerationIssue::Corrupt);
         }
@@ -6868,6 +7528,52 @@ fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
             total_items = total_items
                 .checked_add(effect.params.len())
                 .ok_or(GenerationIssue::Corrupt)?;
+        }
+    }
+
+    if project.schema_version == 3 {
+        let automation_lanes = project
+            .automation_lanes
+            .as_deref()
+            .ok_or(GenerationIssue::Corrupt)?;
+        let mut automation_targets = HashSet::new();
+        for lane in automation_lanes {
+            if !valid_project_string(&lane.id, MAX_STRING_CHARS, false)
+                || !ids.insert(lane.id.as_str())
+                || !valid_project_string(&lane.target.track_id, MAX_STRING_CHARS, false)
+                || !track_ids.contains(lane.target.track_id.as_str())
+                || !matches!(lane.target.kind.as_str(), "track-volume" | "track-pan")
+                || track_kinds_by_id.get(lane.target.track_id.as_str()) == Some(&"master")
+                || !automation_targets
+                    .insert((lane.target.track_id.as_str(), lane.target.kind.as_str()))
+                || lane.points.len() > MAX_AUTOMATION_POINTS
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+            total_items = total_items
+                .checked_add(lane.points.len())
+                .ok_or(GenerationIssue::Corrupt)?;
+            let mut previous_beat = None;
+            for point in &lane.points {
+                let valid_value = match lane.target.kind.as_str() {
+                    "track-volume" => (0.0..=2.0).contains(&point.value),
+                    "track-pan" => (-1.0..=1.0).contains(&point.value),
+                    _ => false,
+                };
+                if !valid_project_string(&point.id, MAX_STRING_CHARS, false)
+                    || !ids.insert(point.id.as_str())
+                    || !point.beat.is_finite()
+                    || point.beat < 0.0
+                    || point.beat > project_length_beats
+                    || previous_beat.is_some_and(|previous| point.beat <= previous)
+                    || !point.value.is_finite()
+                    || !valid_value
+                    || !matches!(point.interpolation.as_str(), "hold" | "linear")
+                {
+                    return Err(GenerationIssue::Corrupt);
+                }
+                previous_beat = Some(point.beat);
+            }
         }
     }
 
@@ -6934,6 +7640,11 @@ fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
                     .as_ref()
                     .is_some_and(|_| clip.kind != "drum")
                 || clip.audio_asset_id.is_some() && clip.kind != "audio"
+                || clip.source_start_frame.is_some() && clip.kind != "audio"
+                || clip.source_frame_count.is_some() && clip.kind != "audio"
+                || clip.fade_in_frames.is_some() && clip.kind != "audio"
+                || clip.fade_out_frames.is_some() && clip.kind != "audio"
+                || clip.gain_db.is_some() && clip.kind != "audio"
             {
                 return Err(GenerationIssue::Corrupt);
             }
@@ -6955,8 +7666,58 @@ fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
                         || clip.steps_per_bar.is_some()
                         || clip.drum_groove.is_some()
                         || clip.audio_asset_id.is_some()
+                        || clip.source_start_frame.is_some()
+                        || clip.source_frame_count.is_some()
+                        || clip.fade_in_frames.is_some()
+                        || clip.fade_out_frames.is_some()
+                        || clip.gain_db.is_some()
                     {
                         return Err(GenerationIssue::Corrupt);
+                    }
+                }
+            }
+            if project.schema_version == 3 && clip.kind == "audio" {
+                let asset_id = clip
+                    .audio_asset_id
+                    .as_deref()
+                    .filter(|value| valid_project_string(value, MAX_STRING_CHARS, false))
+                    .ok_or(GenerationIssue::Corrupt)?;
+                let asset = audio_assets_by_id
+                    .get(asset_id)
+                    .copied()
+                    .ok_or(GenerationIssue::Corrupt)?;
+                let source_start = clip.source_start_frame.ok_or(GenerationIssue::Corrupt)?;
+                let source_count = clip.source_frame_count.ok_or(GenerationIssue::Corrupt)?;
+                let fade_in = clip.fade_in_frames.ok_or(GenerationIssue::Corrupt)?;
+                let fade_out = clip.fade_out_frames.ok_or(GenerationIssue::Corrupt)?;
+                let gain_db = clip.gain_db.ok_or(GenerationIssue::Corrupt)?;
+                if source_start > JS_MAX_SAFE_INTEGER
+                    || source_count > JS_MAX_SAFE_INTEGER
+                    || fade_in > JS_MAX_SAFE_INTEGER
+                    || fade_out > JS_MAX_SAFE_INTEGER
+                    || !gain_db.is_finite()
+                    || !(-96.0..=24.0).contains(&gain_db)
+                {
+                    return Err(GenerationIssue::Corrupt);
+                }
+                match asset {
+                    AudioAssetDto::Ready { frame_count, .. } => {
+                        if track.kind != "audio"
+                            || source_count == 0
+                            || source_start
+                                .checked_add(source_count)
+                                .is_none_or(|end| end > *frame_count)
+                            || fade_in
+                                .checked_add(fade_out)
+                                .is_none_or(|fade| fade > source_count)
+                        {
+                            return Err(GenerationIssue::Corrupt);
+                        }
+                    }
+                    AudioAssetDto::Unresolved { .. } => {
+                        if source_start != 0 || source_count != 0 || fade_in != 0 || fade_out != 0 {
+                            return Err(GenerationIssue::Corrupt);
+                        }
                     }
                 }
             }
@@ -7019,8 +7780,31 @@ fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
                     return Err(GenerationIssue::Corrupt);
                 }
             }
-            let steps_per_bar = clip.steps_per_bar.unwrap_or(16) as f64;
+            let steps_per_bar = clip.steps_per_bar.unwrap_or(16);
+            let drum_projector = if project.schema_version == 3 && !drums.is_empty() {
+                Some(
+                    DrumStepTimelineProjector::compile(
+                        steps_per_bar,
+                        clip.start_beat,
+                        project
+                            .time_signature_map
+                            .as_deref()
+                            .ok_or(GenerationIssue::Corrupt)?,
+                    )
+                    .ok_or(GenerationIssue::Corrupt)?,
+                )
+            } else {
+                None
+            };
             for drum in drums {
+                let drum_beat_in_clip = if project.schema_version == 3 {
+                    drum_projector
+                        .as_ref()
+                        .and_then(|projector| projector.project(drum.step_index))
+                        .map(|beat| beat - clip.start_beat)
+                } else {
+                    Some(drum.step_index as f64 * (beats_per_bar / steps_per_bar as f64))
+                };
                 if !valid_project_string(&drum.id, MAX_STRING_CHARS, false)
                     || !ids.insert(drum.id.as_str())
                     || !matches!(
@@ -7030,7 +7814,8 @@ fn validate_project_v1(value: &Value) -> Result<(), GenerationIssue> {
                     || drum.step_index < 0
                     || !(1..=127).contains(&drum.velocity)
                     || drum.probability.is_some_and(|value| !unit_interval(value))
-                    || drum.step_index as f64 * (beats_per_bar / steps_per_bar) >= clip.length_beats
+                    || drum_beat_in_clip
+                        .is_none_or(|beat| !beat.is_finite() || beat >= clip.length_beats)
                 {
                     return Err(GenerationIssue::Corrupt);
                 }
@@ -7103,12 +7888,24 @@ fn project_has_explicit_null_optionals(value: &Value) -> bool {
         keys.iter()
             .any(|key| record.get(*key).is_some_and(Value::is_null))
     };
+    if has_null(
+        project,
+        &[
+            "lengthBeats",
+            "tempoMap",
+            "timeSignatureMap",
+            "audioAssets",
+            "automationLanes",
+        ],
+    ) {
+        return true;
+    }
     if let Some(Value::Array(tracks)) = project.get("tracks") {
         for track in tracks {
             let Some(track) = track.as_object() else {
                 continue;
             };
-            if has_null(track, &["color", "instrument"]) {
+            if has_null(track, &["role", "color", "instrument"]) {
                 return true;
             }
             if let Some(Value::Object(instrument)) = track.get("instrument") {
@@ -7130,6 +7927,11 @@ fn project_has_explicit_null_optionals(value: &Value) -> bool {
                             "stepsPerBar",
                             "drumGroove",
                             "audioAssetId",
+                            "sourceStartFrame",
+                            "sourceFrameCount",
+                            "fadeInFrames",
+                            "fadeOutFrames",
+                            "gainDb",
                         ],
                     ) {
                         return true;
@@ -7144,6 +7946,15 @@ fn project_has_explicit_null_optionals(value: &Value) -> bool {
                     }
                 }
             }
+        }
+    }
+    if let Some(Value::Array(assets)) = project.get("audioAssets") {
+        if assets.iter().any(|asset| {
+            asset
+                .as_object()
+                .is_some_and(|asset| has_null(asset, &["legacyAssetId"]))
+        }) {
+            return true;
         }
     }
     if let Some(Value::Array(chords)) = project.get("chordTrack") {
@@ -7189,6 +8000,13 @@ fn valid_track_color(value: &str) -> bool {
         return false;
     };
     matches!(hex.len(), 3 | 4 | 6 | 8) && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn canonical_utc_timestamp(value: &str) -> bool {

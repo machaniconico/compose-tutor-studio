@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Project } from '@cts/project-model';
+import {
+  validateProject,
+  type AudioClip,
+  type Project,
+  type ReadyAudioAsset,
+  type Track,
+} from '@cts/project-model';
 import {
   DEFAULT_MIDI_PARSE_LIMITS,
   MAX_MIDI_EXPORT_EVENTS,
@@ -40,11 +46,22 @@ function projectWithLoop(lengthBeats: number): Project {
     key: 'C',
     scale: 'major',
     lengthBars: 8,
+    lengthBeats: Math.max(32, lengthBeats),
+    tempoMap: [{ id: 'bounded-tempo-0', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'bounded-meter-0',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       {
         id: 'lead',
         name: 'Lead',
         type: 'instrument',
+        role: 'general',
         clips: [
           {
             id: 'loop',
@@ -70,6 +87,56 @@ function projectWithLoop(lengthBeats: number): Project {
     createdAt: '2026-07-10T00:00:00.000Z',
     updatedAt: '2026-07-10T00:00:00.000Z',
   };
+}
+
+type ReadyAudioFixture = Readonly<{
+  track: Track;
+  clip: AudioClip;
+  asset: ReadyAudioAsset;
+}>;
+
+function addReadyAudioFixture(project: Project): ReadyAudioFixture {
+  project.schemaVersion = 3;
+  const asset: ReadyAudioAsset = {
+    id: 'asset-1',
+    availability: 'ready',
+    checksumSha256: 'a'.repeat(64),
+    originalName: 'reference.wav',
+    mediaType: 'audio/wav',
+    byteLength: 384_000,
+    sampleRate: 48_000,
+    channelCount: 2,
+    frameCount: 96_000,
+  };
+  const clip: AudioClip = {
+    id: 'audio-clip',
+    trackId: 'audio-track',
+    type: 'audio',
+    startBeat: 0,
+    lengthBeats: 4,
+    loop: false,
+    audioAssetId: asset.id,
+    sourceStartFrame: 4_800,
+    sourceFrameCount: 48_000,
+    fadeInFrames: 480,
+    fadeOutFrames: 960,
+    gainDb: -3,
+  };
+  const track: Track = {
+    id: 'audio-track',
+    name: 'Audio',
+    type: 'audio',
+    role: 'general',
+    clips: [clip],
+    volume: 1,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: [],
+  };
+  project.audioAssets.push(asset);
+  project.tracks.push(track);
+  return { track, clip, asset };
 }
 
 type MidiTextField = 'project title' | 'track name' | 'chord marker';
@@ -352,6 +419,54 @@ describe('bounded MIDI project export', () => {
     });
   });
 
+  it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects drum stepIndex %s instead of projecting it at the clip start',
+    (stepIndex) => {
+      const project = projectWithLoop(4);
+      const track = project.tracks[0]!;
+      track.type = 'drum';
+      track.clips = [{
+        id: 'invalid-step-clip',
+        trackId: track.id,
+        type: 'drum',
+        startBeat: 0,
+        lengthBeats: 4,
+        loop: false,
+        stepsPerBar: 16,
+        drumEvents: [{ id: 'invalid-step', lane: 'kick', stepIndex, velocity: 100 }],
+      }];
+
+      expect(projectToMidiResult(project)).toEqual({
+        ok: false,
+        error: expect.objectContaining({ code: 'invalid-project' }),
+      });
+    },
+  );
+
+  it.each([0, 16.5, 129, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects drum stepsPerBar %s outside the project-model bound',
+    (stepsPerBar) => {
+      const project = projectWithLoop(4);
+      const track = project.tracks[0]!;
+      track.type = 'drum';
+      track.clips = [{
+        id: 'invalid-resolution-clip',
+        trackId: track.id,
+        type: 'drum',
+        startBeat: 0,
+        lengthBeats: 4,
+        loop: false,
+        stepsPerBar,
+        drumEvents: [{ id: 'kick', lane: 'kick', stepIndex: 0, velocity: 100 }],
+      }];
+
+      expect(projectToMidiResult(project)).toEqual({
+        ok: false,
+        error: expect.objectContaining({ code: 'invalid-project' }),
+      });
+    },
+  );
+
   it('rejects an unknown runtime drum lane instead of writing an undefined pitch byte', () => {
     const project = projectWithLoop(4);
     const track = project.tracks[0]!;
@@ -462,26 +577,9 @@ describe('bounded MIDI project export', () => {
       lengthBeats: 4,
       loop: false,
     });
-    project.tracks.push({
-      id: 'audio-track',
-      name: 'Audio',
-      type: 'audio',
-      clips: [{
-        id: 'audio-clip',
-        trackId: 'audio-track',
-        type: 'audio',
-        startBeat: 0,
-        lengthBeats: 4,
-        loop: false,
-        audioAssetId: 'asset-1',
-      }],
-      volume: 1,
-      pan: 0,
-      mute: false,
-      solo: false,
-      effects: [],
-    });
+    addReadyAudioFixture(project);
 
+    expect(validateProject(project).ok).toBe(true);
     const result = projectToMidiResult(project);
     expect(result).toMatchObject({ ok: true });
     if (!result.ok) return;
@@ -489,6 +587,183 @@ describe('bounded MIDI project export', () => {
     const parsed = parseMidiFile(result.bytes);
     expect(parsed.tracks.some((track) => track.name === 'Audio')).toBe(false);
     expect(parsed.tracks.filter((track) => track.notes.length > 0)).toHaveLength(1);
+  });
+
+  it('accepts a zero-range unresolved audio clip on a legacy instrument track', () => {
+    const project = projectWithLoop(4);
+    const { track, clip } = addReadyAudioFixture(project);
+    track.type = 'instrument';
+    clip.sourceStartFrame = 0;
+    clip.sourceFrameCount = 0;
+    clip.fadeInFrames = 0;
+    clip.fadeOutFrames = 0;
+    clip.gainDb = 0;
+    project.audioAssets = [{
+      id: clip.audioAssetId,
+      availability: 'unresolved',
+      legacyAssetId: 'legacy-reference.wav',
+      reason: 'legacy-reference',
+    }];
+
+    expect(validateProject(project).ok).toBe(true);
+    expect(projectToMidiResult(project)).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    'audioAssetId',
+    'sourceStartFrame',
+    'sourceFrameCount',
+    'fadeInFrames',
+    'fadeOutFrames',
+    'gainDb',
+  ] as const)('rejects an audio clip missing required field %s', (field) => {
+    const project = projectWithLoop(4);
+    const { clip } = addReadyAudioFixture(project);
+    delete (clip as Partial<AudioClip>)[field];
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
+  });
+
+  it.each([
+    'audioAssetId',
+    'sourceStartFrame',
+    'sourceFrameCount',
+    'fadeInFrames',
+    'fadeOutFrames',
+    'gainDb',
+  ] as const)('rejects audio-only field %s on a MIDI clip', (field) => {
+    const project = projectWithLoop(4);
+    const clip = project.tracks[0]!.clips[0]! as unknown as Record<string, unknown>;
+    clip[field] = field === 'audioAssetId' ? 'asset-1' : 0;
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
+  });
+
+  it('rejects dangling audio assets and ready audio on a legacy instrument track', () => {
+    const dangling = projectWithLoop(4);
+    const { clip: danglingClip } = addReadyAudioFixture(dangling);
+    danglingClip.audioAssetId = 'missing-asset';
+    expect(projectToMidiResult(dangling)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
+
+    const wrongTrack = projectWithLoop(4);
+    const { track } = addReadyAudioFixture(wrongTrack);
+    track.type = 'instrument';
+    expect(projectToMidiResult(wrongTrack)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
+  });
+
+  it.each([
+    {
+      label: 'negative source start',
+      mutate: ({ clip }: ReadyAudioFixture) => { clip.sourceStartFrame = -1; },
+    },
+    {
+      label: 'zero ready source length',
+      mutate: ({ clip }: ReadyAudioFixture) => { clip.sourceFrameCount = 0; },
+    },
+    {
+      label: 'out-of-asset source range',
+      mutate: ({ clip }: ReadyAudioFixture) => { clip.sourceStartFrame = 80_000; },
+    },
+    {
+      label: 'negative fade',
+      mutate: ({ clip }: ReadyAudioFixture) => { clip.fadeInFrames = -1; },
+    },
+    {
+      label: 'combined fades beyond source range',
+      mutate: ({ clip }: ReadyAudioFixture) => {
+        clip.fadeInFrames = 30_000;
+        clip.fadeOutFrames = 30_000;
+      },
+    },
+    {
+      label: 'gain below the project bound',
+      mutate: ({ clip }: ReadyAudioFixture) => { clip.gainDb = -97; },
+    },
+    {
+      label: 'non-finite gain',
+      mutate: ({ clip }: ReadyAudioFixture) => { clip.gainDb = Number.NaN; },
+    },
+  ])('rejects $label in a ready audio clip', ({ mutate }) => {
+    const project = projectWithLoop(4);
+    const fixture = addReadyAudioFixture(project);
+    mutate(fixture);
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
+  });
+
+  it.each(['sourceStartFrame', 'sourceFrameCount', 'fadeInFrames', 'fadeOutFrames'] as const)(
+    'rejects non-zero %s on an unresolved audio clip',
+    (field) => {
+      const project = projectWithLoop(4);
+      const { track, clip } = addReadyAudioFixture(project);
+      track.type = 'instrument';
+      project.audioAssets = [{
+        id: clip.audioAssetId,
+        availability: 'unresolved',
+        reason: 'missing-reference',
+      }];
+      clip.sourceStartFrame = 0;
+      clip.sourceFrameCount = 0;
+      clip.fadeInFrames = 0;
+      clip.fadeOutFrames = 0;
+      clip[field] = 1;
+
+      expect(projectToMidiResult(project)).toEqual({
+        ok: false,
+        error: expect.objectContaining({ code: 'invalid-project' }),
+      });
+    },
+  );
+
+  it.each([
+    {
+      label: 'missing ready frameCount',
+      mutate: (asset: Record<string, unknown>) => { delete asset.frameCount; },
+    },
+    {
+      label: 'uppercase checksum',
+      mutate: (asset: Record<string, unknown>) => { asset.checksumSha256 = 'A'.repeat(64); },
+    },
+    {
+      label: 'unsupported media type',
+      mutate: (asset: Record<string, unknown>) => { asset.mediaType = 'audio/ogg'; },
+    },
+    {
+      label: 'out-of-range sample rate',
+      mutate: (asset: Record<string, unknown>) => { asset.sampleRate = 7_999; },
+    },
+    {
+      label: 'fractional channel count',
+      mutate: (asset: Record<string, unknown>) => { asset.channelCount = 1.5; },
+    },
+    {
+      label: 'unsupported availability',
+      mutate: (asset: Record<string, unknown>) => { asset.availability = 'cached'; },
+    },
+  ])('rejects audio asset metadata with $label', ({ mutate }) => {
+    const project = projectWithLoop(4);
+    const { asset } = addReadyAudioFixture(project);
+    mutate(asset as unknown as Record<string, unknown>);
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
   });
 
   it('rejects a 129th independent drum port instead of wrapping the port byte', () => {

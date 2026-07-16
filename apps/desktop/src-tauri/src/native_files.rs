@@ -1155,6 +1155,27 @@ mod tests {
         "updatedAt":"2026-07-10T00:00:00.000Z"
     }"#;
 
+    const VALID_PROJECT_V3: &[u8] = br#"{
+        "id":"project-v3-test",
+        "schemaVersion":3,
+        "title":"Test v3",
+        "bpm":120,
+        "timeSignature":[4,4],
+        "key":"C",
+        "scale":"major",
+        "lengthBars":1,
+        "lengthBeats":4,
+        "tempoMap":[{"id":"tempo-v3","beat":0,"bpm":120}],
+        "timeSignatureMap":[{"id":"signature-v3","beat":0,"numerator":4,"denominator":4}],
+        "audioAssets":[],
+        "automationLanes":[],
+        "tracks":[],
+        "chordTrack":[],
+        "sections":[],
+        "createdAt":"2026-07-10T00:00:00.000Z",
+        "updatedAt":"2026-07-10T00:00:00.000Z"
+    }"#;
+
     fn valid_midi() -> Vec<u8> {
         let mut bytes = b"MThd".to_vec();
         bytes.extend_from_slice(&[0, 0, 0, 6, 0, 0, 0, 1, 0, 96]);
@@ -1499,6 +1520,7 @@ mod tests {
     #[test]
     fn validates_project_midi_and_wav_contents() {
         assert!(validate_file_bytes(FileFormat::Project, VALID_PROJECT).is_ok());
+        assert!(validate_file_bytes(FileFormat::Project, VALID_PROJECT_V3).is_ok());
         assert!(validate_file_bytes(FileFormat::Project, b"{}").is_err());
         assert!(validate_file_bytes(FileFormat::Project, b"\xff").is_err());
 

@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "createdAt": "2026-07-10T00:00:00.000Z",
   "cases": [
     {
@@ -13,14 +13,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-mirror\",\"schemaVersion\":2,\"title\":\"Mirror only\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-mirror\",\"schemaVersion\":3,\"title\":\"Mirror only\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
         "recoveryReason": "legacy-project",
         "branchCount": 0
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-mirror\",\"schemaVersion\":2,\"title\":\"Mirror only\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-mirror\",\"schemaVersion\":3,\"title\":\"Mirror only\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -48,14 +48,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-head\",\"schemaVersion\":2,\"title\":\"Canonical head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-head\",\"schemaVersion\":3,\"title\":\"Canonical head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
         "recoveryReason": null,
         "branchCount": 0
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-head\",\"schemaVersion\":2,\"title\":\"Canonical head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-head\",\"schemaVersion\":3,\"title\":\"Canonical head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -83,14 +83,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-old-head\",\"schemaVersion\":2,\"title\":\"Old head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-old-head\",\"schemaVersion\":3,\"title\":\"Old head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
         "recoveryReason": null,
         "branchCount": 0
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-old-head\",\"schemaVersion\":2,\"title\":\"Old head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-old-head\",\"schemaVersion\":3,\"title\":\"Old head\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -122,14 +122,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-pagehide\",\"schemaVersion\":2,\"title\":\"Pagehide recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-pagehide\",\"schemaVersion\":3,\"title\":\"Pagehide recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
         "recoveryReason": "recovery-journal",
         "branchCount": 1
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-pagehide\",\"schemaVersion\":2,\"title\":\"Pagehide recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-pagehide\",\"schemaVersion\":3,\"title\":\"Pagehide recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -165,14 +165,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-intent\",\"schemaVersion\":2,\"title\":\"Interrupted save\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-intent\",\"schemaVersion\":3,\"title\":\"Interrupted save\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
         "recoveryReason": "head-stale",
         "branchCount": 1
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-intent\",\"schemaVersion\":2,\"title\":\"Interrupted save\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-intent\",\"schemaVersion\":3,\"title\":\"Interrupted save\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -192,14 +192,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-first-save\",\"schemaVersion\":2,\"title\":\"First save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-first-save\",\"schemaVersion\":3,\"title\":\"First save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
         "recoveryReason": "recovery-journal",
         "branchCount": 1
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-first-save\",\"schemaVersion\":2,\"title\":\"First save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-first-save\",\"schemaVersion\":3,\"title\":\"First save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -227,14 +227,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-corrupt-pointed\",\"schemaVersion\":2,\"title\":\"Recovered from corrupt generation\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-corrupt-pointed\",\"schemaVersion\":3,\"title\":\"Recovered from corrupt generation\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
         "recoveryReason": "recovery-journal",
         "branchCount": 1
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-corrupt-pointed\",\"schemaVersion\":2,\"title\":\"Recovered from corrupt generation\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-corrupt-pointed\",\"schemaVersion\":3,\"title\":\"Recovered from corrupt generation\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -269,7 +269,7 @@
         },
         {
           "kind": "branch",
-          "projectJson": "{\"id\":\"fixture-conflict\",\"schemaVersion\":2,\"title\":\"Draft A\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+          "projectJson": "{\"id\":\"fixture-conflict\",\"schemaVersion\":3,\"title\":\"Draft A\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
           "source": "recovery-journal",
           "activationId": "activation-a",
           "revision": 1,
@@ -278,7 +278,7 @@
         },
         {
           "kind": "branch",
-          "projectJson": "{\"id\":\"fixture-conflict\",\"schemaVersion\":2,\"title\":\"Draft B\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+          "projectJson": "{\"id\":\"fixture-conflict\",\"schemaVersion\":3,\"title\":\"Draft B\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
           "source": "recovery-journal",
           "activationId": "activation-b",
           "revision": 2,
@@ -382,14 +382,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-no-head-intent\",\"schemaVersion\":2,\"title\":\"No-head intent\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-no-head-intent\",\"schemaVersion\":3,\"title\":\"No-head intent\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
         "recoveryReason": "head-missing",
         "branchCount": 1
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-no-head-intent\",\"schemaVersion\":2,\"title\":\"No-head intent\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-no-head-intent\",\"schemaVersion\":3,\"title\":\"No-head intent\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -417,14 +417,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-historical-recovery\",\"schemaVersion\":2,\"title\":\"Historical recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-historical-recovery\",\"schemaVersion\":3,\"title\":\"Historical recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
         "recoveryReason": "recovery-journal",
         "branchCount": 1
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-historical-recovery\",\"schemaVersion\":2,\"title\":\"Historical recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-historical-recovery\",\"schemaVersion\":3,\"title\":\"Historical recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -452,14 +452,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-parent-fallback\",\"schemaVersion\":2,\"title\":\"Parent fallback\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-parent-fallback\",\"schemaVersion\":3,\"title\":\"Parent fallback\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
         "recoveryReason": "generation-corrupt",
         "branchCount": 0
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-parent-fallback\",\"schemaVersion\":2,\"title\":\"Parent fallback\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-parent-fallback\",\"schemaVersion\":3,\"title\":\"Parent fallback\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -568,7 +568,7 @@
         },
         {
           "kind": "branch",
-          "projectJson": "{\"id\":\"fixture-stale-known-empty\",\"schemaVersion\":2,\"title\":\"Stale first-save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+          "projectJson": "{\"id\":\"fixture-stale-known-empty\",\"schemaVersion\":3,\"title\":\"Stale first-save recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
           "source": "recovery-journal",
           "activationId": "activation-a",
           "revision": 1,
@@ -597,18 +597,18 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":2,\"title\":\"Newer mirror\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":3,\"title\":\"Newer mirror\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}",
         "recoveryReason": "legacy-project",
         "branchCount": 1
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":2,\"title\":\"Newer mirror\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":3,\"title\":\"Newer mirror\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:02.000Z\"}"
         },
         {
           "kind": "branch",
-          "projectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":2,\"title\":\"Stale recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+          "projectJson": "{\"id\":\"fixture-stale-mirror\",\"schemaVersion\":3,\"title\":\"Stale recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
           "source": "recovery-journal",
           "activationId": "activation-a",
           "revision": 1,
@@ -679,7 +679,7 @@
         },
         {
           "kind": "branch",
-          "projectJson": "{\"id\":\"fixture-future-recovery\",\"schemaVersion\":2,\"title\":\"Current recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+          "projectJson": "{\"id\":\"fixture-future-recovery\",\"schemaVersion\":3,\"title\":\"Current recovery\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
           "source": "recovery-journal",
           "activationId": "activation-a",
           "revision": 1,
@@ -708,14 +708,14 @@
       ],
       "expected": {
         "status": "ready",
-        "canonicalProjectJson": "{\"id\":\"fixture-exact-duplicate\",\"schemaVersion\":2,\"title\":\"Exact committed duplicate\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
+        "canonicalProjectJson": "{\"id\":\"fixture-exact-duplicate\",\"schemaVersion\":3,\"title\":\"Exact committed duplicate\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}",
         "recoveryReason": "recovery-journal",
         "branchCount": 1
       },
       "expectedImports": [
         {
           "kind": "head",
-          "projectJson": "{\"id\":\"fixture-exact-duplicate\",\"schemaVersion\":2,\"title\":\"Exact committed duplicate\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
+          "projectJson": "{\"id\":\"fixture-exact-duplicate\",\"schemaVersion\":3,\"title\":\"Exact committed duplicate\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:01.000Z\"}"
         }
       ],
       "expectedCompletion": {
@@ -754,7 +754,7 @@
         },
         {
           "kind": "branch",
-          "projectJson": "{\"id\":\"fixture-stale-history\",\"schemaVersion\":2,\"title\":\"Stale recovery from H1\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:03.000Z\"}",
+          "projectJson": "{\"id\":\"fixture-stale-history\",\"schemaVersion\":3,\"title\":\"Stale recovery from H1\",\"bpm\":120,\"timeSignature\":[4,4],\"key\":\"C\",\"scale\":\"major\",\"lengthBars\":8,\"lengthBeats\":32,\"tempoMap\":[{\"id\":\"migrated-tempo-1\",\"beat\":0,\"bpm\":120}],\"timeSignatureMap\":[{\"id\":\"migrated-signature-1\",\"beat\":0,\"numerator\":4,\"denominator\":4}],\"audioAssets\":[],\"automationLanes\":[],\"tracks\":[],\"chordTrack\":[],\"sections\":[],\"createdAt\":\"2026-07-10T00:00:00.000Z\",\"updatedAt\":\"2026-07-10T00:00:03.000Z\"}",
           "source": "recovery-journal",
           "activationId": "activation-r",
           "revision": 3,

@@ -210,6 +210,7 @@ describe('deterministic synthesized drum noise', () => {
     expect(offsets.slice(3, 6)).toEqual(offsets.slice(0, 3));
     expect(offsets.slice(6, 9)).not.toEqual(offsets.slice(0, 3));
     expect(new Set(offsets.slice(0, 3)).size).toBe(3);
+    expect(fake.gains.every((gain) => gain.gain.value === 0)).toBe(true);
   });
 
   it('never consults process-global randomness for buffers or voices', () => {

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { EffectConfig, Project, Track } from '@cts/project-model';
+import {
+  CURRENT_SCHEMA_VERSION,
+  type EffectConfig,
+  type Project,
+  type Track,
+} from '@cts/project-model';
 import type { NoteScheduleEvent } from '../src/audio/events';
 import {
   beginRuntimeNaturalDrain,
@@ -39,6 +44,7 @@ function instrumentTrack(effects: EffectConfig[] = [], mute = false): Track {
     id: 'instrument',
     name: 'Instrument',
     type: 'instrument',
+    role: 'general',
     clips: [],
     volume: 1,
     pan: 0,
@@ -54,6 +60,7 @@ function masterTrack(volume: number): Track {
     id: 'master',
     name: 'Master',
     type: 'master',
+    role: 'general',
     clips: [],
     volume,
     pan: 0,
@@ -66,13 +73,23 @@ function masterTrack(volume: number): Track {
 function project(track: Track): Project {
   return {
     id: 'live-tail-project',
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title: 'Live tail test',
     bpm: 120,
     timeSignature: [4, 4],
     key: 'C',
     scale: 'major',
     lengthBars: 1,
+    lengthBeats: 4,
+    tempoMap: [{ id: 'live-tail-tempo-0', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'live-tail-meter-0',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [track],
     chordTrack: [],
     sections: [],

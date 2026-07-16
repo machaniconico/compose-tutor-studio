@@ -9,12 +9,12 @@ import {
   type AddTrackKind,
   type Project,
   type Track,
+  type TrackRole,
   type TrackMoveDirection,
   type TrackMutationErrorCode,
   type TrackMutationResult,
 } from '@cts/project-model';
 import { listSynthPresets } from '../audio/synth';
-import { isLearningTrack, isLearningTrackName } from '../features/tracklist/trackPresentation';
 import { useStore } from './store';
 
 export type AddStudioTrackKind = AddTrackKind;
@@ -22,8 +22,7 @@ export type AddStudioTrackKind = AddTrackKind;
 export type TrackCommandErrorCode =
   | TrackMutationErrorCode
   | 'commit-rejected'
-  | 'learning-track-name-protected'
-  | 'reserved-learning-track-name';
+  | 'invalid-track-role';
 
 export type TrackCommandResult =
   | Readonly<{
@@ -128,14 +127,12 @@ export function addStudioTrack(input: AddStudioTrackInput): TrackCommandResult {
   return successResult(added.id, added.name, mutation.changed, playbackWasActive);
 }
 
-/** Rename a non-master track while preserving name-based schema-v2 learning roles. */
+/** Rename a non-master track; schema-v3 learning roles remain attached by id. */
 export function renameStudioTrack(trackId: string, name: string): TrackCommandResult {
   const snapshot = useStore.getState().project;
   const source = projectTrack(snapshot, trackId);
   if (!source) return failed('track-not-found');
   if (source.type === 'master') return failed('master-protected');
-  if (isLearningTrack(source)) return failed('learning-track-name-protected');
-  if (isLearningTrackName(name)) return failed('reserved-learning-track-name');
 
   const mutation = renameTrack(snapshot, trackId, name);
   if (!mutation.ok) return mutationFailure(mutation);
@@ -253,6 +250,40 @@ export function setStudioTrackPreset(trackId: string, preset: string): TrackComm
   return successResult(adopted.id, adopted.name, mutation.changed, playbackWasActive);
 }
 
+/** Assign or transfer one semantic learning role without coupling it to the name. */
+export function setStudioTrackRole(
+  trackId: string,
+  role: TrackRole,
+): TrackCommandResult {
+  const startingState = useStore.getState();
+  const snapshot = startingState.project;
+  const playbackWasActive = startingState.transport.phase !== 'stopped';
+  const source = projectTrack(snapshot, trackId);
+  if (!source) return failed('track-not-found');
+  if (source.type === 'master') return failed('master-protected');
+  if (role !== 'general' && source.type !== 'instrument') {
+    return failed('invalid-track-role');
+  }
+  if (source.role === role) return successResult(source.id, source.name, false);
+
+  const project: Project = {
+    ...snapshot,
+    tracks: snapshot.tracks.map((track) => {
+      if (track.id === trackId) return { ...track, role };
+      if (role !== 'general' && track.role === role) return { ...track, role: 'general' };
+      return track;
+    }),
+  };
+  const mutation: Extract<TrackMutationResult, { ok: true }> = {
+    ok: true,
+    project,
+    trackId,
+    changed: true,
+  };
+  if (!commitMutation(snapshot, mutation)) return failed('commit-rejected');
+  return successResult(source.id, source.name, true, playbackWasActive);
+}
+
 /** Plain-language recovery guidance for every rejected command. */
 export function trackCommandErrorMessage(code: TrackCommandErrorCode): string {
   switch (code) {
@@ -268,6 +299,8 @@ export function trackCommandErrorMessage(code: TrackCommandErrorCode): string {
       return '名前は空白以外の128文字以内で入力してください。';
     case 'invalid-preset':
       return '選択した音色は利用できません。一覧から選び直してください。';
+    case 'invalid-track-role':
+      return 'コード・ベース・メロディの役割は、楽器トラックにだけ設定できます。';
     case 'unsupported-track-kind':
     case 'unsupported-track-type':
       return 'この種類のトラックでは、その操作を利用できません。';

@@ -6,6 +6,7 @@ import {
   applyMasterMix,
   clampPan,
   clampVolume,
+  hasLiveMixChanged,
   resolveMasterMix,
   resolveTrackMix,
 } from '../src/audio/mixState';
@@ -15,17 +16,19 @@ function track(
   type: Track['type'] = 'instrument',
   overrides: Partial<Track> = {},
 ): Track {
+  const { role, ...rest } = overrides;
   return {
     id,
     name: id,
     type,
+    role: role ?? 'general',
     clips: [],
     volume: 1,
     pan: 0,
     mute: false,
     solo: false,
     effects: [],
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -41,6 +44,22 @@ function fakeParam(initial = 1) {
 }
 
 describe('master mix policy', () => {
+  it('detects only fields that update an existing live mixer graph', () => {
+    const source = [track('source')];
+    expect(hasLiveMixChanged(source, source)).toBe(false);
+    expect(hasLiveMixChanged(source, [{ ...source[0]!, name: 'Renamed' }])).toBe(false);
+    expect(hasLiveMixChanged(source, [{ ...source[0]!, volume: 0.5 }])).toBe(true);
+    expect(hasLiveMixChanged(source, [{
+      ...source[0]!,
+      effects: [{
+        id: 'effect',
+        type: 'filter',
+        enabled: true,
+        params: { cutoff: 0.5, resonance: 0.2 },
+      }],
+    }])).toBe(true);
+  });
+
   it('uses unity without a master and the first master volume exactly once', () => {
     expect(resolveMasterMix([track('melody')])).toEqual({ trackId: null, gain: 1 });
     expect(

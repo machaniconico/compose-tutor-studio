@@ -44,11 +44,22 @@ describe('parseMidiFile', () => {
       key: 'C',
       scale: 'major',
       lengthBars: 2,
+      lengthBeats: 8,
+      tempoMap: [{ id: 'round-trip-tempo-0', beat: 0, bpm: 90 }],
+      timeSignatureMap: [{
+        id: 'round-trip-meter-0',
+        beat: 0,
+        numerator: 4,
+        denominator: 4,
+      }],
+      audioAssets: [],
+      automationLanes: [],
       tracks: [
         {
           id: 'lead',
           name: 'Lead',
           type: 'instrument',
+          role: 'general',
           clips: [
             {
               id: 'clip-1',
@@ -73,6 +84,7 @@ describe('parseMidiFile', () => {
           id: 'drums',
           name: 'Drums',
           type: 'drum',
+          role: 'general',
           clips: [
             {
               id: 'clip-2',

@@ -87,6 +87,27 @@ describe('Arranger clip workflow', () => {
     expect(html).toMatch(/<button[^>]*>連動コピーを右へ<\/button>/);
   });
 
+  it('keeps a valid partial-bar clip editable as a fractional bar range', () => {
+    const fixture = fourBarSource();
+    const partialProject = {
+      ...fixture.project,
+      tracks: fixture.project.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) =>
+          clip.id === fixture.clipId
+            ? { ...clip, startBeat: 2, lengthBeats: 2 }
+            : clip,
+        ),
+      })),
+    };
+    activate(partialProject, fixture.clipId);
+
+    const html = renderToStaticMarkup(<Arranger />);
+
+    expect(html.match(/value="0\.5"/g)).toHaveLength(2);
+    expect(html.match(/step="any"/g)).toHaveLength(2);
+  });
+
   it('shows a linked badge and unlink action without duplicating payload', () => {
     const fixture = fourBarSource();
     const linked = duplicateClip(fixture.project, fixture.clipId, {

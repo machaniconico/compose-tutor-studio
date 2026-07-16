@@ -163,6 +163,7 @@ function track(effects: EffectConfig[] = []): Track {
     id: 'track-1',
     name: 'Track 1',
     type: 'instrument',
+    role: 'general',
     clips: [],
     volume: 1,
     pan: 0,

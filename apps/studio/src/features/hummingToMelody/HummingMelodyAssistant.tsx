@@ -5,7 +5,12 @@ import {
   useState,
   type ChangeEvent,
 } from 'react';
-import { findLearningTrack } from '@cts/project-model';
+import {
+  beatToSecondsAt,
+  compileMusicalTime,
+  findLearningTrack,
+  secondsToBeatAt,
+} from '@cts/project-model';
 import { midiToNoteName } from '@cts/theory-engine';
 import {
   SOURCE_AUDIO_ACCEPT,
@@ -555,8 +560,13 @@ export function HummingMelodyAssistant() {
       if (!clip || clip.type !== 'midi' || !target) {
         throw new HummingAssistantError('apply-failed');
       }
+      const musicalTime = compileMusicalTime(current.project);
+      const clipStartSeconds = beatToSecondsAt(musicalTime, clip.startBeat);
       const events = hummingMelodyToNoteEvents(detection.notes, {
         bpm: current.project.bpm,
+        secondsToBeat: (seconds) => (
+          secondsToBeatAt(musicalTime, clipStartSeconds + seconds) - clip.startBeat
+        ),
         clipLengthBeats: clip.lengthBeats,
         quantize,
         createId: () => uid('note'),

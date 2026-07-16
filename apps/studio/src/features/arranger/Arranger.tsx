@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import type { Clip, Section, Track } from '@cts/project-model';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Clip, MusicalTimeIndex, Section, Track } from '@cts/project-model';
 import {
   addSection,
-  beatsPerBar,
+  barToBeatAt,
+  beatToBarPosition,
+  compileMusicalTime,
   duplicateClip,
   resizeClip,
   setMidiClipLoop,
@@ -46,6 +48,52 @@ function locateClip(
     if (clip) return { track, clip };
   }
   return null;
+}
+
+function beatAsBarNumber(musicalTime: MusicalTimeIndex, beat: number): number {
+  const position = beatToBarPosition(musicalTime, beat);
+  const barStart = barToBeatAt(musicalTime, position.bar);
+  const barEnd = barToBeatAt(musicalTime, position.bar + 1);
+  const barLength = barEnd - barStart;
+  return position.bar + (barLength > 0 ? position.beatInBar / barLength : 0);
+}
+
+function beatAtBarNumber(musicalTime: MusicalTimeIndex, barNumber: number): number {
+  const bar = Math.floor(barNumber);
+  const fraction = barNumber - bar;
+  const barStart = barToBeatAt(musicalTime, bar);
+  if (fraction === 0) return barStart;
+  const barEnd = barToBeatAt(musicalTime, bar + 1);
+  return barStart + (barEnd - barStart) * fraction;
+}
+
+export type ClipBarRange = Readonly<{
+  startBeat: number;
+  lengthBeats: number;
+}>;
+
+/** Convert whole or fractional bar drafts without calling the integer-only bar API incorrectly. */
+export function clipBarRangeToBeats(
+  musicalTime: MusicalTimeIndex,
+  startBar: number,
+  lengthBars: number,
+): ClipBarRange | null {
+  const endBar = startBar + lengthBars;
+  if (
+    !Number.isFinite(startBar)
+    || startBar < 0
+    || startBar > Number.MAX_SAFE_INTEGER
+    || !Number.isFinite(lengthBars)
+    || lengthBars <= 0
+    || !Number.isFinite(endBar)
+    || endBar > Number.MAX_SAFE_INTEGER
+  ) {
+    return null;
+  }
+  const startBeat = beatAtBarNumber(musicalTime, startBar);
+  const endBeat = beatAtBarNumber(musicalTime, endBar);
+  if (!Number.isFinite(startBeat) || !Number.isFinite(endBeat) || endBeat <= startBeat) return null;
+  return { startBeat, lengthBeats: endBeat - startBeat };
 }
 
 export type ClipNotice =
@@ -167,10 +215,12 @@ export function Arranger() {
   const sectionButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const addSectionButtonRef = useRef<HTMLButtonElement>(null);
 
-  const bpb = beatsPerBar(project.timeSignature);
+  const musicalTime = useMemo(
+    () => compileMusicalTime(project),
+    [project.lengthBeats, project.tempoMap, project.timeSignatureMap],
+  );
   const ppb = pxPerBeat(zoomX);
-  const barPx = bpb * ppb;
-  const laneWidth = project.lengthBars * barPx;
+  const laneWidth = project.lengthBeats * ppb;
   const clipTracks = project.tracks.filter(
     (track) => track.type !== 'master' && track.clips.length > 0,
   );
@@ -366,7 +416,11 @@ export function Arranger() {
       <div className="arranger__timeline" style={{ width: laneWidth }}>
         {/* bar guides */}
         {Array.from({ length: project.lengthBars + 1 }, (_, bar) => (
-          <div key={`bar-${bar}`} className="arranger__bar" style={{ left: bar * barPx }}>
+          <div
+            key={`bar-${bar}`}
+            className="arranger__bar"
+            style={{ left: barToBeatAt(musicalTime, bar) * ppb }}
+          >
             {bar % 4 === 0 ? <span className="arranger__bar-num">{bar + 1}</span> : null}
           </div>
         ))}
@@ -380,7 +434,13 @@ export function Arranger() {
               else sectionButtonRefs.current.delete(section.id);
             }}
             className={`arranger__section is-${section.type}${editingId === section.id ? ' is-editing' : ''}`}
-            style={{ left: section.startBar * barPx, width: section.lengthBars * barPx }}
+            style={{
+              left: barToBeatAt(musicalTime, section.startBar) * ppb,
+              width: (
+                barToBeatAt(musicalTime, section.startBar + section.lengthBars)
+                - barToBeatAt(musicalTime, section.startBar)
+              ) * ppb,
+            }}
             onClick={() => setEditingId(section.id === editingId ? null : section.id)}
             aria-expanded={editingId === section.id}
             aria-controls={editingId === section.id ? 'arranger-section-editor' : undefined}
@@ -410,7 +470,7 @@ export function Arranger() {
                     key={bar}
                     aria-hidden="true"
                     className="arranger__lane-bar"
-                    style={{ left: bar * barPx }}
+                    style={{ left: barToBeatAt(musicalTime, bar) * ppb }}
                   />
                 ))}
                 {track.clips.map((clip, index) => (
@@ -427,7 +487,7 @@ export function Arranger() {
                       width: clip.lengthBeats * ppb,
                     }}
                     aria-pressed={selectedClipId === clip.id}
-                    aria-label={`${track.name}、クリップ${index + 1}、${(clip.startBeat / bpb).toFixed(1)}小節から${(clip.lengthBeats / bpb).toFixed(1)}小節${clip.aliasOf ? '、連動コピー' : ''}`}
+                    aria-label={`${track.name}、クリップ${index + 1}、${beatAsBarNumber(musicalTime, clip.startBeat).toFixed(1)}小節から${(beatAsBarNumber(musicalTime, clip.startBeat + clip.lengthBeats) - beatAsBarNumber(musicalTime, clip.startBeat)).toFixed(1)}小節${clip.aliasOf ? '、連動コピー' : ''}`}
                     onClick={() => selectArrangerClip(track, clip)}
                     onDoubleClick={() => {
                       selectArrangerClip(track, clip);
@@ -449,8 +509,8 @@ export function Arranger() {
           key={selected.clip.id}
           clip={selected.clip}
           trackName={selected.track.name}
-          beatsInBar={bpb}
-          projectLengthBeats={project.lengthBars * bpb}
+          musicalTime={musicalTime}
+          projectLengthBeats={project.lengthBeats}
           onCommit={resizeSelected}
           onDuplicate={(linked) => duplicateSelected(linked)}
           onUnlink={unlinkSelected}
@@ -494,7 +554,7 @@ export function Arranger() {
 function ClipEditor(props: {
   clip: Clip;
   trackName: string;
-  beatsInBar: number;
+  musicalTime: MusicalTimeIndex;
   projectLengthBeats: number;
   onCommit: (startBeat: number, lengthBeats: number) => boolean;
   onDuplicate: (linked: boolean) => void;
@@ -504,28 +564,36 @@ function ClipEditor(props: {
   const {
     clip,
     trackName,
-    beatsInBar,
+    musicalTime,
     projectLengthBeats,
     onCommit,
     onDuplicate,
     onUnlink,
     onLoopChange,
   } = props;
-  const [startBars, setStartBars] = useState(String(clip.startBeat / beatsInBar));
-  const [lengthBars, setLengthBars] = useState(String(clip.lengthBeats / beatsInBar));
+  const clipStartBar = beatAsBarNumber(musicalTime, clip.startBeat);
+  const clipEndBar = beatAsBarNumber(musicalTime, clip.startBeat + clip.lengthBeats);
+  const [startBars, setStartBars] = useState(String(clipStartBar));
+  const [lengthBars, setLengthBars] = useState(String(clipEndBar - clipStartBar));
 
-  useEffect(() => setStartBars(String(clip.startBeat / beatsInBar)), [clip.startBeat, beatsInBar]);
+  useEffect(() => setStartBars(String(clipStartBar)), [clip.startBeat, clipStartBar]);
   useEffect(
-    () => setLengthBars(String(clip.lengthBeats / beatsInBar)),
-    [clip.lengthBeats, beatsInBar],
+    () => setLengthBars(String(clipEndBar - clipStartBar)),
+    [clip.lengthBeats, clipEndBar, clipStartBar],
   );
 
   const commit = (): void => {
-    const start = Number(startBars) * beatsInBar;
-    const length = Number(lengthBars) * beatsInBar;
-    if (!onCommit(start, length)) {
-      setStartBars(String(clip.startBeat / beatsInBar));
-      setLengthBars(String(clip.lengthBeats / beatsInBar));
+    const startBar = Number(startBars);
+    const lengthInBars = Number(lengthBars);
+    const range = clipBarRangeToBeats(musicalTime, startBar, lengthInBars);
+    if (!range) {
+      setStartBars(String(clipStartBar));
+      setLengthBars(String(clipEndBar - clipStartBar));
+      return;
+    }
+    if (!onCommit(range.startBeat, range.lengthBeats)) {
+      setStartBars(String(clipStartBar));
+      setLengthBars(String(clipEndBar - clipStartBar));
     }
   };
   const duplicateStart = clip.startBeat + clip.lengthBeats;
@@ -543,7 +611,7 @@ function ClipEditor(props: {
           <input
             type="number"
             min={0}
-            step={1}
+            step="any"
             value={startBars}
             onChange={(event) => setStartBars(event.target.value)}
             onBlur={commit}
@@ -556,8 +624,8 @@ function ClipEditor(props: {
           <span>長さ（小節）</span>
           <input
             type="number"
-            min={1}
-            step={1}
+            min={0}
+            step="any"
             value={lengthBars}
             disabled={clip.aliasOf !== undefined}
             onChange={(event) => setLengthBars(event.target.value)}

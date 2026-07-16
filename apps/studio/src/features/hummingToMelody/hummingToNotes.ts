@@ -46,6 +46,8 @@ export function hummingMelodyToNoteEvents(
   melody: readonly HummingMelodyNote[],
   options: Readonly<{
     bpm: number;
+    /** Optional project-timeline mapping for tempo-map aware insertion. */
+    secondsToBeat?: (seconds: number) => number;
     clipLengthBeats: number;
     quantize: HummingQuantize;
     createId: () => string;
@@ -66,6 +68,8 @@ export function hummingMelodyToNoteEvents(
   const grid = options.quantize === 'off' ? null : QUANTIZE_BEATS[options.quantize];
   if (grid === undefined) throw new HummingNoteMappingError('invalid-input');
   const beatsPerSecond = options.bpm / 60;
+  const secondsToBeat = options.secondsToBeat
+    ?? ((seconds: number): number => seconds * beatsPerSecond);
   const candidates: Candidate[] = melody.map((note) => {
     if (
       !Number.isFinite(note.startSeconds) ||
@@ -81,8 +85,22 @@ export function hummingMelodyToNoteEvents(
     ) {
       throw new HummingNoteMappingError('invalid-input');
     }
-    const rawStart = note.startSeconds * beatsPerSecond;
-    const rawEnd = (note.startSeconds + note.durationSeconds) * beatsPerSecond;
+    let rawStart: number;
+    let rawEnd: number;
+    try {
+      rawStart = secondsToBeat(note.startSeconds);
+      rawEnd = secondsToBeat(note.startSeconds + note.durationSeconds);
+    } catch {
+      throw new HummingNoteMappingError('invalid-input');
+    }
+    if (
+      !Number.isFinite(rawStart)
+      || rawStart < 0
+      || !Number.isFinite(rawEnd)
+      || rawEnd <= rawStart
+    ) {
+      throw new HummingNoteMappingError('invalid-input');
+    }
     const startBeat = Math.max(0, snap(rawStart, grid));
     const minimumDuration = grid ?? MIN_EVENT_DURATION_BEATS;
     const endBeat = Math.max(startBeat + minimumDuration, snap(rawEnd, grid));

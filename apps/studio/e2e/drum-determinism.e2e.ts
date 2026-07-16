@@ -1,5 +1,5 @@
 import { expect, test, type Download, type Page } from '@playwright/test';
-import type { Project } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION, type Project } from '@cts/project-model';
 
 const FIXTURE_TITLE = 'Drum Determinism E2E';
 const ORIGINAL_GROOVE_SEED = 42_424;
@@ -15,18 +15,29 @@ type PcmWav = Readonly<{
 function drumOnlyProject(grooveSeed: number): Project {
   return {
     id: 'project-drum-determinism',
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title: FIXTURE_TITLE,
     bpm: 120,
     timeSignature: [4, 4],
     key: 'C',
     scale: 'major',
     lengthBars: 1,
+    lengthBeats: 4,
+    tempoMap: [{ id: 'tempo-drum-determinism', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'signature-drum-determinism',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       {
         id: 'track-deterministic-drums',
         name: 'Deterministic Drums',
         type: 'drum',
+        role: 'general',
         clips: [
           {
             id: 'clip-deterministic-drums',
@@ -68,6 +79,7 @@ function drumOnlyProject(grooveSeed: number): Project {
         id: 'track-master',
         name: 'Master',
         type: 'master',
+        role: 'general',
         clips: [],
         volume: 1,
         pan: 0,

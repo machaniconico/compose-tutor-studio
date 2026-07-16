@@ -67,7 +67,7 @@ function progressionSymbols(project: Project): string[] {
     .map((c) => c.symbol);
 }
 
-/** schema v2の学習roleを共有のtrim・case-fold規則で探す。 */
+/** 公開名をschema v3の永続roleへ解決し、表示名とは独立に探す。 */
 function trackByName(project: Project, name: LearningTrackName): Track | undefined {
   return findLearningTrack(project, name);
 }

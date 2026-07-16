@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type Ref } from 'react';
+import { useEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { useStore, type TransportState } from '../../state/store';
 import {
-  beatsPerBar,
+  beatToBarPosition,
+  compileMusicalTime,
+  type MusicalTimeIndex,
   type MusicalKey,
   type ScaleName,
 } from '@cts/project-model';
-import { formatPosition } from '../timeline';
 import { initAudioBridge } from '../../audio/playback';
 import { ProjectMenu } from '../projectMenu/ProjectMenu';
 import { ExportMenu } from '../export/ExportMenu';
@@ -40,6 +41,19 @@ type PlaybackLifecycleControlProps = {
   onPlay: () => void;
   onStop: () => void;
 };
+
+/** Format an absolute beat against the project's active time-signature map. */
+export function formatMusicalPosition(
+  musicalTime: MusicalTimeIndex,
+  beat: number,
+): string {
+  const safeBeat = Number.isFinite(beat) ? Math.max(0, beat) : 0;
+  const position = beatToBarPosition(musicalTime, safeBeat);
+  const denominator = position.timeSignature[1];
+  const quarterNotesPerNotatedBeat = 4 / denominator;
+  const beatInMeasure = Math.floor(position.beatInBar / quarterNotesPerNotatedBeat) + 1;
+  return `${position.bar + 1}.${beatInMeasure}`;
+}
 
 /** Render the async playback lifecycle independently from the rest of the bar. */
 export function PlaybackLifecycleControl({
@@ -117,7 +131,14 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   // play/cancel intent.
   useEffect(() => initAudioBridge(), []);
 
-  const projectBeatsPerBar = beatsPerBar(project.timeSignature);
+  const musicalTime = useMemo(
+    () => compileMusicalTime({
+      lengthBeats: project.lengthBeats,
+      tempoMap: project.tempoMap,
+      timeSignatureMap: project.timeSignatureMap,
+    }),
+    [project.lengthBeats, project.tempoMap, project.timeSignatureMap],
+  );
   const exportEmergencyBackup = async () => {
     if (emergencyExportLock.current) return;
     emergencyExportLock.current = true;
@@ -197,7 +218,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
         </button>
 
         <div className="position-display" aria-label="再生位置">
-          {formatPosition(transport.positionBeat, projectBeatsPerBar)}
+          {formatMusicalPosition(musicalTime, transport.positionBeat)}
         </div>
 
         <div className="field">

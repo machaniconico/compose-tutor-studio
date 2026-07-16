@@ -1,4 +1,5 @@
 import type { Track } from '@cts/project-model';
+import { effectConfigSignature } from './effects';
 
 export const MIX_RAMP_SECONDS = 0.01;
 
@@ -13,6 +14,27 @@ export type ResolvedTrackMix = Readonly<{
   gain: number;
   pan: number;
 }>;
+
+/** Whether an existing live graph needs a mixer/effect update. */
+export function hasLiveMixChanged(
+  current: readonly Track[],
+  next: readonly Track[],
+): boolean {
+  if (current === next) return false;
+  if (current.length !== next.length) return true;
+  return current.some((track, index) => {
+    const candidate = next[index];
+    return (
+      candidate === undefined ||
+      track.id !== candidate.id ||
+      track.volume !== candidate.volume ||
+      track.pan !== candidate.pan ||
+      track.mute !== candidate.mute ||
+      track.solo !== candidate.solo ||
+      effectConfigSignature(track.effects) !== effectConfigSignature(candidate.effects)
+    );
+  });
+}
 
 /** Clamp a linear gain into the project-model range, failing silent on corruption. */
 export function clampVolume(volume: unknown): number {

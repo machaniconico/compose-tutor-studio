@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type {
-  Clip,
-  DrumLane,
-  EffectConfig,
-  EffectType,
-  Project,
-  Track,
+import {
+  CURRENT_SCHEMA_VERSION,
+  type Clip,
+  type DrumLane,
+  type EffectConfig,
+  type EffectType,
+  type Project,
+  type Track,
 } from '@cts/project-model';
 import {
   buildScheduleEvents,
@@ -47,6 +48,7 @@ function instrumentTrack(effects: EffectConfig[] = []): Track {
     id: 'instrument',
     name: 'Instrument',
     type: 'instrument',
+    role: 'general',
     clips: [],
     volume: 1,
     pan: 0,
@@ -62,6 +64,7 @@ function drumTrack(effects: EffectConfig[] = []): Track {
     id: 'drums',
     name: 'Drums',
     type: 'drum',
+    role: 'general',
     clips: [],
     volume: 1,
     pan: 0,
@@ -75,13 +78,23 @@ function drumTrack(effects: EffectConfig[] = []): Track {
 function project(track: Track): Project {
   return {
     id: 'tail-project',
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title: 'Tail test',
     bpm: 120,
     timeSignature: [4, 4],
     key: 'C',
     scale: 'major',
     lengthBars: 1,
+    lengthBeats: 4,
+    tempoMap: [{ id: 'tail-tempo-0', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'tail-meter-0',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [track],
     chordTrack: [],
     sections: [],

@@ -1,6 +1,9 @@
 import {
-  beatsPerBar as beatsPerBarForTimeSignature,
+  beatToSecondsAt,
+  compileMusicalTime,
+  secondsBetweenBeats,
   type EffectConfig,
+  type MusicalTimeIndex,
   type Project,
 } from '@cts/project-model';
 import {
@@ -17,7 +20,7 @@ import {
 import type { SchedulePayload } from './events';
 import { computeAudibleTracks } from './graph';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from './masterBus';
-import { projectLengthBeats, secondsPerBeat, type ScheduledEvent } from './scheduler';
+import type { ScheduledEvent } from './scheduler';
 import { resolvePreset } from './synth';
 import {
   DRUM_SOURCE_STOP_SECONDS,
@@ -196,18 +199,18 @@ export function planAudioTail(
   project: Project,
   resolvedEvents: readonly ScheduledEvent[],
   startBeat = 0,
-  endBeat = projectLengthBeats(
-    project.lengthBars,
-    beatsPerBarForTimeSignature(project.timeSignature),
-  ),
+  endBeat = project.lengthBeats,
   sampleRate: number = DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
 ): AudioTailPlan {
   const safeStartBeat = finiteNonNegative(startBeat);
   const safeEndBeat = Number.isFinite(endBeat)
     ? Math.max(safeStartBeat, endBeat)
     : safeStartBeat;
-  const secondsPerProjectBeat = secondsPerBeat(project.bpm);
-  const rangeSeconds = (safeEndBeat - safeStartBeat) * secondsPerProjectBeat;
+  const musicalTime = compileMusicalTime(project);
+  const rangeSeconds = Math.max(
+    0,
+    secondsBetweenBeats(musicalTime, safeStartBeat, safeEndBeat),
+  );
   const tracks = new Map(project.tracks.map((track) => [track.id, track]));
   const audibleTrackIds = computeAudibleTracks(project.tracks);
   const sourceEndByTrack = new Map<string, number>();
@@ -229,7 +232,7 @@ export function planAudioTail(
       event,
       payload,
       safeStartBeat,
-      secondsPerProjectBeat,
+      musicalTime,
     );
     if (sourceEnd === null) continue;
     sourceEndByTrack.set(
@@ -320,16 +323,24 @@ function sourceEndSeconds(
   event: ScheduledEvent,
   payload: SchedulePayload,
   startBeat: number,
-  secondsPerProjectBeat: number,
+  musicalTime: MusicalTimeIndex,
 ): number | null {
   if (!Number.isFinite(event.beat)) return null;
-  const onsetSeconds = Math.max(0, (event.beat - startBeat) * secondsPerProjectBeat);
+  const onsetSeconds = Math.max(
+    0,
+    beatToSecondsAt(musicalTime, event.beat)
+      - beatToSecondsAt(musicalTime, startBeat),
+  );
   if (payload.kind === 'drum') {
     return onsetSeconds + DRUM_SOURCE_STOP_SECONDS[payload.lane];
   }
 
   const patch = resolvePreset(payload.preset);
-  const durationSeconds = finiteNonNegative(payload.durationBeats) * secondsPerProjectBeat;
+  const durationBeats = finiteNonNegative(payload.durationBeats);
+  const durationSeconds = Math.max(
+    0,
+    secondsBetweenBeats(musicalTime, event.beat, event.beat + durationBeats),
+  );
   return (
     onsetSeconds +
     Math.max(durationSeconds, patch.env.attack + patch.env.decay) +

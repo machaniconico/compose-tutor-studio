@@ -12,10 +12,11 @@ import type {
   Project,
   ScaleName,
   Track,
+  TrackRole,
   TrackType,
 } from './types';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export type CreateProjectOptions = {
   title?: string;
@@ -43,11 +44,13 @@ export function createTrack(
   type: TrackType,
   instrument?: InstrumentConfig,
   color?: string,
+  role: TrackRole = 'general',
 ): Track {
   return {
     id: makeId('track'),
     name,
     type,
+    role,
     ...(color !== undefined ? { color } : {}),
     clips: [],
     volume: 1,
@@ -108,14 +111,36 @@ export function createEmptyProject(options: CreateProjectOptions = {}): Project 
   const bpm = options.bpm ?? DEFAULTS.bpm;
   const key = options.key ?? DEFAULTS.key;
   const scale = options.scale ?? DEFAULTS.scale;
-  const timeSignature = options.timeSignature ?? DEFAULTS.timeSignature;
+  const requestedTimeSignature = options.timeSignature ?? DEFAULTS.timeSignature;
+  const timeSignature: [number, number] = [
+    requestedTimeSignature[0],
+    requestedTimeSignature[1],
+  ];
   const lengthBars = options.lengthBars ?? DEFAULTS.lengthBars;
   const lengthBeats = lengthBars * beatsPerBar(timeSignature);
   const timestamp = nowIso(clock);
 
-  const chords = createTrack('Chords', 'instrument', { type: 'synth', preset: 'pad' }, '#7c9cf0');
-  const bass = createTrack('Bass', 'instrument', { type: 'synth', preset: 'bass' }, '#f0a07c');
-  const melody = createTrack('Melody', 'instrument', { type: 'synth', preset: 'lead' }, '#7cf0a0');
+  const chords = createTrack(
+    'Chords',
+    'instrument',
+    { type: 'synth', preset: 'pad' },
+    '#7c9cf0',
+    'learning.chords',
+  );
+  const bass = createTrack(
+    'Bass',
+    'instrument',
+    { type: 'synth', preset: 'bass' },
+    '#f0a07c',
+    'learning.bass',
+  );
+  const melody = createTrack(
+    'Melody',
+    'instrument',
+    { type: 'synth', preset: 'lead' },
+    '#7cf0a0',
+    'learning.melody',
+  );
   const drums = createTrack('Drums', 'drum', { type: 'drumkit', preset: 'acoustic' }, '#f07c9c');
   const master = createTrack('Master', 'master');
 
@@ -133,6 +158,16 @@ export function createEmptyProject(options: CreateProjectOptions = {}): Project 
     key,
     scale,
     lengthBars,
+    lengthBeats,
+    tempoMap: [{ id: makeId('tempo'), beat: 0, bpm }],
+    timeSignatureMap: [{
+      id: makeId('signature'),
+      beat: 0,
+      numerator: timeSignature[0],
+      denominator: timeSignature[1],
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [chords, bass, melody, drums, master],
     chordTrack: [],
     sections: [],

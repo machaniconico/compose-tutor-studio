@@ -46,8 +46,168 @@ function migrateV1ToV2(
   return { ...project, schemaVersion: 2, tracks };
 }
 
+function collectObjectIds(
+  value: unknown,
+  result = new Set<string>(),
+  visited = new WeakSet<object>(),
+): Set<string> {
+  if (Array.isArray(value)) {
+    if (visited.has(value)) return result;
+    visited.add(value);
+    for (const item of value) collectObjectIds(item, result, visited);
+    return result;
+  }
+  if (typeof value !== 'object' || value === null) return result;
+  if (visited.has(value)) return result;
+  visited.add(value);
+  const record = value as Readonly<Record<string, unknown>>;
+  if (typeof record.id === 'string') result.add(record.id);
+  for (const nested of Object.values(record)) collectObjectIds(nested, result, visited);
+  return result;
+}
+
+function createMigrationIdAllocator(used: Set<string>, kind: string): () => string {
+  let sequence = 1;
+  return () => {
+    let candidate: string;
+    do {
+      candidate = `migrated-${kind}-${sequence}`;
+      sequence += 1;
+    } while (used.has(candidate));
+    used.add(candidate);
+    return candidate;
+  };
+}
+
+type MigratedLearningRole =
+  | 'learning.chords'
+  | 'learning.bass'
+  | 'learning.melody';
+
+function legacyLearningRole(name: unknown): MigratedLearningRole | null {
+  if (typeof name !== 'string') return null;
+  switch (name.trim().toLowerCase()) {
+    case 'chord':
+    case 'chords':
+    case 'コード':
+      return 'learning.chords';
+    case 'bass':
+      return 'learning.bass';
+    case 'melody':
+      return 'learning.melody';
+    default:
+      return null;
+  }
+}
+
+/** Add schema-v3 maps, roles, automation, and resolvable audio placeholders. */
+function migrateV2ToV3(
+  project: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const usedIds = collectObjectIds(project);
+  const nextTempoId = createMigrationIdAllocator(usedIds, 'tempo');
+  const nextSignatureId = createMigrationIdAllocator(usedIds, 'signature');
+  const nextAudioId = createMigrationIdAllocator(usedIds, 'audio');
+  const audioAssets: Record<string, unknown>[] = [];
+  const assetByLegacyId = new Map<string, string>();
+  const claimedLearningRoles = new Set<MigratedLearningRole>();
+
+  const tracks = Array.isArray(project.tracks)
+    ? project.tracks.map((track) => {
+        if (typeof track !== 'object' || track === null || Array.isArray(track)) {
+          return track;
+        }
+        const trackRecord = track as Readonly<Record<string, unknown>>;
+        const candidateRole = trackRecord.type === 'instrument'
+          ? legacyLearningRole(trackRecord.name)
+          : null;
+        const role = candidateRole !== null && !claimedLearningRoles.has(candidateRole)
+          ? candidateRole
+          : 'general';
+        if (candidateRole !== null && role === candidateRole) {
+          claimedLearningRoles.add(candidateRole);
+        }
+
+        const clips = Array.isArray(trackRecord.clips)
+          ? trackRecord.clips.map((clip) => {
+              if (typeof clip !== 'object' || clip === null || Array.isArray(clip)) {
+                return clip;
+              }
+              const clipRecord = clip as Readonly<Record<string, unknown>>;
+              if (clipRecord.type !== 'audio') return { ...clipRecord };
+
+              const legacyAssetId = typeof clipRecord.audioAssetId === 'string'
+                && clipRecord.audioAssetId.length > 0
+                ? clipRecord.audioAssetId
+                : null;
+              let audioAssetId: string;
+              if (legacyAssetId !== null) {
+                const existing = assetByLegacyId.get(legacyAssetId);
+                if (existing !== undefined) {
+                  audioAssetId = existing;
+                } else {
+                  audioAssetId = nextAudioId();
+                  assetByLegacyId.set(legacyAssetId, audioAssetId);
+                  audioAssets.push({
+                    id: audioAssetId,
+                    availability: 'unresolved',
+                    legacyAssetId,
+                    reason: 'legacy-reference',
+                  });
+                }
+              } else {
+                audioAssetId = nextAudioId();
+                audioAssets.push({
+                  id: audioAssetId,
+                  availability: 'unresolved',
+                  reason: 'missing-reference',
+                });
+              }
+
+              return {
+                ...clipRecord,
+                audioAssetId,
+                sourceStartFrame: 0,
+                sourceFrameCount: 0,
+                fadeInFrames: 0,
+                fadeOutFrames: 0,
+                gainDb: 0,
+              };
+            })
+          : trackRecord.clips;
+        return { ...trackRecord, role, clips };
+      })
+    : project.tracks;
+
+  const timeSignature = project.timeSignature;
+  const numerator = Array.isArray(timeSignature) ? timeSignature[0] : undefined;
+  const denominator = Array.isArray(timeSignature) ? timeSignature[1] : undefined;
+  const lengthBeats = typeof project.lengthBars === 'number'
+    && typeof numerator === 'number'
+    && typeof denominator === 'number'
+    ? project.lengthBars * numerator * (4 / denominator)
+    : Number.NaN;
+
+  return {
+    ...project,
+    schemaVersion: 3,
+    lengthBeats,
+    tempoMap: [{ id: nextTempoId(), beat: 0, bpm: project.bpm }],
+    timeSignatureMap: [{
+      id: nextSignatureId(),
+      beat: 0,
+      numerator,
+      denominator,
+    }],
+    audioAssets,
+    automationLanes: [],
+    tracks,
+  };
+}
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 1, to: 2, migrate: migrateV1ToV2 },
+  { from: 2, to: 3, migrate: migrateV2ToV3 },
 ]);
 
 export type ProjectMigrationErrorCode =

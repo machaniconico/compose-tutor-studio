@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import type {
   Clip,
@@ -8,9 +8,13 @@ import type {
   Track,
 } from '@cts/project-model';
 import {
-  beatsPerBar,
+  beatToBarPosition,
   clipContentOwnerId,
+  compileDrumStepProjector,
+  compileMusicalTime,
+  projectDrumStep,
   resolveClipContent,
+  type MusicalTimeIndex,
 } from '@cts/project-model';
 import { DRUM_PATTERNS, applyDrumPattern, setDrumStepVelocity } from '../../state/editorActions';
 import { publishAppEvent } from '../../state/appEvents';
@@ -99,36 +103,89 @@ export function findDrumClip(
   return null;
 }
 
-/** Include a final partial bar so every persisted drum step remains editable. */
-export function drumClipBarCount(lengthBeats: number, beatsInBar: number): number {
-  if (!Number.isFinite(lengthBeats) || !Number.isFinite(beatsInBar) || beatsInBar <= 0) {
-    return 1;
-  }
-  return Math.max(1, Math.ceil(lengthBeats / beatsInBar));
+export type DrumClipBarLayout = Readonly<{
+  /** Zero-based bar within the clip. */
+  barIndex: number;
+  /** Quarter-note beats elapsed from the clip start. */
+  startBeatInClip: number;
+  /** Quarter-note beat span selected at this local bar's absolute start. */
+  beatsInBar: number;
+  timeSignature: readonly [number, number];
+}>;
+
+/**
+ * Build clip-local bars using the signature active at each local bar start.
+ * This mirrors drum playback while allowing the clip to cross signature-map
+ * changes. A final partial bar remains visible so its persisted steps are
+ * editable.
+ */
+export function drumClipBarLayouts(
+  clipStartBeat: number,
+  lengthBeats: number,
+  musicalTime: MusicalTimeIndex,
+): DrumClipBarLayout[] {
+  const layouts: DrumClipBarLayout[] = [];
+  const drumProjector = compileDrumStepProjector(1, clipStartBeat, musicalTime);
+  let startBeatInClip = 0;
+
+  do {
+    // With one step per bar, stepIndex is the clip-local bar index. Using the
+    // shared projector keeps UI reachability identical to validation/playback.
+    const timing = projectDrumStep(drumProjector, layouts.length);
+    startBeatInClip = timing.beat - clipStartBeat;
+    const timeSignature = beatToBarPosition(
+      musicalTime,
+      timing.beat,
+    ).timeSignature;
+    layouts.push({
+      barIndex: layouts.length,
+      startBeatInClip,
+      beatsInBar: timing.beatsPerBar,
+      timeSignature,
+    });
+    startBeatInClip += timing.beatsPerBar;
+  } while (startBeatInClip < lengthBeats);
+
+  return layouts;
+}
+
+/** Include a final partial local bar so every persisted drum step stays reachable. */
+export function drumClipBarCount(
+  clipStartBeat: number,
+  lengthBeats: number,
+  musicalTime: MusicalTimeIndex,
+): number {
+  return drumClipBarLayouts(clipStartBeat, lengthBeats, musicalTime).length;
 }
 
 /** Match project validation: a drum step is editable only before the clip end. */
 export function isDrumStepWithinClip(
   stepIndex: number,
   stepsPerBar: number,
-  beatsInBar: number,
+  barLayouts: readonly DrumClipBarLayout[],
   lengthBeats: number,
 ): boolean {
-  return Number.isSafeInteger(stepIndex)
-    && stepIndex >= 0
-    && Number.isSafeInteger(stepsPerBar)
-    && stepsPerBar > 0
-    && Number.isFinite(beatsInBar)
-    && beatsInBar > 0
-    && Number.isFinite(lengthBeats)
-    && stepIndex * (beatsInBar / stepsPerBar) < lengthBeats;
+  if (
+    !Number.isSafeInteger(stepIndex)
+    || stepIndex < 0
+    || !Number.isSafeInteger(stepsPerBar)
+    || stepsPerBar <= 0
+    || !Number.isFinite(lengthBeats)
+  ) {
+    return false;
+  }
+  const barIndex = Math.floor(stepIndex / stepsPerBar);
+  const bar = barLayouts[barIndex];
+  if (!bar) return false;
+  const stepInBar = stepIndex - barIndex * stepsPerBar;
+  return bar.startBeatInClip + stepInBar * (bar.beatsInBar / stepsPerBar) < lengthBeats;
 }
 
 /** Last enabled zero-based cell in one visible bar, including partial final bars. */
 export function lastDrumStepInBar(
   barIndex: number,
   stepsPerBar: number,
-  beatsInBar: number,
+  barLayouts: readonly DrumClipBarLayout[],
   lengthBeats: number,
 ): number {
   if (!Number.isSafeInteger(barIndex) || barIndex < 0) return 0;
@@ -138,7 +195,7 @@ export function lastDrumStepInBar(
       isDrumStepWithinClip(
         barIndex * stepsPerBar + stepInBar,
         stepsPerBar,
-        beatsInBar,
+        barLayouts,
         lengthBeats,
       )
     ) {
@@ -146,6 +203,28 @@ export function lastDrumStepInBar(
     }
   }
   return last;
+}
+
+/** Mark the grid cell nearest each notated beat boundary. */
+export function isDrumBeatStart(
+  stepInBar: number,
+  stepsPerBar: number,
+  numerator: number,
+): boolean {
+  if (
+    !Number.isSafeInteger(stepInBar)
+    || !Number.isSafeInteger(stepsPerBar)
+    || !Number.isSafeInteger(numerator)
+    || stepInBar < 0
+    || stepsPerBar <= 0
+    || numerator <= 0
+  ) {
+    return false;
+  }
+  for (let beat = 0; beat < numerator; beat += 1) {
+    if (Math.round(beat * (stepsPerBar / numerator)) === stepInBar) return true;
+  }
+  return false;
 }
 
 /**
@@ -157,7 +236,6 @@ export function DrumGrid() {
   const project = useStore((s) => s.project);
   const tracks = project.tracks;
   const selectedClipId = useStore((s) => s.editor.selectedClipId);
-  const timeSignature = project.timeSignature;
   const applyProjectChange = useStore((s) => s.applyProjectChange);
 
   const [bar, setBar] = useState(0);
@@ -170,22 +248,39 @@ export function DrumGrid() {
 
   const instance = findDrumClip(tracks, selectedClipId);
   const clip = instance ? resolveClipContent(project, instance) : null;
+  const musicalTime = useMemo(
+    () => compileMusicalTime({
+      lengthBeats: project.lengthBeats,
+      tempoMap: project.tempoMap,
+      timeSignatureMap: project.timeSignatureMap,
+    }),
+    [project.lengthBeats, project.tempoMap, project.timeSignatureMap],
+  );
+  const barLayouts = useMemo(
+    () => clip
+      ? drumClipBarLayouts(clip.startBeat, clip.lengthBeats, musicalTime)
+      : [],
+    [clip?.startBeat, clip?.lengthBeats, musicalTime],
+  );
   const groove = readGroove(clip);
   const stepsPerBar = clip?.stepsPerBar ?? 16;
-  const bpb = beatsPerBar(timeSignature);
   const events = ((clip as DrumClipWithGroove | null)?.drumEvents ?? []) as DrumEventWithGroove[];
 
   if (!clip) {
     return <div className="empty-hint">ドラムクリップがありません。</div>;
   }
 
-  const totalBars = drumClipBarCount(clip.lengthBeats, bpb);
+  const totalBars = barLayouts.length;
   const activeBar = Math.min(bar, totalBars - 1);
+  const activeBarLayout = barLayouts[activeBar] ?? barLayouts[0];
+  if (!activeBarLayout) {
+    return <div className="empty-hint">ドラムクリップの拍子を読み込めません。</div>;
+  }
   const barOffset = activeBar * stepsPerBar;
   const lastEnabledStep = lastDrumStepInBar(
     activeBar,
     stepsPerBar,
-    bpb,
+    barLayouts,
     clip.lengthBeats,
   );
   const focusedStepInBar = Math.min(focusedCell.stepInBar, lastEnabledStep);
@@ -389,12 +484,16 @@ export function DrumGrid() {
               const isWithinClip = isDrumStepWithinClip(
                 stepIndex,
                 stepsPerBar,
-                bpb,
+                barLayouts,
                 clip.lengthBeats,
               );
               const event = byKey.get(`${lane}:${stepIndex}`) as DrumEventWithGroove | undefined;
               const isOn = event !== undefined;
-              const isBeatStart = stepInBar % 4 === 0;
+              const isBeatStart = isDrumBeatStart(
+                stepInBar,
+                stepsPerBar,
+                activeBarLayout.timeSignature[0],
+              );
               const shade = isOn ? velocityClass(event.velocity) : '';
               const probability = event ? eventProbability(event, groove.probability) : null;
               return (

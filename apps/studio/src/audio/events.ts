@@ -6,13 +6,15 @@
 // conversion lives here and is unit tested.
 
 import {
-  beatsPerBar as beatsPerBarForTimeSignature,
   assertScheduleEventBudget,
   buildClipIndex,
+  compileDrumStepProjector,
+  compileMusicalTime,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   MAX_RUNTIME_SCHEDULE_EVENTS,
   realizeChordTrack,
   resolveClipContent,
+  projectDrumStep,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   visitMidiClipNoteOccurrences,
   type DrumLane,
@@ -111,7 +113,7 @@ export function drumStepToBeat(
  * The result is unsorted; the scheduler sorts by resolved time. Pure.
  */
 export function buildScheduleEvents(project: Project): ScheduledEvent[] {
-  const beatsPerBar = safeBeatsPerBar(beatsPerBarForTimeSignature(project.timeSignature));
+  const musicalTime = compileMusicalTime(project);
   const clipIndex = buildClipIndex(project);
   assertScheduleEventBudget(project, {
     limit: MAX_RUNTIME_SCHEDULE_EVENTS,
@@ -188,14 +190,15 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
         const clipProbability = clamp(groove?.probability ?? 1, 0, 1);
         const humanizeVelocity = Math.round(clamp(groove?.humanizeVelocity ?? 0, 0, 127));
         const seed = safeSeed(groove?.seed);
+        const drumProjector = compileDrumStepProjector(
+          stepsPerBar,
+          effectiveClip.startBeat,
+          musicalTime,
+        );
         for (const drum of effectiveClip.drumEvents) {
+          const timing = projectDrumStep(drumProjector, drum.stepIndex);
           events.push({
-            beat: drumStepToBeat(
-              drum.stepIndex,
-              stepsPerBar,
-              beatsPerBar,
-              effectiveClip.startBeat,
-            ),
+            beat: timing.beat,
             payload: {
               kind: 'drum',
               trackId: track.id,
@@ -209,7 +212,7 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
                 effectiveClip.lengthBeats,
               ),
               stepsPerBar,
-              beatsPerBar,
+              beatsPerBar: timing.beatsPerBar,
               probability: clamp(drum.probability ?? clipProbability, 0, 1),
               swing,
               humanizeVelocity,

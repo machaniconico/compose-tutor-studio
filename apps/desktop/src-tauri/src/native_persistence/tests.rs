@@ -14,6 +14,39 @@ const CREATED_AT: &str = "2026-07-10T00:00:00.000Z";
 const ERASE_ID_A: &str = "erase-12345678-1234-4abc-8def-1234567890ab";
 const ERASE_ID_B: &str = "erase-abcdef01-2345-4abc-9def-1234567890ab";
 
+#[test]
+fn drum_step_projector_reuses_compiled_thresholds_for_large_maps() {
+    let mut beat = 0.0;
+    let signature_map: Vec<TimeSignatureMapEventDto> = (0..1_024)
+        .map(|index| {
+            let numerator = if index % 2 == 0 { 4 } else { 3 };
+            let event = TimeSignatureMapEventDto {
+                id: format!("signature-{index}"),
+                beat,
+                numerator,
+                denominator: 4,
+            };
+            beat += numerator as f64;
+            event
+        })
+        .collect();
+    let projector = DrumStepTimelineProjector::compile(16, 0.0, &signature_map)
+        .expect("valid signature map compiles");
+
+    assert_eq!(projector.segments.len(), signature_map.len());
+    for step in [0, 15, 16, 31, 4_095, 19_999] {
+        assert_eq!(
+            projector.project(step),
+            drum_step_to_beat_on_timeline(step, 16, 0.0, &signature_map),
+        );
+    }
+    let projected: Vec<f64> = (0..20_000)
+        .map(|step| projector.project(step).expect("step projects"))
+        .collect();
+    assert_eq!(projected.len(), 20_000);
+    assert!(projected.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LegacyParityCorpus {
@@ -95,6 +128,106 @@ fn project_json(project_id: &str, title: &str, revision: u64) -> String {
         "updatedAt": format!("2026-07-10T00:00:{revision:02}.000Z"),
     }))
     .expect("fixture serialization must succeed")
+}
+
+fn schema_v3_project_value() -> Value {
+    json!({
+        "id": "schema-v3-project",
+        "schemaVersion": 3,
+        "title": "Schema v3",
+        "bpm": 120,
+        "timeSignature": [3, 4],
+        "key": "C",
+        "scale": "major",
+        "lengthBars": 2,
+        "lengthBeats": 7,
+        "tempoMap": [
+            { "id": "tempo-1", "beat": 0, "bpm": 120 },
+            { "id": "tempo-2", "beat": 3, "bpm": 90 }
+        ],
+        "timeSignatureMap": [
+            { "id": "signature-1", "beat": 0, "numerator": 3, "denominator": 4 },
+            { "id": "signature-2", "beat": 3, "numerator": 4, "denominator": 4 }
+        ],
+        "audioAssets": [{
+            "id": "asset-ready",
+            "availability": "ready",
+            "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "originalName": "recording.wav",
+            "mediaType": "audio/wav",
+            "byteLength": 4096,
+            "sampleRate": 48000,
+            "channelCount": 2,
+            "frameCount": 2000
+        }],
+        "automationLanes": [{
+            "id": "automation-volume",
+            "target": { "type": "track-volume", "trackId": "track-audio" },
+            "points": [
+                { "id": "automation-point-1", "beat": 1, "value": 1, "interpolation": "hold" },
+                { "id": "automation-point-2", "beat": 7, "value": 0.5, "interpolation": "linear" }
+            ]
+        }],
+        "tracks": [
+            {
+                "id": "track-chords",
+                "name": "Chords",
+                "type": "instrument",
+                "role": "learning.chords",
+                "clips": [],
+                "volume": 1,
+                "pan": 0,
+                "mute": false,
+                "solo": false,
+                "effects": []
+            },
+            {
+                "id": "track-audio",
+                "name": "Recording",
+                "type": "audio",
+                "role": "general",
+                "clips": [{
+                    "id": "clip-audio",
+                    "trackId": "track-audio",
+                    "type": "audio",
+                    "startBeat": 0,
+                    "lengthBeats": 7,
+                    "loop": false,
+                    "audioAssetId": "asset-ready",
+                    "sourceStartFrame": 500,
+                    "sourceFrameCount": 1000,
+                    "fadeInFrames": 100,
+                    "fadeOutFrames": 100,
+                    "gainDb": -3
+                }],
+                "volume": 1,
+                "pan": 0,
+                "mute": false,
+                "solo": false,
+                "effects": []
+            },
+            {
+                "id": "track-master",
+                "name": "Master",
+                "type": "master",
+                "role": "general",
+                "clips": [],
+                "volume": 1,
+                "pan": 0,
+                "mute": false,
+                "solo": false,
+                "effects": []
+            }
+        ],
+        "chordTrack": [],
+        "sections": [],
+        "createdAt": CREATED_AT,
+        "updatedAt": CREATED_AT
+    })
+}
+
+fn schema_v3_project_json() -> String {
+    serde_json::to_string(&schema_v3_project_value()).expect("schema-v3 fixture serializes")
 }
 
 fn linked_clip_project(schema_version: u64, alias_has_payload: bool) -> Vec<u8> {
@@ -322,6 +455,477 @@ fn large_non_aliased_v1_project() -> Vec<u8> {
 }
 
 #[test]
+fn native_project_validation_accepts_schema_v3_and_keeps_versions_strict() {
+    let fixture = schema_v3_project_value();
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&fixture).unwrap()
+    ));
+
+    let mut end_events_and_empty_lane = fixture.clone();
+    end_events_and_empty_lane["tempoMap"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "id": "tempo-at-end", "beat": 7, "bpm": 80 }));
+    end_events_and_empty_lane["timeSignatureMap"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "signature-at-end",
+            "beat": 7,
+            "numerator": 4,
+            "denominator": 4
+        }));
+    end_events_and_empty_lane["automationLanes"][0]["points"] = json!([]);
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&end_events_and_empty_lane).unwrap()),
+        "map events at the project end and empty automation lanes are valid"
+    );
+
+    let mut active_signature_drums = fixture.clone();
+    active_signature_drums["timeSignature"] = json!([4, 4]);
+    active_signature_drums["timeSignatureMap"] = json!([
+        { "id": "signature-1", "beat": 0, "numerator": 4, "denominator": 4 },
+        { "id": "signature-2", "beat": 4, "numerator": 3, "denominator": 4 }
+    ]);
+    active_signature_drums["tracks"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "track-drums",
+            "name": "Drums",
+            "type": "drum",
+            "role": "general",
+            "clips": [{
+                "id": "clip-drums",
+                "trackId": "track-drums",
+                "type": "drum",
+                "startBeat": 4,
+                "lengthBeats": 3,
+                "loop": false,
+                "stepsPerBar": 16,
+                "drumEvents": [{
+                    "id": "drum-at-active-signature",
+                    "lane": "kick",
+                    "stepIndex": 15,
+                    "velocity": 100
+                }]
+            }],
+            "volume": 1,
+            "pan": 0,
+            "mute": false,
+            "solo": false,
+            "effects": []
+        }));
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&active_signature_drums).unwrap()),
+        "drum step ranges use the time signature active at the clip start"
+    );
+
+    let mut variable_signature_drums = fixture.clone();
+    variable_signature_drums["timeSignature"] = json!([4, 4]);
+    variable_signature_drums["timeSignatureMap"] = json!([
+        { "id": "signature-1", "beat": 0, "numerator": 4, "denominator": 4 },
+        { "id": "signature-2", "beat": 4, "numerator": 3, "denominator": 4 }
+    ]);
+    variable_signature_drums["tracks"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "track-variable-drums",
+            "name": "Variable Drums",
+            "type": "drum",
+            "role": "general",
+            "clips": [{
+                "id": "clip-variable-drums",
+                "trackId": "track-variable-drums",
+                "type": "drum",
+                "startBeat": 0,
+                "lengthBeats": 7,
+                "loop": false,
+                "stepsPerBar": 16,
+                "drumEvents": [{
+                    "id": "drum-after-signature-change",
+                    "lane": "kick",
+                    "stepIndex": 31,
+                    "velocity": 100
+                }]
+            }],
+            "volume": 1,
+            "pan": 0,
+            "mute": false,
+            "solo": false,
+            "effects": []
+        }));
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&variable_signature_drums).unwrap()),
+        "drum steps re-evaluate the signature at each clip-local bar start"
+    );
+
+    for (name, mut project) in [
+        ("v3 fields on v2", fixture.clone()),
+        ("missing required root field", fixture.clone()),
+        ("missing required track role", fixture.clone()),
+        ("explicit null required field", fixture.clone()),
+    ] {
+        match name {
+            "v3 fields on v2" => project["schemaVersion"] = json!(2),
+            "missing required root field" => {
+                project.as_object_mut().unwrap().remove("tempoMap");
+            }
+            "missing required track role" => {
+                project["tracks"][0].as_object_mut().unwrap().remove("role");
+            }
+            "explicit null required field" => project["audioAssets"] = Value::Null,
+            _ => unreachable!(),
+        }
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&project).unwrap()),
+            "must reject {name}"
+        );
+    }
+
+    let mut v2 = serde_json::from_str::<Value>(&project_json("legacy-v2", "Legacy", 1)).unwrap();
+    v2["schemaVersion"] = json!(2);
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&v2).unwrap()
+    ));
+    v2["timeSignature"] = json!([3, 4]);
+    v2["lengthBars"] = json!(2);
+    v2["tracks"] = json!([{
+        "id": "legacy-drum-track",
+        "name": "Legacy Drums",
+        "type": "drum",
+        "clips": [{
+            "id": "legacy-drum-clip",
+            "trackId": "legacy-drum-track",
+            "type": "drum",
+            "startBeat": 3,
+            "lengthBeats": 3,
+            "loop": false,
+            "stepsPerBar": 16,
+            "drumEvents": [{
+                "id": "legacy-drum-hit",
+                "lane": "kick",
+                "stepIndex": 15,
+                "velocity": 100
+            }]
+        }],
+        "volume": 1,
+        "pan": 0,
+        "mute": false,
+        "solo": false,
+        "effects": []
+    }]);
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&v2).unwrap()),
+        "schema v2 drums keep fixed-signature step projection"
+    );
+    v2["tracks"][0]["clips"][0]["drumEvents"][0]["stepIndex"] = json!(16);
+    assert!(
+        !validate_project_file_json(&serde_json::to_vec(&v2).unwrap()),
+        "schema v2 fixed-signature projection still rejects the first out-of-range step"
+    );
+    v2["tracks"] = json!([{
+        "id": "legacy-track",
+        "name": "Legacy",
+        "type": "instrument",
+        "role": "general",
+        "clips": [],
+        "volume": 1,
+        "pan": 0,
+        "mute": false,
+        "solo": false,
+        "effects": []
+    }]);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&v2).unwrap()
+    ));
+}
+
+#[test]
+fn native_project_validation_rejects_schema_v3_semantic_matrix() {
+    type MutationCase = (&'static str, fn(&mut Value));
+    let cases: Vec<MutationCase> = vec![
+        ("tempo scalar mirror mismatch", |project: &mut Value| {
+            project["bpm"] = json!(121)
+        }),
+        (
+            "signature change off bar boundary",
+            |project: &mut Value| project["timeSignatureMap"][1]["beat"] = json!(2),
+        ),
+        ("derived bar count mismatch", |project: &mut Value| {
+            project["lengthBars"] = json!(3)
+        }),
+        ("duplicate global id", |project: &mut Value| {
+            project["tempoMap"][0]["id"] = json!("track-audio")
+        }),
+        ("duplicate learning role", |project: &mut Value| {
+            project["tracks"][1]["type"] = json!("instrument");
+            project["tracks"][1]["role"] = json!("learning.chords");
+        }),
+        ("invalid ready checksum", |project: &mut Value| {
+            project["audioAssets"][0]["checksumSha256"] = json!("A".repeat(64))
+        }),
+        ("audio source outside asset", |project: &mut Value| {
+            project["tracks"][1]["clips"][0]["sourceFrameCount"] = json!(2000)
+        }),
+        ("ready audio on non-audio track", |project: &mut Value| {
+            project["tracks"][1]["type"] = json!("instrument")
+        }),
+        ("missing automation target", |project: &mut Value| {
+            project["automationLanes"][0]["target"]["trackId"] = json!("missing")
+        }),
+        ("master pan automation", |project: &mut Value| {
+            project["automationLanes"][0]["target"] =
+                json!({ "type": "track-pan", "trackId": "track-master" })
+        }),
+        ("master volume automation", |project: &mut Value| {
+            project["automationLanes"][0]["target"] =
+                json!({ "type": "track-volume", "trackId": "track-master" })
+        }),
+        ("unsorted automation points", |project: &mut Value| {
+            project["automationLanes"][0]["points"][1]["beat"] = json!(0.5)
+        }),
+        ("invalid interpolation", |project: &mut Value| {
+            project["automationLanes"][0]["points"][0]["interpolation"] = json!("curve")
+        }),
+        (
+            "drum step outside after local signature change",
+            |project: &mut Value| {
+                project["tracks"].as_array_mut().unwrap().push(json!({
+                    "id": "track-drums",
+                    "name": "Drums",
+                    "type": "drum",
+                    "role": "general",
+                    "clips": [{
+                        "id": "clip-drums",
+                        "trackId": "track-drums",
+                        "type": "drum",
+                        "startBeat": 0,
+                        "lengthBeats": 6.5,
+                        "loop": false,
+                        "stepsPerBar": 16,
+                        "drumEvents": [{
+                            "id": "drum-outside-after-signature-change",
+                            "lane": "kick",
+                            "stepIndex": 31,
+                            "velocity": 100
+                        }]
+                    }],
+                    "volume": 1,
+                    "pan": 0,
+                    "mute": false,
+                    "solo": false,
+                    "effects": []
+                }));
+            },
+        ),
+        ("unknown nested field", |project: &mut Value| {
+            project["tempoMap"][0]["unknown"] = json!(true)
+        }),
+    ];
+    for (name, mutate) in cases {
+        let mut project = schema_v3_project_value();
+        mutate(&mut project);
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&project).unwrap()),
+            "must reject {name}"
+        );
+    }
+}
+
+#[test]
+fn schema_v3_unresolved_audio_preserves_legacy_shape_without_ready_metadata() {
+    let mut project = schema_v3_project_value();
+    project["audioAssets"] = json!([{
+        "id": "asset-unresolved",
+        "availability": "unresolved",
+        "legacyAssetId": "legacy-file",
+        "reason": "legacy-reference"
+    }]);
+    project["tracks"][1]["type"] = json!("instrument");
+    let clip = project
+        .pointer_mut("/tracks/1/clips/0")
+        .and_then(Value::as_object_mut)
+        .unwrap();
+    clip.insert("audioAssetId".to_owned(), json!("asset-unresolved"));
+    clip.insert("sourceStartFrame".to_owned(), json!(0));
+    clip.insert("sourceFrameCount".to_owned(), json!(0));
+    clip.insert("fadeInFrames".to_owned(), json!(0));
+    clip.insert("fadeOutFrames".to_owned(), json!(0));
+    clip.insert("gainDb".to_owned(), json!(-3));
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&project).unwrap()
+    ));
+
+    project["tracks"][1]["clips"][0]["sourceFrameCount"] = json!(1);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&project).unwrap()
+    ));
+}
+
+fn migration_v2_project_value() -> Value {
+    json!({
+        "id": "migration-v2",
+        "schemaVersion": 2,
+        "title": "Migration",
+        "bpm": 110,
+        "timeSignature": [4, 4],
+        "key": "C",
+        "scale": "major",
+        "lengthBars": 2,
+        "tracks": [
+            {
+                "id": "migrated-tempo-1",
+                "name": " Melody ",
+                "type": "instrument",
+                "clips": [{
+                    "id": "legacy-midi",
+                    "trackId": "migrated-tempo-1",
+                    "type": "midi",
+                    "startBeat": 0,
+                    "lengthBeats": 2,
+                    "loop": false,
+                    "notes": [{
+                        "id": "legacy-note",
+                        "pitch": 60,
+                        "startBeat": 0,
+                        "durationBeats": 1,
+                        "velocity": 100
+                    }]
+                }],
+                "volume": 1,
+                "pan": 0,
+                "mute": false,
+                "solo": false,
+                "effects": []
+            },
+            {
+                "id": "migrated-signature-1",
+                "name": "melody",
+                "type": "instrument",
+                "clips": [{
+                    "id": "legacy-audio-shared-a",
+                    "trackId": "migrated-signature-1",
+                    "type": "audio",
+                    "startBeat": 2,
+                    "lengthBeats": 2,
+                    "loop": false,
+                    "audioAssetId": "legacy-shared"
+                }],
+                "volume": 1,
+                "pan": 0,
+                "mute": false,
+                "solo": false,
+                "effects": []
+            },
+            {
+                "id": "migrated-audio-1",
+                "name": "Legacy audio",
+                "type": "instrument",
+                "clips": [
+                    {
+                        "id": "legacy-audio-shared-b",
+                        "trackId": "migrated-audio-1",
+                        "type": "audio",
+                        "startBeat": 4,
+                        "lengthBeats": 2,
+                        "loop": false,
+                        "audioAssetId": "legacy-shared"
+                    },
+                    {
+                        "id": "legacy-audio-missing",
+                        "trackId": "migrated-audio-1",
+                        "type": "audio",
+                        "startBeat": 6,
+                        "lengthBeats": 2,
+                        "loop": false
+                    }
+                ],
+                "volume": 1,
+                "pan": 0,
+                "mute": false,
+                "solo": false,
+                "effects": []
+            }
+        ],
+        "chordTrack": [],
+        "sections": [],
+        "createdAt": CREATED_AT,
+        "updatedAt": CREATED_AT
+    })
+}
+
+#[test]
+fn native_v2_to_v3_proof_is_deterministic_collision_safe_and_sound_preserving() {
+    let source = migration_v2_project_value();
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&source).unwrap()
+    ));
+    let migrated = migrate_project_value_v2_to_v3(source.clone()).expect("v2 migrates");
+    assert_eq!(migrated["schemaVersion"], 3);
+    assert_eq!(migrated["lengthBeats"], json!(8));
+    assert_eq!(migrated["tempoMap"][0]["bpm"], json!(110));
+    assert_eq!(migrated["tempoMap"][0]["id"], "migrated-tempo-2");
+    assert_eq!(
+        migrated["timeSignatureMap"][0]["id"],
+        "migrated-signature-2"
+    );
+    assert_eq!(migrated["tracks"][0]["role"], "learning.melody");
+    assert_eq!(migrated["tracks"][1]["role"], "general");
+    assert_eq!(migrated["audioAssets"].as_array().unwrap().len(), 2);
+    assert_eq!(migrated["audioAssets"][0]["id"], "migrated-audio-2");
+    assert_eq!(migrated["audioAssets"][1]["id"], "migrated-audio-3");
+    assert_eq!(
+        migrated["tracks"][1]["clips"][0]["audioAssetId"],
+        migrated["tracks"][2]["clips"][0]["audioAssetId"]
+    );
+    assert_eq!(migrated["tracks"][2]["clips"][1]["sourceFrameCount"], 0);
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&migrated).unwrap()
+    ));
+    assert!(legacy_project_matches_migrated(
+        &serde_json::to_string(&source).unwrap(),
+        &serde_json::to_string(&migrated).unwrap(),
+    ));
+
+    let mut v1 = source;
+    v1["schemaVersion"] = json!(1);
+    v1["tracks"][0]["clips"][0]["aliasOf"] = json!("inert-v1-link");
+    let migrated_v1 = migrate_project_for_legacy_proof(v1, 3).expect("v1 migrates through v2");
+    assert!(migrated_v1["tracks"][0]["clips"][0]
+        .get("aliasOf")
+        .is_none());
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&migrated_v1).unwrap()
+    ));
+
+    let mut smuggled = migration_v2_project_value();
+    smuggled["tracks"][0]["role"] = json!("general");
+    assert!(migrate_project_value_v2_to_v3(smuggled).is_none());
+}
+
+#[test]
+fn native_v2_to_v3_learning_roles_match_javascript_name_normalization() {
+    for (name, expected_role) in [
+        ("Chord", "learning.chords"),
+        ("cHoRdS", "learning.chords"),
+        ("コード", "learning.chords"),
+        ("\u{feff}Chords\u{feff}", "learning.chords"),
+        ("\u{2003}Chord\u{2003}", "learning.chords"),
+        // ECMAScript String#trim does not remove NEXT LINE (U+0085).
+        ("\u{0085}Chords\u{0085}", "general"),
+    ] {
+        let mut source = migration_v2_project_value();
+        source["tracks"][0]["name"] = json!(name);
+
+        let migrated = migrate_project_value_v2_to_v3(source).expect("v2 fixture migrates");
+
+        assert_eq!(migrated["tracks"][0]["role"], expected_role, "{name:?}");
+    }
+}
+
+#[test]
 fn native_project_validation_preserves_v1_alias_sound_and_enforces_v2_links() {
     assert!(validate_project_file_json(&linked_clip_project(1, true)));
     assert!(validate_project_file_json(&linked_clip_project(2, false)));
@@ -542,6 +1146,51 @@ fn schema_v2_linked_project_round_trips_exactly_through_sqlite() {
         .expect("linked project exists");
 
     assert_eq!(loaded.project_json, project_json);
+    assert!(!loaded.recovered);
+}
+
+#[test]
+fn schema_v3_project_round_trips_through_save_crash_draft_and_reopen() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("projects.sqlite3");
+    let repository = NativeRepository::new(path.clone());
+    repository.initialize().expect("repository initializes");
+    let project_json = schema_v3_project_json();
+
+    repository
+        .stage_crash_draft(CrashDraftRequestDto {
+            project_id: "schema-v3-project".to_owned(),
+            project_json: project_json.clone(),
+            activation_id: "activation-v3".to_owned(),
+            revision: 1,
+            write_id: "write-v3-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("schema-v3 crash draft stages");
+    repository
+        .save(SaveRequestDto {
+            project_id: "schema-v3-project".to_owned(),
+            project_json: project_json.clone(),
+            activation_id: "activation-v3".to_owned(),
+            revision: 1,
+            write_id: "write-v3-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("schema-v3 project saves");
+    repository.close().expect("repository closes");
+
+    let reopened = NativeRepository::new(path);
+    reopened.initialize().expect("repository reopens");
+    let loaded = reopened
+        .load("schema-v3-project".to_owned())
+        .expect("schema-v3 project loads")
+        .expect("schema-v3 project exists");
+    assert_eq!(
+        serde_json::from_str::<Value>(&loaded.project_json).unwrap(),
+        serde_json::from_str::<Value>(&project_json).unwrap()
+    );
     assert!(!loaded.recovered);
 }
 
@@ -4009,6 +4658,7 @@ fn higher_completed_head_replaces_same_snapshot_lower_head_as_canonical() {
 #[test]
 fn unknown_future_migration_version_is_rejected_without_staging_or_completion() {
     let (_directory, repository) = initialized_repository();
+    let future_version = LEGACY_MIGRATION_VERSION + 1;
     let project_id = "future-migrator";
     let project = project_json(project_id, "Future", 1);
     let mirror_key = format!("cts.project.{project_id}");
@@ -4019,7 +4669,11 @@ fn unknown_future_migration_version_is_rejected_without_staging_or_completion() 
     assert_eq!(
         repository
             .import_legacy_project(legacy_head_request_at_version(
-                &snapshot, 3, project_id, "Future", 1,
+                &snapshot,
+                future_version,
+                project_id,
+                "Future",
+                1,
             ))
             .unwrap_err()
             .code,
@@ -4027,14 +4681,20 @@ fn unknown_future_migration_version_is_rejected_without_staging_or_completion() 
     );
     assert_eq!(
         repository
-            .complete_legacy_migration(legacy_completion_at_version(&snapshot, 3, 1, 0, 0))
+            .complete_legacy_migration(legacy_completion_at_version(
+                &snapshot,
+                future_version,
+                1,
+                0,
+                0,
+            ))
             .unwrap_err()
             .code,
         PersistenceErrorCode::UnsupportedVersion
     );
     assert_eq!(
         repository
-            .get_legacy_migration_status(snapshot.content_checksum, 3)
+            .get_legacy_migration_status(snapshot.content_checksum, future_version)
             .unwrap_err()
             .code,
         PersistenceErrorCode::UnsupportedVersion
@@ -4044,6 +4704,7 @@ fn unknown_future_migration_version_is_rejected_without_staging_or_completion() 
 
 #[test]
 fn persisted_future_migration_evidence_blocks_runtime_and_reopen_without_mutation() {
+    let future_version = i64::try_from(LEGACY_MIGRATION_VERSION + 1).unwrap();
     for evidence in ["staging", "run"] {
         let (directory, repository) = initialized_repository();
         let path = directory.path().join("projects.sqlite3");
@@ -4060,10 +4721,11 @@ fn persisted_future_migration_evidence_blocks_runtime_and_reopen_without_mutatio
                            content_checksum, migration_version, project_id, source_keys_json,
                            candidate_kind, candidate_operation_id,
                            diagnostic_error_code, staged_at
-                         ) VALUES (?1, 3, ?2, ?3, 'diagnostic', 'diagnostic',
-                                   'migration-failed', ?4)",
+                         ) VALUES (?1, ?2, ?3, ?4, 'diagnostic', 'diagnostic',
+                                   'migration-failed', ?5)",
                         params![
                             snapshot.content_checksum,
+                            future_version,
                             project_id,
                             serde_json::to_vec(&vec![mirror_key]).unwrap(),
                             CREATED_AT,
@@ -4077,9 +4739,10 @@ fn persisted_future_migration_evidence_blocks_runtime_and_reopen_without_mutatio
                         "INSERT INTO legacy_migration_runs (
                            content_checksum, migration_version, completed_at, record_count,
                            total_bytes, ready_project_count, unreadable_project_count, branch_count
-                         ) VALUES (?1, 3, ?2, 1, ?3, 0, 0, 0)",
+                         ) VALUES (?1, ?2, ?3, 1, ?4, 0, 0, 0)",
                         params![
                             snapshot.content_checksum,
+                            future_version,
                             CREATED_AT,
                             i64::try_from(snapshot.total_bytes).unwrap(),
                         ],
@@ -5223,7 +5886,7 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
     )))
     .expect("shared legacy fixture corpus parses");
     let migration_version = corpus.version;
-    assert_eq!(migration_version, 2);
+    assert_eq!(migration_version, LEGACY_MIGRATION_VERSION);
     for fixture in corpus.cases {
         let (_directory, repository) = initialized_repository();
         let borrowed = fixture

@@ -100,11 +100,22 @@ function richSourceProject(): Project {
         lengthBeats: 4,
         loop: false,
         audioAssetId: 'shared-audio-asset',
+        sourceStartFrame: 0,
+        sourceFrameCount: 0,
+        fadeInFrames: 0,
+        fadeOutFrames: 0,
+        gainDb: 0,
       },
     ],
   };
   const next = {
     ...project,
+    audioAssets: [{
+      id: 'shared-audio-asset',
+      availability: 'unresolved' as const,
+      legacyAssetId: 'legacy-shared-audio-asset',
+      reason: 'legacy-reference' as const,
+    }],
     tracks: project.tracks.map((track, index) => (index === 0 ? replacement : track)),
   };
   expect(validateProject(next).ok).toBe(true);
@@ -207,6 +218,7 @@ describe('addTrack', () => {
         id: `filler-${index}`,
         name: `Filler ${index}`,
         type: 'bus',
+        role: 'general',
         clips: [],
         volume: 1,
         pan: 0,
@@ -225,14 +237,18 @@ describe('addTrack', () => {
     expect(calls).toBe(0);
   });
 
-  it.each([' chords ', 'BASS', ' MeLoDy '])('rejects reserved learning name %s before requesting ids', (name) => {
+  it.each([' chords ', 'BASS', ' MeLoDy '])('allows legacy-looking names without assigning a learning role: %s', (name) => {
     const project = base();
     let calls = 0;
-    expectFailure(addTrack(project, 'instrument', {
+    const result = expectSuccess(addTrack(project, 'instrument', {
       name,
       idFactory: (kind) => `${kind}-${++calls}`,
-    }), 'reserved-learning-track-name');
-    expect(calls).toBe(0);
+    }));
+    expect(result.project.tracks.find((track) => track.id === result.trackId)).toMatchObject({
+      name: name.trim(),
+      role: 'general',
+    });
+    expect(calls).toBe(2);
   });
 });
 
@@ -265,31 +281,20 @@ describe('renameTrack', () => {
     expectFailure(renameTrack(project, project.tracks.at(-1)!.id, 'Output'), 'master-protected');
   });
 
-  it.each([
-    ['Chords', ' cHoRdS '],
-    ['Bass', ' BASS '],
-    ['Melody', ' melody '],
-  ])('protects the schema-v2 %s learning role after trim and case normalization', (name, variant) => {
+  it.each(['Chords', 'Bass', 'Melody'])('renames the %s learning-role track without changing its role', (name) => {
     const project = base();
     const track = project.tracks.find((candidate) => candidate.name === name)!;
-    const withVariant = {
-      ...project,
-      tracks: project.tracks.map((candidate) => (
-        candidate.id === track.id ? { ...candidate, name: variant } : candidate
-      )),
-    };
-    expectFailure(
-      renameTrack(withVariant, track.id, `${name} renamed`),
-      'learning-track-name-protected',
-    );
+    const renamed = expectSuccess(renameTrack(project, track.id, `${name} renamed`));
+    expect(renamed.project.tracks.find((candidate) => candidate.id === track.id)).toMatchObject({
+      name: `${name} renamed`,
+      role: track.role,
+    });
   });
 
-  it.each([' chords ', 'BASS', ' MeLoDy '])('does not let another track claim reserved name %s', (name) => {
+  it.each([' chords ', 'BASS', ' MeLoDy '])('allows another track to use a learning-looking name %s', (name) => {
     const project = base();
-    expectFailure(
-      renameTrack(project, project.tracks[3]!.id, name),
-      'reserved-learning-track-name',
-    );
+    const renamed = expectSuccess(renameTrack(project, project.tracks[3]!.id, name));
+    expect(renamed.project.tracks[3]).toMatchObject({ name: name.trim(), role: 'general' });
   });
 });
 
@@ -304,6 +309,7 @@ describe('duplicateTrack', () => {
 
     expect(duplicate.id).toBe(result.trackId);
     expect(duplicate.name).toBe('Chords Copy');
+    expect(duplicate.role).toBe('general');
     expect(result.project.tracks[0]).toBe(source);
     expect(project.tracks).toHaveLength(5);
     expect(result.project.updatedAt).toBe(project.updatedAt);
@@ -433,7 +439,7 @@ describe('moveTrack and removeTrack', () => {
     ['Bass', ' BASS '],
     ['Melody', ' melody '],
   ])(
-    'protects the schema-v2 %s learning track from removal after normalization',
+    'protects the schema-v3 %s learning role from removal regardless of name',
     (name, variant) => {
       const project = base();
       const track = project.tracks.find((candidate) => candidate.name === name)!;

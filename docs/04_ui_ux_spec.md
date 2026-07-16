@@ -153,7 +153,7 @@ Track Listの管理UI:
 ### 2.8 Drum Editor
 
 - 選択したdrum Clipを優先して表示し、選択がない場合だけ先頭のdrum Clipへfallbackする
-- 表示小節数は`max(1, ceil(clip.lengthBeats / beatsPerBar))`とする。小節途中で終わるimported clipでも最終partial barを表示し、step開始beatがclip終端より前のcellだけを編集可能にする。終端と同じまたは後のcellはdisabledにして範囲外と読み上げる
+- 表示小節はClip開始位置から`timeSignatureMap`をたどって導出する。beat 0だけの固定mapでは`max(1, ceil(clip.lengthBeats / beatsPerBar))`と一致する。小節途中で終わるimported clipでも最終partial barを表示し、map-awareなstep開始beatがclip終端より前のcellだけを編集可能にする。終端と同じまたは後のcellはdisabledにして範囲外と読み上げる
 - 表示のためにclip length、stepsPerBar、DrumEventをpaddingまたは丸めない
 
 ### 2.9 カラオケ作成（ボーカルカット）

@@ -13,9 +13,15 @@ import {
   MAX_PROJECT_STRING_LENGTH,
   MAX_PROJECT_TRACKS,
   MIN_EVENT_DURATION_BEATS,
+  barToBeatAt,
+  beatToBarPosition,
   beatsPerBar as beatsPerBarForTimeSignature,
+  compileDrumStepProjector,
+  compileMusicalTime,
+  projectDrumStep,
   type Clip,
   type DrumLane,
+  type MusicalTimeIndex,
   type NoteEvent,
   type Project,
   type Track,
@@ -116,6 +122,8 @@ export type MapParsedMidiOptions = {
   reservedTrackNames?: readonly string[];
   targetBpm?: number;
   targetTimeSignature?: Project['timeSignature'];
+  /** Compiled timeline of the Project receiving the import. */
+  targetMusicalTime?: MusicalTimeIndex;
   targetKey?: Project['key'];
   targetScale?: Project['scale'];
   maxTracks?: number;
@@ -290,28 +298,43 @@ function uniqueTrackName(base: string, used: Set<string>): string {
 
 function exactDrumSteps(
   notes: readonly NormalizedNote[],
-  timeSignature: Project['timeSignature'],
+  musicalTime: MusicalTimeIndex,
   ppq: number,
 ): Array<{ lane: DrumLane; stepIndex: number; velocity: number }> | null {
-  const beatsPerBar = beatsPerBarForTimeSignature(timeSignature);
-  if (!Number.isFinite(beatsPerBar) || beatsPerBar <= 0 || !Number.isFinite(ppq) || ppq <= 0) {
+  if (!Number.isFinite(ppq) || ppq <= 0) {
     return null;
   }
-  const beatPerStep = beatsPerBar / IMPORT_DRUM_STEPS_PER_BAR;
   const maxBeatError = 0.5 / ppq + Number.EPSILON;
   const events: Array<{ lane: DrumLane; stepIndex: number; velocity: number }> = [];
   const occupied = new Set<string>();
+  const drumProjector = compileDrumStepProjector(
+    IMPORT_DRUM_STEPS_PER_BAR,
+    0,
+    musicalTime,
+  );
   for (const note of notes) {
     const lane = MIDI_DRUM_LANES[note.pitch];
     if (!lane) return null;
     if (Math.abs(note.durationBeats - IMPORT_DRUM_DURATION_BEATS) > maxBeatError) {
       return null;
     }
-    const stepIndex = Math.round(note.startBeat / beatPerStep);
-    const representedBeat = stepIndex * beatPerStep;
+
+    let barPosition: ReturnType<typeof beatToBarPosition>;
+    try {
+      barPosition = beatToBarPosition(musicalTime, note.startBeat);
+    } catch {
+      return null;
+    }
+    const activeBeatsPerBar = beatsPerBarForTimeSignature(barPosition.timeSignature);
+    if (!Number.isFinite(activeBeatsPerBar) || activeBeatsPerBar <= 0) return null;
+    const beatPerStep = activeBeatsPerBar / IMPORT_DRUM_STEPS_PER_BAR;
+    const stepInBar = Math.round(barPosition.beatInBar / beatPerStep);
+    const stepIndex = barPosition.bar * IMPORT_DRUM_STEPS_PER_BAR + stepInBar;
+    const representedBeat = projectDrumStep(drumProjector, stepIndex).beat;
     if (
       !Number.isSafeInteger(stepIndex) ||
       stepIndex < 0 ||
+      !Number.isFinite(representedBeat) ||
       Math.abs(representedBeat - note.startBeat) > maxBeatError
     ) {
       return null;
@@ -322,6 +345,21 @@ function exactDrumSteps(
     events.push({ lane, stepIndex, velocity: note.velocity });
   }
   return events;
+}
+
+function fixedImportMusicalTime(
+  timeSignature: Project['timeSignature'],
+): MusicalTimeIndex {
+  return compileMusicalTime({
+    lengthBeats: MAX_PROJECT_TIMELINE_BEATS,
+    tempoMap: [{ id: 'midi-import-tempo', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'midi-import-signature',
+      beat: 0,
+      numerator: timeSignature[0],
+      denominator: timeSignature[1],
+    }],
+  });
 }
 
 function metadataWarnings(parsed: ParsedMidiFile, options: MapParsedMidiOptions): string[] {
@@ -444,6 +482,8 @@ export function mapParsedMidiToTracks(
   const fallbackName = options.trackName ?? 'MIDI: 読み込みトラック';
   const usedNames = new Set(options.reservedTrackNames ?? []);
   const timeSignature = options.targetTimeSignature ?? [4, 4];
+  const targetMusicalTime = options.targetMusicalTime
+    ?? fixedImportMusicalTime(timeSignature);
   const tracks: Track[] = [];
   const clips: Clip[] = [];
   const warnings = metadataWarnings(parsed, options);
@@ -463,7 +503,7 @@ export function mapParsedMidiToTracks(
     const pan = importedPan(group.initialChannel);
     const color = options.color ?? IMPORT_TRACK_COLORS[groupIndex % IMPORT_TRACK_COLORS.length];
     const drumSteps = group.channel === MIDI_DRUM_CHANNEL
-      ? exactDrumSteps(group.notes, timeSignature, parsed.ppq)
+      ? exactDrumSteps(group.notes, targetMusicalTime, parsed.ppq)
       : null;
 
     if (
@@ -492,6 +532,7 @@ export function mapParsedMidiToTracks(
         id: trackId,
         name,
         type: 'drum',
+        role: 'general',
         color,
         clips: [clip],
         volume,
@@ -520,6 +561,7 @@ export function mapParsedMidiToTracks(
       id: trackId,
       name,
       type: 'instrument',
+      role: 'general',
       color,
       clips: [clip],
       volume,
@@ -573,12 +615,6 @@ function insertBeforeMaster(tracks: readonly Track[], importedTracks: readonly T
   ];
 }
 
-function beatsPerBar(project: Project): number {
-  const [numerator, denominator] = project.timeSignature;
-  if (numerator <= 0 || denominator <= 0) return 4;
-  return numerator * (4 / denominator);
-}
-
 export function appendImportedMidiTracks(project: Project, importedTracks: readonly Track[]): Project {
   if (importedTracks.length === 0) return project;
   const longestClipEnd = importedTracks.reduce(
@@ -591,10 +627,17 @@ export function appendImportedMidiTracks(project: Project, importedTracks: reado
     ),
     0,
   );
-  const requiredBars = Math.max(1, Math.ceil(longestClipEnd / beatsPerBar(project)));
+  const musicalTime = compileMusicalTime(project);
+  const endPosition = beatToBarPosition(musicalTime, longestClipEnd);
+  const requiredBars = Math.max(
+    1,
+    endPosition.bar + (endPosition.beatInBar > 1e-9 ? 1 : 0),
+  );
+  const requiredLengthBeats = barToBeatAt(musicalTime, requiredBars);
   return {
     ...project,
     lengthBars: Math.max(project.lengthBars, requiredBars),
+    lengthBeats: Math.max(project.lengthBeats, requiredLengthBeats),
     tracks: insertBeforeMaster(project.tracks, importedTracks),
   };
 }
@@ -668,6 +711,7 @@ function importMidiData(
     reservedTrackNames: store.project.tracks.map((track) => track.name),
     targetBpm: store.project.bpm,
     targetTimeSignature: store.project.timeSignature,
+    targetMusicalTime: compileMusicalTime(store.project),
     targetKey: store.project.key,
     targetScale: store.project.scale,
     maxTracks: Math.max(0, MAX_PROJECT_TRACKS - store.project.tracks.length),

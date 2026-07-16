@@ -15,7 +15,6 @@ import {
   type RetryPolicy,
 } from '@cts/project-persistence';
 import {
-  beatsPerBar as beatsPerBarForTimeSignature,
   clipContentOwnerId,
   createEmptyProject,
   decodeProject,
@@ -48,6 +47,7 @@ import {
   nativeAppLifecycleGateway,
   type NativeCloseAuthorization,
 } from '../platform/nativeAppLifecycle';
+import { hasLiveMixChanged } from '../audio/mixState';
 import { fenceRendererStorageWrites } from '../platform/rendererStorageFence';
 import { nativeLifecycleGate } from '../platform/nativeLifecycleGate';
 import { settleNativeCloseHandoff } from '../platform/nativeCloseHandoff';
@@ -299,8 +299,7 @@ function makeTransport(playbackRequestId = 0): TransportState {
 }
 
 function transportProjectLengthBeats(project: Project): number {
-  const length =
-    project.lengthBars * beatsPerBarForTimeSignature(project.timeSignature);
+  const length = project.lengthBeats;
   return Number.isFinite(length) && length > 0 ? length : 0;
 }
 
@@ -381,15 +380,70 @@ function clipTopologyEqual(
   );
 }
 
+function musicalTimelineTopologyEqual(left: Project, right: Project): boolean {
+  return (
+    left.lengthBeats === right.lengthBeats &&
+    left.tempoMap.length === right.tempoMap.length &&
+    left.tempoMap.every((event, index) => {
+      const candidate = right.tempoMap[index];
+      return candidate?.beat === event.beat && candidate.bpm === event.bpm;
+    }) &&
+    left.timeSignatureMap.length === right.timeSignatureMap.length &&
+    left.timeSignatureMap.every((event, index) => {
+      const candidate = right.timeSignatureMap[index];
+      return (
+        candidate?.beat === event.beat &&
+        candidate.numerator === event.numerator &&
+        candidate.denominator === event.denominator
+      );
+    })
+  );
+}
+
+function automationTopologyEqual(left: Project, right: Project): boolean {
+  return (
+    left.automationLanes.length === right.automationLanes.length &&
+    left.automationLanes.every((lane, laneIndex) => {
+      const candidate = right.automationLanes[laneIndex];
+      return (
+        candidate?.id === lane.id &&
+        candidate.target.type === lane.target.type &&
+        candidate.target.trackId === lane.target.trackId &&
+        candidate.points.length === lane.points.length &&
+        lane.points.every((point, pointIndex) => {
+          const nextPoint = candidate.points[pointIndex];
+          return (
+            nextPoint?.id === point.id &&
+            nextPoint.beat === point.beat &&
+            nextPoint.value === point.value &&
+            nextPoint.interpolation === point.interpolation
+          );
+        })
+      );
+    })
+  );
+}
+
 /**
  * Whether an adopted project edit invalidates the topology captured by the
  * current playback session. Live mixer fields are applied by the audio bridge;
- * names/colors, effects, and note contents are deliberately outside this
- * structural policy. Track and clip ordering is significant because tied
- * events are scheduled in project order.
+ * names/colors and note contents are deliberately outside this structural
+ * policy. Automation is a session snapshot; editing its lanes, or mixer state
+ * while a lane exists, stops playback before any future AudioParam commands
+ * can be cancelled. Semantic roles are topology because the Chords role
+ * routes realized harmony. Track and clip ordering is significant because
+ * tied events are scheduled in project order.
  */
 export function hasPlaybackTopologyChanged(current: Project, next: Project): boolean {
   if (current === next) return false;
+  if (!musicalTimelineTopologyEqual(current, next)) return true;
+  if (!automationTopologyEqual(current, next)) return true;
+  if (
+    (current.automationLanes.length > 0 || next.automationLanes.length > 0) &&
+    hasLiveMixChanged(current.tracks, next.tracks)
+  ) {
+    return true;
+  }
   if (current.tracks.length !== next.tracks.length) return true;
 
   return current.tracks.some((track, trackIndex) => {
@@ -398,6 +452,7 @@ export function hasPlaybackTopologyChanged(current: Project, next: Project): boo
     if (
       track.id !== nextTrack.id ||
       track.type !== nextTrack.type ||
+      track.role !== nextTrack.role ||
       !instrumentTopologyEqual(track, nextTrack) ||
       track.clips.length !== nextTrack.clips.length
     ) {
@@ -1260,7 +1315,12 @@ export function createStudioStore(
     setBpm: (bpm) => {
       const current = get().project;
       const bounded = Number.isFinite(bpm) ? Math.min(300, Math.max(20, bpm)) : current.bpm;
-      commitProject({ ...current, bpm: bounded });
+      commitProject({
+        ...current,
+        bpm: bounded,
+        tempoMap: current.tempoMap.map((event, index) =>
+          index === 0 ? { ...event, bpm: bounded } : event),
+      });
     },
     setKey: (key) => {
       if (get().project.key === key) return;

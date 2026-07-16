@@ -40,7 +40,46 @@ function linkedNoteProject(notesPerSource: number, instanceCount: number) {
   return project;
 }
 
+function drumDensityProject(variableSignature: boolean) {
+  const project = createEmptyProject({ lengthBars: 4, clock });
+  if (variableSignature) {
+    project.lengthBeats = 13;
+    project.timeSignatureMap = [
+      { ...project.timeSignatureMap[0]!, beat: 0, numerator: 4, denominator: 4 },
+      { id: 'density-three-four', beat: 4, numerator: 3, denominator: 4 },
+    ];
+  }
+  const drumClip = project.tracks.find((track) => track.type === 'drum')?.clips[0];
+  if (!drumClip) throw new Error('Drum fixture is missing');
+  drumClip.lengthBeats = project.lengthBeats;
+  drumClip.drumEvents = [
+    { id: 'density-drum-a', lane: 'kick', stepIndex: 16, velocity: 100 },
+    { id: 'density-drum-b', lane: 'snare', stepIndex: 19, velocity: 100 },
+  ];
+  return project;
+}
+
 describe('effective schedule-event preflight', () => {
+  it('uses each local drum-bar signature for density projection', () => {
+    const options = {
+      limit: 10,
+      projection: 'audible',
+      density: { windowBeats: 0.7, maxEventsPerWindow: 1 },
+    } as const;
+
+    expect(preflightScheduleEventBudget(drumDensityProject(true), options)).toMatchObject({
+      ok: false,
+      reason: 'density',
+      observed: 2,
+      windowStartBeat: 4,
+    });
+    expect(preflightScheduleEventBudget(drumDensityProject(false), options)).toEqual({
+      ok: true,
+      eventCount: 2,
+      limit: 10,
+    });
+  });
+
   it('counts expanded MIDI clip loops only in the audible projection', () => {
     const project = linkedNoteProject(1, 1);
     const track = project.tracks.find((candidate) => candidate.name === 'Melody');

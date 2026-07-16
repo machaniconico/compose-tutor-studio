@@ -26,6 +26,11 @@ function project(tracks: Track[], chordTrack: ChordEvent[] = []): Project {
     key: 'C',
     scale: 'major',
     lengthBars: 1,
+    lengthBeats: 4,
+    tempoMap: [{ id: 'tempo-1', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{ id: 'signature-1', beat: 0, numerator: 4, denominator: 4 }],
+    audioAssets: [],
+    automationLanes: [],
     tracks,
     chordTrack,
     sections: [],
@@ -39,6 +44,7 @@ function instrumentTrack(id: string, name: string, clips: Clip[]): Track {
     id,
     name,
     type: 'instrument',
+    role: 'general',
     clips,
     volume: 0.5,
     pan: 0,
@@ -125,6 +131,7 @@ describe('runtime loop-density integration', () => {
 
   it('includes realized Chord Track notes in periodic density', () => {
     const chordsTrack = instrumentTrack('chords-track', 'Chords', []);
+    chordsTrack.role = 'learning.chords';
     const source = project([chordsTrack], [{
       id: 'loop-chord',
       startBeat: 1,

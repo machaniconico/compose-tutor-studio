@@ -10,9 +10,16 @@ import {
   secondsPerBeat,
   timeToBeat,
   wrapBeat,
+  type BeatTimeMapping,
   type LoopRegion,
   type ScheduledEvent,
 } from '../src/audio/scheduler';
+
+const variableTempo: BeatTimeMapping = {
+  // 120 BPM through beat 4, then 60 BPM.
+  beatToSeconds: (beat) => beat <= 4 ? beat * 0.5 : 2 + (beat - 4),
+  secondsToBeat: (seconds) => seconds <= 2 ? seconds * 2 : 4 + (seconds - 2),
+};
 
 describe('secondsPerBeat', () => {
   it('is 0.5s at 120bpm', () => {
@@ -38,6 +45,11 @@ describe('beatToTime / timeToBeat', () => {
   it('round-trips through timeToBeat', () => {
     const t = beatToTime(7.5, 90, 1, 4);
     expect(timeToBeat(t, 90, 1, 4)).toBeCloseTo(7.5, 10);
+  });
+
+  it('integrates a tempo map across an anchored tempo change', () => {
+    expect(beatToTime(6, variableTempo, 2, 10)).toBeCloseTo(13, 10);
+    expect(timeToBeat(13, variableTempo, 2, 10)).toBeCloseTo(6, 10);
   });
 });
 
@@ -154,6 +166,20 @@ describe('nextEventsInWindow (loop wrap)', () => {
     // Subsequent passes: the in-region event recurs, the outside one never does.
     const secondPass = nextEventsInWindow(mixed, 4, 8, 120, 0, 0, loop);
     expect(secondPass.map((d) => d.payload)).toEqual(['inside']);
+  });
+
+  it('repeats the loop tempo contour instead of continuing at the final tempo', () => {
+    const tempoLoop: LoopRegion = { startBeat: 0, endBeat: 8 };
+    const due = nextEventsInWindow(
+      [{ beat: 4, payload: 'change' }],
+      0,
+      16,
+      variableTempo,
+      0,
+      0,
+      tempoLoop,
+    );
+    expect(due.map((event) => event.time)).toEqual([2, 8]);
   });
 });
 

@@ -23,6 +23,14 @@
   - project切替前flush
   - lifecycle接続と復旧通知
 
+### 2.1 Project schema v3 metadata boundary
+
+- Project schemaのcurrent valueは3。rendererとRust native境界はcanonical JSONをversion判定し、`v1 → v2 → v3`を順にmigrationしてからrequired / unknown fieldとdomain不変条件を検証する。SQLiteの`user_version = 2`はrepository table schemaのversionであり、Project JSONの`schemaVersion = 3`とは別である。
+- v3 snapshotはTrack role、`lengthBeats`、tempo / 拍子map、AudioAsset metadata、AutomationLane、Audio Clipのasset ID / frame range / fade / gainを含む。`bpm` / `timeSignature` / `lengthBars`はmapから導くcompatibility mirrorとして同時に検証する。
+- v2→v3は固定tempo / 拍子をbeat 0 mapへ移し、保存順で最初に正規化名Chords / Bass / Melodyへ一致するinstrument Trackへroleを割り当てる。legacy audio参照は決定的な`unresolved` AudioAssetへ残すため、binaryが未解決でもproject metadataを失わず再保存できる。
+
+このprotocolが現在atomicにcommitするのはcanonical Project JSON metadataだけである。AudioAssetの実binary、application-owned assets directory、checksum検証付きstaging / move / rollback / orphan cleanupはまだcommit対象ではなく、Audio Clipの実再生も未実装である。次Batchではbinaryを一時領域へ書く→checksum / metadata検証→Project JSONをCAS commitする→fileを確定する順序と、各crash pointのroll-forward / rollbackを別途定義する。
+
 ## 3. localStorageレコード
 
 論理キーは次の4種類。IDとoperation IDはURL encodingしてキーへ格納する。
@@ -56,6 +64,8 @@ cts.persistence.v1.project.<id>.recovery.<activation-id>
 9. intentと、同activation・同revision以前、または今回昇格したsnapshotと完全一致するrecovery journalだけを消す。別activationの分岐下書きは保持する。
 10. 旧版mirrorをbest effortで更新する。
 11. commit成功後だけ古いgenerationをGCする。currentから`parentHeadVersion`をたどったcommit済み祖先を失敗兄弟より優先し、最低3レコードを残す。
+
+上記のcommit/read-back/checksumはschema v3のAudioAsset **metadata** をProject JSONの一部として保護するが、参照先binary fileはまだ同じtransactionへ参加しない。metadataが`ready`でも、現行releaseがapplication-owned binaryの存在や再生可能性を保証するものではない。
 
 `expectedHeadVersion` は3状態を区別する。`null` は「証拠が何もないEmpty」を意味し、初回作成・初回削除だけに使う。省略は「head欠損・破損を明示的に直すRepair」であり、復旧可能なprojectの保存、またはcorrupt/conflict証拠の明示削除だけに使う。文字列はそのcommit tokenとのMatchである。EmptyをRepairの代用にはしない。
 
@@ -168,10 +178,10 @@ main actual handleを検証した直後、最初のschema/WAL accessより前に
 ## 9. 現在の制約
 
 - localStorage自体にはatomic compare-and-swapがないため、Web Locks非対応ブラウザではcanonical更新を無効化する。完全なmulti-writer保証の次段階はTauri/SQLite transactionで行う。
-- ブラウザ版JSONはcompact canonical payloadで保存・通常書出し・緊急書出し・再読込を同じ16MB上限に揃える。audio assetはまだproject bundleへ含めない。
+- ブラウザ版JSONはcompact canonical payloadで保存・通常書出し・緊急書出し・再読込を同じ16MB上限に揃える。AudioAsset metadataはschema v3 JSONへ含めるが、実binaryはまだproject bundleへ含めない。
 - untrusted projectはUI展開前に、最大256小節かつ8192四分音符拍、拍子分子32、128 steps/bar、128 tracks、20,000 events/clip、最小event長1/960拍などの実用上限を検証する。track colorは外部URLを解釈できないhex色だけを許可する。
 - Tauri版はSQLite正本へ切替済み。旧localStorage snapshotはcontent checksumだけを信用せず、全key/value/checksumをnative側で再検証し、候補のsource provenanceを証明してからmigration version単位でatomic公開する。future/corrupt recordは診断として保持し、decoder更新時はmigration versionを上げて再評価する。
-- native repositoryはlegacy migration v1/v2を受理し、同一snapshot/projectでは完了済みの最高versionだけをlive authorityとして扱う。これによりv2で復旧できたprojectの旧unsupported/migration診断や旧branch/headはlive判定から外れる一方、異なるsnapshotのsticky evidenceとexact raw archiveは保持される。未完了の上位versionは下位versionを置き換えず、未知の将来versionがrunまたはstagingに残るdatabaseは初期化・全操作ともmutation前にfail closedする。rendererはProject schema v1→v2 migrationを含むlegacy migration v2を送信し、完了済みv1 markerがあってもexact raw archiveを新decoderで再評価する。
+- native repositoryはlegacy persistence migration v1/v2を受理し、同一snapshot/projectでは完了済みの最高versionだけをlive authorityとして扱う。これはSQLite移行versionであり、payloadはProject schema `v1 → v2 → v3`をcanonical metadataへ変換する。これにより旧projectのunsupported/migration診断や旧branch/headはlive判定から外れる一方、異なるsnapshotのsticky evidenceとexact raw archiveは保持される。未完了の上位versionは下位versionを置き換えず、未知の将来versionがrunまたはstagingに残るdatabaseは初期化・全操作ともmutation前にfail closedする。rendererとnativeはschema v3 metadataを検証し、完了済みv1 markerがあってもexact raw archiveを新decoderで再評価する。
 - native close requestは即時にwindow destructionを止め、async flush、同期recovery journal、SQLite close、限定close commandの順で終了する。OS強制killでは、現在revisionについて`保護済み` receiptを照合済みならcrash draftを次回起動で復元する。receipt前のstage中、保護失敗後、突然の電源断やstorage hardware故障までは保証しない。
 - 旧localStorageのexact raw archiveは移行監査・future schema再処理のためSQLite内に残る。通常のプロジェクト削除では消えず、デスクトップ版の端末全消去だけがdatabase familyごと削除する。
 - 端末全消去のmarker順序と再開はprocess crashを対象にする。Windowsではdirectory metadataの明示fsync相当を現在実装していないため、電源断直後のNTFS delete永続性までは保証せず、実機power-loss検証またはwrite-through設計を後続hardeningとする。

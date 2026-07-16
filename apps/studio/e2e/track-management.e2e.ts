@@ -42,7 +42,18 @@ test('manages a track atomically, restores focus, and persists its sound and ord
   const rename = page.getByLabel('名前', { exact: true });
   await rename.fill('Bass');
   await page.getByRole('button', { name: '名前を変更', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('学習用に予約された名前');
+  await expect(page.getByRole('button', {
+    name: 'Bass（同名 1/2） トラックを選択',
+    exact: true,
+  })).toBeVisible();
+  await expect(page.getByRole('button', {
+    name: 'Bass（同名 2/2） トラックを選択',
+    exact: true,
+  })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('combobox', {
+    name: 'Bass 学習での役割',
+    exact: true,
+  })).toHaveValue('general');
   await rename.fill('Counterline Pro');
   await page.getByRole('button', { name: '名前を変更', exact: true }).click();
   selectedTrack = page.getByRole('button', {

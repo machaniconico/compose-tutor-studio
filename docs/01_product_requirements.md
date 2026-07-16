@@ -56,7 +56,7 @@
 | US-009 | ユーザーとして、AIに改善案を聞きたい | Should | プロジェクトのコード/メロディ情報から説明付き提案を返す |
 | US-010 | 上級者として、外部VSTを使いたい | Could/Future | VST3 SDK/ライセンス確認後に実装判断 |
 | US-011 | 動画制作者・学習者として、利用許諾のある既存曲からカラオケ練習用音源を作りたい | Should | 対応するステレオ音源を端末内で中央定位軽減し、A/B試聴後にWAVを書き出せる |
-| US-012 | 作曲者として、曲に楽器やドラムを足して音色と並びを整えたい | Must | production UIから安全に追加・複製・並べ替え・一般Track削除を行い、内蔵音色を選んで保存・Undo・再生できる。schema v2の学習Trackは名称と削除を保護する |
+| US-012 | 作曲者として、曲に楽器やドラムを足して音色と並びを整えたい | Must | production UIから安全に追加・複製・並べ替え・一般Track削除を行い、内蔵音色を選んで保存・Undo・再生できる。schema v3では学習role Trackも改名できてroleを保持し、削除だけを保護する |
 
 ## 3. MVP機能範囲
 
@@ -76,7 +76,7 @@
 - Bass Assistant: コードルート、5度、オクターブ、経過音候補
 - Melody Assistant: コードトーン、アプローチノート、モチーフ反復の可視化
 - Pattern/Clip: 1〜4小節単位の素材を組み合わせる
-- Track管理（Batch 3部分）: instrument / drum追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v2で名前が学習上の役割を兼ねるChords / Bass / Melodyは改名・削除せず、それ以外のnon-masterだけを改名する
+- Track管理（部分実装）: instrument / drum追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v3の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない
 
 ### 3.3 Learning
 
@@ -113,7 +113,7 @@
 | 自動マスタリング本実装 | 音質評価・責任範囲が大きい | まずはラウドネス/ピーク診断に限定 |
 | 楽譜エディタ | 実装量が大きい | MIDI編集が安定後 |
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
-| Audio / Bus Trackのproduction追加 | Audio Assetとroutingがなく、追加できても音声配置・経路として成立しない | Batch 4のschema v3 Asset / role、Batch 5のAudio配置・再生、Batch 6のroutingを順に導入して有効化 |
+| Audio / Bus Trackのproduction追加 | schema v3のAudioAsset metadataはあるが、実binary transaction / playbackとroutingがなく、追加できても音声配置・経路として成立しない | 次Batchでassets directoryとAudio配置・再生、その後にroutingを導入して有効化 |
 
 ## 5. 非機能要件
 
@@ -136,6 +136,6 @@
 - レッスンの開始、判定、完了、進捗保存ができる
 - MIDI/WAVを書き出せる
 - 利用許諾のあるステレオ音源から、ローカル処理でカラオケ用WAVを作成できる
-- instrument / drum Trackの管理と音色変更が、Masterおよびschema v2学習Trackの名称・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
+- instrument / drum Trackの管理と音色変更が、Master保護、schema v3学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
 - 主要ロジックにテストがある
 - 既存DAWのUIコピーではなく、独自デザインである

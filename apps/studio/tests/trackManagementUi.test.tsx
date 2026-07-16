@@ -38,12 +38,14 @@ describe('track management UI', () => {
     expect(html).not.toContain('maxlength=');
   });
 
-  it('protects the schema-v2 Chords learning track while exposing its legacy preset safely', () => {
+  it('keeps the Chords learning role while allowing an independent display name', () => {
     const html = renderToStaticMarkup(<TrackInspector />);
 
     expect(html).toContain('Chords');
-    expect(html).toContain('学習用トラック');
-    expect(html).not.toContain('名前を変更');
+    expect(html).toContain('名前を変更しても学習用の役割は保持されます');
+    expect(html).toContain('名前を変更');
+    expect(html).toContain('aria-label="Chords 学習での役割"');
+    expect(html).toContain('value="learning.chords" selected=""');
     expect(html).toContain('aria-label="Chords 音色"');
     expect(html).toContain('value="softPad" selected=""');
     expect(html).toContain('やわらかいパッド');

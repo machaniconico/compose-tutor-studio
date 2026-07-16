@@ -158,6 +158,7 @@ describe('noteCountAtLeast', () => {
       id: 'melody',
       name: 'Melody',
       type: 'instrument' as const,
+      role: 'learning.melody' as const,
       clips: [
         {
           id: 'c1',

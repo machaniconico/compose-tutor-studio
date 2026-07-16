@@ -97,14 +97,37 @@ export type Clip = {
   stepsPerBar?: number;
   drumGroove?: DrumGrooveSettings;
   audioAssetId?: string;
+  sourceStartFrame?: number;
+  sourceFrameCount?: number;
+  fadeInFrames?: number;
+  fadeOutFrames?: number;
+  gainDb?: number;
+};
+
+/** Schema-v3's required payload for an audio clip. */
+export type AudioClip = Clip & {
+  type: 'audio';
+  audioAssetId: string;
+  sourceStartFrame: number;
+  sourceFrameCount: number;
+  fadeInFrames: number;
+  fadeOutFrames: number;
+  gainDb: number;
 };
 
 export type TrackType = 'instrument' | 'drum' | 'audio' | 'bus' | 'master';
+
+export type TrackRole =
+  | 'general'
+  | 'learning.chords'
+  | 'learning.bass'
+  | 'learning.melody';
 
 export type Track = {
   id: string;
   name: string;
   type: TrackType;
+  role: TrackRole;
   color?: string;
   clips: Clip[];
   volume: number;
@@ -113,6 +136,60 @@ export type Track = {
   solo: boolean;
   instrument?: InstrumentConfig;
   effects: EffectConfig[];
+};
+
+export type TempoMapEvent = {
+  id: string;
+  beat: number;
+  bpm: number;
+};
+
+export type TimeSignatureMapEvent = {
+  id: string;
+  beat: number;
+  numerator: number;
+  denominator: number;
+};
+
+export type ReadyAudioAsset = {
+  id: string;
+  availability: 'ready';
+  checksumSha256: string;
+  originalName: string;
+  mediaType: 'audio/wav' | 'audio/mpeg' | 'audio/mp4' | 'audio/aac';
+  byteLength: number;
+  sampleRate: number;
+  channelCount: number;
+  frameCount: number;
+};
+
+export type UnresolvedAudioAsset = {
+  id: string;
+  availability: 'unresolved';
+  legacyAssetId?: string;
+  reason: 'legacy-reference' | 'missing-reference';
+};
+
+export type AudioAsset = ReadyAudioAsset | UnresolvedAudioAsset;
+
+export type AutomationInterpolation = 'hold' | 'linear';
+
+export type AutomationPoint = {
+  id: string;
+  beat: number;
+  value: number;
+  interpolation: AutomationInterpolation;
+};
+
+export type AutomationTarget = {
+  type: 'track-volume' | 'track-pan';
+  trackId: string;
+};
+
+export type AutomationLane = {
+  id: string;
+  target: AutomationTarget;
+  points: AutomationPoint[];
 };
 
 export type Project = {
@@ -124,6 +201,11 @@ export type Project = {
   key: MusicalKey;
   scale: ScaleName;
   lengthBars: number;
+  lengthBeats: number;
+  tempoMap: TempoMapEvent[];
+  timeSignatureMap: TimeSignatureMapEvent[];
+  audioAssets: AudioAsset[];
+  automationLanes: AutomationLane[];
   tracks: Track[];
   chordTrack: ChordEvent[];
   sections: Section[];

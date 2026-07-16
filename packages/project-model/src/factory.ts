@@ -29,6 +29,7 @@ export function createInstrumentTrack(name = 'Instrument'): Track {
     id: makeId('track'),
     name,
     type: 'instrument',
+    role: 'general',
     clips: [],
     volume: 1,
     pan: 0,
@@ -44,6 +45,7 @@ export function createDrumTrack(name = 'Drums'): Track {
     id: makeId('track'),
     name,
     type: 'drum',
+    role: 'general',
     clips: [],
     volume: 1,
     pan: 0,
@@ -100,13 +102,18 @@ export function createDefaultProject(opts: CreateDefaultProjectOpts = {}): Proje
   const bpm = opts.bpm ?? 100;
   const key: MusicalKey = opts.key ?? 'C';
   const scale: ScaleName = opts.scale ?? 'major';
-  const timeSignature: [number, number] = opts.timeSignature ?? [4, 4];
+  const requestedTimeSignature = opts.timeSignature ?? [4, 4];
+  const timeSignature: [number, number] = [
+    requestedTimeSignature[0],
+    requestedTimeSignature[1],
+  ];
   const lengthBars = opts.lengthBars ?? 8;
 
   const master: Track = {
     id: makeId('track'),
     name: 'Master',
     type: 'master',
+    role: 'general',
     clips: [],
     volume: 1,
     pan: 0,
@@ -133,6 +140,16 @@ export function createDefaultProject(opts: CreateDefaultProjectOpts = {}): Proje
     key,
     scale,
     lengthBars,
+    lengthBeats,
+    tempoMap: [{ id: makeId('tempo'), beat: 0, bpm }],
+    timeSignatureMap: [{
+      id: makeId('signature'),
+      beat: 0,
+      numerator: timeSignature[0],
+      denominator: timeSignature[1],
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [master, instrTrack, drumTrack],
     chordTrack: [],
     sections: [],

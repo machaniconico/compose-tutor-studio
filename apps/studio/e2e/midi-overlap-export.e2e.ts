@@ -12,11 +12,22 @@ function overlappingProject(): Project {
     key: 'C',
     scale: 'major',
     lengthBars: 1,
+    lengthBeats: 4,
+    tempoMap: [{ id: 'tempo-overlap', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'signature-overlap',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       {
         id: 'lead',
         name: 'Lead',
         type: 'instrument',
+        role: 'general',
         clips: [{
           id: 'lead-clip',
           trackId: 'lead',
@@ -40,6 +51,7 @@ function overlappingProject(): Project {
         id: 'master',
         name: 'Master',
         type: 'master',
+        role: 'general',
         clips: [],
         volume: 1,
         pan: 0,

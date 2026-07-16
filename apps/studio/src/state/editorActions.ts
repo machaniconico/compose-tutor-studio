@@ -25,11 +25,17 @@ import {
   MAX_PROJECT_LENGTH_BARS,
   MAX_PROJECT_TIMELINE_BEATS,
   MIN_EVENT_DURATION_BEATS,
+  barToBeatAt,
+  beatToBarPosition,
   beatsPerBar as beatsPerBarOf,
   clipContentOwnerId,
+  compileDrumStepProjector,
+  compileMusicalTime,
   findLearningTrack,
   normalizeLearningTrackName,
+  projectDrumStep,
   resolveClipContent,
+  timeSignatureAtBeat,
 } from '@cts/project-model';
 import {
   analyzeChord,
@@ -60,8 +66,7 @@ import {
 
 /** Bar index (0-based) for a beat offset under the project's time signature. */
 function barOf(project: Project, startBeat: number): number {
-  const bpb = projectBeatsPerBar(project);
-  return bpb > 0 ? Math.floor(startBeat / bpb) : 0;
+  return beatToBarPosition(compileMusicalTime(project), startBeat).bar;
 }
 
 /** Whether a MIDI pitch belongs to the project's key/scale. */
@@ -179,7 +184,7 @@ export function findClip(project: Project, clipId: string | null): Clip | null {
   return null;
 }
 
-/** Find a schema-v2 learning track after shared role-name normalization. */
+/** Resolve a public learning-name alias to its persisted schema-v3 role owner. */
 export function findTrackByName(project: Project, name: string): Track | null {
   const role = normalizeLearningTrackName(name);
   return role ? (findLearningTrack(project, role) ?? null) : null;
@@ -195,7 +200,13 @@ export function firstMidiClipOfTrack(project: Project, name: string): Clip | nul
 
 /** Beats per bar for the project's time signature. */
 export function projectBeatsPerBar(project: Project): number {
-  return beatsPerBarOf(project.timeSignature);
+  return projectBeatsPerBarAt(project, 0);
+}
+
+/** Beats in the bar whose signature is active at an absolute beat. */
+export function projectBeatsPerBarAt(project: Project, beat: number): number {
+  const musicalTime = compileMusicalTime(project);
+  return beatsPerBarOf(timeSignatureAtBeat(musicalTime, beat));
 }
 
 // ---------------------------------------------------------------------------
@@ -308,15 +319,19 @@ export function appendChordAfterLast(symbol: string): void {
   useStore.getState().applyProjectChange((project) => {
     const sorted = [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat);
     const last = sorted[sorted.length - 1];
-    const bpb = projectBeatsPerBar(project);
     const startBeat = last ? last.startBeat + last.durationBeats : 0;
-    const requiredLengthBars = Math.ceil((startBeat + bpb) / bpb);
+    const musicalTime = compileMusicalTime(project);
+    const startBar = beatToBarPosition(musicalTime, startBeat).bar;
+    const requiredLengthBars = startBar + 1;
     if (requiredLengthBars > MAX_PROJECT_LENGTH_BARS) return project;
-    const event = buildChordEvent(project, symbol, startBeat, bpb);
+    const chordEndBeat = barToBeatAt(musicalTime, requiredLengthBars);
+    if (chordEndBeat > MAX_PROJECT_TIMELINE_BEATS) return project;
+    const event = buildChordEvent(project, symbol, startBeat, chordEndBeat - startBeat);
     captured.push({ project, event });
     return {
       ...project,
       lengthBars: Math.max(project.lengthBars, requiredLengthBars),
+      lengthBeats: Math.max(project.lengthBeats, chordEndBeat),
       chordTrack: [...project.chordTrack, event],
     };
   });
@@ -341,12 +356,14 @@ export function applyProgressionTemplate(templateId: string): void {
     if (!template) return project;
     const symbols = realizeDegrees(template.degrees, project.key, project.scale);
     if (symbols.length === 0) return project;
-    const bpb = projectBeatsPerBar(project);
+    const musicalTime = compileMusicalTime(project);
     const chords: ChordEvent[] = [];
     for (let bar = 0; bar < project.lengthBars; bar += 1) {
       const symbol = symbols[bar % symbols.length];
       if (symbol === undefined) continue;
-      chords.push(buildChordEvent(project, symbol, bar * bpb, bpb));
+      const startBeat = barToBeatAt(musicalTime, bar);
+      const endBeat = barToBeatAt(musicalTime, bar + 1);
+      chords.push(buildChordEvent(project, symbol, startBeat, endBeat - startBeat));
     }
     captured.push({ project, chords });
     return { ...project, chordTrack: chords };
@@ -841,19 +858,30 @@ export function applyDrumPattern(clipId: string, patternId: DrumPatternId): bool
   const clip = findClip(state.project, clipId);
   if (!clip || clip.type !== 'drum') return false;
   return state.applyProjectChange((project) => {
-    const bpb = projectBeatsPerBar(project);
+    const musicalTime = compileMusicalTime(project);
     return mapClip(project, clipId, (clip) => {
       const stepsPerBar = clip.stepsPerBar ?? 16;
-      const bars = Math.max(1, Math.round(clip.lengthBeats / bpb));
+      const drumProjector = compileDrumStepProjector(
+        stepsPerBar,
+        clip.startBeat,
+        musicalTime,
+      );
+      const clipEndBeat = clip.startBeat + clip.lengthBeats;
       const events: DrumEvent[] = [];
-      for (let bar = 0; bar < bars; bar += 1) {
+      for (let bar = 0; ; bar += 1) {
         const barOffset = bar * stepsPerBar;
+        if (!Number.isSafeInteger(barOffset)) break;
+        const barStart = projectDrumStep(drumProjector, barOffset).beat;
+        if (!Number.isFinite(barStart) || barStart >= clipEndBeat) break;
         for (const [lane, indices] of Object.entries(pattern.steps)) {
           for (const idx of indices ?? []) {
+            const stepIndex = barOffset + idx;
+            const beat = projectDrumStep(drumProjector, stepIndex).beat;
+            if (!Number.isFinite(beat) || beat >= clipEndBeat) continue;
             events.push({
               id: uid('drum'),
               lane: lane as DrumLane,
-              stepIndex: barOffset + idx,
+              stepIndex,
               velocity: 100,
             });
           }

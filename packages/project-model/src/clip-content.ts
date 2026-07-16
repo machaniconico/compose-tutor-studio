@@ -1,7 +1,12 @@
 import type { Clock } from './clock';
 import { nowIso, systemClock } from './clock';
 import { makeId } from './ids';
-import { beatsPerBar, projectLengthBeats } from './time';
+import {
+  compileDrumStepProjector,
+  compileMusicalTime,
+  projectDrumStep,
+  projectLengthBeats,
+} from './time';
 import type { Clip, DrumEvent, NoteEvent, Project } from './types';
 import { MAX_CLIPS_PER_TRACK, MIN_EVENT_DURATION_BEATS } from './limits';
 import {
@@ -56,6 +61,19 @@ function independentClone(effective: Clip, id: string, startBeat: number): Clip 
     ...(effective.audioAssetId !== undefined
       ? { audioAssetId: effective.audioAssetId }
       : {}),
+    ...(effective.sourceStartFrame !== undefined
+      ? { sourceStartFrame: effective.sourceStartFrame }
+      : {}),
+    ...(effective.sourceFrameCount !== undefined
+      ? { sourceFrameCount: effective.sourceFrameCount }
+      : {}),
+    ...(effective.fadeInFrames !== undefined
+      ? { fadeInFrames: effective.fadeInFrames }
+      : {}),
+    ...(effective.fadeOutFrames !== undefined
+      ? { fadeOutFrames: effective.fadeOutFrames }
+      : {}),
+    ...(effective.gainDb !== undefined ? { gainDb: effective.gainDb } : {}),
   };
   return clone;
 }
@@ -75,6 +93,27 @@ export type ClipMutationFailure =
   | 'clip-limit'
   | 'event-limit'
   | 'unsupported-linked-type';
+
+function projectHasEntityId(project: Project, id: string): boolean {
+  return project.id === id
+    || project.tempoMap.some((event) => event.id === id)
+    || project.timeSignatureMap.some((event) => event.id === id)
+    || project.audioAssets.some((asset) => asset.id === id)
+    || project.automationLanes.some(
+      (lane) => lane.id === id || lane.points.some((point) => point.id === id),
+    )
+    || project.tracks.some(
+      (track) => track.id === id
+        || track.effects.some((effect) => effect.id === id)
+        || track.clips.some(
+          (clip) => clip.id === id
+            || clip.notes?.some((note) => note.id === id) === true
+            || clip.drumEvents?.some((event) => event.id === id) === true,
+        ),
+    )
+    || project.chordTrack.some((chord) => chord.id === id)
+    || project.sections.some((section) => section.id === id);
+}
 
 export type DuplicateClipResult =
   | Readonly<{ ok: true; project: Project; clipId: string }>
@@ -117,7 +156,7 @@ export function duplicateClip(
   }
 
   const newId = options.id ?? makeId('clip');
-  if (findClip(project, newId)) return { ok: false, reason: 'duplicate-id' };
+  if (projectHasEntityId(project, newId)) return { ok: false, reason: 'duplicate-id' };
 
   const duplicate: Clip = options.linked
     ? {
@@ -288,13 +327,20 @@ export function resizeClip(
     return { ok: false, reason: 'content-out-of-range' };
   }
   const stepsPerBar = effective.stepsPerBar ?? 16;
-  const beatsInBar = beatsPerBar(project.timeSignature);
-  if (
-    effective.drumEvents?.some(
-      (event) => event.stepIndex * (beatsInBar / stepsPerBar) >= lengthBeats,
-    )
-  ) {
-    return { ok: false, reason: 'content-out-of-range' };
+  if ((effective.drumEvents?.length ?? 0) > 0) {
+    const musicalTime = compileMusicalTime(project);
+    const drumProjector = compileDrumStepProjector(
+      stepsPerBar,
+      startBeat,
+      musicalTime,
+    );
+    if (
+      effective.drumEvents?.some(
+        (event) => projectDrumStep(drumProjector, event.stepIndex).beat - startBeat >= lengthBeats,
+      )
+    ) {
+      return { ok: false, reason: 'content-out-of-range' };
+    }
   }
 
   if (!changesLength && startBeat === located.clip.startBeat) {

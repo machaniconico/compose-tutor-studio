@@ -6,7 +6,7 @@
 // always wins") is unit-testable without any audio nodes, then applied to the
 // live gain nodes.
 
-import type { EffectConfig, Track } from '@cts/project-model';
+import type { AutomationTarget, EffectConfig, Track } from '@cts/project-model';
 import { buildEffectChain, effectConfigSignature, type BuiltEffectChain } from './effects';
 import {
   applyAudioParam,
@@ -276,6 +276,31 @@ export class TrackGraph {
     const mix = resolveTrackMix(track, audible);
     applyAudioParam(this.gain.gain, mix.gain, when, mode);
     applyAudioParam(this.panner.pan, mix.pan, when, mode);
+  }
+
+  /** Append one sample-accurate volume or pan automation command. */
+  scheduleAutomation(
+    target: AutomationTarget['type'],
+    value: number,
+    when: number,
+    interpolation: 'hold' | 'linear',
+    audible: boolean,
+  ): void {
+    const param = target === 'track-volume' ? this.gain.gain : this.panner.pan;
+    const safeValue = target === 'track-volume'
+      ? (audible ? clampVolume(value) : 0)
+      : clampPan(value);
+    const candidate = param as AudioParam & {
+      linearRampToValueAtTime?: (value: number, endTime: number) => AudioParam;
+      setValueAtTime?: (value: number, startTime: number) => AudioParam;
+    };
+    if (interpolation === 'linear' && typeof candidate.linearRampToValueAtTime === 'function') {
+      candidate.linearRampToValueAtTime(safeValue, when);
+    } else if (typeof candidate.setValueAtTime === 'function') {
+      candidate.setValueAtTime(safeValue, when);
+    } else {
+      param.value = safeValue;
+    }
   }
 
   /** Rebuild the insert effect nodes when the track's effect list changes. */

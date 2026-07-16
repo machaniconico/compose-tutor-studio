@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { PlaybackLifecycleControl } from '../src/features/transport/TransportBar';
+import { compileMusicalTime } from '@cts/project-model';
+import {
+  formatMusicalPosition,
+  PlaybackLifecycleControl,
+} from '../src/features/transport/TransportBar';
 import type { TransportState } from '../src/state/store';
 
 const stopped: TransportState = {
@@ -64,5 +68,70 @@ describe('TransportBar playback lifecycle', () => {
     expect(html).toContain('連動コピーを減らして');
     expect(html).toContain('編集内容はそのままです');
     expect(html).not.toContain('出力先と端末の音量');
+  });
+});
+
+describe('formatMusicalPosition', () => {
+  it('formats fixed-map projects exactly as before', () => {
+    const musicalTime = compileMusicalTime({
+      lengthBeats: 8,
+      tempoMap: [{ id: 'tempo', beat: 0, bpm: 120 }],
+      timeSignatureMap: [{ id: 'signature', beat: 0, numerator: 4, denominator: 4 }],
+    });
+
+    expect(formatMusicalPosition(musicalTime, 0)).toBe('1.1');
+    expect(formatMusicalPosition(musicalTime, 5)).toBe('2.2');
+    expect(formatMusicalPosition(musicalTime, -1)).toBe('1.1');
+    expect(formatMusicalPosition(musicalTime, Number.NaN)).toBe('1.1');
+  });
+
+  it('advances bars at mapped time-signature boundaries', () => {
+    const musicalTime = compileMusicalTime({
+      lengthBeats: 14,
+      tempoMap: [{ id: 'tempo', beat: 0, bpm: 120 }],
+      timeSignatureMap: [
+        { id: 'signature-four-four', beat: 0, numerator: 4, denominator: 4 },
+        { id: 'signature-three-four', beat: 8, numerator: 3, denominator: 4 },
+      ],
+    });
+
+    expect(formatMusicalPosition(musicalTime, 8)).toBe('3.1');
+    expect(formatMusicalPosition(musicalTime, 10.99)).toBe('3.3');
+    expect(formatMusicalPosition(musicalTime, 11)).toBe('4.1');
+  });
+
+  it('counts eighth-note beats in a 6/8 measure', () => {
+    const musicalTime = compileMusicalTime({
+      lengthBeats: 6,
+      tempoMap: [{ id: 'tempo-six-eight', beat: 0, bpm: 120 }],
+      timeSignatureMap: [{
+        id: 'signature-six-eight',
+        beat: 0,
+        numerator: 6,
+        denominator: 8,
+      }],
+    });
+
+    expect([0, 0.5, 1, 1.5, 2, 2.5, 3].map((beat) =>
+      formatMusicalPosition(musicalTime, beat)))
+      .toEqual(['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '2.1']);
+  });
+
+  it('does not count quarter-note subdivisions as beats in a 4/2 measure', () => {
+    const musicalTime = compileMusicalTime({
+      lengthBeats: 8,
+      tempoMap: [{ id: 'tempo-four-two', beat: 0, bpm: 120 }],
+      timeSignatureMap: [{
+        id: 'signature-four-two',
+        beat: 0,
+        numerator: 4,
+        denominator: 2,
+      }],
+    });
+
+    expect(formatMusicalPosition(musicalTime, 1)).toBe('1.1');
+    expect(formatMusicalPosition(musicalTime, 2)).toBe('1.2');
+    expect(formatMusicalPosition(musicalTime, 7.99)).toBe('1.4');
+    expect(formatMusicalPosition(musicalTime, 8)).toBe('2.1');
   });
 });

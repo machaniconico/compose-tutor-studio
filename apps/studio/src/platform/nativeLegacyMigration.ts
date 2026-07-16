@@ -21,8 +21,8 @@ import {
 } from '@cts/project-persistence';
 
 export type LegacyMigrationStatus = Readonly<{ complete: boolean }>;
-/** Bumped when the archived v1 Project payload is re-encoded into schema v2. */
-export const LEGACY_MIGRATION_VERSION = 2;
+/** Bumped when archived v1/v2 payloads are re-encoded into Project schema v3. */
+export const LEGACY_MIGRATION_VERSION = 3;
 
 export type LegacyProjectImportReceipt = Readonly<{
   projectId: string;

@@ -14,11 +14,12 @@ import type {
 function makeTrack(
   overrides: Partial<Track> & { name: string; type: Track['type'] },
 ): Track {
-  const { name, type, clips, volume, ...rest } = overrides;
+  const { name, type, role, clips, volume, ...rest } = overrides;
   return {
     id: name,
     name,
     type,
+    role: role ?? 'general',
     clips: clips ?? [],
     volume: volume ?? 1.0,
     pan: 0,
@@ -30,21 +31,39 @@ function makeTrack(
 }
 
 export function makeProject(overrides: Partial<Project> = {}): Project {
+  const {
+    lengthBeats,
+    tempoMap,
+    timeSignatureMap,
+    audioAssets,
+    automationLanes,
+    ...rest
+  } = overrides;
   return {
     id: 'test-project',
-    schemaVersion: 1,
+    schemaVersion: 3,
     title: 'Test',
     bpm: 120,
     timeSignature: [4, 4],
     key: 'C',
     scale: 'major',
     lengthBars: 8,
+    lengthBeats: lengthBeats ?? 32,
+    tempoMap: tempoMap ?? [{ id: 'tempo-1', beat: 0, bpm: 120 }],
+    timeSignatureMap: timeSignatureMap ?? [{
+      id: 'signature-1',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: audioAssets ?? [],
+    automationLanes: automationLanes ?? [],
     tracks: [],
     chordTrack: [],
     sections: [],
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-01T00:00:00.000Z',
-    ...overrides,
+    ...rest,
   };
 }
 

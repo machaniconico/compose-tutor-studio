@@ -1,6 +1,10 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppEvent } from '@cts/tutorial-engine';
-import { MAX_TRACK_EFFECTS } from '@cts/project-model';
+import {
+  MAX_TRACK_EFFECTS,
+  compileMusicalTime,
+  drumStepToBeatOnTimeline,
+} from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 import { subscribeAppEvents } from '../src/state/appEvents';
 
@@ -685,6 +689,40 @@ describe('applyDrumPattern', () => {
     expect(events.length).toBeGreaterThan(0);
     expect(events.some((e) => e.lane === 'kick')).toBe(true);
     expect(events.some((e) => e.lane === 'snare')).toBe(true);
+  });
+
+  it('tiles variable-meter bars and keeps only hits inside a partial final bar', () => {
+    const candidate = structuredClone(useStore.getState().project);
+    const initialSignature = candidate.timeSignatureMap[0];
+    const drumClip = candidate.tracks.find((track) => track.type === 'drum')?.clips[0];
+    if (!initialSignature || !drumClip) throw new Error('variable-meter fixture is missing');
+    candidate.lengthBars = 11;
+    candidate.lengthBeats = 34;
+    candidate.timeSignature = [4, 4];
+    candidate.timeSignatureMap = [
+      { ...initialSignature, beat: 0, numerator: 4, denominator: 4 },
+      { id: 'meter-3-4-pattern-test', beat: 4, numerator: 3, denominator: 4 },
+    ];
+    drumClip.lengthBeats = 8;
+    expect(useStore.getState().applyProjectChange(() => candidate)).toBe(true);
+
+    expect(actions.applyDrumPattern(drumClip.id, 'eightBeat')).toBe(true);
+    const project = useStore.getState().project;
+    const applied = actions.findClip(project, drumClip.id);
+    const musicalTime = compileMusicalTime(project);
+    const events = applied?.drumEvents ?? [];
+    const clipEndBeat = (applied?.startBeat ?? 0) + (applied?.lengthBeats ?? 0);
+
+    expect(events.some((event) => event.stepIndex === 32)).toBe(true);
+    expect(drumStepToBeatOnTimeline(32, 16, applied?.startBeat ?? 0, musicalTime).beat).toBe(7);
+    expect(events.every((event) => (
+      drumStepToBeatOnTimeline(
+        event.stepIndex,
+        applied?.stepsPerBar ?? 16,
+        applied?.startBeat ?? 0,
+        musicalTime,
+      ).beat < clipEndBeat
+    ))).toBe(true);
   });
 });
 

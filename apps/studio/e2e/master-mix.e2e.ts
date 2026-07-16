@@ -1,5 +1,5 @@
 import { expect, test, type Download, type Page } from '@playwright/test';
-import type { Project } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION, type Project } from '@cts/project-model';
 import { planWavRender } from '../src/audio/wav';
 
 const FIXTURE_TITLE = 'Master Mix E2E';
@@ -23,18 +23,29 @@ function masterMixProject(
   const lengthBeats = lengthBars * 4;
   return {
     id: 'project-master-mix-e2e',
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title: FIXTURE_TITLE,
     bpm: 120,
     timeSignature: [4, 4],
     key: 'C',
     scale: 'major',
     lengthBars,
+    lengthBeats,
+    tempoMap: [{ id: 'tempo-master-mix', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'signature-master-mix',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       {
         id: 'track-deterministic-tone',
         name: 'Deterministic Tone',
         type: 'instrument',
+        role: 'general',
         clips: [
           {
             id: 'clip-deterministic-tone',
@@ -69,6 +80,7 @@ function masterMixProject(
         id: 'track-master',
         name: 'Master',
         type: 'master',
+        role: 'general',
         clips: [],
         volume: 1,
         pan: 0,

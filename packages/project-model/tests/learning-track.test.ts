@@ -8,7 +8,7 @@ import {
   normalizeLearningTrackName,
 } from '../src/index';
 
-describe('schema-v2 learning track roles', () => {
+describe('schema-v3 learning track roles', () => {
   it.each([
     ['  cHoRdS\n', 'Chords'],
     ['\tBASS  ', 'Bass'],
@@ -27,21 +27,22 @@ describe('schema-v2 learning track roles', () => {
     },
   );
 
-  it('requires an instrument track and distinguishes each requested role', () => {
-    expect(isLearningTrack({ name: '  mElOdY ', type: 'instrument' })).toBe(true);
-    expect(isLearningTrack({ name: '  mElOdY ', type: 'instrument' }, 'Melody')).toBe(true);
-    expect(isLearningTrack({ name: '  mElOdY ', type: 'instrument' }, 'Bass')).toBe(false);
-    expect(isLearningTrack({ name: 'Melody', type: 'drum' })).toBe(false);
+  it('uses the persisted role and distinguishes each requested role', () => {
+    expect(isLearningTrack({ role: 'learning.melody' })).toBe(true);
+    expect(isLearningTrack({ role: 'learning.melody' }, 'Melody')).toBe(true);
+    expect(isLearningTrack({ role: 'learning.melody' }, 'learning.melody')).toBe(true);
+    expect(isLearningTrack({ role: 'learning.melody' }, 'Bass')).toBe(false);
+    expect(isLearningTrack({ role: 'general' })).toBe(false);
   });
 
-  it('finds case and whitespace variants while ignoring a non-instrument impostor', () => {
+  it('finds by role even after renaming while ignoring a name impostor', () => {
     const project = createEmptyProject({
       clock: () => new Date('2026-07-16T00:00:00.000Z'),
     });
     const melody = project.tracks.find((track) => track.name === 'Melody');
     const drums = project.tracks.find((track) => track.type === 'drum');
     if (!melody || !drums) throw new Error('learning-track fixture is incomplete');
-    melody.name = '  mElOdY\n';
+    melody.name = 'Counterline';
     drums.name = 'Melody';
     project.tracks = [drums, ...project.tracks.filter((track) => track.id !== drums.id)];
 

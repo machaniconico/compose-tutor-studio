@@ -52,6 +52,28 @@ describe('humming melody note mapping', () => {
     ).toThrowError(HummingNoteMappingError);
   });
 
+  it('maps recording seconds through a variable-tempo project timeline', () => {
+    const notes = hummingMelodyToNoteEvents(
+      [{ startSeconds: 1, durationSeconds: 2, midi: 67, confidence: 0.8 }],
+      {
+        bpm: 120,
+        clipLengthBeats: 8,
+        quantize: 'off',
+        createId: ids(),
+        // 0..1s = 2 beats at 120 BPM, then 1 beat/s at 60 BPM.
+        secondsToBeat: (seconds) => seconds <= 1 ? seconds * 2 : seconds + 1,
+      },
+    );
+
+    expect(notes).toEqual([{
+      id: 'note-1',
+      pitch: 67,
+      startBeat: 2,
+      durationBeats: 2,
+      velocity: 87,
+    }]);
+  });
+
   it('keeps unquantized floating-point notes inside strict project boundaries', () => {
     const clipLengthBeats = 3.884317223462118;
     const bounded = hummingMelodyToNoteEvents(

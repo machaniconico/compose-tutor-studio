@@ -10,7 +10,7 @@ import {
 } from '../src/state/store';
 
 describe('playback topology changes', () => {
-  it('detects track ordering, instrument configuration, and clip layout changes', () => {
+  it('detects track ordering, semantic roles, instrument configuration, and clip layout changes', () => {
     const project = createDefaultProject();
     const [first, second] = project.tracks;
     if (!first || !second || !first.clips[0]) throw new Error('track fixture missing');
@@ -18,6 +18,19 @@ describe('playback topology changes', () => {
     expect(hasPlaybackTopologyChanged(project, {
       ...project,
       tracks: [second, first, ...project.tracks.slice(2)],
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      bpm: 90,
+      tempoMap: project.tempoMap.map((event, index) =>
+        index === 0 ? { ...event, bpm: 90 } : event,
+      ),
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      tracks: project.tracks.map((track, index) =>
+        index === 0 ? { ...track, role: 'general' } : track,
+      ),
     })).toBe(true);
     expect(hasPlaybackTopologyChanged(project, {
       ...project,
@@ -105,6 +118,35 @@ describe('playback topology changes', () => {
     })).toBe(false);
   });
 
+  it('treats automation edits and automated live-mix edits as snapshot changes', () => {
+    const project = createDefaultProject();
+    const target = project.tracks[0];
+    if (!target) throw new Error('track fixture missing');
+    project.automationLanes = [{
+      id: 'volume-lane',
+      target: { type: 'track-volume', trackId: target.id },
+      points: [{ id: 'volume-point', beat: 0, value: 0.5, interpolation: 'hold' }],
+    }];
+
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.id === target.id ? { ...track, name: 'Renamed' } : track),
+    })).toBe(false);
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.id === target.id ? { ...track, volume: 0.75 } : track),
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      automationLanes: project.automationLanes.map((lane) => ({
+        ...lane,
+        points: lane.points.map((point) => ({ ...point, value: 0.25 })),
+      })),
+    })).toBe(true);
+  });
+
   it.each(['starting', 'playing'] as const)(
     'stops an active %s generation atomically when topology is adopted',
     (phase) => {
@@ -170,6 +212,25 @@ describe('playback topology changes', () => {
       phase: 'playing',
       isPlaying: true,
       playbackRequestId: requestId,
+    });
+  });
+
+  it('stops active playback when the tempo-map clock changes', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    store.getState().play();
+    const requestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(requestId);
+
+    store.getState().setBpm(90);
+
+    expect(store.getState().project).toMatchObject({
+      bpm: 90,
+      tempoMap: [{ beat: 0, bpm: 90 }],
+    });
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      playbackRequestId: requestId + 1,
     });
   });
 
@@ -333,7 +394,14 @@ describe('transport playback lifecycle', () => {
       project: {
         ...state.project,
         lengthBars: 2,
+        lengthBeats: 6,
         timeSignature: [6, 8] as [number, number],
+        timeSignatureMap: [{
+          id: 'signature-6-8',
+          beat: 0,
+          numerator: 6,
+          denominator: 8,
+        }],
       },
       transport: { ...state.transport, positionBeat: 6 },
     }));
@@ -345,10 +413,10 @@ describe('transport playback lifecycle', () => {
 
   it.each([0, Number.NaN])(
     'uses beat zero when the project length is unusable (%s)',
-    (lengthBars) => {
+    (lengthBeats) => {
       const store = createStudioStore(new MemoryProjectRepository());
       store.setState((state) => ({
-        project: { ...state.project, lengthBars },
+        project: { ...state.project, lengthBeats },
         transport: { ...state.transport, positionBeat: 2 },
       }));
 
@@ -361,7 +429,12 @@ describe('transport playback lifecycle', () => {
   it('rewinds at the song end without changing an enabled loop region', () => {
     const store = createStudioStore(new MemoryProjectRepository());
     store.setState((state) => ({
-      project: { ...state.project, lengthBars: 2, timeSignature: [4, 4] },
+      project: {
+        ...state.project,
+        lengthBars: 2,
+        lengthBeats: 8,
+        timeSignature: [4, 4],
+      },
       transport: {
         ...state.transport,
         positionBeat: 8,
@@ -522,7 +595,14 @@ describe('transport playback lifecycle', () => {
       project: {
         ...state.project,
         lengthBars: 2,
+        lengthBeats: 6,
         timeSignature: [6, 8] as [number, number],
+        timeSignatureMap: [{
+          id: 'signature-6-8',
+          beat: 0,
+          numerator: 6,
+          denominator: 8,
+        }],
       },
       transport: {
         ...state.transport,

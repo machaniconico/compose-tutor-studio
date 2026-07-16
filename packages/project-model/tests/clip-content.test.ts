@@ -159,6 +159,19 @@ describe('linked clip content', () => {
     expect(findClip(edited, copy.id)?.clip.notes?.[0]?.pitch).toBe(60);
   });
 
+  it('rejects an injected clip id that collides with any project entity id', () => {
+    const { project, source } = midiPattern();
+    const before = structuredClone(project);
+
+    expect(duplicateClip(
+      project,
+      source.id,
+      { id: project.tempoMap[0]!.id, startBeat: 4, linked: true },
+      t1,
+    )).toEqual({ ok: false, reason: 'duplicate-id' });
+    expect(project).toEqual(before);
+  });
+
   it('rejects a duplicate that would cross the persisted effective-event limit', () => {
     const { project, source } = midiPattern();
     const track = project.tracks.find((candidate) => candidate.id === source.trackId);
@@ -245,6 +258,33 @@ describe('linked clip content', () => {
     expect(resizeClip(linked.project, source.id, { lengthBeats: 2 }, t1)).toEqual({
       ok: false,
       reason: 'linked-dependents',
+    });
+  });
+
+  it('checks drum content bounds with each local bar signature', () => {
+    const project = createEmptyProject({ lengthBars: 4, clock: t0 });
+    project.lengthBeats = 13;
+    project.timeSignatureMap = [
+      { ...project.timeSignatureMap[0]!, beat: 0, numerator: 4, denominator: 4 },
+      { id: 'resize-three-four', beat: 4, numerator: 3, denominator: 4 },
+    ];
+    const drumClip = project.tracks.find((track) => track.type === 'drum')?.clips[0];
+    if (!drumClip) throw new Error('drum fixture is missing');
+    drumClip.startBeat = 2;
+    drumClip.lengthBeats = 7.25;
+    drumClip.drumEvents = [{
+      id: 'resize-variable-hit',
+      lane: 'kick',
+      stepIndex: 31,
+      velocity: 100,
+    }];
+
+    expect(resizeClip(project, drumClip.id, {}, t1)).toMatchObject({ ok: true });
+
+    drumClip.drumEvents[0]!.stepIndex = 34;
+    expect(resizeClip(project, drumClip.id, {}, t1)).toEqual({
+      ok: false,
+      reason: 'content-out-of-range',
     });
   });
 
@@ -561,6 +601,12 @@ describe('project schema v1 to v2 clip migration', () => {
     const legacy = structuredClone(project) as unknown as Record<string, unknown>;
     legacy.schemaVersion = 1;
     const tracks = legacy.tracks as Array<{ clips: Array<Record<string, unknown>> }>;
+    delete legacy.lengthBeats;
+    delete legacy.tempoMap;
+    delete legacy.timeSignatureMap;
+    delete legacy.audioAssets;
+    delete legacy.automationLanes;
+    for (const track of tracks as Array<Record<string, unknown>>) delete track.role;
     tracks[1]!.clips[0]!.aliasOf = 'formerly-ignored';
 
     const migrated = migrateProject(legacy);

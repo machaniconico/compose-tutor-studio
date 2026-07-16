@@ -7,20 +7,22 @@
 
 import {
   assertScheduleEventBudget,
-  beatsPerBar as beatsPerBarForTimeSignature,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   type Project,
 } from '@cts/project-model';
+import {
+  automationBaseValue,
+  automationCommandsInWindow,
+} from './automation';
 import { buildScheduleEvents, type SchedulePayload } from './events';
-import { buildTrackGraphs, type TrackGraph } from './graph';
+import { buildTrackGraphs, computeAudibleTracks, type TrackGraph } from './graph';
 import { buildMasterBus } from './masterBus';
 import { applyMasterMix } from './mixState';
+import { beatDurationSeconds, createProjectMusicalTime } from './musicalTime';
 import {
   beatToTime,
-  projectLengthBeats,
   resolveDrumOccurrence,
-  secondsPerBeat,
   type ScheduledEvent,
 } from './scheduler';
 import { createNoiseBuffer, DrumVoiceManager } from './drums';
@@ -68,9 +70,9 @@ export function planWavRender(
   project: Project,
   resolvedEvents: readonly ScheduledEvent[] = buildWavScheduleEvents(project),
 ): WavRenderPlan {
-  const barBeats = beatsPerBarForTimeSignature(project.timeSignature);
-  const lengthBeats = projectLengthBeats(project.lengthBars, barBeats);
-  const songSeconds = lengthBeats * secondsPerBeat(project.bpm);
+  const { tempo } = createProjectMusicalTime(project);
+  const lengthBeats = project.lengthBeats;
+  const songSeconds = tempo.beatToSeconds(lengthBeats);
   const tail = planAudioTail(
     project,
     resolvedEvents,
@@ -286,6 +288,7 @@ export function buildWavScheduleEvents(project: Project): ScheduledEvent[] {
 export async function renderProjectToWav(project: Project): Promise<Blob> {
   const events = buildWavScheduleEvents(project);
   const plan = planWavRender(project, events);
+  const { index: musicalTime, tempo } = createProjectMusicalTime(project);
 
   const ctx = new OfflineAudioContext(RENDER_CHANNELS, plan.frames, RENDER_SAMPLE_RATE);
 
@@ -312,6 +315,31 @@ export async function renderProjectToWav(project: Project): Promise<Blob> {
     // Offline exports deliberately omit UI meters. Registering their analysers
     // would replace the live meter registry and retain the offline context.
     graphs = buildTrackGraphs(ctx, graphDestination, project.tracks, 0, 'disabled');
+    const audibleTrackIds = computeAudibleTracks(project.tracks);
+    const tracksById = new Map(project.tracks.map((track) => [track.id, track]));
+    const tempoChangeBeats = project.tempoMap.slice(1).map((event) => event.beat);
+    for (const lane of project.automationLanes) {
+      const track = tracksById.get(lane.target.trackId);
+      const graph = graphs.get(lane.target.trackId);
+      if (!track || !graph) continue;
+      for (const command of automationCommandsInWindow(
+        lane,
+        automationBaseValue(track, lane.target),
+        0,
+        project.lengthBeats,
+        null,
+        true,
+        tempoChangeBeats,
+      )) {
+        graph.scheduleAutomation(
+          lane.target.type,
+          command.value,
+          beatToTime(command.beat, tempo, 0, 0),
+          command.interpolation,
+          audibleTrackIds.has(track.id),
+        );
+      }
+    }
     let sharedDrumNoise: AudioBuffer | undefined;
     for (const track of project.tracks) {
       const graph = graphs.get(track.id);
@@ -327,15 +355,19 @@ export async function renderProjectToWav(project: Project): Promise<Blob> {
       }
     }
 
-    // Schedule everything. anchorBeat=0, anchorTime=0 => beat n maps to n*spb.
-    const spb = secondsPerBeat(project.bpm);
+    // Schedule everything through the same tempo map used by live playback.
     for (const ev of events) {
-      const time = beatToTime(ev.beat, project.bpm, 0, 0);
+      const time = beatToTime(ev.beat, tempo, 0, 0);
       const payload = ev.payload as SchedulePayload;
       if (payload.kind === 'note') {
         const synth = synths.get(payload.trackId);
         if (synth) {
-          synth.noteOn(payload.pitch, time, payload.durationBeats * spb, payload.velocity);
+          synth.noteOn(
+            payload.pitch,
+            time,
+            beatDurationSeconds(musicalTime, ev.beat, payload.durationBeats),
+            payload.velocity,
+          );
         }
       } else {
         const drum = drums.get(payload.trackId);

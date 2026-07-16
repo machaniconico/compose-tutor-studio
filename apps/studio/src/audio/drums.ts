@@ -28,6 +28,15 @@ const NOISE_SUBVOICE_SALT = Object.freeze({
   clapBurstBase: 0x100,
 });
 
+/**
+ * End every envelope on the audio timeline itself. `ended` is delivered on the
+ * main thread, so relying on its graph-disconnect timing can expose a few
+ * engine-dependent filter-tail samples during an offline render.
+ */
+function silenceAtSourceStop(param: AudioParam, stopTime: number): void {
+  param.setValueAtTime(0, stopTime);
+}
+
 function uint32(value: number, fallback: number): number {
   return Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff
     ? value >>> 0
@@ -240,6 +249,10 @@ export class DrumVoiceManager {
       const peak = 0.9 * vel;
       gain.gain.setValueAtTime(peak, time);
       gain.gain.exponentialRampToValueAtTime(0.001, time + 0.32);
+      silenceAtSourceStop(
+        gain.gain,
+        time + DRUM_VOICE_TIMING.kick.bodySourceStopSeconds,
+      );
       osc.connect(gain);
       gain.connect(this.output);
       osc.start(time);
@@ -260,6 +273,10 @@ export class DrumVoiceManager {
       hp.frequency.setValueAtTime(1500, time);
       clickGain.gain.setValueAtTime(0.4 * vel, time);
       clickGain.gain.exponentialRampToValueAtTime(0.001, time + 0.02);
+      silenceAtSourceStop(
+        clickGain.gain,
+        time + DRUM_VOICE_TIMING.kick.clickSourceStopSeconds,
+      );
       click.connect(hp);
       hp.connect(clickGain);
       clickGain.connect(this.output);
@@ -284,6 +301,10 @@ export class DrumVoiceManager {
       bp.Q.setValueAtTime(0.8, time);
       noiseGain.gain.setValueAtTime(0.6 * vel, time);
       noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+      silenceAtSourceStop(
+        noiseGain.gain,
+        time + DRUM_VOICE_TIMING.snare.noiseSourceStopSeconds,
+      );
       noise.connect(bp);
       bp.connect(noiseGain);
       noiseGain.connect(this.output);
@@ -298,6 +319,10 @@ export class DrumVoiceManager {
       tone.frequency.setValueAtTime(180, time);
       toneGain.gain.setValueAtTime(0.4 * vel, time);
       toneGain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+      silenceAtSourceStop(
+        toneGain.gain,
+        time + DRUM_VOICE_TIMING.snare.toneSourceStopSeconds,
+      );
       tone.connect(toneGain);
       toneGain.connect(this.output);
       tone.start(time);
@@ -326,6 +351,7 @@ export class DrumVoiceManager {
         0.001,
         time + timing.envelopeDecaySeconds,
       );
+      silenceAtSourceStop(gain.gain, time + timing.sourceStopSeconds);
       noise.connect(hp);
       hp.connect(gain);
       gain.connect(this.output);
@@ -352,6 +378,10 @@ export class DrumVoiceManager {
         bp.Q.setValueAtTime(1.2, start);
         gain.gain.setValueAtTime(0.34 * vel, start);
         gain.gain.exponentialRampToValueAtTime(0.001, start + 0.09);
+        silenceAtSourceStop(
+          gain.gain,
+          start + DRUM_VOICE_TIMING.clap.burstSourceStopSeconds,
+        );
         noise.connect(bp);
         bp.connect(gain);
         gain.connect(this.output);
@@ -371,6 +401,10 @@ export class DrumVoiceManager {
       osc.frequency.exponentialRampToValueAtTime(160, time + 0.18);
       gain.gain.setValueAtTime(0.5 * vel, time);
       gain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+      silenceAtSourceStop(
+        gain.gain,
+        time + DRUM_VOICE_TIMING.perc.sourceStopSeconds,
+      );
       osc.connect(gain);
       gain.connect(this.output);
       osc.start(time);

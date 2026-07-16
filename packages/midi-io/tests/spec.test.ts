@@ -179,11 +179,22 @@ function tinyProject(): Project {
     key: 'C',
     scale: 'major',
     lengthBars: 1,
+    lengthBeats: 4,
+    tempoMap: [{ id: 'tempo-0', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'time-signature-0',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       {
         id: 'inst',
         name: 'Lead',
         type: 'instrument',
+        role: 'general',
         clips: [
           {
             id: 'c1',
@@ -208,6 +219,7 @@ function tinyProject(): Project {
         id: 'drm',
         name: 'Drums',
         type: 'drum',
+        role: 'general',
         clips: [
           {
             id: 'd1',
@@ -251,6 +263,7 @@ function projectWithMelodicTracks(trackCount: number): Project {
       id: `instrument-${index}`,
       name: `Instrument ${index + 1}`,
       type: 'instrument' as const,
+      role: 'general' as const,
       clips: [],
       volume: 1,
       pan: 0,
@@ -525,7 +538,7 @@ describe('projectToMidi drum mapping', () => {
   });
 });
 
-describe('projectToMidi chord markers', () => {
+describe('projectToMidi tempo track', () => {
   it('emits FF 06 markers on the tempo track at chord start', () => {
     const parsed = parseSmf(projectToMidi(tinyProject()));
     const tempoTrack = parsed.tracks[0]!;
@@ -567,11 +580,107 @@ describe('projectToMidi chord markers', () => {
     });
   });
 
-  it('emits tempo (FF 51) and time signature (FF 58) on the tempo track', () => {
+  it('emits the single canonical tempo and time-signature map points at tick zero', () => {
     const parsed = parseSmf(projectToMidi(tinyProject()));
     const tempoTrack = parsed.tracks[0]!;
-    expect(tempoTrack.events.some((e) => e.type === 'meta' && e.metaType === 0x51)).toBe(true);
-    expect(tempoTrack.events.some((e) => e.type === 'meta' && e.metaType === 0x58)).toBe(true);
+    expect(tempoTrack.events.filter(
+      (event) => event.type === 'meta' && event.metaType === 0x51,
+    )).toEqual([{
+      type: 'meta',
+      tick: 0,
+      metaType: 0x51,
+      data: [0x07, 0xa1, 0x20],
+    }]);
+    expect(tempoTrack.events.filter(
+      (event) => event.type === 'meta' && event.metaType === 0x58,
+    )).toEqual([{
+      type: 'meta',
+      tick: 0,
+      metaType: 0x58,
+      data: [4, 2, 24, 8],
+    }]);
+  });
+
+  it('keeps the pre-v3 scalar fallback when timeline maps are absent', () => {
+    const legacy = structuredClone(tinyProject()) as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 2;
+    legacy.bpm = 90;
+    legacy.timeSignature = [3, 4];
+    delete legacy.tempoMap;
+    delete legacy.timeSignatureMap;
+
+    const tempoTrack = parseSmf(projectToMidi(legacy as unknown as Project)).tracks[0]!;
+    expect(tempoTrack.events.filter(
+      (event) => event.type === 'meta' && event.metaType === 0x51,
+    )).toEqual([{
+      type: 'meta',
+      tick: 0,
+      metaType: 0x51,
+      data: [0x0a, 0x2c, 0x2b],
+    }]);
+    expect(tempoTrack.events.filter(
+      (event) => event.type === 'meta' && event.metaType === 0x58,
+    )).toEqual([{
+      type: 'meta',
+      tick: 0,
+      metaType: 0x58,
+      data: [3, 2, 24, 8],
+    }]);
+  });
+
+  it('exports every map point, ignores scalar mirrors, and orders quantized duplicate ticks', () => {
+    const project = tinyProject();
+    project.bpm = 33;
+    project.timeSignature = [7, 8];
+    project.lengthBars = 2;
+    project.lengthBeats = 8;
+    project.tempoMap = [
+      { id: 'tempo-start', beat: 0, bpm: 120 },
+      { id: 'tempo-slow', beat: 4, bpm: 60 },
+      { id: 'tempo-fast', beat: 4.004, bpm: 240 },
+    ];
+    project.timeSignatureMap = [
+      { id: 'meter-start', beat: 0, numerator: 4, denominator: 4 },
+      { id: 'meter-three', beat: 4, numerator: 3, denominator: 4 },
+      { id: 'meter-five', beat: 4.004, numerator: 5, denominator: 8 },
+    ];
+
+    const first = projectToMidi(project, { ppq: 100 });
+    const second = projectToMidi(project, { ppq: 100 });
+    const tempoTrack = parseSmf(first).tracks[0]!;
+
+    expect(second).toEqual(first);
+    expect(tempoTrack.events.filter(
+      (event) => event.type === 'meta' && event.metaType === 0x51,
+    )).toEqual([
+      { type: 'meta', tick: 0, metaType: 0x51, data: [0x07, 0xa1, 0x20] },
+      { type: 'meta', tick: 400, metaType: 0x51, data: [0x0f, 0x42, 0x40] },
+      { type: 'meta', tick: 400, metaType: 0x51, data: [0x03, 0xd0, 0x90] },
+    ]);
+    expect(tempoTrack.events.filter(
+      (event) => event.type === 'meta' && event.metaType === 0x58,
+    )).toEqual([
+      { type: 'meta', tick: 0, metaType: 0x58, data: [4, 2, 24, 8] },
+      { type: 'meta', tick: 400, metaType: 0x58, data: [3, 2, 24, 8] },
+      { type: 'meta', tick: 400, metaType: 0x58, data: [5, 3, 24, 8] },
+    ]);
+  });
+
+  it.each([
+    ['tempoMap', []],
+    ['timeSignatureMap', []],
+    ['tempoMap', [
+      { id: 'tempo-a', beat: 0, bpm: 120 },
+      { id: 'tempo-b', beat: 0, bpm: 90 },
+    ]],
+  ] as const)('rejects a non-canonical %s instead of falling back to scalars', (field, value) => {
+    const project = tinyProject();
+    Object.assign(project, { [field]: value });
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
   });
 
   it('ends every track with an end-of-track meta (FF 2F)', () => {

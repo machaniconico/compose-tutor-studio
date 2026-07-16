@@ -331,11 +331,22 @@ describe('exportProjectToMidi', () => {
     key: 'C',
     scale: 'major',
     lengthBars: 4,
+    lengthBeats: 16,
+    tempoMap: [{ id: 'test-tempo-0', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'test-meter-0',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       {
         id: 'track-1',
         name: 'Piano',
         type: 'instrument',
+        role: 'general',
         clips: [
           {
             id: 'clip-1',
@@ -439,11 +450,19 @@ describe('exportProjectToMidi', () => {
       ...project,
       timeSignature: [3, 4],
       lengthBars: 2,
+      lengthBeats: 6,
+      timeSignatureMap: [{
+        id: 'test-meter-three-four',
+        beat: 0,
+        numerator: 3,
+        denominator: 4,
+      }],
       tracks: [
         {
           id: 'track-drums',
           name: 'Drums',
           type: 'drum',
+          role: 'general',
           clips: [
             {
               id: 'clip-drums',
@@ -480,11 +499,19 @@ describe('exportProjectToMidi', () => {
       ...project,
       timeSignature: [6, 8],
       lengthBars: 1,
+      lengthBeats: 3,
+      timeSignatureMap: [{
+        id: 'test-meter-six-eight',
+        beat: 0,
+        numerator: 6,
+        denominator: 8,
+      }],
       tracks: [
         {
           id: 'track-six-eight',
           name: 'Six Eight Drums',
           type: 'drum',
+          role: 'general',
           clips: [
             {
               id: 'clip-six-eight',
@@ -511,16 +538,24 @@ describe('exportProjectToMidi', () => {
     expect(noteOnTicks(midi, 0x99, 36)).toEqual([Math.round(1.5 * PPQ)]);
   });
 
-  it('uses the playback fallback when 3/4 drum stepsPerBar is invalid', () => {
+  it('rejects invalid 3/4 drum stepsPerBar instead of applying a playback fallback', () => {
     const drumProject: Project = {
       ...project,
       timeSignature: [3, 4],
       lengthBars: 2,
+      lengthBeats: 6,
+      timeSignatureMap: [{
+        id: 'test-meter-fallback-three-four',
+        beat: 0,
+        numerator: 3,
+        denominator: 4,
+      }],
       tracks: [
         {
           id: 'track-drums',
           name: 'Drums',
           type: 'drum',
+          role: 'general',
           clips: [
             {
               id: 'clip-drums',
@@ -545,9 +580,9 @@ describe('exportProjectToMidi', () => {
       chordTrack: [],
     };
 
-    const midi = exportProjectToMidi(drumProject);
-    const expectedBeat = drumStepToBeat(8, 0, 3, 3);
-    expect(noteOnTicks(midi, 0x99, 36)).toEqual([Math.round(expectedBeat * PPQ)]);
+    expect(() => exportProjectToMidi(drumProject)).toThrowError(
+      expect.objectContaining({ code: 'invalid-project' }),
+    );
   });
 
   it('keeps 4/4 drum step export timing unchanged', () => {
@@ -558,6 +593,7 @@ describe('exportProjectToMidi', () => {
           id: 'track-drums',
           name: 'Drums',
           type: 'drum',
+          role: 'general',
           clips: [
             {
               id: 'clip-drums',

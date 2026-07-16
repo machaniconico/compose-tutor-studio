@@ -27,8 +27,14 @@ describe('validateProject', () => {
     const high = { ...baseProject(), bpm: 400 };
     expect(validateProject(low).errors.some((e) => e.path === 'bpm')).toBe(true);
     expect(validateProject(high).errors.some((e) => e.path === 'bpm')).toBe(true);
-    expect(validateProject({ ...baseProject(), bpm: 20 }).valid).toBe(true);
-    expect(validateProject({ ...baseProject(), bpm: 300 }).valid).toBe(true);
+    const boundary = (bpm: number): Project => {
+      const project = baseProject();
+      project.bpm = bpm;
+      project.tempoMap[0]!.bpm = bpm;
+      return project;
+    };
+    expect(validateProject(boundary(20)).valid).toBe(true);
+    expect(validateProject(boundary(300)).valid).toBe(true);
   });
 
   it('flags invalid time signature denominator', () => {
@@ -67,7 +73,7 @@ describe('validateProject', () => {
     expect(validateProject(project).errors).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: 'lengthBars',
+          path: 'lengthBeats',
           message: expect.stringContaining('quarter-note beats'),
         }),
       ]),
@@ -172,4 +178,75 @@ describe('validateProject', () => {
     expect(result.ok).toBe(false);
     expect(result.errors).toHaveLength(MAX_PROJECT_VALIDATION_ERRORS);
   });
+
+  it('validates drum steps against each local bar signature', () => {
+    const project = createEmptyProject({ clock, lengthBars: 4, timeSignature: [4, 4] });
+    project.lengthBeats = 13;
+    project.timeSignatureMap = [
+      { ...project.timeSignatureMap[0]!, beat: 0, numerator: 4, denominator: 4 },
+      { id: 'validation-three-four', beat: 4, numerator: 3, denominator: 4 },
+    ];
+    project.tracks.forEach((track) => {
+      track.clips.forEach((clip) => {
+        clip.lengthBeats = 13;
+      });
+    });
+    const drumClip = project.tracks.find((track) => track.type === 'drum')?.clips[0];
+    if (!drumClip) throw new Error('drum fixture missing');
+    drumClip.startBeat = 2;
+    drumClip.lengthBeats = 7.25;
+    drumClip.drumEvents = [{
+      id: 'variable-signature-hit',
+      lane: 'kick',
+      stepIndex: 31,
+      velocity: 100,
+    }];
+
+    expect(validateProject(project).ok).toBe(true);
+
+    drumClip.drumEvents[0]!.stepIndex = 34;
+    expect(validateProject(project).errors).toContainEqual(
+      expect.objectContaining({
+        path: expect.stringContaining('drumEvents[0].stepIndex'),
+        message: 'drum step must fall within its clip',
+      }),
+    );
+  });
+
+  it('bounds dense drum validation across large valid and invalid signature maps', () => {
+    const dense = createEmptyProject({ clock, lengthBars: 256, timeSignature: [1, 4] });
+    dense.timeSignatureMap = Array.from({ length: 257 }, (_, index) => ({
+      id: `dense-signature-${index}`,
+      beat: index,
+      numerator: 1,
+      denominator: 4,
+    }));
+    const drumClip = dense.tracks.find((track) => track.type === 'drum')?.clips[0];
+    if (!drumClip) throw new Error('drum fixture missing');
+    drumClip.drumEvents = Array.from({ length: 20_000 }, (_, index) => ({
+      id: `dense-drum-${index}`,
+      lane: 'kick' as const,
+      stepIndex: index % 4_096,
+      velocity: 100,
+    }));
+
+    const validStartedAt = Date.now();
+    expect(validateProject(dense).ok).toBe(true);
+    expect(Date.now() - validStartedAt).toBeLessThan(2_000);
+
+    const invalid = structuredClone(dense);
+    invalid.lengthBars = 1_024;
+    invalid.lengthBeats = 1_024;
+    invalid.timeSignatureMap = Array.from({ length: 1_024 }, (_, index) => ({
+      id: `hostile-signature-${index}`,
+      beat: index,
+      numerator: 1,
+      denominator: 4,
+    }));
+    const invalidStartedAt = Date.now();
+    expect(validateProject(invalid).errors).toContainEqual(
+      expect.objectContaining({ path: 'lengthBars' }),
+    );
+    expect(Date.now() - invalidStartedAt).toBeLessThan(2_000);
+  }, 10_000);
 });

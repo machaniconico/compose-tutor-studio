@@ -12,12 +12,34 @@ import {
   encodeProjectJson,
   findClip,
   resolveClipContent,
+  type Project,
 } from '../src/index';
 
 const clock = () => new Date('2026-07-10T00:00:00.000Z');
 
 function projectRecord(): Record<string, unknown> {
   return structuredClone(createEmptyProject({ clock })) as unknown as Record<string, unknown>;
+}
+
+function legacyProjectRecord(project: Project, schemaVersion: 1 | 2): Record<string, unknown> {
+  const legacy = structuredClone(project) as unknown as Record<string, unknown>;
+  legacy.schemaVersion = schemaVersion;
+  delete legacy.lengthBeats;
+  delete legacy.tempoMap;
+  delete legacy.timeSignatureMap;
+  delete legacy.audioAssets;
+  delete legacy.automationLanes;
+  for (const track of legacy.tracks as Array<Record<string, unknown>>) {
+    delete track.role;
+    for (const clip of track.clips as Array<Record<string, unknown>>) {
+      delete clip.sourceStartFrame;
+      delete clip.sourceFrameCount;
+      delete clip.fadeInFrames;
+      delete clip.fadeOutFrames;
+      delete clip.gainDb;
+    }
+  }
+  return legacy;
 }
 
 describe('canonical project codec', () => {
@@ -128,7 +150,7 @@ describe('canonical project codec', () => {
       notes: [],
     }));
 
-    const decoded = decodeProject(legacy);
+    const decoded = decodeProject(legacyProjectRecord(legacy, 1));
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
     expect(decoded).toMatchObject({ sourceSchemaVersion: 1, migrated: true });
@@ -307,6 +329,33 @@ describe('canonical project codec', () => {
         expect.objectContaining({ path: 'tracks[0].instrument.params.cutoff', code: 'not-finite' }),
       ]),
     );
+  });
+
+  it('counts numeric parameter entries toward the total nested-item budget', () => {
+    const project = createEmptyProject({ clock });
+    const params = Object.fromEntries(
+      Array.from({ length: 2_048 }, (_, index) => [`parameter-${index}`, index]),
+    );
+    for (let trackIndex = 0; trackIndex < 2; trackIndex += 1) {
+      project.tracks[trackIndex]!.effects = Array.from({ length: 50 }, (_, effectIndex) => ({
+        id: `budget-effect-${trackIndex}-${effectIndex}`,
+        type: 'filter' as const,
+        enabled: true,
+        params,
+      }));
+    }
+
+    const result = decodeProject(project);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: expect.stringContaining('.params'),
+        code: 'out-of-range',
+        message: expect.stringContaining('project exceeds 200000 nested items'),
+      }),
+    ]));
   });
 
   it('preserves __proto__ as inert parameter data without changing prototypes', () => {

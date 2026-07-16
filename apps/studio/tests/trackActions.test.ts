@@ -79,7 +79,7 @@ describe('studio track commands', () => {
     expect(state.editor.activeView).toBe('drums');
   });
 
-  it('rejects blank names and reserved learning names without history or project changes', () => {
+  it('rejects blank names but keeps learning roles independent from editable names', () => {
     const before = useStore.getState();
     const projectBefore = fingerprint(before.project);
     const historyBefore = before.past.length;
@@ -89,31 +89,32 @@ describe('studio track commands', () => {
       ok: false,
       code: 'invalid-track-name',
     });
-    expect(trackActions.renameStudioTrack(before.project.tracks[0]?.id ?? '', 'Elsewhere')).toMatchObject({
-      ok: false,
-      code: 'learning-track-name-protected',
-    });
     expect(fingerprint(useStore.getState().project)).toBe(projectBefore);
     expect(useStore.getState().past).toHaveLength(historyBefore);
     expect(useStore.getState().saveState.revision).toBe(revisionBefore);
 
+    const learningTrack = before.project.tracks.find((track) => track.role === 'learning.chords');
+    if (!learningTrack) throw new Error('learning role fixture missing');
+    expect(trackActions.renameStudioTrack(learningTrack.id, 'Harmony')).toMatchObject({
+      ok: true,
+      changed: true,
+    });
+    expect(
+      useStore.getState().project.tracks.find((track) => track.id === learningTrack.id),
+    ).toMatchObject({ name: 'Harmony', role: 'learning.chords' });
+
     const created = trackActions.addStudioTrack({ kind: 'instrument', name: 'Lead' });
     if (!created.ok) throw new Error('fixture track was not added');
-    const stable = useStore.getState();
-    const stableFingerprint = fingerprint(stable.project);
-    const stableHistory = stable.past.length;
-    const stableRevision = stable.saveState.revision;
     expect(trackActions.renameStudioTrack(created.trackId, ' melody ')).toMatchObject({
-      ok: false,
-      code: 'reserved-learning-track-name',
+      ok: true,
+      changed: true,
     });
-    expect(fingerprint(useStore.getState().project)).toBe(stableFingerprint);
-    expect(useStore.getState().past).toHaveLength(stableHistory);
-    expect(useStore.getState().saveState.revision).toBe(stableRevision);
-
-    expect(projectBefore).not.toBe(stableFingerprint);
-    expect(historyBefore).toBeLessThan(stableHistory);
-    expect(revisionBefore).toBeLessThan(stableRevision);
+    expect(
+      useStore.getState().project.tracks.find((track) => track.id === created.trackId),
+    ).toMatchObject({ name: 'melody', role: 'general' });
+    expect(projectBefore).not.toBe(fingerprint(useStore.getState().project));
+    expect(historyBefore).toBeLessThan(useStore.getState().past.length);
+    expect(revisionBefore).toBeLessThan(useStore.getState().saveState.revision);
   });
 
   it('protects learning tracks from deletion without changing project history', () => {
@@ -128,6 +129,40 @@ describe('studio track commands', () => {
     expect(fingerprint(useStore.getState().project)).toBe(fingerprint(before.project));
     expect(useStore.getState().past).toHaveLength(before.past.length);
     expect(useStore.getState().saveState.revision).toBe(before.saveState.revision);
+  });
+
+  it('transfers one learning role atomically and restarts stale playback topology', () => {
+    const previousOwner = useStore.getState().project.tracks.find(
+      (track) => track.role === 'learning.chords',
+    );
+    if (!previousOwner) throw new Error('learning role fixture missing');
+    const created = trackActions.addStudioTrack({ kind: 'instrument', name: 'Harmony Layer' });
+    if (!created.ok) throw new Error('target track fixture missing');
+
+    useStore.getState().play();
+    const requestId = useStore.getState().transport.playbackRequestId;
+    useStore.getState().confirmPlaybackStarted(requestId);
+    const historyBefore = useStore.getState().past.length;
+
+    const result = trackActions.setStudioTrackRole(created.trackId, 'learning.chords');
+
+    expect(result).toMatchObject({ ok: true, changed: true, playbackStopped: true });
+    expect(useStore.getState().project.tracks.find(
+      (track) => track.id === previousOwner.id,
+    )?.role).toBe('general');
+    expect(useStore.getState().project.tracks.find(
+      (track) => track.id === created.trackId,
+    )?.role).toBe('learning.chords');
+    expect(useStore.getState().past).toHaveLength(historyBefore + 1);
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      playbackRequestId: requestId + 1,
+    });
+    expect(trackActions.deleteStudioTrack(created.trackId)).toMatchObject({
+      ok: false,
+      code: 'learning-track-protected',
+    });
   });
 
   it('keeps same-name and same-preset no-ops out of history', () => {

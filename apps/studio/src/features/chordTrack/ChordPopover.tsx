@@ -1,6 +1,13 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { beatsPerBar, type ChordEvent, type Project } from '@cts/project-model';
+import {
+  barToBeatAt,
+  beatToBarPosition,
+  compileMusicalTime,
+  type ChordEvent,
+  type MusicalTimeIndex,
+  type Project,
+} from '@cts/project-model';
 import {
   analyzeChord,
   getDiatonicChords,
@@ -119,6 +126,99 @@ function detailLines(suggestion: ChordSuggestion, project: Project): string[] {
   }
 }
 
+function beatAsBarNumber(musicalTime: MusicalTimeIndex, beat: number): number {
+  const position = beatToBarPosition(musicalTime, beat);
+  const barStart = barToBeatAt(musicalTime, position.bar);
+  const barEnd = barToBeatAt(musicalTime, position.bar + 1);
+  const barLength = barEnd - barStart;
+  return position.bar + (barLength > 0 ? position.beatInBar / barLength : 0);
+}
+
+function beatAtBarNumber(musicalTime: MusicalTimeIndex, barNumber: number): number {
+  const bar = Math.floor(barNumber);
+  const fraction = barNumber - bar;
+  const barStart = barToBeatAt(musicalTime, bar);
+  if (fraction === 0) return barStart;
+  const barEnd = barToBeatAt(musicalTime, bar + 1);
+  return barStart + (barEnd - barStart) * fraction;
+}
+
+export type ChordPopoverTiming = Readonly<{
+  startBar: number;
+  durationBars: number;
+  maxDurationBars: number;
+}>;
+
+export function chordPopoverTiming(
+  musicalTime: MusicalTimeIndex,
+  lengthBars: number,
+  chord: Pick<ChordEvent, 'startBeat' | 'durationBeats'>,
+): ChordPopoverTiming {
+  const startPosition = beatToBarPosition(musicalTime, chord.startBeat);
+  const startBarNumber = beatAsBarNumber(musicalTime, chord.startBeat);
+  const endBarNumber = beatAsBarNumber(
+    musicalTime,
+    chord.startBeat + chord.durationBeats,
+  );
+  const startBarIndex = Math.min(
+    Math.max(0, lengthBars - 1),
+    Math.max(0, startPosition.bar),
+  );
+  const maxDurationBars = Math.max(0, lengthBars - startBarNumber);
+  const durationBars = Math.min(
+    maxDurationBars,
+    Math.max(0, endBarNumber - startBarNumber),
+  );
+  return {
+    startBar: startBarIndex + 1,
+    durationBars,
+    maxDurationBars,
+  };
+}
+
+export function moveChordToBarPatch(
+  musicalTime: MusicalTimeIndex,
+  lengthBars: number,
+  chord: Pick<ChordEvent, 'startBeat' | 'durationBeats'>,
+  nextBar: number,
+): Pick<ChordEvent, 'startBeat' | 'durationBeats'> {
+  const timing = chordPopoverTiming(musicalTime, lengthBars, chord);
+  if (!Number.isFinite(nextBar)) {
+    return { startBeat: chord.startBeat, durationBeats: chord.durationBeats };
+  }
+  const boundedBar = Math.min(lengthBars, Math.max(1, Math.round(nextBar)));
+  const startBarIndex = boundedBar - 1;
+  const boundedDuration = Math.min(
+    timing.durationBars,
+    Math.max(0, lengthBars - startBarIndex),
+  );
+  const startBeat = barToBeatAt(musicalTime, startBarIndex);
+  const endBeat = beatAtBarNumber(musicalTime, startBarIndex + boundedDuration);
+  return { startBeat, durationBeats: endBeat - startBeat };
+}
+
+export function resizeChordToBarsPatch(
+  musicalTime: MusicalTimeIndex,
+  lengthBars: number,
+  chord: Pick<ChordEvent, 'startBeat' | 'durationBeats'>,
+  nextDuration: number,
+): Pick<ChordEvent, 'durationBeats'> {
+  const timing = chordPopoverTiming(musicalTime, lengthBars, chord);
+  if (!Number.isFinite(nextDuration) || nextDuration <= 0) {
+    return { durationBeats: chord.durationBeats };
+  }
+  const boundedDuration = Math.min(
+    timing.maxDurationBars,
+    nextDuration,
+  );
+  const startBarNumber = beatAsBarNumber(musicalTime, chord.startBeat);
+  const endBeat = Math.min(
+    musicalTime.lengthBeats,
+    beatAtBarNumber(musicalTime, startBarNumber + boundedDuration),
+  );
+  return { durationBeats: endBeat - chord.startBeat };
+}
+
 /**
  * Inline chord edit popover. Free-text input with live parse feedback, a
  * diatonic palette (I ii iii IV V vi vii°), a suggestion list with Japanese
@@ -146,10 +246,15 @@ export function ChordPopover(props: {
   triggerElementRef.current = triggerElement;
   const titleId = useId();
   const feedbackId = useId();
-  const bpb = beatsPerBar(project.timeSignature);
-  const startBar = Math.floor(chord.startBeat / bpb) + 1;
-  const durationBars = Math.max(1, Math.round(chord.durationBeats / bpb));
-  const maxDurationBars = Math.max(1, project.lengthBars - startBar + 1);
+  const musicalTime = useMemo(
+    () => compileMusicalTime(project),
+    [project.lengthBeats, project.tempoMap, project.timeSignatureMap],
+  );
+  const { startBar, durationBars, maxDurationBars } = chordPopoverTiming(
+    musicalTime,
+    project.lengthBars,
+    chord,
+  );
   const portalRoot = triggerElement?.closest<HTMLElement>('.app-shell') ?? document.body;
 
   useEffect(() => {
@@ -239,23 +344,27 @@ export function ChordPopover(props: {
   };
 
   const moveToBar = (nextBar: number) => {
-    const boundedBar = Math.min(project.lengthBars, Math.max(1, Math.round(nextBar)));
-    const boundedDuration = Math.min(
-      durationBars,
-      Math.max(1, project.lengthBars - boundedBar + 1),
+    updateChord(
+      chord.id,
+      moveChordToBarPatch(
+        musicalTime,
+        project.lengthBars,
+        chord,
+        nextBar,
+      ),
     );
-    updateChord(chord.id, {
-      startBeat: (boundedBar - 1) * bpb,
-      durationBeats: boundedDuration * bpb,
-    });
   };
 
   const resizeToBars = (nextDuration: number) => {
-    const boundedDuration = Math.min(
-      maxDurationBars,
-      Math.max(1, Math.round(nextDuration)),
+    updateChord(
+      chord.id,
+      resizeChordToBarsPatch(
+        musicalTime,
+        project.lengthBars,
+        chord,
+        nextDuration,
+      ),
     );
-    updateChord(chord.id, { durationBeats: boundedDuration * bpb });
   };
 
   return createPortal(
@@ -331,9 +440,9 @@ export function ChordPopover(props: {
           <span>長さ（小節）</span>
           <input
             type="number"
-            min={1}
+            min={0}
             max={maxDurationBars}
-            step={1}
+            step="any"
             value={durationBars}
             onChange={(event) => resizeToBars(Number(event.target.value))}
           />

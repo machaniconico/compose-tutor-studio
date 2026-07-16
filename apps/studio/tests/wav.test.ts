@@ -56,6 +56,7 @@ function drumTrack(clip: Clip): Track {
     id: 'drums',
     name: 'Drums',
     type: 'drum',
+    role: 'general',
     clips: [clip],
     volume: 0.8,
     pan: 0,
@@ -67,15 +68,29 @@ function drumTrack(clip: Clip): Track {
 }
 
 function projectWithDrumClip(clip: Clip): Project {
+  const lengthBars = Math.max(
+    1,
+    Math.ceil((clip.startBeat + clip.lengthBeats) / 4),
+  );
   return {
     id: 'project',
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title: 'WAV test',
     bpm: 120,
     timeSignature: [4, 4],
     key: 'C',
     scale: 'major',
-    lengthBars: 1,
+    lengthBars,
+    lengthBeats: lengthBars * 4,
+    tempoMap: [{ id: 'wav-tempo-0', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{
+      id: 'wav-meter-0',
+      beat: 0,
+      numerator: 4,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [drumTrack(clip)],
     chordTrack: [],
     sections: [],
@@ -100,6 +115,7 @@ function projectWithMasterOnly(): Project {
         id: 'master',
         name: 'Master',
         type: 'master',
+        role: 'general',
         clips: [],
         volume: 1,
         pan: 0,
@@ -263,10 +279,21 @@ describe('buildWavScheduleEvents drum groove parity', () => {
       key: 'C',
       scale: 'major',
       lengthBars: 2,
+      lengthBeats: 8,
+      tempoMap: [{ id: 'ordered-tempo-0', beat: 0, bpm: 120 }],
+      timeSignatureMap: [{
+        id: 'ordered-meter-0',
+        beat: 0,
+        numerator: 4,
+        denominator: 4,
+      }],
+      audioAssets: [],
+      automationLanes: [],
       tracks: [{
         id: 'lead',
         name: 'Lead',
         type: 'instrument',
+        role: 'general',
         // Deliberately store the later source first to reproduce project-order
         // traversal that used to steal future voices before they started.
         clips: [source, alias],
@@ -374,6 +401,7 @@ describe('buildWavScheduleEvents drum groove parity', () => {
     };
     const project = projectWithDrumClip(clipA);
     project.lengthBars = 2;
+    project.lengthBeats = 8;
     project.tracks[0]!.clips = [clipA, clipB];
 
     const live = nextEventsInWindow(
@@ -469,7 +497,17 @@ describe('buildWavScheduleEvents drum groove parity', () => {
       stepsPerBar: 16,
       drumEvents: [{ id: 'middle', lane: 'kick', stepIndex: 8, velocity: 100 }],
     };
-    const project = { ...projectWithDrumClip(clip), timeSignature: [6, 8] as [number, number] };
+    const project = {
+      ...projectWithDrumClip(clip),
+      timeSignature: [6, 8] as [number, number],
+      lengthBeats: 3,
+      timeSignatureMap: [{
+        id: 'wav-meter-six-eight',
+        beat: 0,
+        numerator: 6,
+        denominator: 8,
+      }],
+    };
 
     expect(buildWavScheduleEvents(project)[0]?.beat).toBe(1.5);
   });
@@ -495,10 +533,21 @@ describe('MIDI Clip loop live/WAV parity', () => {
       key: 'C',
       scale: 'major',
       lengthBars: Math.ceil(lengthBeats / 4),
+      lengthBeats: Math.ceil(lengthBeats / 4) * 4,
+      tempoMap: [{ id: 'wav-loop-tempo-0', beat: 0, bpm: 120 }],
+      timeSignatureMap: [{
+        id: 'wav-loop-meter-0',
+        beat: 0,
+        numerator: 4,
+        denominator: 4,
+      }],
+      audioAssets: [],
+      automationLanes: [],
       tracks: [{
         id: 'lead',
         name: 'Lead',
         type: 'instrument',
+        role: 'general',
         clips: [clip],
         volume: 1,
         pan: 0,
@@ -520,6 +569,7 @@ describe('MIDI Clip loop live/WAV parity', () => {
     ]);
     project.tracks[0]!.clips[0]!.startBeat = 4.5;
     project.lengthBars = 2;
+    project.lengthBeats = 8;
 
     const readNotes = (events: ReturnType<typeof buildScheduleEvents>) =>
       events.map((event) => ({
@@ -621,6 +671,7 @@ describe('WAV render allocation budget', () => {
       id: 'wav-total-track',
       name: 'Lead',
       type: 'instrument',
+      role: 'general',
       clips: [source],
       volume: 1,
       pan: 0,
@@ -653,6 +704,7 @@ describe('WAV render allocation budget', () => {
       }),
       schemaVersion: CURRENT_SCHEMA_VERSION,
       lengthBars: 256,
+      lengthBeats: 1_024,
       tracks: [track],
     };
 
@@ -676,8 +728,10 @@ describe('WAV render allocation budget', () => {
       drumEvents: [],
     });
     project.lengthBars = 100;
+    project.lengthBeats = 400;
     project.timeSignature = [4, 4];
     project.bpm = 20;
+    project.tempoMap = [{ id: 'wav-tempo-slow', beat: 0, bpm: 20 }];
 
     expect(() => planWavRender(project)).toThrow(WavRenderLimitError);
   });
@@ -819,6 +873,7 @@ describe('WAV render allocation budget', () => {
       drumEvents: [{ id: 'hat-599-75', lane: 'openHat', stepIndex: 15, velocity: 100 }],
     });
     project.lengthBars = 150;
+    project.lengthBeats = 600;
     project.tracks[0]!.effects = [
       {
         id: 'delay-1',

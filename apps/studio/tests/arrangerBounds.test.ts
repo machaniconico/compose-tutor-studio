@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { compileMusicalTime } from '@cts/project-model';
 import {
+  clipBarRangeToBeats,
   clampSectionLength,
   clampSectionStart,
   sectionLengthMax,
@@ -7,6 +9,21 @@ import {
 } from '../src/features/arranger/Arranger';
 
 describe('arranger section timing bounds', () => {
+  it('converts partial bar drafts without passing fractions to the integer bar API', () => {
+    const musicalTime = compileMusicalTime({
+      lengthBeats: 8,
+      tempoMap: [{ id: 'tempo', beat: 0, bpm: 120 }],
+      timeSignatureMap: [{ id: 'signature', beat: 0, numerator: 4, denominator: 4 }],
+    });
+
+    expect(clipBarRangeToBeats(musicalTime, 0.5, 0.5)).toEqual({
+      startBeat: 2,
+      lengthBeats: 2,
+    });
+    expect(clipBarRangeToBeats(musicalTime, -0.5, 1)).toBeNull();
+    expect(clipBarRangeToBeats(musicalTime, 0, 0)).toBeNull();
+  });
+
   it('clamps a start edit without shortening the section', () => {
     expect(sectionStartMax(4, 8)).toBe(4);
     expect(clampSectionStart(7, 4, 8)).toBe(4);

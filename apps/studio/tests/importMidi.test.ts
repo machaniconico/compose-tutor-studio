@@ -11,7 +11,14 @@ import {
   type ImportedMidiNote,
   type ParsedMidiFile,
 } from '@cts/midi-io';
-import { MAX_PROJECT_TRACKS, validateProject, type Project, type Track } from '@cts/project-model';
+import {
+  MAX_PROJECT_TRACKS,
+  compileMusicalTime,
+  drumStepToBeatOnTimeline,
+  validateProject,
+  type Project,
+  type Track,
+} from '@cts/project-model';
 import { buildScheduleEvents } from '../src/audio/events';
 import { createDefaultProject } from '../src/state/defaultProject';
 import {
@@ -48,6 +55,17 @@ function note(partial: Partial<ImportedMidiNote>): ImportedMidiNote {
     durationSeconds: 0.5,
     ...partial,
   };
+}
+
+function variableMeterMusicalTime() {
+  return compileMusicalTime({
+    lengthBeats: 34,
+    tempoMap: [{ id: 'tempo-120', beat: 0, bpm: 120 }],
+    timeSignatureMap: [
+      { id: 'meter-4-4', beat: 0, numerator: 4, denominator: 4 },
+      { id: 'meter-3-4', beat: 4, numerator: 3, denominator: 4 },
+    ],
+  });
 }
 
 function parsedMidi(notes: ImportedMidiNote[]): ParsedMidiFile {
@@ -240,6 +258,72 @@ describe('MIDI import mapping', () => {
     expect(mapped.warnings).toEqual([]);
   });
 
+  it('maps exact Channel 10 hits through the receiving Project variable meter', () => {
+    const musicalTime = variableMeterMusicalTime();
+    const mapped = mapParsedMidiToTracks(
+      {
+        ppq: 480,
+        tempoBpm: 120,
+        tracks: [{
+          name: 'Variable drums',
+          notes: [note({
+            channel: 9,
+            pitch: 36,
+            startTick: 2_280,
+            startBeat: 4.75,
+            durationTick: 120,
+            durationBeat: 0.25,
+          })],
+        }],
+      },
+      {
+        makeId: makeIdFactory(),
+        targetTimeSignature: [4, 4],
+        targetMusicalTime: musicalTime,
+      },
+    );
+
+    expect(mapped.ok).toBe(true);
+    if (!mapped.ok) return;
+    expect(mapped.track.type).toBe('drum');
+    expect(mapped.clip.drumEvents?.[0]?.stepIndex).toBe(20);
+    expect(drumStepToBeatOnTimeline(20, 16, 0, musicalTime).beat).toBe(4.75);
+    expect(mapped.warnings).toEqual([]);
+  });
+
+  it('falls back without moving a Channel 10 hit that the target meter grid cannot represent', () => {
+    const mapped = mapParsedMidiToTracks(
+      {
+        ppq: 480,
+        tempoBpm: 120,
+        tracks: [{
+          name: 'Unrepresentable drums',
+          notes: [note({
+            channel: 9,
+            pitch: 36,
+            startTick: 2_400,
+            startBeat: 5,
+            durationTick: 120,
+            durationBeat: 0.25,
+          })],
+        }],
+      },
+      {
+        makeId: makeIdFactory(),
+        targetTimeSignature: [4, 4],
+        targetMusicalTime: variableMeterMusicalTime(),
+      },
+    );
+
+    expect(mapped.ok).toBe(true);
+    if (!mapped.ok) return;
+    expect(mapped.track.type).toBe('instrument');
+    expect(mapped.clip.notes?.[0]?.startBeat).toBe(5);
+    expect(mapped.warnings).toEqual([
+      expect.stringContaining('音程を保つMIDIトラック'),
+    ]);
+  });
+
   it.each([
     {
       label: 'inside the half-tick tolerance',
@@ -338,6 +422,13 @@ describe('MIDI import mapping', () => {
     const source = createDefaultProject('日本語Roundtrip');
     source.bpm = 90;
     source.timeSignature = [3, 4];
+    source.tempoMap = [{ id: 'roundtrip-tempo', beat: 0, bpm: 90 }];
+    source.timeSignatureMap = [{
+      id: 'roundtrip-signature',
+      beat: 0,
+      numerator: 3,
+      denominator: 4,
+    }];
     source.chordTrack = [];
     const melody = source.tracks.find((track) => track.name === 'Melody');
     const bass = source.tracks.find((track) => track.name === 'Bass');
@@ -827,6 +918,7 @@ describe('MIDI import mapping', () => {
     const project = {
       ...source,
       lengthBars: 1,
+      lengthBeats: 4,
       tracks: source.tracks.map((track) => ({
         ...track,
         clips: track.clips.map((clip) => ({ ...clip, lengthBeats: 4 })),

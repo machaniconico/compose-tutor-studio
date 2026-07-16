@@ -2,7 +2,7 @@
 // not stamp Project.updatedAt; the application store owns revision timestamps.
 
 import { makeId } from './ids';
-import { isLearningTrack, isLearningTrackName } from './learning-track';
+import { isLearningTrack } from './learning-track';
 import { encodeProjectJson, MAX_PROJECT_STRING_LENGTH } from './project-codec';
 import { projectLengthBeats } from './time';
 import type { ProjectCodecIssue } from './project-codec';
@@ -133,6 +133,13 @@ function allEntityIds(project: Project): Set<string> {
   }
   for (const chord of project.chordTrack) ids.add(chord.id);
   for (const section of project.sections) ids.add(section.id);
+  for (const event of project.tempoMap) ids.add(event.id);
+  for (const event of project.timeSignatureMap) ids.add(event.id);
+  for (const asset of project.audioAssets) ids.add(asset.id);
+  for (const lane of project.automationLanes) {
+    ids.add(lane.id);
+    for (const point of lane.points) ids.add(point.id);
+  }
   return ids;
 }
 
@@ -232,13 +239,6 @@ export function addTrack(
         `Track names must contain text and be at most ${MAX_TRACK_NAME_CODE_POINTS} Unicode characters.`,
       );
     }
-    if (isLearningTrackName(name)) {
-      return failure(
-        'reserved-learning-track-name',
-        'Chords, Bass, and Melody are reserved for schema-v2 learning tracks.',
-      );
-    }
-
     const reserved = allEntityIds(project);
     const idFactory = options.idFactory ?? defaultIdFactory;
     const trackId = allocateId('track', idFactory, reserved);
@@ -272,6 +272,7 @@ export function addTrack(
       id: trackId.id,
       name,
       type: kind,
+      role: 'general',
       clips: [clip],
       volume: 1,
       pan: 0,
@@ -305,23 +306,11 @@ export function renameTrack(
       return failure('master-protected', 'Master tracks cannot be renamed.');
     }
     const current = project.tracks[index]!;
-    if (isLearningTrack(current)) {
-      return failure(
-        'learning-track-name-protected',
-        'Schema-v2 learning track names cannot be changed.',
-      );
-    }
     const normalized = normalizedName(name);
     if (normalized === null) {
       return failure(
         'invalid-track-name',
         `Track names must contain text and be at most ${MAX_TRACK_NAME_CODE_POINTS} Unicode characters.`,
-      );
-    }
-    if (isLearningTrackName(normalized)) {
-      return failure(
-        'reserved-learning-track-name',
-        'Chords, Bass, and Melody are reserved for schema-v2 learning tracks.',
       );
     }
     if (current.name === normalized) return success(project, trackId, false);
@@ -396,13 +385,6 @@ export function duplicateTrack(
         `Track names must contain text and be at most ${MAX_TRACK_NAME_CODE_POINTS} Unicode characters.`,
       );
     }
-    if (isLearningTrackName(name)) {
-      return failure(
-        'reserved-learning-track-name',
-        'Chords, Bass, and Melody are reserved for schema-v2 learning tracks.',
-      );
-    }
-
     const reserved = allEntityIds(project);
     const idFactory = options.idFactory ?? defaultIdFactory;
     const newTrackId = allocateId('track', idFactory, reserved);
@@ -446,6 +428,7 @@ export function duplicateTrack(
       ...source,
       id: newTrackId.id,
       name,
+      role: 'general',
       clips,
       effects,
       ...(source.instrument !== undefined
@@ -510,11 +493,14 @@ export function removeTrack(project: Project, trackId: string): TrackMutationRes
     if (isLearningTrack(track)) {
       return failure(
         'learning-track-protected',
-        'Schema-v2 Chords, Bass, and Melody tracks cannot be removed.',
+        'Learning-role tracks cannot be removed.',
       );
     }
     const tracks = project.tracks.filter((_, trackIndex) => trackIndex !== index);
-    return success({ ...project, tracks }, trackId, true);
+    const automationLanes = project.automationLanes.filter(
+      (lane) => lane.target.trackId !== trackId,
+    );
+    return success({ ...project, tracks, automationLanes }, trackId, true);
   });
 }
 

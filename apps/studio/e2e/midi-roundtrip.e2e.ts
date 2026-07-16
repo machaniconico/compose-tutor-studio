@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { Project } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION, type Project } from '@cts/project-model';
 import {
   panToCc,
   parseMidiFile,
@@ -48,18 +48,29 @@ function displayedVolumeAfterMidiCc(volume: number): number {
 function sourceProject(): Project {
   return {
     id: 'midi-roundtrip-source',
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title: '往復テスト🎼',
     bpm: SOURCE_BPM,
     timeSignature: [3, 4],
     key: 'C',
     scale: 'major',
     lengthBars: 1,
+    lengthBeats: 3,
+    tempoMap: [{ id: 'tempo-midi-roundtrip', beat: 0, bpm: SOURCE_BPM }],
+    timeSignatureMap: [{
+      id: 'signature-midi-roundtrip',
+      beat: 0,
+      numerator: 3,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       {
         id: 'source-drums',
         name: SOURCE_TRACKS[0].name,
         type: 'drum',
+        role: 'general',
         clips: [
           {
             id: 'source-drum-clip',
@@ -86,6 +97,7 @@ function sourceProject(): Project {
         id: 'source-lead',
         name: SOURCE_TRACKS[1].name,
         type: 'instrument',
+        role: 'general',
         clips: [
           {
             id: 'source-lead-clip',
@@ -116,6 +128,7 @@ function sourceProject(): Project {
         id: 'source-bass',
         name: SOURCE_TRACKS[2].name,
         type: 'instrument',
+        role: 'general',
         clips: [
           {
             id: 'source-bass-clip',

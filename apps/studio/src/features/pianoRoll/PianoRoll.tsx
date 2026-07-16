@@ -10,10 +10,12 @@ import {
 import { useStore } from '../../state/store';
 import {
   MIN_EVENT_DURATION_BEATS,
-  beatsPerBar,
-  projectLengthBeats,
+  barToBeatAt,
+  beatToBarPosition,
+  compileMusicalTime,
   resolveClipContent,
   type Clip,
+  type MusicalTimeIndex,
   type NoteEvent,
   type Project,
 } from '@cts/project-model';
@@ -62,6 +64,32 @@ function buildRows(): number[] {
   const rows: number[] = [];
   for (let midi = PIANO_HIGH_MIDI; midi >= PIANO_LOW_MIDI; midi -= 1) rows.push(midi);
   return rows;
+}
+
+/** Project bar boundaries converted into the selected clip's local beat coordinates. */
+export function pianoRollBarGuideBeats(
+  musicalTime: MusicalTimeIndex,
+  clipStartBeat: number,
+  clipLengthBeats: number,
+): number[] {
+  if (
+    !Number.isFinite(clipStartBeat)
+    || clipStartBeat < 0
+    || !Number.isFinite(clipLengthBeats)
+    || clipLengthBeats <= 0
+  ) {
+    return [];
+  }
+  const clipEndBeat = Math.min(musicalTime.lengthBeats, clipStartBeat + clipLengthBeats);
+  if (clipEndBeat <= clipStartBeat) return [];
+  const firstBar = Math.max(0, beatToBarPosition(musicalTime, clipStartBeat).bar);
+  const lastBar = Math.max(firstBar, beatToBarPosition(musicalTime, clipEndBeat).bar);
+  const guides: number[] = [];
+  for (let bar = firstBar; bar <= lastBar; bar += 1) {
+    const localBeat = barToBeatAt(musicalTime, bar) - clipStartBeat;
+    if (localBeat >= 0 && localBeat <= clipEndBeat - clipStartBeat) guides.push(localBeat);
+  }
+  return guides;
 }
 
 function coarsePointerMatches(): boolean {
@@ -382,8 +410,20 @@ export function PianoRoll() {
   const ppb = pxPerBeat(editor.zoomX);
   const rows = useMemo(() => buildRows(), []);
   const gridHeight = rows.length * rowHeight;
-  const barBeats = beatsPerBar(project.timeSignature);
-  const lengthBeats = projectLengthBeats(project);
+  const musicalTime = useMemo(
+    () => compileMusicalTime({
+      lengthBeats: project.lengthBeats,
+      tempoMap: project.tempoMap,
+      timeSignatureMap: project.timeSignatureMap,
+    }),
+    [project.lengthBeats, project.tempoMap, project.timeSignatureMap],
+  );
+  const lengthBeats = clip?.lengthBeats ?? project.lengthBeats;
+  const clipStartBeat = clip?.startBeat ?? 0;
+  const barGuideBeats = useMemo(
+    () => pianoRollBarGuideBeats(musicalTime, clipStartBeat, lengthBeats),
+    [clipStartBeat, lengthBeats, musicalTime],
+  );
   const gridWidth = lengthBeats * ppb;
   const notes = clip?.type === 'midi' ? clip.notes ?? [] : [];
   const visibleNotes = useMemo(
@@ -1280,18 +1320,24 @@ export function PianoRoll() {
               style={{ left: beat * ppb }}
             />
           ))}
-          {Array.from({ length: project.lengthBars + 1 }, (_, bar) => (
+          {barGuideBeats.map((beat, bar) => (
             <div
               key={`bar-${bar}`}
               className="pr__gridline is-bar"
-              style={{ left: bar * barBeats * ppb }}
+              style={{ left: beat * ppb }}
             />
           ))}
 
           {/* chord-tone highlight per region (when C on) */}
           {editor.chordToneHighlight
-            ? project.chordTrack.map((chord) =>
-                rows.map((midi, i) => {
+            ? project.chordTrack.map((chord) => {
+                const localStart = Math.max(0, chord.startBeat - clip.startBeat);
+                const localEnd = Math.min(
+                  clip.lengthBeats,
+                  chord.startBeat + chord.durationBeats - clip.startBeat,
+                );
+                if (localEnd <= localStart) return null;
+                return rows.map((midi, i) => {
                   const pc = ((midi % 12) + 12) % 12;
                   const isChordTone = chord.notes
                     .map((n) => ((n % 12) + 12) % 12)
@@ -1304,13 +1350,13 @@ export function PianoRoll() {
                       style={{
                         top: i * rowHeight,
                         height: rowHeight,
-                        left: chord.startBeat * ppb,
-                        width: chord.durationBeats * ppb,
+                        left: localStart * ppb,
+                        width: (localEnd - localStart) * ppb,
                       }}
                     />
                   );
-                }),
-              )
+                });
+              })
             : null}
 
           {gridKeyboardFocused ? (

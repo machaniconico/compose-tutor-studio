@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { Track } from '@cts/project-model';
+import type { Track, TrackRole } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import {
   deleteStudioTrack,
   duplicateStudioTrack,
   moveStudioTrack,
   renameStudioTrack,
+  setStudioTrackRole,
   setStudioTrackPreset,
   trackCommandErrorMessage,
 } from '../../state/trackActions';
@@ -54,6 +55,13 @@ type TrackInspectorStatus = Readonly<{
   kind: 'info' | 'error';
 }>;
 
+const TRACK_ROLE_OPTIONS: readonly Readonly<{ value: TrackRole; label: string }>[] = [
+  { value: 'general', label: '一般' },
+  { value: 'learning.chords', label: 'コード学習' },
+  { value: 'learning.bass', label: 'ベース学習' },
+  { value: 'learning.melody', label: 'メロディ学習' },
+];
+
 function TrackInspectorForm({ track, tracks }: TrackInspectorFormProps) {
   const [nameDraft, setNameDraft] = useState(track.name);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -61,7 +69,6 @@ function TrackInspectorForm({ track, tracks }: TrackInspectorFormProps) {
   const index = tracks.findIndex((candidate) => candidate.id === track.id);
   const isMaster = track.type === 'master';
   const isLearning = isLearningTrack(track);
-  const renameProtected = isMaster || isLearning;
   const canMoveUp =
     !isMaster && index > 0 && tracks[index - 1]?.type !== 'master';
   const canMoveDown =
@@ -142,6 +149,20 @@ function TrackInspectorForm({ track, tracks }: TrackInspectorFormProps) {
     if (result.changed) pushToast(message, 'success');
   };
 
+  const changeRole = (role: TrackRole): void => {
+    const result = setStudioTrackRole(track.id, role);
+    if (!result.ok) {
+      showError(trackCommandErrorMessage(result.code));
+      return;
+    }
+    const label = TRACK_ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role;
+    const message = result.changed
+      ? `トラックの役割を「${label}」へ変更しました。${playbackStoppedNotice(result.playbackStopped)}`
+      : 'トラックの役割は変更されていません。';
+    showInfo(message);
+    if (result.changed) pushToast(message, 'success');
+  };
+
   return (
     <section className="panel-section track-inspector" aria-labelledby="track-inspector-title">
       <div className="track-inspector__heading">
@@ -153,11 +174,9 @@ function TrackInspectorForm({ track, tracks }: TrackInspectorFormProps) {
 
       <strong className="track-inspector__name">{track.name}</strong>
 
-      {renameProtected ? (
+      {isMaster ? (
         <p className="track-inspector__help">
-          {isMaster
-            ? 'マスタートラックは名前・順序・複製・削除を変更できません。'
-            : 'この学習用トラックは、コード・ベース・メロディ支援との互換性を守るため、名前と削除を現在は固定しています。'}
+          マスタートラックは名前・順序・複製・削除を変更できません。
         </p>
       ) : (
         <form className="track-inspector__rename" onSubmit={submitName}>
@@ -176,6 +195,28 @@ function TrackInspectorForm({ track, tracks }: TrackInspectorFormProps) {
           </button>
         </form>
       )}
+
+      {isLearning && !isMaster ? (
+        <p className="track-inspector__help">
+          名前を変更しても学習用の役割は保持されます。この役割を持つトラックは削除できません。
+        </p>
+      ) : null}
+
+      {track.type === 'instrument' ? (
+        <label className="track-inspector__preset">
+          <span>学習での役割</span>
+          <select
+            aria-label={`${track.name} 学習での役割`}
+            value={track.role}
+            onChange={(event) => changeRole(event.target.value as TrackRole)}
+          >
+            {TRACK_ROLE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <small>同じ学習役割は1トラックだけです。選び直すと役割がこのトラックへ移ります。</small>
+        </label>
+      ) : null}
 
       {synthPreset !== null ? (
         <label className="track-inspector__preset">

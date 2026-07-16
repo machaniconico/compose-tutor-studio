@@ -25,6 +25,7 @@ function track(
     id,
     name: id,
     type: opts.type ?? 'instrument',
+    role: 'general',
     clips: [],
     volume: opts.volume ?? 0.8,
     pan: opts.pan ?? 0,

@@ -1,8 +1,15 @@
 // Project validation. Enforces docs/06_data_model.md section 5 plus structural
 // integrity checks (unique ids, clip.trackId references an existing track).
 
-import { beatsPerBar, projectLengthBeats as projectTimelineLengthBeats } from './time';
+import {
+  beatsPerBar,
+  compileDrumStepProjector,
+  compileMusicalTime,
+  projectDrumStep,
+  projectLengthBeats as projectTimelineLengthBeats,
+} from './time';
 import type { Project } from './types';
+import { CURRENT_SCHEMA_VERSION } from './factories';
 import {
   MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS,
   preflightScheduleEventBudget,
@@ -34,10 +41,23 @@ export const MAX_EVENTS_PER_CLIP = 20_000;
 export const MAX_TRACK_EFFECTS = 64;
 export const MAX_CHORD_EVENTS = 4_096;
 export const MAX_PROJECT_SECTIONS = 256;
+export const MAX_TEMPO_MAP_EVENTS = 4_096;
+export const MAX_TIME_SIGNATURE_MAP_EVENTS = 1_024;
+export const MAX_AUDIO_ASSETS = 4_096;
+export const MAX_AUTOMATION_LANES = 2_048;
+export const MAX_AUTOMATION_POINTS_PER_LANE = 20_000;
 export const MAX_PROJECT_TIMELINE_BEATS =
   MAX_PROJECT_LENGTH_BARS * MAX_TIME_SIGNATURE_NUMERATOR;
 export const MAX_PROJECT_VALIDATION_ERRORS = 100;
 export const SAFE_TRACK_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+export const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+const TRACK_ROLES = new Set([
+  'general',
+  'learning.chords',
+  'learning.bass',
+  'learning.melody',
+]);
 
 function inRange(value: number, min: number, max: number): boolean {
   return Number.isFinite(value) && value >= min && value <= max;
@@ -55,6 +75,12 @@ export function validateProject(project: Project): ValidationResult {
   const atErrorLimit = (): boolean => errors.length >= MAX_PROJECT_VALIDATION_ERRORS;
 
   // --- Project-level scalar rules ---
+  if (project.schemaVersion !== CURRENT_SCHEMA_VERSION) {
+    push(
+      'schemaVersion',
+      `schemaVersion must be ${CURRENT_SCHEMA_VERSION} (got ${project.schemaVersion})`,
+    );
+  }
   if (!inRange(project.bpm, 20, 300)) {
     push('bpm', `bpm must be between 20 and 300 (got ${project.bpm})`);
   }
@@ -74,26 +100,140 @@ export function validateProject(project: Project): ValidationResult {
     );
   }
   const projectLengthBeats = projectTimelineLengthBeats(project);
-  if (
-    !Number.isFinite(projectLengthBeats) ||
-    projectLengthBeats <= 0 ||
-    projectLengthBeats > MAX_PROJECT_TIMELINE_BEATS
-  ) {
+  const projectLengthValid =
+    Number.isFinite(projectLengthBeats)
+    && projectLengthBeats > 0
+    && projectLengthBeats <= MAX_PROJECT_TIMELINE_BEATS;
+  if (!projectLengthValid) {
     push(
-      'lengthBars',
+      'lengthBeats',
       `project timeline must not exceed ${MAX_PROJECT_TIMELINE_BEATS} quarter-note beats (got ${projectLengthBeats})`,
     );
   }
 
-  if (
-    !Number.isInteger(project.lengthBars) ||
-    project.lengthBars <= 0 ||
-    project.lengthBars > MAX_PROJECT_LENGTH_BARS
-  ) {
+  const lengthBarsValid = Number.isInteger(project.lengthBars)
+    && project.lengthBars > 0
+    && project.lengthBars <= MAX_PROJECT_LENGTH_BARS;
+  if (!lengthBarsValid) {
     push(
       'lengthBars',
       `lengthBars must be an integer between 1 and ${MAX_PROJECT_LENGTH_BARS} (got ${project.lengthBars})`,
     );
+  }
+
+  let tempoMapValid = projectLengthValid
+    && project.tempoMap.length > 0
+    && project.tempoMap.length <= MAX_TEMPO_MAP_EVENTS;
+  if (project.tempoMap.length === 0) {
+    push('tempoMap', 'tempoMap must contain a beat-0 event');
+  } else if (project.tempoMap[0]?.beat !== 0) {
+    push('tempoMap[0].beat', 'the first tempo event must start at beat 0');
+    tempoMapValid = false;
+  }
+  if (project.tempoMap.length > MAX_TEMPO_MAP_EVENTS) {
+    push('tempoMap', `tempoMap must contain at most ${MAX_TEMPO_MAP_EVENTS} items`);
+    tempoMapValid = false;
+  }
+  let previousTempoBeat = Number.NEGATIVE_INFINITY;
+  project.tempoMap.forEach((event, index) => {
+    const path = `tempoMap[${index}]`;
+    if (!inRange(event.bpm, 20, 300)) {
+      push(`${path}.bpm`, `bpm must be between 20 and 300 (got ${event.bpm})`);
+      tempoMapValid = false;
+    }
+    if (!inRange(event.beat, 0, projectLengthBeats)) {
+      push(`${path}.beat`, 'tempo event beat must fall within the project timeline');
+      tempoMapValid = false;
+    }
+    if (event.beat <= previousTempoBeat) {
+      push(`${path}.beat`, 'tempo event beats must be strictly increasing');
+      tempoMapValid = false;
+    }
+    previousTempoBeat = event.beat;
+  });
+  if (project.tempoMap[0] !== undefined && project.bpm !== project.tempoMap[0].bpm) {
+    push('bpm', 'bpm must mirror tempoMap[0].bpm');
+    tempoMapValid = false;
+  }
+
+  let signatureSegmentsValid = projectLengthValid
+    && lengthBarsValid
+    && project.timeSignatureMap.length > 0
+    && project.timeSignatureMap.length <= MAX_TIME_SIGNATURE_MAP_EVENTS;
+  if (project.timeSignatureMap.length === 0) {
+    push('timeSignatureMap', 'timeSignatureMap must contain a beat-0 event');
+  } else if (project.timeSignatureMap[0]?.beat !== 0) {
+    push('timeSignatureMap[0].beat', 'the first time-signature event must start at beat 0');
+    signatureSegmentsValid = false;
+  }
+  if (project.timeSignatureMap.length > MAX_TIME_SIGNATURE_MAP_EVENTS) {
+    push(
+      'timeSignatureMap',
+      `timeSignatureMap must contain at most ${MAX_TIME_SIGNATURE_MAP_EVENTS} items`,
+    );
+    signatureSegmentsValid = false;
+  }
+  let previousSignatureBeat = Number.NEGATIVE_INFINITY;
+  let previousSignatureBeatsPerBar = 0;
+  let computedLengthBars = 0;
+  project.timeSignatureMap.forEach((event, index) => {
+    const path = `timeSignatureMap[${index}]`;
+    if (
+      !Number.isInteger(event.numerator)
+      || event.numerator <= 0
+      || event.numerator > MAX_TIME_SIGNATURE_NUMERATOR
+    ) {
+      push(
+        `${path}.numerator`,
+        `time signature numerator must be an integer between 1 and ${MAX_TIME_SIGNATURE_NUMERATOR}`,
+      );
+      signatureSegmentsValid = false;
+    }
+    if (!VALID_DENOMINATORS.has(event.denominator)) {
+      push(`${path}.denominator`, 'time signature denominator must be 2, 4, 8, or 16');
+      signatureSegmentsValid = false;
+    }
+    if (!inRange(event.beat, 0, projectLengthBeats)) {
+      push(`${path}.beat`, 'time-signature event beat must fall within the project timeline');
+      signatureSegmentsValid = false;
+    }
+    if (event.beat <= previousSignatureBeat) {
+      push(`${path}.beat`, 'time-signature event beats must be strictly increasing');
+      signatureSegmentsValid = false;
+    }
+    if (index > 0 && previousSignatureBeatsPerBar > 0) {
+      const segmentBars = (event.beat - previousSignatureBeat) / previousSignatureBeatsPerBar;
+      if (!Number.isInteger(segmentBars)) {
+        push(`${path}.beat`, 'time-signature changes must occur on a bar boundary');
+        signatureSegmentsValid = false;
+      } else {
+        computedLengthBars += segmentBars;
+      }
+    }
+    previousSignatureBeat = event.beat;
+    previousSignatureBeatsPerBar = beatsPerBar([event.numerator, event.denominator]);
+  });
+  if (signatureSegmentsValid && previousSignatureBeatsPerBar > 0) {
+    const finalBars = (projectLengthBeats - previousSignatureBeat) / previousSignatureBeatsPerBar;
+    if (!Number.isInteger(finalBars)) {
+      push('lengthBeats', 'the project must end on a bar boundary');
+      signatureSegmentsValid = false;
+    } else {
+      computedLengthBars += finalBars;
+      if (project.lengthBars !== computedLengthBars) {
+        push('lengthBars', 'lengthBars must mirror the actual time-signature-map bar count');
+        signatureSegmentsValid = false;
+      }
+    }
+  }
+  const firstSignature = project.timeSignatureMap[0];
+  if (
+    firstSignature !== undefined
+    && (project.timeSignature[0] !== firstSignature.numerator
+      || project.timeSignature[1] !== firstSignature.denominator)
+  ) {
+    push('timeSignature', 'timeSignature must mirror the beat-0 timeSignatureMap event');
+    signatureSegmentsValid = false;
   }
 
   // --- Id uniqueness (collect all ids across the project) ---
@@ -111,6 +251,54 @@ export function validateProject(project: Project): ValidationResult {
   };
   markId(project.id, 'id');
 
+  project.tempoMap.forEach((event, index) => {
+    markId(event.id, `tempoMap[${index}].id`);
+  });
+  project.timeSignatureMap.forEach((event, index) => {
+    markId(event.id, `timeSignatureMap[${index}].id`);
+  });
+
+  if (project.audioAssets.length > MAX_AUDIO_ASSETS) {
+    push('audioAssets', `audioAssets must contain at most ${MAX_AUDIO_ASSETS} items`);
+  }
+  const audioAssetsById = new Map<string, Project['audioAssets'][number]>();
+  project.audioAssets.forEach((asset, index) => {
+    const path = `audioAssets[${index}]`;
+    markId(asset.id, `${path}.id`);
+    if (!audioAssetsById.has(asset.id)) audioAssetsById.set(asset.id, asset);
+    if (asset.availability === 'ready') {
+      if (!SHA256_PATTERN.test(asset.checksumSha256)) {
+        push(`${path}.checksumSha256`, 'checksumSha256 must be 64 lowercase hexadecimal digits');
+      }
+      if (asset.originalName.length === 0) {
+        push(`${path}.originalName`, 'originalName must not be empty');
+      }
+      if (!['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac'].includes(asset.mediaType)) {
+        push(`${path}.mediaType`, 'unsupported audio media type');
+      }
+      if (!Number.isSafeInteger(asset.byteLength) || asset.byteLength <= 0) {
+        push(`${path}.byteLength`, 'byteLength must be a positive safe integer');
+      }
+      if (!Number.isSafeInteger(asset.sampleRate) || !inRange(asset.sampleRate, 8_000, 384_000)) {
+        push(`${path}.sampleRate`, 'sampleRate must be an integer between 8000 and 384000');
+      }
+      if (!Number.isSafeInteger(asset.channelCount) || !inRange(asset.channelCount, 1, 32)) {
+        push(`${path}.channelCount`, 'channelCount must be an integer between 1 and 32');
+      }
+      if (!Number.isSafeInteger(asset.frameCount) || asset.frameCount <= 0) {
+        push(`${path}.frameCount`, 'frameCount must be a positive safe integer');
+      }
+    } else {
+      if (asset.reason === 'legacy-reference') {
+        if (asset.legacyAssetId === undefined || asset.legacyAssetId.length === 0) {
+          push(`${path}.legacyAssetId`, 'legacy-reference assets require a non-empty legacyAssetId');
+        }
+      } else if (asset.legacyAssetId !== undefined) {
+        push(`${path}.legacyAssetId`, 'missing-reference assets must not have legacyAssetId');
+      }
+    }
+  });
+
   if (project.tracks.length > MAX_PROJECT_TRACKS) {
     push('tracks', `tracks must contain at most ${MAX_PROJECT_TRACKS} items`);
   }
@@ -122,10 +310,27 @@ export function validateProject(project: Project): ValidationResult {
   }
 
   const trackIds = new Set<string>();
+  const tracksById = new Map<string, Project['tracks'][number]>();
+  const claimedLearningRoles = new Set<string>();
   project.tracks.forEach((track, ti) => {
     if (atErrorLimit()) return;
     markId(track.id, `tracks[${ti}].id`);
     trackIds.add(track.id);
+    if (!tracksById.has(track.id)) tracksById.set(track.id, track);
+
+    if (!TRACK_ROLES.has(track.role)) {
+      push(`tracks[${ti}].role`, `unsupported track role "${track.role}"`);
+    }
+    if (track.role !== 'general') {
+      if (track.type !== 'instrument') {
+        push(`tracks[${ti}].role`, 'learning roles are only allowed on instrument tracks');
+      }
+      if (claimedLearningRoles.has(track.role)) {
+        push(`tracks[${ti}].role`, `learning role "${track.role}" must be unique`);
+      } else {
+        claimedLearningRoles.add(track.role);
+      }
+    }
 
     if (track.clips.length > MAX_CLIPS_PER_TRACK) {
       push(`tracks[${ti}].clips`, `clips must contain at most ${MAX_CLIPS_PER_TRACK} items`);
@@ -151,6 +356,65 @@ export function validateProject(project: Project): ValidationResult {
       markId(effect.id, `tracks[${ti}].effects[${ei}].id`);
     });
   });
+
+  if (project.automationLanes.length > MAX_AUTOMATION_LANES) {
+    push(
+      'automationLanes',
+      `automationLanes must contain at most ${MAX_AUTOMATION_LANES} items`,
+    );
+  }
+  const automationTargets = new Set<string>();
+  project.automationLanes.forEach((lane, laneIndex) => {
+    if (atErrorLimit()) return;
+    const lanePath = `automationLanes[${laneIndex}]`;
+    markId(lane.id, `${lanePath}.id`);
+    if (!trackIds.has(lane.target.trackId)) {
+      push(`${lanePath}.target.trackId`, `automation target references missing track "${lane.target.trackId}"`);
+    } else if (tracksById.get(lane.target.trackId)?.type === 'master') {
+      push(`${lanePath}.target.trackId`, 'automation cannot target a Master track');
+    }
+    const targetKey = `${lane.target.type}\u0000${lane.target.trackId}`;
+    if (automationTargets.has(targetKey)) {
+      push(`${lanePath}.target`, 'only one automation lane is allowed per target');
+    } else {
+      automationTargets.add(targetKey);
+    }
+    if (lane.points.length > MAX_AUTOMATION_POINTS_PER_LANE) {
+      push(
+        `${lanePath}.points`,
+        `automation lane must contain at most ${MAX_AUTOMATION_POINTS_PER_LANE} points`,
+      );
+    }
+    let previousBeat = Number.NEGATIVE_INFINITY;
+    lane.points.forEach((point, pointIndex) => {
+      if (atErrorLimit()) return;
+      const pointPath = `${lanePath}.points[${pointIndex}]`;
+      markId(point.id, `${pointPath}.id`);
+      if (!inRange(point.beat, 0, projectLengthBeats)) {
+        push(`${pointPath}.beat`, 'automation point must fall within the project timeline');
+      }
+      if (point.beat <= previousBeat) {
+        push(`${pointPath}.beat`, 'automation point beats must be strictly increasing');
+      }
+      previousBeat = point.beat;
+      const valueRange = lane.target.type === 'track-volume' ? [0, 2] : [-1, 1];
+      if (!inRange(point.value, valueRange[0] ?? 0, valueRange[1] ?? 0)) {
+        push(
+          `${pointPath}.value`,
+          `${lane.target.type} automation value is outside its allowed range`,
+        );
+      }
+    });
+  });
+
+  let musicalTimeIndex: ReturnType<typeof compileMusicalTime> | null = null;
+  if (tempoMapValid && signatureSegmentsValid) {
+    try {
+      musicalTimeIndex = compileMusicalTime(project);
+    } catch {
+      // Map-specific errors above are more actionable than a derived-index error.
+    }
+  }
 
   const clipsById = new Map<string, { clip: Project['tracks'][number]['clips'][number]; trackId: string }>();
   for (const track of project.tracks) {
@@ -241,6 +505,17 @@ export function validateProject(project: Project): ValidationResult {
         if (clip.audioAssetId !== undefined) {
           push(`${clipPath}.audioAssetId`, 'linked clip payload belongs to its source');
         }
+        for (const field of [
+          'sourceStartFrame',
+          'sourceFrameCount',
+          'fadeInFrames',
+          'fadeOutFrames',
+          'gainDb',
+        ] as const) {
+          if (clip[field] !== undefined) {
+            push(`${clipPath}.${field}`, 'linked clip payload belongs to its source');
+          }
+        }
       }
       if (
         clip.stepsPerBar !== undefined &&
@@ -267,6 +542,83 @@ export function validateProject(project: Project): ValidationResult {
       }
       if (clip.type !== 'audio' && clip.audioAssetId !== undefined) {
         push(`${clipPath}.audioAssetId`, 'audioAssetId is only allowed on audio clips');
+      }
+      const audioFields = [
+        'sourceStartFrame',
+        'sourceFrameCount',
+        'fadeInFrames',
+        'fadeOutFrames',
+        'gainDb',
+      ] as const;
+      if (clip.type !== 'audio') {
+        for (const field of audioFields) {
+          if (clip[field] !== undefined) {
+            push(`${clipPath}.${field}`, `${field} is only allowed on audio clips`);
+          }
+        }
+      } else {
+        if (clip.audioAssetId === undefined || clip.audioAssetId.length === 0) {
+          push(`${clipPath}.audioAssetId`, 'audio clips require a non-empty audioAssetId');
+        }
+        for (const field of audioFields) {
+          if (clip[field] === undefined) {
+            push(`${clipPath}.${field}`, `audio clips require ${field}`);
+          }
+        }
+        const asset = clip.audioAssetId === undefined
+          ? undefined
+          : audioAssetsById.get(clip.audioAssetId);
+        if (clip.audioAssetId !== undefined && asset === undefined) {
+          push(
+            `${clipPath}.audioAssetId`,
+            `audioAssetId "${clip.audioAssetId}" references a non-existent audio asset`,
+          );
+        }
+        if (!inRange(clip.gainDb ?? Number.NaN, -96, 24)) {
+          push(`${clipPath}.gainDb`, 'gainDb must be between -96 and 24');
+        }
+        if (asset?.availability === 'ready') {
+          if (track.type !== 'audio') {
+            push(`${clipPath}.audioAssetId`, 'ready audio assets may only be used on audio tracks');
+          }
+          if (!Number.isSafeInteger(clip.sourceStartFrame) || (clip.sourceStartFrame ?? -1) < 0) {
+            push(`${clipPath}.sourceStartFrame`, 'sourceStartFrame must be a non-negative safe integer');
+          }
+          if (!Number.isSafeInteger(clip.sourceFrameCount) || (clip.sourceFrameCount ?? 0) <= 0) {
+            push(`${clipPath}.sourceFrameCount`, 'ready audio clips require a positive sourceFrameCount');
+          }
+          if (
+            Number.isSafeInteger(clip.sourceStartFrame)
+            && Number.isSafeInteger(clip.sourceFrameCount)
+            && (clip.sourceStartFrame ?? 0) + (clip.sourceFrameCount ?? 0) > asset.frameCount
+          ) {
+            push(`${clipPath}.sourceFrameCount`, 'audio source range must fit within the asset');
+          }
+          for (const field of ['fadeInFrames', 'fadeOutFrames'] as const) {
+            if (!Number.isSafeInteger(clip[field]) || (clip[field] ?? -1) < 0) {
+              push(`${clipPath}.${field}`, `${field} must be a non-negative safe integer`);
+            }
+          }
+          if (
+            Number.isSafeInteger(clip.fadeInFrames)
+            && Number.isSafeInteger(clip.fadeOutFrames)
+            && Number.isSafeInteger(clip.sourceFrameCount)
+            && (clip.fadeInFrames ?? 0) + (clip.fadeOutFrames ?? 0) > (clip.sourceFrameCount ?? 0)
+          ) {
+            push(`${clipPath}.fadeOutFrames`, 'combined fades must not exceed sourceFrameCount');
+          }
+        } else if (asset?.availability === 'unresolved') {
+          for (const field of [
+            'sourceStartFrame',
+            'sourceFrameCount',
+            'fadeInFrames',
+            'fadeOutFrames',
+          ] as const) {
+            if (clip[field] !== 0) {
+              push(`${clipPath}.${field}`, 'unresolved audio clips must use a zero source range');
+            }
+          }
+        }
       }
       if (clip.drumGroove !== undefined) {
         const groovePath = `${clipPath}.drumGroove`;
@@ -322,6 +674,12 @@ export function validateProject(project: Project): ValidationResult {
         }
       });
 
+      const stepsPerBar = clip.stepsPerBar ?? 16;
+      const drumProjector = musicalTimeIndex !== null
+        && Number.isFinite(clip.startBeat)
+        && (clip.drumEvents?.length ?? 0) > 0
+        ? compileDrumStepProjector(stepsPerBar, clip.startBeat, musicalTimeIndex)
+        : null;
       clip.drumEvents?.forEach((drum, di) => {
         if (atErrorLimit()) return;
         const drumPath = `${clipPath}.drumEvents[${di}]`;
@@ -329,15 +687,18 @@ export function validateProject(project: Project): ValidationResult {
         if (!inRange(drum.velocity, 1, 127) || !Number.isInteger(drum.velocity)) {
           push(`${drumPath}.velocity`, `velocity must be an integer 1..127 (got ${drum.velocity})`);
         }
-        if (!Number.isInteger(drum.stepIndex) || drum.stepIndex < 0) {
+        const validStepIndex = Number.isInteger(drum.stepIndex) && drum.stepIndex >= 0;
+        if (!validStepIndex) {
           push(`${drumPath}.stepIndex`, `stepIndex must be a non-negative integer (got ${drum.stepIndex})`);
         }
         if (drum.probability !== undefined && !inRange(drum.probability, 0, 1)) {
           push(`${drumPath}.probability`, 'probability must be between 0 and 1');
         }
-        const stepsPerBar = clip.stepsPerBar ?? 16;
-        const drumBeat = drum.stepIndex * (beatsPerBar(project.timeSignature) / stepsPerBar);
-        if (Number.isFinite(drumBeat) && drumBeat >= clip.lengthBeats) {
+        const drumBeat = drumProjector !== null
+          && validStepIndex
+          ? projectDrumStep(drumProjector, drum.stepIndex).beat - clip.startBeat
+          : drum.stepIndex * (beatsPerBar(project.timeSignature) / stepsPerBar);
+        if (validStepIndex && (!Number.isFinite(drumBeat) || drumBeat >= clip.lengthBeats)) {
           push(`${drumPath}.stepIndex`, 'drum step must fall within its clip');
         }
       });

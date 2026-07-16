@@ -4,6 +4,7 @@
 // accepted without mutating the project.
 
 import { chordPitchClasses, pitchClassNumber } from './theory';
+import { findLearningTrack } from './learning-track';
 import type { ChordEvent, PitchClassName, Project, Track } from './types';
 
 /** Default C anchor for close-position chord voicings (MIDI 48 = C3). */
@@ -11,9 +12,6 @@ export const CHORD_VOICING_BASE_C = 48;
 
 /** Gentle backing velocity that leaves headroom for melody and drums. */
 export const CHORD_VOICING_VELOCITY = 80;
-
-/** Names used by the built-in project factories for the dedicated chord track. */
-const CHORD_TRACK_NAMES = new Set(['chord', 'chords', 'コード']);
 
 export type RealizedChordNote = {
   /** Source chord id, useful for deterministic tracing and tests. */
@@ -34,13 +32,7 @@ export type RealizedChordPitchVisitor = (chord: ChordEvent, pitch: number) => vo
 
 /** Find the dedicated chord-backing instrument track, if the project has one. */
 export function findChordTrack(project: Project): Track | null {
-  return (
-    project.tracks.find(
-      (track) =>
-        track.type === 'instrument' &&
-        CHORD_TRACK_NAMES.has(track.name.trim().toLocaleLowerCase('en-US')),
-    ) ?? null
-  );
+  return findLearningTrack(project, 'learning.chords') ?? null;
 }
 
 /** Whether the dedicated track already contains authored notes. */

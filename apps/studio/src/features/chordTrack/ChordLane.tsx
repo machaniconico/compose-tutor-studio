@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { beatsPerBar, type ChordEvent } from '@cts/project-model';
+import {
+  barToBeatAt,
+  beatToBarPosition,
+  compileMusicalTime,
+  type ChordEvent,
+  type MusicalTimeIndex,
+} from '@cts/project-model';
 import {
   PROGRESSION_TEMPLATES,
   getDiatonicChords,
@@ -11,7 +17,6 @@ import { pxPerBeat, timelineWidth } from '../timeline';
 import {
   addChordWithAnalysis,
   applyProgressionTemplate,
-  projectBeatsPerBar,
 } from '../../state/editorActions';
 import {
   ChordPopover,
@@ -53,12 +58,129 @@ function functionLabel(fn: HarmonicFunction | undefined): string | null {
   }
 }
 
-function chordButtonLabel(chord: ChordEvent, bpb: number): string {
-  const bar = Math.floor(chord.startBeat / bpb) + 1;
-  const bars = Math.max(1, Math.round(chord.durationBeats / bpb));
+function beatAsBarNumber(musicalTime: MusicalTimeIndex, beat: number): number {
+  const position = beatToBarPosition(musicalTime, beat);
+  const barStart = barToBeatAt(musicalTime, position.bar);
+  const barEnd = barToBeatAt(musicalTime, position.bar + 1);
+  const barLength = barEnd - barStart;
+  return position.bar + (barLength > 0 ? position.beatInBar / barLength : 0);
+}
+
+function beatAtBarNumber(musicalTime: MusicalTimeIndex, barNumber: number): number {
+  const bar = Math.floor(barNumber);
+  const fraction = barNumber - bar;
+  const barStart = barToBeatAt(musicalTime, bar);
+  if (fraction === 0) return barStart;
+  const barEnd = barToBeatAt(musicalTime, bar + 1);
+  return barStart + (barEnd - barStart) * fraction;
+}
+
+function chordDurationBars(musicalTime: MusicalTimeIndex, chord: ChordEvent): number {
+  const startBar = beatAsBarNumber(musicalTime, chord.startBeat);
+  const endBar = beatAsBarNumber(
+    musicalTime,
+    chord.startBeat + chord.durationBeats,
+  );
+  return Math.max(0, endBar - startBar);
+}
+
+function displayBarCount(value: number): string {
+  return Number.isInteger(value)
+    ? String(value)
+    : value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+export type ChordBarPlacement = Readonly<{
+  startBeat: number;
+  durationBeats: number;
+}>;
+
+export function chordGridBarPlacement(
+  musicalTime: MusicalTimeIndex,
+  bar: number,
+  durationBars = 1,
+): ChordBarPlacement {
+  const startBeat = beatAtBarNumber(musicalTime, bar);
+  const endBeat = beatAtBarNumber(musicalTime, bar + durationBars);
+  return { startBeat, durationBeats: endBeat - startBeat };
+}
+
+export function chordGridBarAtBeat(
+  musicalTime: MusicalTimeIndex,
+  beat: number,
+  lengthBars: number,
+): number {
+  const bar = beatToBarPosition(
+    musicalTime,
+    Math.min(musicalTime.lengthBeats, Math.max(0, beat)),
+  ).bar;
+  return Math.min(Math.max(0, lengthBars - 1), Math.max(0, bar));
+}
+
+export function chordGridDragPreview(
+  musicalTime: MusicalTimeIndex,
+  lengthBars: number,
+  chord: Pick<ChordEvent, 'id' | 'startBeat' | 'durationBeats'>,
+  kind: 'move' | 'resize',
+  deltaBeats: number,
+): ChordDragPreview {
+  const originStartBar = beatAsBarNumber(musicalTime, chord.startBeat);
+  const originEndBar = beatAsBarNumber(
+    musicalTime,
+    chord.startBeat + chord.durationBeats,
+  );
+  const durationBars = originEndBar - originStartBar;
+  if (kind === 'move') {
+    const candidateBeat = Math.min(
+      musicalTime.lengthBeats,
+      Math.max(0, chord.startBeat + deltaBeats),
+    );
+    const barsDelta = Math.round(
+      beatAsBarNumber(musicalTime, candidateBeat) - originStartBar,
+    );
+    const targetStartBar = Math.min(
+      Math.max(0, lengthBars - durationBars),
+      Math.max(0, originStartBar + barsDelta),
+    );
+    const startBeat = beatAtBarNumber(musicalTime, targetStartBar);
+    const endBeat = beatAtBarNumber(musicalTime, targetStartBar + durationBars);
+    return {
+      chordId: chord.id,
+      startBeat,
+      durationBeats: endBeat - startBeat,
+    };
+  }
+
+  const candidateEndBeat = Math.min(
+    musicalTime.lengthBeats,
+    Math.max(0, chord.startBeat + chord.durationBeats + deltaBeats),
+  );
+  const barsDelta = Math.round(
+    beatAsBarNumber(musicalTime, candidateEndBeat) - originEndBar,
+  );
+  const maxDurationBars = Math.max(0, lengthBars - originStartBar);
+  const minimumDurationBars = Math.min(1, durationBars);
+  const targetDurationBars = Math.min(
+    maxDurationBars,
+    Math.max(minimumDurationBars, durationBars + barsDelta),
+  );
+  const endBeat = beatAtBarNumber(
+    musicalTime,
+    originStartBar + targetDurationBars,
+  );
+  return {
+    chordId: chord.id,
+    startBeat: chord.startBeat,
+    durationBeats: endBeat - chord.startBeat,
+  };
+}
+
+function chordButtonLabel(chord: ChordEvent, musicalTime: MusicalTimeIndex): string {
+  const bar = beatToBarPosition(musicalTime, chord.startBeat).bar + 1;
+  const bars = chordDurationBars(musicalTime, chord);
   const details = [
     `第${bar}小節`,
-    `長さ${bars}小節`,
+    `長さ${displayBarCount(bars)}小節`,
     chord.degree ? `度数${chord.degree}` : null,
     functionLabel(chord.function),
   ].filter((part): part is string => part !== null);
@@ -114,10 +236,14 @@ export function ChordLane() {
   const gridInstructionsId = useId();
   const gridStatusId = useId();
 
-  const bpb = beatsPerBar(project.timeSignature);
-  const lengthBeats = project.lengthBars * bpb;
+  const musicalTime = useMemo(
+    () => compileMusicalTime(project),
+    [project.lengthBeats, project.tempoMap, project.timeSignatureMap],
+  );
+  const lengthBeats = project.lengthBeats;
   const width = timelineWidth(lengthBeats, zoomX);
   const ppb = pxPerBeat(zoomX);
+  const keyboardBarPlacement = chordGridBarPlacement(musicalTime, keyboardBar);
 
   const sortedChords = useMemo(
     () => [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat),
@@ -258,13 +384,14 @@ export function ChordLane() {
     const scroll = scrollRef.current;
     const grid = gridRef.current;
     if (!scroll || !grid || document.activeElement !== grid) return;
-    const barStart = keyboardBar * bpb * ppb;
-    const barEnd = barStart + bpb * ppb;
+    const placement = chordGridBarPlacement(musicalTime, keyboardBar);
+    const barStart = placement.startBeat * ppb;
+    const barEnd = (placement.startBeat + placement.durationBeats) * ppb;
     if (barStart < scroll.scrollLeft) scroll.scrollLeft = barStart;
     else if (barEnd > scroll.scrollLeft + scroll.clientWidth) {
       scroll.scrollLeft = barEnd - scroll.clientWidth;
     }
-  }, [bpb, keyboardBar, ppb]);
+  }, [keyboardBar, musicalTime, ppb]);
 
   useEffect(() => {
     const trigger = popoverTriggerRef.current;
@@ -319,15 +446,16 @@ export function ChordLane() {
 
   const addChordAtBar = useCallback(
     (bar: number) => {
-      const startBeat = bar * bpb;
+      const placement = chordGridBarPlacement(musicalTime, bar);
+      const { startBeat, durationBeats } = placement;
       const occupied = sortedChords.some(
         (c) => startBeat >= c.startBeat && startBeat < c.startBeat + c.durationBeats,
       );
       if (occupied) return false;
-      addChordWithAnalysis(smartDefaultSymbol(startBeat), startBeat, bpb);
+      addChordWithAnalysis(smartDefaultSymbol(startBeat), startBeat, durationBeats);
       return true;
     },
-    [bpb, sortedChords, smartDefaultSymbol],
+    [musicalTime, sortedChords, smartDefaultSymbol],
   );
 
   const onGridClick = useCallback(
@@ -337,9 +465,10 @@ export function ChordLane() {
       const rect = gridRef.current?.getBoundingClientRect();
       if (!rect) return;
       const x = e.clientX - rect.left;
-      const bar = Math.min(
-        project.lengthBars - 1,
-        Math.max(0, Math.floor(x / (bpb * ppb))),
+      const bar = chordGridBarAtBeat(
+        musicalTime,
+        x / ppb,
+        project.lengthBars,
       );
       setKeyboardBar(bar);
       setGridAnnouncement(
@@ -348,7 +477,7 @@ export function ChordLane() {
           : `第${bar + 1}小節にはすでにコードがあります。`,
       );
     },
-    [bpb, ppb, project.lengthBars, addChordAtBar],
+    [addChordAtBar, musicalTime, ppb, project.lengthBars],
   );
 
   const onGridKeyDown = useCallback(
@@ -413,25 +542,17 @@ export function ChordLane() {
       if (!drag || e.pointerId !== drag.pointerId) return;
       const dx = e.clientX - drag.startX;
       if (Math.abs(dx) > 3) movedRef.current = true;
-      const barsDelta = Math.round(dx / (bpb * ppb));
-      let preview: ChordDragPreview;
-      if (drag.kind === 'move') {
-        const nextStart = Math.max(0, drag.originStart + barsDelta * bpb);
-        const maxStart = lengthBeats - drag.originDuration;
-        preview = {
-          chordId: drag.chordId,
-          startBeat: Math.min(nextStart, Math.max(0, maxStart)),
-          durationBeats: drag.originDuration,
-        };
-      } else {
-        const nextDuration = Math.max(bpb, drag.originDuration + barsDelta * bpb);
-        const maxDuration = lengthBeats - drag.originStart;
-        preview = {
-          chordId: drag.chordId,
+      const preview = chordGridDragPreview(
+        musicalTime,
+        project.lengthBars,
+        {
+          id: drag.chordId,
           startBeat: drag.originStart,
-          durationBeats: Math.min(nextDuration, maxDuration),
-        };
-      }
+          durationBeats: drag.originDuration,
+        },
+        drag.kind,
+        dx / ppb,
+      );
       const current = dragPreviewRef.current;
       if (
         current?.startBeat === preview.startBeat &&
@@ -442,7 +563,7 @@ export function ChordLane() {
       dragPreviewRef.current = preview;
       setDragPreview(preview);
     },
-    [bpb, ppb, lengthBeats],
+    [musicalTime, ppb, project.lengthBars],
   );
 
   const onPointerUp = useCallback((event: React.PointerEvent) => {
@@ -453,6 +574,7 @@ export function ChordLane() {
     dragPreviewRef.current = null;
     setDragPreview(null);
     if (
+      movedRef.current &&
       preview &&
       (preview.startBeat !== drag.originStart ||
         preview.durationBeats !== drag.originDuration)
@@ -521,13 +643,20 @@ export function ChordLane() {
         >
           <div
             className="chord-lane__keyboard-cursor"
-            style={{ left: keyboardBar * bpb * ppb, width: bpb * ppb }}
+            style={{
+              left: keyboardBarPlacement.startBeat * ppb,
+              width: keyboardBarPlacement.durationBeats * ppb,
+            }}
             aria-hidden="true"
           />
 
           {/* bar guides */}
           {Array.from({ length: project.lengthBars }, (_, bar) => (
-            <div key={`bar-${bar}`} className="chord-lane__bar" style={{ left: bar * bpb * ppb }} />
+            <div
+              key={`bar-${bar}`}
+              className="chord-lane__bar"
+              style={{ left: barToBeatAt(musicalTime, bar) * ppb }}
+            />
           ))}
 
           {sortedChords.map((chord) => {
@@ -543,7 +672,7 @@ export function ChordLane() {
                   if (element) chordButtonRefs.current.set(chord.id, element);
                   else chordButtonRefs.current.delete(chord.id);
                 }}
-                aria-label={chordButtonLabel(chord, bpb)}
+                aria-label={chordButtonLabel(chord, musicalTime)}
                 aria-pressed={isSelected}
                 aria-haspopup="dialog"
                 aria-expanded={isOpen}

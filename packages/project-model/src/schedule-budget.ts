@@ -13,7 +13,12 @@ import {
   countMidiClipNoteOccurrences,
   visitMidiClipNoteOccurrences,
 } from './midi-clip-loop';
-import { beatsPerBar } from './time';
+import {
+  beatsPerBar,
+  compileDrumStepProjector,
+  compileMusicalTime,
+  projectDrumStep,
+} from './time';
 import type { Project } from './types';
 
 /** Compatibility-safe invariant enforced by the TypeScript and Rust codecs. */
@@ -157,7 +162,10 @@ function preflightDensity(
     });
   }
 
-  const barBeats = beatsPerBar(project.timeSignature);
+  const musicalTime = project.timeSignatureMap.length > 0 && project.tempoMap.length > 0
+    ? compileMusicalTime(project)
+    : null;
+  const fixedBarBeats = beatsPerBar(project.timeSignature);
   for (const track of project.tracks) {
     if (track.type === 'master') continue;
     for (const instance of track.clips) {
@@ -182,10 +190,20 @@ function preflightDensity(
         Number.isSafeInteger(source.stepsPerBar) && (source.stepsPerBar ?? 0) > 0
           ? source.stepsPerBar!
           : 16;
-      const beatsPerStep = barBeats / stepsPerBar;
+      const drumProjector = musicalTime === null || (source.drumEvents?.length ?? 0) === 0
+        ? null
+        : compileDrumStepProjector(stepsPerBar, instance.startBeat, musicalTime);
       const swing = clampUnit(source.drumGroove?.swing);
       for (const drum of source.drumEvents ?? []) {
-        const rawOnset = instance.startBeat + drum.stepIndex * beatsPerStep;
+        const timing = drumProjector === null
+          ? {
+              beat: instance.startBeat
+                + drum.stepIndex * (fixedBarBeats / stepsPerBar),
+              beatsPerBar: fixedBarBeats,
+            }
+          : projectDrumStep(drumProjector, drum.stepIndex);
+        const beatsPerStep = timing.beatsPerBar / stepsPerBar;
+        const rawOnset = timing.beat;
         const onset = drum.stepIndex % 2 === 0
           ? rawOnset
           : rawOnset + beatsPerStep * 0.5 * swing;

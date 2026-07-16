@@ -6,14 +6,18 @@
 // of being allowed to attach itself to a newer play request.
 
 import {
-  beatsPerBar as beatsPerBarForTimeSignature,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   ScheduleEventLimitError,
+  type MusicalTimeIndex,
   type Project,
   type Track,
 } from '@cts/project-model';
 import { useStore } from '../state/store';
+import {
+  automationBaseValue,
+  automationCommandsInWindow,
+} from './automation';
 import { createNoiseBuffer, DrumVoiceManager } from './drums';
 import { getAudioEngine } from './engine';
 import { buildScheduleEvents, type SchedulePayload } from './events';
@@ -23,9 +27,13 @@ import {
   computeAudibleTracks,
   type TrackGraph,
 } from './graph';
-import { applyMasterMix } from './mixState';
+import { applyMasterMix, hasLiveMixChanged } from './mixState';
 import {
-  metronomeBeatEvents,
+  createProjectMusicalTime,
+  mappedBeatDurationSeconds,
+} from './musicalTime';
+import {
+  metronomeMapEvents,
   scheduleMetronomeClick,
   type ScheduledMetronomeClick,
 } from './metronome';
@@ -37,11 +45,12 @@ import {
 import {
   beatToTime,
   createScheduleEventIndex,
+  loopBeatTimeMapping,
   preflightLoopScheduleDensity,
-  projectLengthBeats,
   resolveDrumOccurrence,
   Scheduler,
-  secondsPerBeat,
+  timeToBeat,
+  type BeatTimeMapping,
   type DueEvent,
   type LoopRegion,
   type ScheduledEvent,
@@ -66,8 +75,10 @@ type RuntimeSession = PlaybackSession & {
   metronomeClicks: Set<ScheduledMetronomeClick>;
   metronomeBeatFrontier: number;
   readonly metronomeOn: boolean;
-  readonly beatsPerBar: number;
-  readonly bpm: number;
+  readonly musicalTime: MusicalTimeIndex;
+  readonly tempo: BeatTimeMapping;
+  readonly transportTempo: BeatTimeMapping;
+  readonly tempoChangeBeats: readonly number[];
   readonly anchorBeat: number;
   readonly anchorTime: number;
   readonly loop: LoopRegion | null;
@@ -307,6 +318,7 @@ export function initAudioBridge(): () => void {
   // topology remain snapshots until the next playback request, as before.
   const unsubProject = useStore.subscribe((next, previous) => {
     if (next.project === previous.project) return;
+    if (!hasLiveMixChanged(previous.project.tracks, next.project.tracks)) return;
     const session = controller.activeSession;
     if (!session?.scheduler.isRunning) return;
     for (const trackId of computeAudibleTracks(next.project.tracks)) {
@@ -346,13 +358,17 @@ async function createRuntimeSession(
   const store = useStore.getState();
   const project = store.project;
   const transport = store.transport;
-  const beatsPerBar = beatsPerBarForTimeSignature(project.timeSignature);
-  const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
+  const { index: musicalTime, tempo } = createProjectMusicalTime(project);
+  const lengthBeats = project.lengthBeats;
   const loop = normalizeTransportLoop(
     transport.loopEnabled,
     transport.loopStartBeat,
     transport.loopEndBeat,
     lengthBeats,
+  );
+  const transportTempo = loop ? loopBeatTimeMapping(tempo, loop) : tempo;
+  const tempoChangeBeats = Object.freeze(
+    project.tempoMap.slice(1).map((event) => event.beat),
   );
   const startBeat = transport.positionBeat;
   const now = engine.now();
@@ -470,6 +486,9 @@ async function createRuntimeSession(
         if (session) fireEvents(session, due);
       },
       onScheduleWindow: (window) => {
+        if (session) {
+          scheduleAutomationForWindow(session, window.startBeat, window.endBeat);
+        }
         if (session?.metronomeOn) {
           scheduleMetronomeForWindow(
             session,
@@ -511,7 +530,7 @@ async function createRuntimeSession(
       );
       const projectEndTime = beatToTime(
         lengthBeats,
-        project.bpm,
+        tempo,
         startBeat,
         anchorTime,
       );
@@ -538,8 +557,10 @@ async function createRuntimeSession(
       metronomeClicks: new Set(),
       metronomeBeatFrontier: startBeat,
       metronomeOn: transport.metronome,
-      beatsPerBar,
-      bpm: project.bpm,
+      musicalTime,
+      tempo,
+      transportTempo,
+      tempoChangeBeats,
       anchorBeat: startBeat,
       anchorTime,
       loop,
@@ -568,7 +589,7 @@ async function createRuntimeSession(
 
     const endBeat = loop ? Infinity : lengthBeats;
     startupAnchorTime = anchorTime;
-    scheduler.startIndexed(scheduleIndex, project.bpm, startBeat, endBeat);
+    scheduler.startIndexed(scheduleIndex, tempo, startBeat, endBeat);
     startupAnchorTime = null;
     if (!scheduler.isRunning || String(context.state) !== 'running' || !isCurrent()) {
       throw new CancelledPlaybackRequest();
@@ -583,7 +604,6 @@ async function createRuntimeSession(
 
 /** Schedule a batch of due note/drum events for one generation only. */
 function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
-  const secondsPerProjectBeat = secondsPerBeat(session.bpm);
   for (const event of due) {
     const payload = event.payload as SchedulePayload;
     if (payload.kind === 'note') {
@@ -591,13 +611,64 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
       synth?.noteOn(
         payload.pitch,
         event.time,
-        payload.durationBeats * secondsPerProjectBeat,
+        mappedBeatDurationSeconds(
+          session.transportTempo,
+          timeToBeat(
+            event.time,
+            session.transportTempo,
+            session.anchorBeat,
+            session.anchorTime,
+          ),
+          payload.durationBeats,
+        ),
         payload.velocity,
       );
     } else {
       session.drums
         .get(payload.trackId)
         ?.trigger(payload.lane, event.time, payload.velocity, payload.voiceSeed);
+    }
+  }
+}
+
+function scheduleAutomationForWindow(
+  session: RuntimeSession,
+  windowStartBeat: number,
+  windowEndBeat: number,
+): void {
+  const latestProject = useStore.getState().project;
+  const liveTracks = latestProject.id === session.projectSnapshot.id
+    ? latestProject.tracks
+    : session.projectSnapshot.tracks;
+  const tracks = new Map(liveTracks.map((track) => [track.id, track]));
+  const audible = computeAudibleTracks(liveTracks);
+
+  for (const lane of session.projectSnapshot.automationLanes) {
+    const track = tracks.get(lane.target.trackId);
+    const graph = session.graphs.get(lane.target.trackId);
+    if (!track || !graph) continue;
+    const commands = automationCommandsInWindow(
+      lane,
+      automationBaseValue(track, lane.target),
+      windowStartBeat,
+      windowEndBeat,
+      session.loop,
+      session.loop === null && windowEndBeat >= session.projectSnapshot.lengthBeats,
+      session.tempoChangeBeats,
+    );
+    for (const command of commands) {
+      graph.scheduleAutomation(
+        lane.target.type,
+        command.value,
+        beatToTime(
+          command.beat,
+          session.transportTempo,
+          session.anchorBeat,
+          session.anchorTime,
+        ),
+        command.interpolation,
+        audible.has(track.id),
+      );
     }
   }
 }
@@ -612,15 +683,16 @@ function scheduleMetronomeForWindow(
   if (windowEndBeat <= windowStartBeat) return;
   const scheduleStartBeat = Math.max(windowStartBeat, session.metronomeBeatFrontier);
   const horizonBeat = Math.max(windowEndBeat, session.metronomeBeatFrontier);
-  const clicks = metronomeBeatEvents(
+  const clicks = metronomeMapEvents(
+    session.musicalTime,
     scheduleStartBeat,
     horizonBeat,
-    session.beatsPerBar,
+    session.loop,
   );
   for (const click of clicks) {
     const time = beatToTime(
       click.beat,
-      session.bpm,
+      session.transportTempo,
       session.anchorBeat,
       session.anchorTime,
     );

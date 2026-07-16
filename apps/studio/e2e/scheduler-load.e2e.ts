@@ -54,6 +54,16 @@ function schedulerLoadProject(): Project {
     key: 'C',
     scale: 'major',
     lengthBars: 256,
+    lengthBeats: 8_192,
+    tempoMap: [{ id: 'tempo-scheduler-stress', beat: 0, bpm: 300 }],
+    timeSignatureMap: [{
+      id: 'signature-scheduler-stress',
+      beat: 0,
+      numerator: 32,
+      denominator: 4,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       // Keep the selected first track payload-free so this test isolates the
       // scheduler from rendering thousands of piano-roll DOM nodes.
@@ -61,6 +71,7 @@ function schedulerLoadProject(): Project {
         id: 'scheduler-stress-master',
         name: 'Master',
         type: 'master',
+        role: 'general',
         clips: [],
         volume: 1,
         pan: 0,
@@ -72,6 +83,7 @@ function schedulerLoadProject(): Project {
         id: trackId,
         name: 'Scheduler Stress',
         type: 'instrument',
+        role: 'general',
         clips: [source, ...aliases],
         volume: 0.1,
         pan: 0,
@@ -100,11 +112,22 @@ function shortLoopDensityProject(noteCount: number): Project {
     key: 'C',
     scale: 'major',
     lengthBars: 1,
+    lengthBeats: 0.25,
+    tempoMap: [{ id: 'tempo-short-loop', beat: 0, bpm: 300 }],
+    timeSignatureMap: [{
+      id: 'signature-short-loop',
+      beat: 0,
+      numerator: 1,
+      denominator: 16,
+    }],
+    audioAssets: [],
+    automationLanes: [],
     tracks: [
       {
         id: 'short-loop-master',
         name: 'Master',
         type: 'master',
+        role: 'general',
         clips: [],
         volume: 1,
         pan: 0,
@@ -116,6 +139,7 @@ function shortLoopDensityProject(noteCount: number): Project {
         id: trackId,
         name: 'Short Loop Notes',
         type: 'instrument',
+        role: 'general',
         clips: [{
           id: 'short-loop-clip',
           trackId,

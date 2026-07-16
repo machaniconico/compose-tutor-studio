@@ -429,7 +429,7 @@ function resolveDueEvent(
   ev: ScheduledEvent,
   playheadBeat: number,
   sourceBeat: number,
-  bpm: number,
+  tempo: TempoSource,
   anchorBeat: number,
   anchorTime: number,
   windowStartBeat: number,
@@ -443,7 +443,7 @@ function resolveDueEvent(
   ) return null;
 
   return {
-    time: beatToTime(occurrence.beat, bpm, anchorBeat, anchorTime),
+    time: beatToTime(occurrence.beat, tempo, anchorBeat, anchorTime),
     beat: sourceBeat,
     payload: occurrence.payload,
   };
@@ -455,6 +455,81 @@ export function secondsPerBeat(bpm: number): number {
   return 60 / safe;
 }
 
+/** A precompiled, monotonic mapping between project beats and elapsed seconds. */
+export type BeatTimeMapping = Readonly<{
+  beatToSeconds: (beat: number) => number;
+  secondsToBeat: (seconds: number) => number;
+}>;
+
+/** Fixed BPM remains supported for callers and tests that do not need a tempo map. */
+export type TempoSource = number | BeatTimeMapping;
+
+function isBeatTimeMapping(source: TempoSource): source is BeatTimeMapping {
+  return typeof source !== 'number';
+}
+
+function elapsedSecondsAtBeat(beat: number, source: TempoSource): number {
+  return isBeatTimeMapping(source)
+    ? source.beatToSeconds(beat)
+    : beat * secondsPerBeat(source);
+}
+
+function beatAtElapsedSeconds(seconds: number, source: TempoSource): number {
+  return isBeatTimeMapping(source)
+    ? source.secondsToBeat(seconds)
+    : seconds / secondsPerBeat(source);
+}
+
+/**
+ * Repeat the tempo contour inside a loop on every pass.
+ *
+ * The scheduler advances on an unwrapped beat axis. Without this adapter a
+ * tempo map would be applied only on the first pass and every later pass would
+ * incorrectly continue at the map's final tempo.
+ */
+export function loopBeatTimeMapping(
+  source: TempoSource,
+  loop: LoopRegion,
+): BeatTimeMapping {
+  const loopLength = loop.endBeat - loop.startBeat;
+  if (!(loopLength > 0)) {
+    return {
+      beatToSeconds: (beat) => elapsedSecondsAtBeat(beat, source),
+      secondsToBeat: (seconds) => beatAtElapsedSeconds(seconds, source),
+    };
+  }
+
+  const loopStartSeconds = elapsedSecondsAtBeat(loop.startBeat, source);
+  const loopEndSeconds = elapsedSecondsAtBeat(loop.endBeat, source);
+  const loopSeconds = loopEndSeconds - loopStartSeconds;
+  if (!(loopSeconds > 0) || !Number.isFinite(loopSeconds)) {
+    return {
+      beatToSeconds: (beat) => elapsedSecondsAtBeat(beat, source),
+      secondsToBeat: (seconds) => beatAtElapsedSeconds(seconds, source),
+    };
+  }
+
+  return {
+    beatToSeconds: (beat) => {
+      if (beat < loop.startBeat) return elapsedSecondsAtBeat(beat, source);
+      const offset = beat - loop.startBeat;
+      const cycle = Math.floor(offset / loopLength);
+      const phaseBeat = loop.startBeat + (offset - cycle * loopLength);
+      return loopStartSeconds
+        + cycle * loopSeconds
+        + (elapsedSecondsAtBeat(phaseBeat, source) - loopStartSeconds);
+    },
+    secondsToBeat: (seconds) => {
+      if (seconds < loopStartSeconds) return beatAtElapsedSeconds(seconds, source);
+      const offset = seconds - loopStartSeconds;
+      const cycle = Math.floor(offset / loopSeconds);
+      const phaseSeconds = loopStartSeconds + (offset - cycle * loopSeconds);
+      const phaseBeat = beatAtElapsedSeconds(phaseSeconds, source);
+      return loop.startBeat + cycle * loopLength + (phaseBeat - loop.startBeat);
+    },
+  };
+}
+
 /**
  * Convert a beat position to an absolute AudioContext time.
  *
@@ -464,21 +539,30 @@ export function secondsPerBeat(bpm: number): number {
  */
 export function beatToTime(
   beat: number,
-  bpm: number,
+  tempo: TempoSource,
   anchorBeat: number,
   anchorTime: number,
 ): number {
-  return anchorTime + (beat - anchorBeat) * secondsPerBeat(bpm);
+  if (typeof tempo === 'number') {
+    return anchorTime + (beat - anchorBeat) * secondsPerBeat(tempo);
+  }
+  return anchorTime
+    + elapsedSecondsAtBeat(beat, tempo)
+    - elapsedSecondsAtBeat(anchorBeat, tempo);
 }
 
 /** Inverse of {@link beatToTime}: AudioContext time -> beat. */
 export function timeToBeat(
   time: number,
-  bpm: number,
+  tempo: TempoSource,
   anchorBeat: number,
   anchorTime: number,
 ): number {
-  return anchorBeat + (time - anchorTime) / secondsPerBeat(bpm);
+  if (typeof tempo === 'number') {
+    return anchorBeat + (time - anchorTime) / secondsPerBeat(tempo);
+  }
+  const anchorElapsed = elapsedSecondsAtBeat(anchorBeat, tempo);
+  return beatAtElapsedSeconds(anchorElapsed + time - anchorTime, tempo);
 }
 
 /**
@@ -649,7 +733,7 @@ function appendIndexedRange(
   rangeEndBeat: number,
   searchPaddingBeats: number,
   cycle: number,
-  bpm: number,
+  tempo: TempoSource,
   anchorBeat: number,
   anchorTime: number,
   windowStartBeat: number,
@@ -686,7 +770,7 @@ function appendIndexedRange(
       indexed.event,
       playheadBeat,
       indexed.event.beat,
-      bpm,
+      tempo,
       anchorBeat,
       anchorTime,
       windowStartBeat,
@@ -702,7 +786,7 @@ function selectIndexedEventsInWindow(
   index: ScheduleEventIndex,
   windowStartBeat: number,
   windowEndBeat: number,
-  bpm: number,
+  tempo: TempoSource,
   anchorBeat: number,
   anchorTime: number,
   stats: MutableScheduleQueryStats | null,
@@ -717,6 +801,9 @@ function selectIndexedEventsInWindow(
 
   const due: IndexedDueEvent[] = [];
   const region = index.loop;
+  const transportTempo = region && typeof tempo !== 'number'
+    ? loopBeatTimeMapping(tempo, region)
+    : tempo;
 
   if (!region) {
     appendIndexedRange(
@@ -725,7 +812,7 @@ function selectIndexedEventsInWindow(
       windowEndBeat,
       0,
       0,
-      bpm,
+      transportTempo,
       anchorBeat,
       anchorTime,
       windowStartBeat,
@@ -767,7 +854,7 @@ function selectIndexedEventsInWindow(
         rangeEndBeat,
         phaseSearchPadding,
         cycle,
-        bpm,
+        transportTempo,
         anchorBeat,
         anchorTime,
         windowStartBeat,
@@ -791,7 +878,7 @@ export function nextIndexedEventsInWindow(
   index: ScheduleEventIndex,
   windowStartBeat: number,
   windowEndBeat: number,
-  bpm: number,
+  tempo: TempoSource,
   anchorBeat: number,
   anchorTime: number,
 ): DueEvent[] {
@@ -799,7 +886,7 @@ export function nextIndexedEventsInWindow(
     index,
     windowStartBeat,
     windowEndBeat,
-    bpm,
+    tempo,
     anchorBeat,
     anchorTime,
     null,
@@ -811,7 +898,7 @@ export function queryScheduleEventIndex(
   index: ScheduleEventIndex,
   windowStartBeat: number,
   windowEndBeat: number,
-  bpm: number,
+  tempo: TempoSource,
   anchorBeat: number,
   anchorTime: number,
 ): ScheduleQueryResult {
@@ -827,7 +914,7 @@ export function queryScheduleEventIndex(
     index,
     windowStartBeat,
     windowEndBeat,
-    bpm,
+    tempo,
     anchorBeat,
     anchorTime,
     stats,
@@ -959,7 +1046,7 @@ export function nextEventsInWindow(
   events: readonly ScheduledEvent[],
   windowStartBeat: number,
   windowEndBeat: number,
-  bpm: number,
+  tempo: TempoSource,
   anchorBeat: number,
   anchorTime: number,
   loop: LoopRegion | null,
@@ -968,7 +1055,7 @@ export function nextEventsInWindow(
     createScheduleEventIndex(events, loop),
     windowStartBeat,
     windowEndBeat,
-    bpm,
+    tempo,
     anchorBeat,
     anchorTime,
   );
@@ -1034,7 +1121,8 @@ export class Scheduler {
 
   private timer: ReturnType<typeof setInterval> | null = null;
   private eventIndex: ScheduleEventIndex = createScheduleEventIndex([]);
-  private bpm = 120;
+  private tempo: TempoSource = 120;
+  private transportTempo: TempoSource = 120;
   private loop: LoopRegion | null = null;
   private endBeat = Infinity;
 
@@ -1064,21 +1152,21 @@ export class Scheduler {
    * Start scheduling.
    *
    * @param events     all events to play, in beats (need not be sorted)
-   * @param bpm        tempo
+   * @param tempo      fixed tempo or a precompiled beat/time mapping
    * @param startBeat  playhead start position in beats
    * @param loop       loop region, or null for one-shot playback
    * @param endBeat    project end (stop point when loop is off)
    */
   start(
     events: readonly ScheduledEvent[],
-    bpm: number,
+    tempo: TempoSource,
     startBeat: number,
     loop: LoopRegion | null,
     endBeat: number,
   ): void {
     this.startIndexed(
       createScheduleEventIndex(events, isValidLoop(loop) ? loop : null),
-      bpm,
+      tempo,
       startBeat,
       endBeat,
     );
@@ -1087,14 +1175,17 @@ export class Scheduler {
   /** Start from an already-built index after caller-side safety preflight. */
   startIndexed(
     eventIndex: ScheduleEventIndex,
-    bpm: number,
+    tempo: TempoSource,
     startBeat: number,
     endBeat: number,
   ): void {
     this.stop();
-    this.bpm = bpm;
+    this.tempo = tempo;
     this.eventIndex = eventIndex;
     this.loop = eventIndex.loop;
+    this.transportTempo = this.loop && typeof tempo !== 'number'
+      ? loopBeatTimeMapping(tempo, this.loop)
+      : tempo;
     this.endBeat = Number.isFinite(endBeat) ? endBeat : Infinity;
     this.anchorBeat = startBeat;
     this.scheduledBeat = startBeat;
@@ -1120,7 +1211,12 @@ export class Scheduler {
    * the playback layer to drive the on-screen playhead. Loop-wrapped.
    */
   currentBeat(): number {
-    const raw = timeToBeat(this.clock(), this.bpm, this.anchorBeat, this.anchorTime);
+    const raw = timeToBeat(
+      this.clock(),
+      this.transportTempo,
+      this.anchorBeat,
+      this.anchorTime,
+    );
     if (this.loop) return wrapBeat(raw, this.loop);
     return raw;
   }
@@ -1143,9 +1239,19 @@ export class Scheduler {
   private scheduleTick(): void {
     const now = this.clock();
     const horizonTime = now + this.lookaheadS;
-    const playheadBeat = timeToBeat(now, this.bpm, this.anchorBeat, this.anchorTime);
+    const playheadBeat = timeToBeat(
+      now,
+      this.transportTempo,
+      this.anchorBeat,
+      this.anchorTime,
+    );
     // Convert the time horizon into a playhead-beat horizon.
-    const horizonBeat = timeToBeat(horizonTime, this.bpm, this.anchorBeat, this.anchorTime);
+    const horizonBeat = timeToBeat(
+      horizonTime,
+      this.transportTempo,
+      this.anchorBeat,
+      this.anchorTime,
+    );
 
     // Stop-at-end: clamp the horizon to the project end when not looping.
     const effectiveHorizon = this.loop ? horizonBeat : Math.min(horizonBeat, this.endBeat);
@@ -1161,7 +1267,7 @@ export class Scheduler {
         this.eventIndex,
         windowStartBeat,
         effectiveHorizon,
-        this.bpm,
+        this.tempo,
         this.anchorBeat,
         this.anchorTime,
       );

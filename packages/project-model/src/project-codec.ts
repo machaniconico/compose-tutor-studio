@@ -1,6 +1,10 @@
 import { CURRENT_SCHEMA_VERSION } from './factories';
 import { migrateProject, ProjectMigrationError } from './migrations';
 import type {
+  AudioAsset,
+  AutomationLane,
+  AutomationPoint,
+  AutomationTarget,
   ChordEvent,
   Clip,
   DrumEvent,
@@ -10,6 +14,8 @@ import type {
   NoteEvent,
   Project,
   Section,
+  TempoMapEvent,
+  TimeSignatureMapEvent,
   Track,
 } from './types';
 import { validateProject } from './validation';
@@ -89,11 +95,22 @@ const PROJECT_SCALES = [
   'blues',
 ] as const;
 const TRACK_TYPES = ['instrument', 'drum', 'audio', 'bus', 'master'] as const;
+const TRACK_ROLES = [
+  'general',
+  'learning.chords',
+  'learning.bass',
+  'learning.melody',
+] as const;
 const CLIP_TYPES = ['midi', 'drum', 'audio', 'automation'] as const;
 const DRUM_LANES = ['kick', 'snare', 'closedHat', 'openHat', 'clap', 'perc'] as const;
 const EFFECT_TYPES = ['filter', 'delay', 'reverb', 'compressor', 'eq'] as const;
 const SECTION_TYPES = ['intro', 'verse', 'preChorus', 'chorus', 'bridge', 'outro'] as const;
 const CHORD_FUNCTIONS = ['T', 'SD', 'D', 'Other'] as const;
+const AUDIO_AVAILABILITIES = ['ready', 'unresolved'] as const;
+const AUDIO_MEDIA_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac'] as const;
+const UNRESOLVED_AUDIO_REASONS = ['legacy-reference', 'missing-reference'] as const;
+const AUTOMATION_TARGET_TYPES = ['track-volume', 'track-pan'] as const;
+const AUTOMATION_INTERPOLATIONS = ['hold', 'linear'] as const;
 const ISO_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 class StructureDecoder {
@@ -160,12 +177,30 @@ class StructureDecoder {
     return value;
   }
 
+  takeItems(itemCount: number, maximum: number, path: string): number {
+    const remaining = Math.max(0, MAX_PROJECT_TOTAL_ITEMS - this.decodedItems);
+    const count = Math.min(itemCount, maximum, remaining);
+    if (count < itemCount && remaining < itemCount) {
+      this.issue(path, 'out-of-range', `project exceeds ${MAX_PROJECT_TOTAL_ITEMS} nested items`);
+    }
+    this.decodedItems += count;
+    return count;
+  }
+
   positiveSafeInteger(value: unknown, path: string): number {
     const decoded = this.number(value, path);
     if (!Number.isSafeInteger(decoded)) {
       this.issue(path, 'not-integer', 'expected a safe integer');
     } else if (decoded <= 0) {
       this.issue(path, 'out-of-range', 'expected a positive integer');
+    }
+    return decoded;
+  }
+
+  safeInteger(value: unknown, path: string): number {
+    const decoded = this.number(value, path);
+    if (!Number.isSafeInteger(decoded)) {
+      this.issue(path, 'not-integer', 'expected a safe integer');
     }
     return decoded;
   }
@@ -204,12 +239,7 @@ class StructureDecoder {
     if (value.length > MAX_PROJECT_COLLECTION_ITEMS) {
       this.issue(path, 'out-of-range', `array exceeds ${MAX_PROJECT_COLLECTION_ITEMS} items`);
     }
-    const remaining = Math.max(0, MAX_PROJECT_TOTAL_ITEMS - this.decodedItems);
-    const count = Math.min(value.length, MAX_PROJECT_COLLECTION_ITEMS, remaining);
-    if (count < value.length && remaining < value.length) {
-      this.issue(path, 'out-of-range', `project exceeds ${MAX_PROJECT_TOTAL_ITEMS} nested items`);
-    }
-    this.decodedItems += count;
+    const count = this.takeItems(value.length, MAX_PROJECT_COLLECTION_ITEMS, path);
     const decoded: T[] = [];
     for (let index = 0; index < count; index += 1) {
       decoded.push(decodeItem(value[index], `${path}[${index}]`));
@@ -234,7 +264,8 @@ function decodeNumberRecord(decoder: StructureDecoder, value: unknown, path: str
   if (entries.length > 2_048) {
     decoder.issue(path, 'out-of-range', 'parameter map exceeds 2048 entries');
   }
-  for (const [key, item] of entries.slice(0, 2_048)) {
+  const count = decoder.takeItems(entries.length, 2_048, path);
+  for (const [key, item] of entries.slice(0, count)) {
     if (key.length > MAX_PROJECT_STRING_LENGTH) {
       decoder.issue(`${path}.${key.slice(0, 32)}`, 'out-of-range', 'parameter name is too long');
       continue;
@@ -330,7 +361,12 @@ function decodeDrumGroove(
   };
 }
 
-function decodeClip(decoder: StructureDecoder, value: unknown, path: string): Clip {
+function decodeClip(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+  schemaVersion = CURRENT_SCHEMA_VERSION,
+): Clip {
   const record = decoder.record(value, path, [
     'id',
     'trackId',
@@ -344,7 +380,15 @@ function decodeClip(decoder: StructureDecoder, value: unknown, path: string): Cl
     'stepsPerBar',
     'drumGroove',
     'audioAssetId',
+    ...(schemaVersion >= 3
+      ? ['sourceStartFrame', 'sourceFrameCount', 'fadeInFrames', 'fadeOutFrames', 'gainDb']
+      : []),
   ]) ?? {};
+  const type = decoder.member(
+    decoder.required(record, 'type', `${path}.type`),
+    CLIP_TYPES,
+    `${path}.type`,
+  );
   const notes = Object.prototype.hasOwnProperty.call(record, 'notes')
     ? decoder.array(record.notes, `${path}.notes`, (item, itemPath) => decodeNote(decoder, item, itemPath))
     : undefined;
@@ -360,11 +404,34 @@ function decodeClip(decoder: StructureDecoder, value: unknown, path: string): Cl
     ? decodeDrumGroove(decoder, record.drumGroove, `${path}.drumGroove`)
     : undefined;
   const aliasOf = decoder.optionalString(record, 'aliasOf', `${path}.aliasOf`);
-  const audioAssetId = decoder.optionalString(record, 'audioAssetId', `${path}.audioAssetId`);
+  const requiresAudioPayload = schemaVersion >= 3 && type === 'audio';
+  const audioAssetId = requiresAudioPayload
+    ? decoder.string(
+        decoder.required(record, 'audioAssetId', `${path}.audioAssetId`),
+        `${path}.audioAssetId`,
+      )
+    : decoder.optionalString(record, 'audioAssetId', `${path}.audioAssetId`);
+  const decodeFrameField = (key: string): number | undefined => {
+    if (requiresAudioPayload) {
+      return decoder.safeInteger(decoder.required(record, key, `${path}.${key}`), `${path}.${key}`);
+    }
+    return Object.prototype.hasOwnProperty.call(record, key)
+      ? decoder.safeInteger(record[key], `${path}.${key}`)
+      : undefined;
+  };
+  const sourceStartFrame = decodeFrameField('sourceStartFrame');
+  const sourceFrameCount = decodeFrameField('sourceFrameCount');
+  const fadeInFrames = decodeFrameField('fadeInFrames');
+  const fadeOutFrames = decodeFrameField('fadeOutFrames');
+  const gainDb = requiresAudioPayload
+    ? decoder.number(decoder.required(record, 'gainDb', `${path}.gainDb`), `${path}.gainDb`)
+    : Object.prototype.hasOwnProperty.call(record, 'gainDb')
+      ? decoder.number(record.gainDb, `${path}.gainDb`)
+      : undefined;
   return {
     id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
     trackId: decoder.string(decoder.required(record, 'trackId', `${path}.trackId`), `${path}.trackId`),
-    type: decoder.member(decoder.required(record, 'type', `${path}.type`), CLIP_TYPES, `${path}.type`),
+    type,
     startBeat: decoder.number(decoder.required(record, 'startBeat', `${path}.startBeat`), `${path}.startBeat`),
     lengthBeats: decoder.number(
       decoder.required(record, 'lengthBeats', `${path}.lengthBeats`),
@@ -377,14 +444,25 @@ function decodeClip(decoder: StructureDecoder, value: unknown, path: string): Cl
     ...(stepsPerBar !== undefined ? { stepsPerBar } : {}),
     ...(drumGroove !== undefined ? { drumGroove } : {}),
     ...(audioAssetId !== undefined ? { audioAssetId } : {}),
+    ...(sourceStartFrame !== undefined ? { sourceStartFrame } : {}),
+    ...(sourceFrameCount !== undefined ? { sourceFrameCount } : {}),
+    ...(fadeInFrames !== undefined ? { fadeInFrames } : {}),
+    ...(fadeOutFrames !== undefined ? { fadeOutFrames } : {}),
+    ...(gainDb !== undefined ? { gainDb } : {}),
   };
 }
 
-function decodeTrack(decoder: StructureDecoder, value: unknown, path: string): Track {
+function decodeTrack(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+  schemaVersion = CURRENT_SCHEMA_VERSION,
+): Track {
   const record = decoder.record(value, path, [
     'id',
     'name',
     'type',
+    ...(schemaVersion >= 3 ? ['role'] : []),
     'color',
     'clips',
     'volume',
@@ -402,11 +480,18 @@ function decodeTrack(decoder: StructureDecoder, value: unknown, path: string): T
     id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
     name: decoder.string(decoder.required(record, 'name', `${path}.name`), `${path}.name`),
     type: decoder.member(decoder.required(record, 'type', `${path}.type`), TRACK_TYPES, `${path}.type`),
+    role: schemaVersion >= 3
+      ? decoder.member(
+          decoder.required(record, 'role', `${path}.role`),
+          TRACK_ROLES,
+          `${path}.role`,
+        )
+      : 'general',
     ...(color !== undefined ? { color } : {}),
     clips: decoder.array(
       decoder.required(record, 'clips', `${path}.clips`),
       `${path}.clips`,
-      (item, itemPath) => decodeClip(decoder, item, itemPath),
+      (item, itemPath) => decodeClip(decoder, item, itemPath, schemaVersion),
     ),
     volume: decoder.number(decoder.required(record, 'volume', `${path}.volume`), `${path}.volume`),
     pan: decoder.number(decoder.required(record, 'pan', `${path}.pan`), `${path}.pan`),
@@ -476,6 +561,189 @@ function decodeSection(decoder: StructureDecoder, value: unknown, path: string):
   };
 }
 
+function decodeTempoMapEvent(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): TempoMapEvent {
+  const record = decoder.record(value, path, ['id', 'beat', 'bpm']) ?? {};
+  return {
+    id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    beat: decoder.number(decoder.required(record, 'beat', `${path}.beat`), `${path}.beat`),
+    bpm: decoder.number(decoder.required(record, 'bpm', `${path}.bpm`), `${path}.bpm`),
+  };
+}
+
+function decodeTimeSignatureMapEvent(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): TimeSignatureMapEvent {
+  const record = decoder.record(value, path, ['id', 'beat', 'numerator', 'denominator']) ?? {};
+  return {
+    id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    beat: decoder.number(decoder.required(record, 'beat', `${path}.beat`), `${path}.beat`),
+    numerator: decoder.safeInteger(
+      decoder.required(record, 'numerator', `${path}.numerator`),
+      `${path}.numerator`,
+    ),
+    denominator: decoder.safeInteger(
+      decoder.required(record, 'denominator', `${path}.denominator`),
+      `${path}.denominator`,
+    ),
+  };
+}
+
+function decodeAudioAsset(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioAsset {
+  const record = decoder.record(value, path, [
+    'id',
+    'availability',
+    'checksumSha256',
+    'originalName',
+    'mediaType',
+    'byteLength',
+    'sampleRate',
+    'channelCount',
+    'frameCount',
+    'legacyAssetId',
+    'reason',
+  ]) ?? {};
+  const availability = decoder.member(
+    decoder.required(record, 'availability', `${path}.availability`),
+    AUDIO_AVAILABILITIES,
+    `${path}.availability`,
+  );
+  const id = decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`);
+
+  if (availability === 'ready') {
+    for (const key of ['legacyAssetId', 'reason']) {
+      if (Object.prototype.hasOwnProperty.call(record, key)) {
+        decoder.issue(`${path}.${key}`, 'unknown-key', `property is not allowed for a ready asset`);
+      }
+    }
+    return {
+      id,
+      availability,
+      checksumSha256: decoder.string(
+        decoder.required(record, 'checksumSha256', `${path}.checksumSha256`),
+        `${path}.checksumSha256`,
+      ),
+      originalName: decoder.string(
+        decoder.required(record, 'originalName', `${path}.originalName`),
+        `${path}.originalName`,
+      ),
+      mediaType: decoder.member(
+        decoder.required(record, 'mediaType', `${path}.mediaType`),
+        AUDIO_MEDIA_TYPES,
+        `${path}.mediaType`,
+      ),
+      byteLength: decoder.positiveSafeInteger(
+        decoder.required(record, 'byteLength', `${path}.byteLength`),
+        `${path}.byteLength`,
+      ),
+      sampleRate: decoder.positiveSafeInteger(
+        decoder.required(record, 'sampleRate', `${path}.sampleRate`),
+        `${path}.sampleRate`,
+      ),
+      channelCount: decoder.positiveSafeInteger(
+        decoder.required(record, 'channelCount', `${path}.channelCount`),
+        `${path}.channelCount`,
+      ),
+      frameCount: decoder.positiveSafeInteger(
+        decoder.required(record, 'frameCount', `${path}.frameCount`),
+        `${path}.frameCount`,
+      ),
+    };
+  }
+
+  for (const key of [
+    'checksumSha256',
+    'originalName',
+    'mediaType',
+    'byteLength',
+    'sampleRate',
+    'channelCount',
+    'frameCount',
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      decoder.issue(`${path}.${key}`, 'unknown-key', `property is not allowed for an unresolved asset`);
+    }
+  }
+  const legacyAssetId = decoder.optionalString(record, 'legacyAssetId', `${path}.legacyAssetId`);
+  return {
+    id,
+    availability: 'unresolved',
+    ...(legacyAssetId !== undefined ? { legacyAssetId } : {}),
+    reason: decoder.member(
+      decoder.required(record, 'reason', `${path}.reason`),
+      UNRESOLVED_AUDIO_REASONS,
+      `${path}.reason`,
+    ),
+  };
+}
+
+function decodeAutomationTarget(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AutomationTarget {
+  const record = decoder.record(value, path, ['type', 'trackId']) ?? {};
+  return {
+    type: decoder.member(
+      decoder.required(record, 'type', `${path}.type`),
+      AUTOMATION_TARGET_TYPES,
+      `${path}.type`,
+    ),
+    trackId: decoder.string(
+      decoder.required(record, 'trackId', `${path}.trackId`),
+      `${path}.trackId`,
+    ),
+  };
+}
+
+function decodeAutomationPoint(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AutomationPoint {
+  const record = decoder.record(value, path, ['id', 'beat', 'value', 'interpolation']) ?? {};
+  return {
+    id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    beat: decoder.number(decoder.required(record, 'beat', `${path}.beat`), `${path}.beat`),
+    value: decoder.number(decoder.required(record, 'value', `${path}.value`), `${path}.value`),
+    interpolation: decoder.member(
+      decoder.required(record, 'interpolation', `${path}.interpolation`),
+      AUTOMATION_INTERPOLATIONS,
+      `${path}.interpolation`,
+    ),
+  };
+}
+
+function decodeAutomationLane(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AutomationLane {
+  const record = decoder.record(value, path, ['id', 'target', 'points']) ?? {};
+  return {
+    id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    target: decodeAutomationTarget(
+      decoder,
+      decoder.required(record, 'target', `${path}.target`),
+      `${path}.target`,
+    ),
+    points: decoder.array(
+      decoder.required(record, 'points', `${path}.points`),
+      `${path}.points`,
+      (item, itemPath) => decodeAutomationPoint(decoder, item, itemPath),
+    ),
+  };
+}
+
 function decodeCurrentProject(input: unknown): ProjectDecodeResult {
   const decoder = new StructureDecoder();
   try {
@@ -488,6 +756,11 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
       'key',
       'scale',
       'lengthBars',
+      'lengthBeats',
+      'tempoMap',
+      'timeSignatureMap',
+      'audioAssets',
+      'automationLanes',
       'tracks',
       'chordTrack',
       'sections',
@@ -526,6 +799,30 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
       lengthBars: decoder.number(
         decoder.required(record, 'lengthBars', 'lengthBars'),
         'lengthBars',
+      ),
+      lengthBeats: decoder.number(
+        decoder.required(record, 'lengthBeats', 'lengthBeats'),
+        'lengthBeats',
+      ),
+      tempoMap: decoder.array(
+        decoder.required(record, 'tempoMap', 'tempoMap'),
+        'tempoMap',
+        (item, itemPath) => decodeTempoMapEvent(decoder, item, itemPath),
+      ),
+      timeSignatureMap: decoder.array(
+        decoder.required(record, 'timeSignatureMap', 'timeSignatureMap'),
+        'timeSignatureMap',
+        (item, itemPath) => decodeTimeSignatureMapEvent(decoder, item, itemPath),
+      ),
+      audioAssets: decoder.array(
+        decoder.required(record, 'audioAssets', 'audioAssets'),
+        'audioAssets',
+        (item, itemPath) => decodeAudioAsset(decoder, item, itemPath),
+      ),
+      automationLanes: decoder.array(
+        decoder.required(record, 'automationLanes', 'automationLanes'),
+        'automationLanes',
+        (item, itemPath) => decodeAutomationLane(decoder, item, itemPath),
       ),
       tracks: decoder.array(
         decoder.required(record, 'tracks', 'tracks'),
@@ -580,6 +877,66 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
   } catch {
     return { ok: false, error: { code: 'validation-exception', issues: decoder.issues } };
   }
+}
+
+/** Reject fields that were not part of the declared v1/v2 transport shape. */
+function inspectLegacyProjectStructure(input: unknown, schemaVersion: 1 | 2): ProjectCodecIssue[] {
+  const decoder = new StructureDecoder();
+  const record = decoder.record(input, '', [
+    'id',
+    'schemaVersion',
+    'title',
+    'bpm',
+    'timeSignature',
+    'key',
+    'scale',
+    'lengthBars',
+    'tracks',
+    'chordTrack',
+    'sections',
+    'createdAt',
+    'updatedAt',
+  ]);
+  if (!record) return decoder.issues;
+
+  decoder.string(decoder.required(record, 'id', 'id'), 'id');
+  decoder.positiveSafeInteger(
+    decoder.required(record, 'schemaVersion', 'schemaVersion'),
+    'schemaVersion',
+  );
+  decoder.string(decoder.required(record, 'title', 'title'), 'title');
+  decoder.number(decoder.required(record, 'bpm', 'bpm'), 'bpm');
+  const timeSignature = decoder.required(record, 'timeSignature', 'timeSignature');
+  if (!Array.isArray(timeSignature)) {
+    decoder.issue('timeSignature', 'invalid-type', 'expected a two-item array');
+  } else {
+    if (timeSignature.length !== 2) {
+      decoder.issue('timeSignature', 'out-of-range', 'expected exactly two items');
+    }
+    decoder.number(timeSignature[0], 'timeSignature[0]');
+    decoder.number(timeSignature[1], 'timeSignature[1]');
+  }
+  decoder.member(decoder.required(record, 'key', 'key'), PROJECT_KEYS, 'key');
+  decoder.member(decoder.required(record, 'scale', 'scale'), PROJECT_SCALES, 'scale');
+  decoder.number(decoder.required(record, 'lengthBars', 'lengthBars'), 'lengthBars');
+  decoder.array(
+    decoder.required(record, 'tracks', 'tracks'),
+    'tracks',
+    (item, itemPath) => decodeTrack(decoder, item, itemPath, schemaVersion),
+  );
+  decoder.array(
+    decoder.required(record, 'chordTrack', 'chordTrack'),
+    'chordTrack',
+    (item, itemPath) => decodeChord(decoder, item, itemPath),
+  );
+  decoder.array(
+    decoder.required(record, 'sections', 'sections'),
+    'sections',
+    (item, itemPath) => decodeSection(decoder, item, itemPath),
+  );
+  decoder.timestamp(decoder.required(record, 'createdAt', 'createdAt'), 'createdAt');
+  decoder.timestamp(decoder.required(record, 'updatedAt', 'updatedAt'), 'updatedAt');
+  return decoder.issues;
 }
 
 function schemaVersionOf(input: unknown):
@@ -649,6 +1006,10 @@ export function decodeProject(input: unknown): ProjectDecodeResult {
 
   let current: unknown = input;
   if (version.version < CURRENT_SCHEMA_VERSION) {
+    const legacyIssues = inspectLegacyProjectStructure(input, version.version as 1 | 2);
+    if (legacyIssues.length > 0) {
+      return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };
+    }
     try {
       current = migrateProject(input as Readonly<Record<string, unknown>>);
     } catch (error) {

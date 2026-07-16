@@ -6,10 +6,16 @@
 import {
   beatsPerBar as beatsPerBarForTimeSignature,
   buildClipIndex,
+  compileDrumStepProjector,
+  compileMusicalTime,
   countMidiClipNoteOccurrences,
+  MAX_DRUM_STEPS_PER_BAR,
+  projectDrumStep,
   realizeChordTrack,
   resolveClipContent,
+  SHA256_PATTERN,
   visitMidiClipNoteOccurrences,
+  type AudioAsset,
   type Project,
   type NoteEvent,
   type DrumLane,
@@ -17,7 +23,10 @@ import {
   type Clip,
   type ClipIndex,
   type MidiClipNoteOccurrence,
+  type MusicalTimeIndex,
   type RealizedChordNote,
+  type TempoMapEvent,
+  type TimeSignatureMapEvent,
 } from '@cts/project-model';
 import {
   PPQ,
@@ -50,6 +59,24 @@ const MAX_MIDI_PORT = 0x7f;
 export const MAX_MIDI_EXPORT_EVENTS = 200_000;
 const MAX_MIDI_TEXT_BYTES = 4_096;
 const MAX_MIDI_PPQ = 0x7fff;
+const AUDIO_CLIP_FIELDS = [
+  'audioAssetId',
+  'sourceStartFrame',
+  'sourceFrameCount',
+  'fadeInFrames',
+  'fadeOutFrames',
+  'gainDb',
+] as const;
+const READY_AUDIO_ASSET_FIELDS = [
+  'checksumSha256',
+  'originalName',
+  'mediaType',
+  'byteLength',
+  'sampleRate',
+  'channelCount',
+  'frameCount',
+] as const;
+const AUDIO_MEDIA_TYPES = new Set(['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac']);
 
 export type MidiExportErrorCode =
   | 'invalid-options'
@@ -288,6 +315,166 @@ function trackPanCc(value: number, trackId: string): number {
   return midiDataByte(panToCc(value), `track ${trackId} CC10 value`);
 }
 
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function requirePositiveSafeInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    exportFailure('invalid-project', `${label} must be a positive safe integer`);
+  }
+  return value as number;
+}
+
+function validateExportAudioAssets(project: Project): ReadonlyMap<string, AudioAsset> {
+  const rawAssets = (project as Partial<Pick<Project, 'audioAssets'>>).audioAssets;
+  if (rawAssets === undefined) return new Map();
+  if (!Array.isArray(rawAssets)) {
+    exportFailure('invalid-project', 'audioAssets must be an array');
+  }
+
+  const assets = new Map<string, AudioAsset>();
+  for (const [index, rawAsset] of rawAssets.entries()) {
+    const label = `audioAssets[${index}]`;
+    if (typeof rawAsset !== 'object' || rawAsset === null || Array.isArray(rawAsset)) {
+      exportFailure('invalid-project', `${label} must be an object`);
+    }
+    const asset = rawAsset as unknown as Record<string, unknown>;
+    if (typeof asset.id !== 'string' || asset.id.length === 0) {
+      exportFailure('invalid-project', `${label} id must be a non-empty string`);
+    }
+    if (assets.has(asset.id)) {
+      exportFailure('invalid-project', `audio asset id ${asset.id} must be unique`);
+    }
+
+    if (asset.availability === 'ready') {
+      if (hasOwn(asset, 'legacyAssetId') || hasOwn(asset, 'reason')) {
+        exportFailure('invalid-project', `${label} ready metadata is mutually exclusive`);
+      }
+      if (
+        typeof asset.checksumSha256 !== 'string'
+        || !SHA256_PATTERN.test(asset.checksumSha256)
+      ) {
+        exportFailure(
+          'invalid-project',
+          `${label} checksumSha256 must be 64 lowercase hexadecimal digits`,
+        );
+      }
+      if (typeof asset.originalName !== 'string' || asset.originalName.length === 0) {
+        exportFailure('invalid-project', `${label} originalName must be a non-empty string`);
+      }
+      if (typeof asset.mediaType !== 'string' || !AUDIO_MEDIA_TYPES.has(asset.mediaType)) {
+        exportFailure('invalid-project', `${label} has an unsupported mediaType`);
+      }
+      requirePositiveSafeInteger(asset.byteLength, `${label} byteLength`);
+      if (
+        !Number.isSafeInteger(asset.sampleRate)
+        || (asset.sampleRate as number) < 8_000
+        || (asset.sampleRate as number) > 384_000
+      ) {
+        exportFailure('invalid-project', `${label} sampleRate must be an integer in 8000..384000`);
+      }
+      if (
+        !Number.isSafeInteger(asset.channelCount)
+        || (asset.channelCount as number) < 1
+        || (asset.channelCount as number) > 32
+      ) {
+        exportFailure('invalid-project', `${label} channelCount must be an integer in 1..32`);
+      }
+      requirePositiveSafeInteger(asset.frameCount, `${label} frameCount`);
+    } else if (asset.availability === 'unresolved') {
+      if (READY_AUDIO_ASSET_FIELDS.some((field) => hasOwn(asset, field))) {
+        exportFailure('invalid-project', `${label} unresolved metadata is mutually exclusive`);
+      }
+      if (asset.reason !== 'legacy-reference' && asset.reason !== 'missing-reference') {
+        exportFailure('invalid-project', `${label} has an unsupported unresolved reason`);
+      }
+      if (
+        asset.reason === 'legacy-reference'
+        && (typeof asset.legacyAssetId !== 'string' || asset.legacyAssetId.length === 0)
+      ) {
+        exportFailure(
+          'invalid-project',
+          `${label} legacy-reference requires a non-empty legacyAssetId`,
+        );
+      }
+      if (asset.reason === 'missing-reference' && hasOwn(asset, 'legacyAssetId')) {
+        exportFailure(
+          'invalid-project',
+          `${label} missing-reference must not contain legacyAssetId`,
+        );
+      }
+    } else {
+      exportFailure('invalid-project', `${label} has an unsupported availability`);
+    }
+    assets.set(asset.id, rawAsset);
+  }
+  return assets;
+}
+
+function validateExportAudioClip(
+  track: Track,
+  clip: Clip,
+  audioAssets: ReadonlyMap<string, AudioAsset>,
+): void {
+  const rawClip = clip as unknown as Record<string, unknown>;
+  for (const field of AUDIO_CLIP_FIELDS) {
+    if (!hasOwn(rawClip, field) || rawClip[field] === undefined) {
+      exportFailure('invalid-project', `audio clip ${clip.id} requires ${field}`);
+    }
+  }
+  if (typeof clip.audioAssetId !== 'string' || clip.audioAssetId.length === 0) {
+    exportFailure('invalid-project', `audio clip ${clip.id} requires a non-empty audioAssetId`);
+  }
+  const asset = audioAssets.get(clip.audioAssetId);
+  if (asset === undefined) {
+    exportFailure(
+      'invalid-project',
+      `audio clip ${clip.id} references missing asset ${clip.audioAssetId}`,
+    );
+  }
+  if (!Number.isFinite(clip.gainDb) || clip.gainDb! < -96 || clip.gainDb! > 24) {
+    exportFailure('invalid-project', `audio clip ${clip.id} gainDb must be in -96..24`);
+  }
+
+  const frameFields = [
+    'sourceStartFrame',
+    'sourceFrameCount',
+    'fadeInFrames',
+    'fadeOutFrames',
+  ] as const;
+  for (const field of frameFields) {
+    if (!Number.isSafeInteger(clip[field])) {
+      exportFailure('invalid-project', `audio clip ${clip.id} ${field} must be a safe integer`);
+    }
+  }
+
+  if (asset.availability === 'unresolved') {
+    if (frameFields.some((field) => clip[field] !== 0)) {
+      exportFailure('invalid-project', `unresolved audio clip ${clip.id} must use a zero range`);
+    }
+    return;
+  }
+  if (track.type !== 'audio') {
+    exportFailure('invalid-project', `ready audio clip ${clip.id} must belong to an audio track`);
+  }
+  if (clip.sourceStartFrame! < 0) {
+    exportFailure('invalid-project', `audio clip ${clip.id} sourceStartFrame must be non-negative`);
+  }
+  if (clip.sourceFrameCount! <= 0) {
+    exportFailure('invalid-project', `audio clip ${clip.id} sourceFrameCount must be positive`);
+  }
+  if (clip.fadeInFrames! < 0 || clip.fadeOutFrames! < 0) {
+    exportFailure('invalid-project', `audio clip ${clip.id} fades must be non-negative`);
+  }
+  if (clip.sourceStartFrame! > asset.frameCount - clip.sourceFrameCount!) {
+    exportFailure('invalid-project', `audio clip ${clip.id} source range exceeds its asset`);
+  }
+  if (clip.fadeInFrames! > clip.sourceFrameCount! - clip.fadeOutFrames!) {
+    exportFailure('invalid-project', `audio clip ${clip.id} fades exceed its source range`);
+  }
+}
+
 /**
  * Reject domain-invalid shapes before allocation or chord realization can
  * reinterpret them. Audio and automation clips are valid lossy projections:
@@ -308,6 +495,7 @@ function validateExportProjectShape(project: Project): void {
     }
   }
 
+  const audioAssets = validateExportAudioAssets(project);
   for (const track of project.tracks) {
     if (!Array.isArray(track.clips)) {
       exportFailure('invalid-project', `track ${track.id} clips must be an array`);
@@ -324,9 +512,6 @@ function validateExportProjectShape(project: Project): void {
       }
       if (clip.type === 'drum' && track.type !== 'drum') {
         exportFailure('invalid-project', `drum clip ${clip.id} must belong to a drum track`);
-      }
-      if (clip.type === 'audio' && track.type !== 'audio') {
-        exportFailure('invalid-project', `audio clip ${clip.id} must belong to an audio track`);
       }
       if (!['midi', 'drum', 'audio', 'automation'].includes(clip.type)) {
         exportFailure('invalid-project', `clip ${clip.id} has an unsupported type`);
@@ -346,8 +531,19 @@ function validateExportProjectShape(project: Project): void {
       ) {
         exportFailure('invalid-project', `clip ${clip.id} drum settings are only valid on drum clips`);
       }
-      if (clip.audioAssetId !== undefined && clip.type !== 'audio') {
-        exportFailure('invalid-project', `clip ${clip.id} audioAssetId is only valid on audio clips`);
+      if (clip.type === 'audio') {
+        validateExportAudioClip(track, clip, audioAssets);
+      } else {
+        const rawClip = clip as unknown as Record<string, unknown>;
+        const audioField = AUDIO_CLIP_FIELDS.find(
+          (field) => hasOwn(rawClip, field) && rawClip[field] !== undefined,
+        );
+        if (audioField !== undefined) {
+          exportFailure(
+            'invalid-project',
+            `clip ${clip.id} ${audioField} is only valid on audio clips`,
+          );
+        }
       }
     }
   }
@@ -408,6 +604,96 @@ function requireFinitePositive(value: number, label: string): void {
   if (!Number.isFinite(value) || value <= 0) {
     exportFailure('timing-out-of-range', `${label} must be a finite positive number`);
   }
+}
+
+function timelineMapEvents<T extends Readonly<{ beat: number }>>(
+  raw: unknown,
+  fallback: readonly T[],
+  label: string,
+  validateEvent: (event: unknown, index: number) => T,
+): readonly T[] {
+  if (raw === undefined) return fallback;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    exportFailure('invalid-project', `${label} must be a non-empty array`);
+  }
+
+  const events: T[] = [];
+  let previousBeat = Number.NEGATIVE_INFINITY;
+  for (const [index, value] of raw.entries()) {
+    const event = validateEvent(value, index);
+    const beat = event.beat;
+    if (!Number.isFinite(beat) || beat < 0) {
+      exportFailure(
+        'timing-out-of-range',
+        `${label}[${index}] beat must be a finite non-negative number`,
+      );
+    }
+    if (index === 0 && beat !== 0) {
+      exportFailure('invalid-project', `${label} must start at beat 0`);
+    }
+    if (beat <= previousBeat) {
+      exportFailure('invalid-project', `${label} beats must be strictly increasing`);
+    }
+    previousBeat = beat;
+    events.push(event);
+  }
+  return events;
+}
+
+function timelineEventRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    exportFailure('invalid-project', `${label} must be an object`);
+  }
+  const event = value as Record<string, unknown>;
+  if (typeof event.id !== 'string' || event.id.length === 0) {
+    exportFailure('invalid-project', `${label} id must be a non-empty string`);
+  }
+  return event;
+}
+
+function projectTempoMap(project: Project): readonly TempoMapEvent[] {
+  const raw = (project as Partial<Pick<Project, 'tempoMap'>>).tempoMap;
+  return timelineMapEvents(
+    raw,
+    [{ id: 'legacy-tempo-0', beat: 0, bpm: project.bpm }],
+    'tempoMap',
+    (value, index) => {
+      const event = timelineEventRecord(value, `tempoMap[${index}]`);
+      return {
+        id: event.id as string,
+        beat: event.beat as number,
+        bpm: event.bpm as number,
+      };
+    },
+  );
+}
+
+function projectTimeSignatureMap(
+  project: Project,
+): readonly TimeSignatureMapEvent[] {
+  const raw = (project as Partial<Pick<Project, 'timeSignatureMap'>>).timeSignatureMap;
+  return timelineMapEvents(
+    raw,
+    [{
+      id: 'legacy-time-signature-0',
+      beat: 0,
+      numerator: project.timeSignature[0],
+      denominator: project.timeSignature[1],
+    }],
+    'timeSignatureMap',
+    (value, index) => {
+      const event = timelineEventRecord(value, `timeSignatureMap[${index}]`);
+      return {
+        id: event.id as string,
+        beat: event.beat as number,
+        numerator: event.numerator as number,
+        denominator: event.denominator as number,
+      };
+    },
+  );
 }
 
 /** Preserve every positive musical duration as at least one MIDI tick. */
@@ -551,24 +837,45 @@ function appendRealizedChordNotes(
 function appendClipDrums(
   clip: Clip,
   ppq: number,
-  beatsPerBar: number,
+  musicalTime: MusicalTimeIndex,
   messages: MidiMessage[],
   budget: MidiExportBudget,
 ): void {
   const events = clip.drumEvents ?? [];
+  const clipStepsPerBar = clip.stepsPerBar ?? 16;
+  if (
+    !Number.isSafeInteger(clipStepsPerBar)
+    || clipStepsPerBar < 1
+    || clipStepsPerBar > MAX_DRUM_STEPS_PER_BAR
+  ) {
+    exportFailure(
+      'invalid-project',
+      `clip ${clip.id} stepsPerBar must be an integer in 1..${MAX_DRUM_STEPS_PER_BAR}`,
+    );
+  }
+  const stepsPerBar = clipStepsPerBar;
+  for (const [index, event] of events.entries()) {
+    if (!Number.isSafeInteger(event?.stepIndex) || event.stepIndex < 0) {
+      exportFailure(
+        'invalid-project',
+        `drum event ${event?.id ?? index} stepIndex must be a non-negative safe integer`,
+      );
+    }
+  }
   if (events.length === 0) return;
 
-  const clipStepsPerBar = clip.stepsPerBar ?? 16;
-  const stepsPerBar = clipStepsPerBar > 0 ? clipStepsPerBar : 16;
-  // A bar is divided into stepsPerBar steps and follows the project meter.
-  const beatsPerStep = beatsPerBar / stepsPerBar;
-
   requireFiniteNonNegative(clip.startBeat, `clip ${clip.id} start`);
-  requireFinitePositive(beatsPerStep, `clip ${clip.id} drum step duration`);
+  const drumProjector = compileDrumStepProjector(
+    stepsPerBar,
+    clip.startBeat,
+    musicalTime,
+  );
   budget.reserve(events.length * 2);
   for (const evt of events) {
     const pitch = midiDataByte(DRUM_NOTE[evt.lane], `drum event ${evt.id} pitch`);
-    const startBeat = clip.startBeat + evt.stepIndex * beatsPerStep;
+    const timing = projectDrumStep(drumProjector, evt.stepIndex);
+    requireFinitePositive(timing.beatsPerBar, `clip ${clip.id} beats per bar`);
+    const startBeat = timing.beat;
     const startTick = beatToTick(startBeat, ppq, `drum event ${evt.id} start`);
     const endTick = quantizedEndTick(
       startTick,
@@ -642,7 +949,7 @@ function buildInstrumentTrack(
   channel: number,
   port: number,
   ppq: number,
-  beatsPerBar: number,
+  musicalTime: MusicalTimeIndex,
   budget: MidiExportBudget,
   realizedChordNotes: readonly RealizedChordNote[] = [],
 ): Uint8Array {
@@ -666,7 +973,7 @@ function buildInstrumentTrack(
       exportFailure('invalid-project', `clip ${clip.id} has an invalid linked source`);
     }
     if (effectiveClip.type === 'drum') {
-      appendClipDrums(effectiveClip, ppq, beatsPerBar, msgs, budget);
+      appendClipDrums(effectiveClip, ppq, musicalTime, msgs, budget);
     } else if (effectiveClip.type === 'midi') {
       appendClipNotes(effectiveClip, channel, ppq, msgs, budget);
     }
@@ -723,19 +1030,40 @@ function projectToMidiWithinBudget(
     exportFailure('invalid-project', 'project must be an object');
   }
   validateExportProjectShape(project);
-  const beatsPerBar = beatsPerBarForTimeSignature(project.timeSignature);
-  requireFinitePositive(beatsPerBar, 'beats per bar');
   const realizedChords = realizeChordTrack(project);
   const clipIndex = buildClipIndex(project);
+  const tempoMap = projectTempoMap(project);
+  const timeSignatureMap = projectTimeSignatureMap(project);
+  const legacyLengthBeats = project.lengthBars
+    * beatsPerBarForTimeSignature(project.timeSignature);
+  const musicalTime = compileMusicalTime({
+    lengthBeats: Number.isFinite(project.lengthBeats)
+      ? project.lengthBeats
+      : legacyLengthBeats,
+    tempoMap,
+    timeSignatureMap,
+  });
 
   // --- Track 0: tempo / meta / chord markers ---
-  // Track name + tempo + meter + markers + buildTrackChunk's end-of-track.
-  budget.reserve(4 + project.chordTrack.length);
+  // Track name + every map event + markers + buildTrackChunk's end-of-track.
+  budget.reserve(2 + tempoMap.length + timeSignatureMap.length + project.chordTrack.length);
   const metaMessages: MidiMessage[] = [
     { tick: 0, bytes: trackNameMeta(project.title) },
-    { tick: 0, bytes: tempoMeta(project.bpm) },
-    { tick: 0, bytes: timeSigMeta(project.timeSignature[0], project.timeSignature[1]) },
   ];
+  // Keep map order canonical. Distinct beats may quantize to the same tick at
+  // a low PPQ; stable insertion makes the later map point the effective value.
+  for (const event of tempoMap) {
+    metaMessages.push({
+      tick: beatToTick(event.beat, ppq, `tempo ${event.id} beat`),
+      bytes: tempoMeta(event.bpm),
+    });
+  }
+  for (const event of timeSignatureMap) {
+    metaMessages.push({
+      tick: beatToTick(event.beat, ppq, `time signature ${event.id} beat`),
+      bytes: timeSigMeta(event.numerator, event.denominator),
+    });
+  }
   for (const chord of project.chordTrack) {
     metaMessages.push({
       tick: beatToTick(chord.startBeat, ppq, `chord ${chord.id} start`),
@@ -774,7 +1102,7 @@ function projectToMidiWithinBudget(
         channel,
         port,
         ppq,
-        beatsPerBar,
+        musicalTime,
         budget,
         realizedNotes,
       ),

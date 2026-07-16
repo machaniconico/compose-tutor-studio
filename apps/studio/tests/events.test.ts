@@ -54,6 +54,7 @@ function instrumentTrack(id: string, preset: string, clip: Clip): Track {
     id,
     name: id,
     type: 'instrument',
+    role: 'general',
     clips: [clip],
     volume: 0.8,
     pan: 0,
@@ -69,6 +70,7 @@ function drumTrack(id: string, clip: Clip): Track {
     id,
     name: id,
     type: 'drum',
+    role: 'general',
     clips: [clip],
     volume: 0.8,
     pan: 0,
@@ -89,6 +91,11 @@ function project(tracks: Track[]): Project {
     key: 'C',
     scale: 'major',
     lengthBars: 8,
+    lengthBeats: 32,
+    tempoMap: [{ id: 'tempo-1', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{ id: 'signature-1', beat: 0, numerator: 4, denominator: 4 }],
+    audioAssets: [],
+    automationLanes: [],
     tracks,
     chordTrack: [],
     sections: [],
@@ -132,6 +139,7 @@ describe('buildScheduleEvents', () => {
     };
     const track = instrumentTrack('chords-track', 'softPad', clip);
     track.name = 'Chords';
+    track.role = 'learning.chords';
     const chord: ChordEvent = {
       id: 'g7',
       startBeat: 2.5,
@@ -489,7 +497,16 @@ describe('buildScheduleEvents', () => {
     legacy.schemaVersion = 1;
     legacy.createdAt = '2026-07-12T00:00:00.000Z';
     legacy.updatedAt = '2026-07-12T00:00:00.000Z';
-    const decoded = decodeProject(legacy);
+    const legacyRecord = structuredClone(legacy) as unknown as Record<string, unknown>;
+    delete legacyRecord.lengthBeats;
+    delete legacyRecord.tempoMap;
+    delete legacyRecord.timeSignatureMap;
+    delete legacyRecord.audioAssets;
+    delete legacyRecord.automationLanes;
+    for (const track of legacyRecord.tracks as Array<Record<string, unknown>>) {
+      delete track.role;
+    }
+    const decoded = decodeProject(legacyRecord);
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
 
@@ -625,7 +642,14 @@ describe('buildScheduleEvents', () => {
       stepsPerBar: 16,
       drumEvents: [{ id: 'middle', lane: 'kick', stepIndex: 8, velocity: 100 }],
     };
-    const source = { ...project([drumTrack('dr', clip)]), timeSignature: [6, 8] as [number, number] };
+    const source = {
+      ...project([drumTrack('dr', clip)]),
+      timeSignature: [6, 8] as [number, number],
+      lengthBeats: 24,
+      timeSignatureMap: [
+        { id: 'signature-1', beat: 0, numerator: 6, denominator: 8 },
+      ],
+    };
 
     expect(buildScheduleEvents(source)[0]?.beat).toBe(1.5);
   });
@@ -635,6 +659,7 @@ describe('buildScheduleEvents', () => {
       id: 'm',
       name: 'Master',
       type: 'master',
+      role: 'general',
       clips: [],
       volume: 0.9,
       pan: 0,
