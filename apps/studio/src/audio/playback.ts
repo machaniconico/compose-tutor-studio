@@ -13,11 +13,29 @@ import {
   type Project,
   type Track,
 } from '@cts/project-model';
-import { useStore } from '../state/store';
+import { useStore, type AudioIssue } from '../state/store';
 import {
   automationBaseValue,
   automationCommandsInWindow,
 } from './automation';
+import {
+  acquireProjectAudioBuffers,
+  AudioAssetPlaybackError,
+  assertProjectAudioAssetCombinedResourceBudget,
+  getAudioAssetPlaybackCache,
+  preflightProjectAudioAssets,
+  projectHasReferencedReadyAudioAssets,
+  reserveProjectAudioAssetResourceBudget,
+  type AudioAssetBufferLease,
+} from './audioAssetResolver';
+import {
+  AudioClipPlanLimitError,
+  createAudioClipPlaybackIndex,
+  planAudioClipTailSources,
+  planAudioClipPlaybackWindow,
+  type AudioClipPlaybackIndex,
+} from './audioClipPlanner';
+import { AudioClipVoiceManager } from './audioClipVoice';
 import { createNoiseBuffer, DrumVoiceManager } from './drums';
 import { getAudioEngine } from './engine';
 import { buildScheduleEvents, type SchedulePayload } from './events';
@@ -72,6 +90,9 @@ type RuntimeSession = PlaybackSession & {
   graphs: Map<string, TrackGraph>;
   synths: Map<string, SynthVoiceManager>;
   drums: Map<string, DrumVoiceManager>;
+  audioVoices: Map<string, AudioClipVoiceManager>;
+  audioBuffers: AudioAssetBufferLease;
+  readonly audioClipIndex: AudioClipPlaybackIndex;
   metronomeClicks: Set<ScheduledMetronomeClick>;
   metronomeBeatFrontier: number;
   readonly metronomeOn: boolean;
@@ -118,6 +139,34 @@ class CancelledPlaybackRequest extends Error {
     super('Playback request was superseded before audio startup completed.');
     this.name = 'CancelledPlaybackRequest';
   }
+}
+
+/** Map bounded startup failures to the transport issue vocabulary. */
+export function classifyPlaybackStartFailure(
+  error: unknown,
+): Exclude<AudioIssue, 'interrupted' | null> {
+  if (error instanceof ScheduleEventLimitError || error instanceof AudioClipPlanLimitError) {
+    return 'event-limit-exceeded';
+  }
+  if (error instanceof AudioAssetPlaybackError) {
+    if (error.code === 'asset-missing') return 'audio-asset-missing';
+    if (error.code === 'asset-changed') return 'audio-asset-changed';
+    if (error.code === 'decode-failed') return 'audio-decode-failed';
+    if (error.code === 'resource-limit') return 'audio-resource-limit';
+    if (error.code === 'resolver-unavailable' || error.code === 'asset-unavailable') {
+      return 'audio-asset-unavailable';
+    }
+  }
+  return 'start-failed';
+}
+
+/** File-state failures should refresh the store's runtime availability evidence. */
+export function shouldRefreshAudioAssetIssuesAfterFailure(error: unknown): boolean {
+  return error instanceof AudioAssetPlaybackError && (
+    error.code === 'asset-missing' ||
+    error.code === 'asset-changed' ||
+    error.code === 'asset-unavailable'
+  );
 }
 
 /**
@@ -184,6 +233,12 @@ export function planRuntimeAudioTail(
     const resolved = resolveDrumOccurrence(event, event.beat);
     return resolved ? [resolved] : [];
   });
+  const { tempo } = createProjectMusicalTime(planningProject);
+  const audioSources = planAudioClipTailSources(planningProject, {
+    startBeat,
+    endBeat,
+    tempo,
+  });
 
   return planAudioTail(
     planningProject,
@@ -191,6 +246,7 @@ export function planRuntimeAudioTail(
     startBeat,
     endBeat,
     sampleRate,
+    audioSources,
   );
 }
 
@@ -288,10 +344,13 @@ export function initAudioBridge(): () => void {
     createSession: (requestId, handlers, isCurrent) =>
       createRuntimeSession(requestId, handlers, isCurrent),
     confirmStarted: (requestId) => useStore.getState().confirmPlaybackStarted(requestId),
-    failStart: (requestId, error) => useStore.getState().failPlaybackStart(
-      requestId,
-      error instanceof ScheduleEventLimitError ? 'event-limit-exceeded' : 'start-failed',
-    ),
+    failStart: (requestId, error) => {
+      const store = useStore.getState();
+      store.failPlaybackStart(requestId, classifyPlaybackStartFailure(error));
+      if (shouldRefreshAudioAssetIssuesAfterFailure(error)) {
+        void store.refreshAudioAssetIssues();
+      }
+    },
     finish: (requestId) => useStore.getState().finishPlayback(requestId),
     interrupt: (requestId) => useStore.getState().interruptPlayback(requestId),
   });
@@ -341,23 +400,81 @@ export function initAudioBridge(): () => void {
   };
 }
 
+/** Reserve startup atomically through verified decoded lease acquisition. */
+export async function acquireRuntimeProjectAudioBuffers(
+  project: Project,
+  context: AudioContext,
+  isCurrent: () => boolean,
+): Promise<AudioAssetBufferLease> {
+  const audioAssetCache = getAudioAssetPlaybackCache();
+  // Only active leases and in-flight decodes survive; reclaimable LRU entries
+  // cannot create a false process-level reservation failure.
+  audioAssetCache.clearUnused();
+  if (!projectHasReferencedReadyAudioAssets(project)) {
+    return acquireProjectAudioBuffers({ assets: [], estimatedDecodedBytes: 0 }, context, {
+      cache: audioAssetCache,
+    });
+  }
+
+  const estimate = assertProjectAudioAssetCombinedResourceBudget(
+    project,
+    context.sampleRate,
+    audioAssetCache.retainedDecodedBytes,
+  );
+  const reservation = reserveProjectAudioAssetResourceBudget(
+    project,
+    estimate.estimatedPeakBytes,
+  );
+  try {
+    const preparedAudio = await preflightProjectAudioAssets(project, {
+      cache: audioAssetCache,
+      targetSampleRate: context.sampleRate,
+    });
+    if (!isCurrent()) throw new CancelledPlaybackRequest();
+    if (String(context.state) !== 'running') {
+      throw new Error(`AudioContext left the running state (${String(context.state)}).`);
+    }
+    const audioBuffers = await acquireProjectAudioBuffers(preparedAudio, context, {
+      cache: audioAssetCache,
+    });
+    if (!isCurrent()) {
+      audioBuffers.release();
+      throw new CancelledPlaybackRequest();
+    }
+    // The active decoded lease is now visible through retainedDecodedBytes, so
+    // subsequent live/WAV/import reservations will include it directly.
+    reservation.release();
+    return audioBuffers;
+  } catch (error) {
+    reservation.release();
+    throw error;
+  }
+}
+
 /** Build and start one fully isolated render session. */
 async function createRuntimeSession(
   requestId: number,
   handlers: PlaybackSessionHandlers,
   isCurrent: () => boolean,
 ): Promise<RuntimeSession> {
+  const initialStore = useStore.getState();
+  const project = initialStore.project;
+  const transport = initialStore.transport;
   const engine = getAudioEngine();
-  // ensureContext begins synchronously when this async function is invoked.
-  const { context, master } = await engine.ensureContext();
+  // Context activation must begin in the originating click/key stack. Asset
+  // I/O is asynchronous, so live playback starts this promise immediately and
+  // still withholds every TrackGraph/source until preflight and decode succeed.
+  // WAV export has no gesture constraint and preflights before OfflineContext.
+  const contextActivation = engine.ensureContext();
+  void contextActivation.catch(() => {
+    // The authoritative rejection is awaited below if this request survives.
+  });
+  const { context, master } = await contextActivation;
   if (!isCurrent()) throw new CancelledPlaybackRequest();
   if (String(context.state) !== 'running') {
     throw new Error(`AudioContext did not enter the running state (${String(context.state)}).`);
   }
 
-  const store = useStore.getState();
-  const project = store.project;
-  const transport = store.transport;
   const { index: musicalTime, tempo } = createProjectMusicalTime(project);
   const lengthBeats = project.lengthBeats;
   const loop = normalizeTransportLoop(
@@ -370,8 +487,10 @@ async function createRuntimeSession(
   const tempoChangeBeats = Object.freeze(
     project.tempoMap.slice(1).map((event) => event.beat),
   );
-  const startBeat = transport.positionBeat;
-  const now = engine.now();
+  // Audio Clip regions are immutable for this playback generation. Compile
+  // and bound them once; 25 ms scheduler ticks perform only indexed overlap
+  // queries and never rebuild the full project region list.
+  const audioClipIndex = createAudioClipPlaybackIndex(project, { tempo });
   // Build and budget the immutable schedule before allocating per-track Web
   // Audio graphs. Oversized linked projects fail closed at this boundary.
   const scheduleEvents: readonly ScheduledEvent[] = buildScheduleEvents(project);
@@ -395,6 +514,26 @@ async function createRuntimeSession(
   let graphs = new Map<string, TrackGraph>();
   const synths = new Map<string, SynthVoiceManager>();
   const drums = new Map<string, DrumVoiceManager>();
+  const audioVoices = new Map<string, AudioClipVoiceManager>();
+  const audioBuffers = await acquireRuntimeProjectAudioBuffers(project, context, isCurrent);
+  // Byte I/O and decode may have taken long enough for non-topological state
+  // to change without superseding this request. Adopt the latest mix, seek
+  // position, and metronome value only after the final await. Loop/topology
+  // edits increment the request id and have already failed isCurrent above.
+  const startupStore = useStore.getState();
+  if (startupStore.project.id !== project.id || !isCurrent()) {
+    audioBuffers.release();
+    throw new CancelledPlaybackRequest();
+  }
+  const startupTracks = startupStore.project.tracks;
+  const startupTransport = startupStore.transport;
+  const startBeat = (
+    Number.isFinite(startupTransport.positionBeat) &&
+    startupTransport.positionBeat >= 0 &&
+    startupTransport.positionBeat < lengthBeats
+  ) ? startupTransport.positionBeat : 0;
+  const metronomeOn = startupTransport.metronome;
+  const now = engine.now();
   let session: RuntimeSession | null = null;
   let unsubscribeContext = () => {};
   let cancelNaturalDrainTimer = () => {};
@@ -438,6 +577,15 @@ async function createRuntimeSession(
       }
     }
     drums.clear();
+    for (const voice of audioVoices.values()) {
+      try {
+        voice.dispose();
+      } catch {
+        // Dispose every AudioBufferSource even after an output interruption.
+      }
+    }
+    audioVoices.clear();
+    audioBuffers.release();
     for (const graph of graphs.values()) {
       try {
         graph.dispose();
@@ -457,10 +605,10 @@ async function createRuntimeSession(
   };
 
   try {
-    applyMasterMix(master, project.tracks, now, 'immediate');
-    graphs = buildTrackGraphs(context, master, project.tracks, now, 'live');
+    applyMasterMix(master, startupTracks, now, 'immediate');
+    graphs = buildTrackGraphs(context, master, startupTracks, now, 'live');
     let sharedDrumNoise: AudioBuffer | undefined;
-    for (const track of project.tracks) {
+    for (const track of startupTracks) {
       const graph = graphs.get(track.id);
       if (!graph) continue;
       if (track.type === 'drum') {
@@ -469,11 +617,13 @@ async function createRuntimeSession(
           track.id,
           new DrumVoiceManager(context, graph.input, sharedDrumNoise),
         );
-      } else if (track.type !== 'master') {
+      } else if (track.type === 'instrument') {
         synths.set(
           track.id,
           new SynthVoiceManager(context, graph.input, track.instrument?.preset),
         );
+      } else if (track.type === 'audio') {
+        audioVoices.set(track.id, new AudioClipVoiceManager(context, graph.input));
       }
     }
 
@@ -487,6 +637,7 @@ async function createRuntimeSession(
       },
       onScheduleWindow: (window) => {
         if (session) {
+          scheduleAudioForWindow(session, window.startBeat, window.endBeat);
           scheduleAutomationForWindow(session, window.startBeat, window.endBeat);
         }
         if (session?.metronomeOn) {
@@ -504,7 +655,7 @@ async function createRuntimeSession(
     });
 
     const anchorTime = engine.now();
-    const everAudibleTrackIds = computeAudibleTracks(project.tracks);
+    const everAudibleTrackIds = computeAudibleTracks(startupTracks);
     let naturalDrainStarted = false;
 
     const beginNaturalDrain = (onComplete: () => void): void => {
@@ -554,9 +705,12 @@ async function createRuntimeSession(
       graphs,
       synths,
       drums,
+      audioVoices,
+      audioBuffers,
+      audioClipIndex,
       metronomeClicks: new Set(),
       metronomeBeatFrontier: startBeat,
-      metronomeOn: transport.metronome,
+      metronomeOn,
       musicalTime,
       tempo,
       transportTempo,
@@ -599,6 +753,49 @@ async function createRuntimeSession(
   } catch (error) {
     disposeResources();
     throw error;
+  }
+}
+
+/** Schedule interval sources, including clips already active at a resumed window. */
+function scheduleAudioForWindow(
+  session: RuntimeSession,
+  windowStartBeat: number,
+  windowEndBeat: number,
+): void {
+  const plans = planAudioClipPlaybackWindow(session.projectSnapshot, {
+    windowStartBeat,
+    windowEndBeat,
+    tempo: session.tempo,
+    transportLoop: session.loop,
+    index: session.audioClipIndex,
+  });
+  for (const plan of plans) {
+    const voice = session.audioVoices.get(plan.trackId);
+    const buffer = session.audioBuffers.buffersByAssetId.get(plan.assetId);
+    if (!voice) {
+      throw new AudioAssetPlaybackError(
+        'asset-unavailable',
+        plan.assetId,
+        'The Audio Clip track output is unavailable.',
+      );
+    }
+    if (!buffer) {
+      throw new AudioAssetPlaybackError(
+        'asset-missing',
+        plan.assetId,
+        'A preflighted Audio Clip buffer is unavailable.',
+      );
+    }
+    voice.schedule(
+      plan,
+      buffer,
+      beatToTime(
+        plan.startBeat,
+        session.transportTempo,
+        session.anchorBeat,
+        session.anchorTime,
+      ),
+    );
   }
 }
 

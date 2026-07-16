@@ -11,15 +11,29 @@ import {
   type NoteScheduleEvent,
 } from '../src/audio/events';
 import {
+  AudioAssetPlaybackCache,
+  AudioAssetPlaybackError,
+  sha256Hex,
+} from '../src/audio/audioAssetResolver';
+import {
+  MAX_HEAVY_AUDIO_RESOURCE_BYTES,
+  getReservedHeavyAudioResourceBytes,
+  reserveHeavyAudioResources,
+} from '../src/audio/audioResourceReservation';
+import {
   nextEventsInWindow,
 } from '../src/audio/scheduler';
 import {
   MAX_WAV_RENDER_ESTIMATED_BYTES,
   MAX_WAV_RENDER_SECONDS,
   MAX_WAV_SCHEDULE_EVENTS,
+  MAX_WAV_TOTAL_ESTIMATED_BYTES,
   RENDER_CHANNELS,
   RENDER_SAMPLE_RATE,
   WavRenderLimitError,
+  assertWavProjectCombinedResourceBudget,
+  assertWavSourceOccurrenceBudget,
+  buildWavAudioClipPlans,
   buildWavScheduleEvents,
   encodeWav,
   floatToInt16,
@@ -127,6 +141,51 @@ function projectWithMasterOnly(): Project {
   };
 }
 
+async function projectWithAudioClip(bytes: Uint8Array): Promise<Project> {
+  const checksumSha256 = await sha256Hex(bytes);
+  return {
+    ...projectWithMasterOnly(),
+    lengthBars: 2,
+    lengthBeats: 8,
+    audioAssets: [{
+      id: 'wav-audio-asset',
+      availability: 'ready',
+      checksumSha256,
+      originalName: 'canonical.wav',
+      mediaType: 'audio/wav',
+      byteLength: bytes.byteLength,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 48_000,
+    }],
+    tracks: [{
+      id: 'wav-audio-track',
+      name: 'Audio',
+      type: 'audio',
+      role: 'general',
+      clips: [{
+        id: 'wav-audio-clip',
+        trackId: 'wav-audio-track',
+        type: 'audio',
+        startBeat: 1,
+        lengthBeats: 4,
+        loop: true,
+        audioAssetId: 'wav-audio-asset',
+        sourceStartFrame: 12_000,
+        sourceFrameCount: 24_000,
+        fadeInFrames: 2_400,
+        fadeOutFrames: 4_800,
+        gainDb: -3,
+      }],
+      volume: 1,
+      pan: 0,
+      mute: false,
+      solo: false,
+      effects: [],
+    }],
+  };
+}
+
 function installOfflineContext(startRendering: () => Promise<AudioBuffer>) {
   const master = {
     gain: {
@@ -162,6 +221,122 @@ function installOfflineContext(startRendering: () => Promise<AudioBuffer>) {
     }),
   );
   return { context, master, limiter };
+}
+
+class AudioClipFakeParam {
+  value = 0;
+  readonly commands: Array<{ kind: string; value?: number; time: number }> = [];
+
+  cancelScheduledValues(time: number): void {
+    this.commands.push({ kind: 'cancel', time });
+  }
+
+  setValueAtTime(value: number, time: number): void {
+    this.value = value;
+    this.commands.push({ kind: 'set', value, time });
+  }
+
+  linearRampToValueAtTime(value: number, time: number): void {
+    this.value = value;
+    this.commands.push({ kind: 'linear', value, time });
+  }
+}
+
+class AudioClipFakeNode {
+  readonly connections: AudioClipFakeNode[] = [];
+  readonly connectionHistory: AudioClipFakeNode[] = [];
+  disconnectCalls = 0;
+
+  connect(destination: AudioClipFakeNode): AudioClipFakeNode {
+    this.connections.push(destination);
+    this.connectionHistory.push(destination);
+    return destination;
+  }
+
+  disconnect(): void {
+    this.disconnectCalls += 1;
+    this.connections.length = 0;
+  }
+}
+
+class AudioClipFakeGain extends AudioClipFakeNode {
+  readonly gain = new AudioClipFakeParam();
+}
+
+class AudioClipFakePanner extends AudioClipFakeNode {
+  readonly pan = new AudioClipFakeParam();
+}
+
+class AudioClipFakeCompressor extends AudioClipFakeNode {
+  readonly threshold = new AudioClipFakeParam();
+  readonly knee = new AudioClipFakeParam();
+  readonly ratio = new AudioClipFakeParam();
+  readonly attack = new AudioClipFakeParam();
+  readonly release = new AudioClipFakeParam();
+}
+
+class AudioClipFakeSource extends AudioClipFakeNode {
+  buffer: AudioBuffer | null = null;
+  loop = false;
+  loopStart = 0;
+  loopEnd = 0;
+  onended: (() => void) | null = null;
+  readonly starts: Array<{ when: number; offset: number; duration: number }> = [];
+  readonly stops: number[] = [];
+
+  start(when: number, offset: number, duration: number): void {
+    this.starts.push({ when, offset, duration });
+  }
+
+  stop(when: number): void {
+    this.stops.push(when);
+  }
+}
+
+function installAudioClipOfflineContext() {
+  const sources: AudioClipFakeSource[] = [];
+  const gains: AudioClipFakeGain[] = [];
+  const destination = new AudioClipFakeNode();
+  const decoded = {
+    duration: 1,
+    length: 44_100,
+    sampleRate: 44_100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44_100),
+  } as unknown as AudioBuffer;
+  const rendered = {
+    duration: 4,
+    length: 1,
+    sampleRate: 44_100,
+    numberOfChannels: 2,
+    getChannelData: () => new Float32Array(1),
+  } as unknown as AudioBuffer;
+  const context = {
+    currentTime: 0,
+    sampleRate: 44_100,
+    destination,
+    createGain: vi.fn(() => {
+      const gain = new AudioClipFakeGain();
+      gains.push(gain);
+      return gain;
+    }),
+    createStereoPanner: vi.fn(() => new AudioClipFakePanner()),
+    createDynamicsCompressor: vi.fn(() => new AudioClipFakeCompressor()),
+    createBufferSource: vi.fn(() => {
+      const source = new AudioClipFakeSource();
+      sources.push(source);
+      return source;
+    }),
+    decodeAudioData: vi.fn(async () => decoded),
+    startRendering: vi.fn(async () => rendered),
+  };
+  vi.stubGlobal(
+    'OfflineAudioContext',
+    vi.fn(function OfflineAudioContext() {
+      return context;
+    }),
+  );
+  return { context, sources, gains, destination };
 }
 
 afterEach(() => {
@@ -717,6 +892,108 @@ describe('WAV render allocation budget', () => {
     );
   });
 
+  it('shares one offline source-node ceiling across notes/drums and Audio Clips', () => {
+    const scheduled = Array.from({ length: 6_000 }, () => ({}));
+    const audioClips = Array.from({ length: 4_001 }, () => ({}));
+
+    expect(() => assertWavSourceOccurrenceBudget(
+      scheduled as never[],
+      audioClips as never[],
+    )).toThrowError(expect.objectContaining({
+      name: 'ScheduleEventLimitError',
+      reason: 'total',
+      limit: MAX_WAV_SCHEDULE_EVENTS,
+      observed: MAX_WAV_SCHEDULE_EVENTS + 1,
+    }) as ScheduleEventLimitError);
+  });
+
+  it('combines offline output and decoded audio before context allocation', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    project.lengthBars = 150;
+    project.lengthBeats = 600;
+    const sourceAsset = project.audioAssets[0];
+    if (!sourceAsset || sourceAsset.availability !== 'ready') {
+      throw new Error('ready WAV fixture asset required');
+    }
+    project.audioAssets[0] = {
+      ...sourceAsset,
+      // Exactly the resolver's individual 256 MiB decoded ceiling at 48 kHz;
+      // the 44.1 kHz decode plus a five-minute output exceeds the shared cap.
+      frameCount: 67_108_864,
+    };
+    const offlineContext = vi.fn(() => {
+      throw new Error('OfflineAudioContext must not be allocated');
+    });
+    vi.stubGlobal('OfflineAudioContext', offlineContext);
+
+    await expect(renderProjectToWav(project, {
+      audioAssetResolver: { resolve: async () => bytes },
+      audioAssetCache: new AudioAssetPlaybackCache(),
+    })).rejects.toMatchObject({
+      name: 'AudioAssetPlaybackError',
+      code: 'resource-limit',
+      assetId: 'wav-audio-asset',
+    });
+    expect(offlineContext).not.toHaveBeenCalled();
+  });
+
+  it('takes the larger resolver/hash phase before reading a raw-heavy asset', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    const sourceAsset = project.audioAssets[0];
+    if (!sourceAsset || sourceAsset.availability !== 'ready') {
+      throw new Error('ready WAV fixture asset required');
+    }
+    project.audioAssets[0] = {
+      ...sourceAsset,
+      byteLength: Math.floor(MAX_WAV_TOTAL_ESTIMATED_BYTES / 3) + 1,
+    };
+    const resolve = vi.fn(async () => bytes);
+    const offlineContext = vi.fn(() => {
+      throw new Error('OfflineAudioContext must not be allocated');
+    });
+    vi.stubGlobal('OfflineAudioContext', offlineContext);
+
+    await expect(renderProjectToWav(project, {
+      audioAssetResolver: { resolve },
+      audioAssetCache: new AudioAssetPlaybackCache(),
+    })).rejects.toMatchObject({
+      name: 'AudioAssetPlaybackError',
+      code: 'resource-limit',
+      assetId: 'wav-audio-asset',
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(offlineContext).not.toHaveBeenCalled();
+  });
+
+  it('rejects a competing WAV reservation before resolver or context allocation', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    const resolve = vi.fn(async () => bytes);
+    const offlineContext = vi.fn(() => {
+      throw new Error('OfflineAudioContext must not be allocated');
+    });
+    vi.stubGlobal('OfflineAudioContext', offlineContext);
+    const first = reserveHeavyAudioResources(MAX_HEAVY_AUDIO_RESOURCE_BYTES - 1);
+
+    try {
+      await expect(renderProjectToWav(project, {
+        audioAssetResolver: { resolve },
+        audioAssetCache: new AudioAssetPlaybackCache(),
+      })).rejects.toMatchObject({
+        name: 'AudioAssetPlaybackError',
+        code: 'resource-limit',
+        assetId: 'wav-audio-asset',
+      });
+      expect(resolve).not.toHaveBeenCalled();
+      expect(offlineContext).not.toHaveBeenCalled();
+    } finally {
+      first.release();
+    }
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
   it('rejects an hours-long valid timeline before constructing OfflineAudioContext', () => {
     const project = projectWithDrumClip({
       id: 'long',
@@ -757,8 +1034,31 @@ describe('WAV render allocation budget', () => {
     expect(plan.songSeconds).toBeLessThan(MAX_WAV_RENDER_SECONDS);
     expect(plan.frames).toBe(2 * RENDER_SAMPLE_RATE);
     expect(plan.estimatedBytes).toBe(
-      plan.frames * RENDER_CHANNELS * (Float32Array.BYTES_PER_ELEMENT + 2),
+      plan.frames * RENDER_CHANNELS * Float32Array.BYTES_PER_ELEMENT
+        + 44
+        + plan.frames * RENDER_CHANNELS * 2,
     );
+    expect(plan.exportEstimatedBytes).toBe(
+      plan.frames * RENDER_CHANNELS * Float32Array.BYTES_PER_ELEMENT
+        + (44 + plan.frames * RENDER_CHANNELS * 2) * 4,
+    );
+  });
+
+  it('accepts the end-to-end export reservation boundary and rejects one byte over', () => {
+    const project = projectWithMasterOnly();
+    const plan = planWavRender(project);
+
+    expect(assertWavProjectCombinedResourceBudget({
+      ...plan,
+      exportEstimatedBytes: MAX_WAV_TOTAL_ESTIMATED_BYTES,
+    }, project)).toBe(MAX_WAV_TOTAL_ESTIMATED_BYTES);
+    expect(() => assertWavProjectCombinedResourceBudget({
+      ...plan,
+      exportEstimatedBytes: MAX_WAV_TOTAL_ESTIMATED_BYTES + 1,
+    }, project)).toThrowError(expect.objectContaining({
+      name: 'AudioAssetPlaybackError',
+      code: 'resource-limit',
+    }) as AudioAssetPlaybackError);
   });
 
   it('allocates the resolved final open-hat source tail instead of a fixed second', () => {
@@ -847,7 +1147,9 @@ describe('WAV render allocation budget', () => {
     expect(plan.tailSeconds).toBe(40);
     expect(plan.totalSeconds).toBe(42);
     expect(plan.estimatedBytes).toBe(
-      plan.frames * RENDER_CHANNELS * (Float32Array.BYTES_PER_ELEMENT + 2),
+      plan.frames * RENDER_CHANNELS * Float32Array.BYTES_PER_ELEMENT
+        + 44
+        + plan.frames * RENDER_CHANNELS * 2,
     );
     expect(plan.estimatedBytes).toBeLessThan(MAX_WAV_RENDER_ESTIMATED_BYTES);
     expect(plan.fadeEndSeconds).toBe(42 - MASTER_LIMITER_LOOKAHEAD_SECONDS);
@@ -898,7 +1200,134 @@ describe('WAV render allocation budget', () => {
   });
 });
 
+describe('WAV Audio Clip integration', () => {
+  it('uses the shared interval planner for source range, clip loop, gain, and fades', async () => {
+    const project = await projectWithAudioClip(Uint8Array.from([1, 2, 3, 4]));
+    const [plan] = buildWavAudioClipPlans(project);
+
+    expect(plan).toMatchObject({
+      trackId: 'wav-audio-track',
+      clipId: 'wav-audio-clip',
+      assetId: 'wav-audio-asset',
+      startBeat: 1,
+      endBeat: 5,
+      sourceOffsetSeconds: 0.25,
+      durationSeconds: 2,
+      loopStartSeconds: 0.25,
+      loopEndSeconds: 0.75,
+    });
+    expect(plan?.gainPoints[0]?.value).toBe(0);
+    expect(plan?.gainPoints.at(-1)?.value).toBe(0);
+  });
+
+  it('reports an Audio Clip-only source overflow as the shared event limit', async () => {
+    const project = await projectWithAudioClip(Uint8Array.from([1, 2, 3, 4]));
+    const source = project.tracks[0]?.clips[0];
+    if (!source || source.type !== 'audio') throw new Error('audio fixture clip required');
+    project.tracks[0]!.clips = Array.from(
+      { length: MAX_WAV_SCHEDULE_EVENTS + 1 },
+      (_, index) => ({ ...source, id: `wav-audio-clip-${index}` }),
+    );
+
+    expect(() => buildWavAudioClipPlans(project)).toThrowError(
+      expect.objectContaining({
+        name: 'ScheduleEventLimitError',
+        code: 'schedule-event-limit-exceeded',
+        reason: 'total',
+        limit: MAX_WAV_SCHEDULE_EVENTS,
+        observed: MAX_WAV_SCHEDULE_EVENTS + 1,
+      }) as ScheduleEventLimitError,
+    );
+  });
+
+  it('rejects a missing asset before constructing OfflineAudioContext', async () => {
+    const project = await projectWithAudioClip(Uint8Array.from([1, 2, 3, 4]));
+    const offlineContext = vi.fn(() => {
+      throw new Error('OfflineAudioContext must not be allocated');
+    });
+    vi.stubGlobal('OfflineAudioContext', offlineContext);
+    const missing = new AudioAssetPlaybackError(
+      'asset-missing',
+      'wav-audio-asset',
+    );
+
+    await expect(renderProjectToWav(project, {
+      audioAssetResolver: { resolve: async () => { throw missing; } },
+    })).rejects.toBe(missing);
+    expect(offlineContext).not.toHaveBeenCalled();
+  });
+
+  it('rejects changed bytes before constructing OfflineAudioContext', async () => {
+    const project = await projectWithAudioClip(Uint8Array.from([1, 2, 3, 4]));
+    const offlineContext = vi.fn(() => {
+      throw new Error('OfflineAudioContext must not be allocated');
+    });
+    vi.stubGlobal('OfflineAudioContext', offlineContext);
+
+    await expect(renderProjectToWav(project, {
+      audioAssetResolver: { resolve: async () => Uint8Array.from([1, 2, 3, 9]) },
+    })).rejects.toMatchObject({
+      code: 'asset-changed',
+      assetId: 'wav-audio-asset',
+    });
+    expect(offlineContext).not.toHaveBeenCalled();
+  });
+
+  it('decodes, schedules, loops, and releases the planned Audio Clip source', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    const { context, sources, destination } = installAudioClipOfflineContext();
+
+    const rendered = await renderProjectToWav(project, {
+      audioAssetResolver: { resolve: async () => bytes },
+    });
+    expect(rendered.blob).toBeInstanceOf(Blob);
+    rendered.release();
+
+    expect(context.decodeAudioData).toHaveBeenCalledTimes(1);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({
+      loop: true,
+      loopStart: 0.25,
+      loopEnd: 0.75,
+      starts: [{ when: 0.5, offset: 0.25, duration: 2 }],
+      stops: [0],
+      disconnectCalls: 1,
+    });
+    const clipGain = sources[0]?.connectionHistory[0];
+    // The source-owned clip gain is gone after finally cleanup; shared output
+    // ownership remains with TrackGraph and never reaches the destination.
+    expect(clipGain?.disconnectCalls).toBe(1);
+    expect(destination.disconnectCalls).toBe(0);
+  });
+});
+
 describe('renderProjectToWav graph ownership', () => {
+  it('transfers the shared reservation to the encoded Blob lease', async () => {
+    let finishRendering!: (buffer: AudioBuffer) => void;
+    const rendering = new Promise<AudioBuffer>((resolve) => {
+      finishRendering = resolve;
+    });
+    const { context } = installOfflineContext(() => rendering);
+    const pending = renderProjectToWav(projectWithMasterOnly());
+
+    await vi.waitFor(() => expect(context.startRendering).toHaveBeenCalledOnce());
+    expect(getReservedHeavyAudioResourceBytes()).toBeGreaterThan(0);
+    finishRendering({
+      numberOfChannels: 2,
+      sampleRate: 44_100,
+      getChannelData: vi.fn(() => new Float32Array([0])),
+    } as unknown as AudioBuffer);
+    const rendered = await pending;
+    expect(rendered.blob).toBeInstanceOf(Blob);
+    expect(rendered.released).toBe(false);
+    expect(getReservedHeavyAudioResourceBytes()).toBeGreaterThan(0);
+    rendered.release();
+    rendered.release();
+    expect(rendered.released).toBe(true);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
   it('omits meters and disconnects the offline master graph after success', async () => {
     const audioBuffer = {
       numberOfChannels: 2,
@@ -909,7 +1338,9 @@ describe('renderProjectToWav graph ownership', () => {
       Promise.resolve(audioBuffer),
     );
 
-    await expect(renderProjectToWav(projectWithMasterOnly())).resolves.toBeInstanceOf(Blob);
+    const rendered = await renderProjectToWav(projectWithMasterOnly());
+    expect(rendered.blob).toBeInstanceOf(Blob);
+    rendered.release();
 
     expect(context.createAnalyser).not.toHaveBeenCalled();
     expect(master.disconnect).toHaveBeenCalledTimes(1);
@@ -927,5 +1358,6 @@ describe('renderProjectToWav graph ownership', () => {
     expect(context.createAnalyser).not.toHaveBeenCalled();
     expect(master.disconnect).toHaveBeenCalledTimes(1);
     expect(limiter.disconnect).toHaveBeenCalledTimes(1);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
   });
 });

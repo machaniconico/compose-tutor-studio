@@ -66,7 +66,17 @@ export function PlaybackLifecycleControl({
   const isActive = transport.phase !== 'stopped';
   const audioIssueMessage =
     transport.audioIssue === 'event-limit-exceeded'
-      ? '再生イベントが多すぎます。ノート、ドラム、または連動コピーを減らして、もう一度「再生」を押してください。編集内容はそのままです。'
+      ? '再生イベントが多すぎます。ノート、ドラム、オーディオクリップ、または連動コピーを減らして、もう一度「再生」を押してください。編集内容はそのままです。'
+      : transport.audioIssue === 'audio-asset-missing'
+        ? '保存済みの音声素材が見つかりません。素材を保存した端末のアプリデータを確認してください。編集内容はそのままです。'
+        : transport.audioIssue === 'audio-asset-changed'
+          ? '保存済みの音声素材が変更または破損しているため再生できません。素材の状態を確認してください。編集内容はそのままです。'
+          : transport.audioIssue === 'audio-asset-unavailable'
+            ? '音声素材の保存領域へ現在アクセスできません。端末の空き容量やアクセス権を確認してください。編集内容はそのままです。'
+            : transport.audioIssue === 'audio-decode-failed'
+              ? '保存済みの音声素材を読み取れませんでした。素材が対応形式か、破損していないか確認してください。編集内容はそのままです。'
+              : transport.audioIssue === 'audio-resource-limit'
+                ? '音声素材が再生時のメモリ上限を超えています。使用する素材の数または長さを減らしてください。編集内容はそのままです。'
       : transport.audioIssue === 'start-failed'
         ? '音を再生できませんでした。出力先と端末の音量を確認して、もう一度「再生」を押してください。編集内容はそのままです。'
         : transport.audioIssue === 'interrupted'

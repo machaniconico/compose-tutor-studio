@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../../state/store';
 import { AddTrackDialog } from './AddTrackDialog';
+import { audioTrackAssetSummary } from '../audioTrack/audioAssetPresentation';
 import {
   TRACK_ADD_CONTROL_ID,
   TRACK_TYPE_BADGE,
@@ -14,6 +15,8 @@ import {
 export function TrackList() {
   const [addOpen, setAddOpen] = useState(false);
   const tracks = useStore((s) => s.project.tracks);
+  const audioAssets = useStore((s) => s.project.audioAssets);
+  const audioAssetIssues = useStore((s) => s.audioAssetIssues);
   const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
   const selectTrack = useStore((s) => s.selectTrack);
   const selectClip = useStore((s) => s.selectClip);
@@ -38,6 +41,9 @@ export function TrackList() {
         {tracks.map((track) => {
           const isSelected = track.id === selectedTrackId;
           const controlName = accessibleTrackName(tracks, track);
+          const assetStatus = track.type === 'audio'
+            ? audioTrackAssetSummary(track, audioAssets, audioAssetIssues)
+            : null;
           const selectThisTrack = () => {
             selectTrack(track.id);
             const firstClip = track.clips[0];
@@ -67,6 +73,14 @@ export function TrackList() {
                     <span className="badge">{TRACK_TYPE_BADGE[track.type]}</span>{' '}
                     {TRACK_TYPE_LABEL[track.type]}
                   </span>
+                  {track.type === 'audio' ? (
+                    <span
+                      className={`track-row__asset${assetStatus?.problem ? ' is-problem' : ''}`}
+                      title={assetStatus?.statusLabel}
+                    >
+                      {assetStatus?.label ?? '音声クリップなし'}
+                    </span>
+                  ) : null}
                 </span>
               </button>
 

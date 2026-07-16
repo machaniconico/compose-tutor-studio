@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createAudioTrackClip, type AudioClip, type ReadyAudioAsset } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 
 let useStore: typeof import('../src/state/store')['useStore'];
@@ -99,6 +100,62 @@ describe('TrackList mixer controls', () => {
     expect(html).toContain('aria-label="Harmony（同名 1/2） トラックを選択"');
     expect(html).toContain('aria-label="Harmony（同名 2/2） トラックを選択"');
     expect(html.match(/<span class="track-row__name">Harmony<\/span>/g)).toHaveLength(2);
+  });
+
+  it('surfaces a damaged later Audio Clip asset even when the first asset is healthy', () => {
+    const firstAsset: ReadyAudioAsset = {
+      id: 'asset-track-row-first',
+      availability: 'ready',
+      checksumSha256: '1'.repeat(64),
+      originalName: 'healthy.wav',
+      mediaType: 'audio/wav',
+      byteLength: 96_044,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 48_000,
+    };
+    const secondAsset: ReadyAudioAsset = {
+      ...firstAsset,
+      id: 'asset-track-row-second',
+      checksumSha256: '2'.repeat(64),
+      originalName: 'damaged-later.wav',
+    };
+    const created = createAudioTrackClip(useStore.getState().project, firstAsset, {
+      trackName: 'Two Takes',
+      idFactory: (kind) => `${kind}-track-row-audio`,
+    });
+    if (!created.ok) throw new Error(created.error.code);
+    const track = created.project.tracks.find((candidate) => candidate.id === created.trackId);
+    const firstClip = track?.clips[0];
+    if (!track || !firstClip || firstClip.type !== 'audio') throw new Error('audio fixture missing');
+    const secondClip: AudioClip = {
+      ...(firstClip as AudioClip),
+      id: 'clip-track-row-second',
+      startBeat: 4,
+      audioAssetId: secondAsset.id,
+    };
+    const project = {
+      ...created.project,
+      audioAssets: [...created.project.audioAssets, secondAsset],
+      tracks: created.project.tracks.map((candidate) =>
+        candidate.id === track.id
+          ? { ...candidate, clips: [...candidate.clips, secondClip] }
+          : candidate,
+      ),
+    };
+    const nextState = {
+      project,
+      audioAssetIssues: { [secondAsset.id]: 'changed' as const },
+    };
+    useStore.setState(nextState);
+    Object.assign(useStore.getInitialState(), nextState);
+
+    const html = renderToStaticMarkup(<TrackList />);
+
+    expect(html).toContain('damaged-later.wav・音声素材が変更または破損しています');
+    expect(html).toContain('class="track-row__asset is-problem"');
+    expect(html).toContain('title="音声素材が変更または破損しています"');
+    expect(html).not.toContain('class="track-row__asset">healthy.wav</span>');
   });
 
   it('can restore focus to Add when a valid legacy project has no remaining row', () => {

@@ -237,7 +237,8 @@ export type ResizeClipResult =
         | 'invalid-range'
         | 'linked-length-locked'
         | 'linked-dependents'
-        | 'content-out-of-range';
+        | 'content-out-of-range'
+        | 'unsupported-audio-clip';
     }>;
 
 export type SetMidiClipLoopResult =
@@ -290,6 +291,9 @@ export function resizeClip(
 ): ResizeClipResult {
   const located = findClip(project, clipId);
   if (!located) return { ok: false, reason: 'clip-not-found' };
+  if (located.clip.type === 'audio') {
+    return { ok: false, reason: 'unsupported-audio-clip' };
+  }
   const effective = resolveClipContent(project, located.clip);
   if (!effective) return { ok: false, reason: 'invalid-alias' };
 

@@ -2,11 +2,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   duplicateClip,
+  createAudioTrackClip,
+  compileMusicalTime,
   findClip,
   resizeClip,
   setMidiClipLoop,
   unlinkClip,
   type Project,
+  type ReadyAudioAsset,
 } from '@cts/project-model';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { installLocalStorage } from './localStorageStub';
@@ -14,6 +17,8 @@ import { installLocalStorage } from './localStorageStub';
 let Arranger: typeof import('../src/features/arranger/Arranger')['Arranger'];
 let clipOperationMessage: typeof import('../src/features/arranger/Arranger')['clipOperationMessage'];
 let isClipNoticeCurrent: typeof import('../src/features/arranger/Arranger')['isClipNoticeCurrent'];
+let audioBarNumberToBeat: typeof import('../src/features/arranger/AudioClipEditor')['audioBarNumberToBeat'];
+let parseAudioNumericDraft: typeof import('../src/features/arranger/AudioClipEditor')['parseAudioNumericDraft'];
 let useStore: typeof import('../src/state/store')['useStore'];
 
 beforeAll(async () => {
@@ -21,6 +26,9 @@ beforeAll(async () => {
   ({ useStore } = await import('../src/state/store'));
   ({ Arranger, clipOperationMessage, isClipNoticeCurrent } = await import(
     '../src/features/arranger/Arranger'
+  ));
+  ({ audioBarNumberToBeat, parseAudioNumericDraft } = await import(
+    '../src/features/arranger/AudioClipEditor'
   ));
 });
 
@@ -75,6 +83,18 @@ describe('Arranger clip workflow', () => {
     expect(clipOperationMessage('event-limit')).toContain('コピーを減らしてください');
   });
 
+  it('rejects empty and hostile numeric drafts before timeline APIs or mutations run', () => {
+    const musicalTime = compileMusicalTime(createDefaultProject('Numeric guard'));
+
+    expect(parseAudioNumericDraft('')).toBeNull();
+    expect(parseAudioNumericDraft('   ')).toBeNull();
+    expect(parseAudioNumericDraft('1.25')).toBe(1.25);
+    expect(parseAudioNumericDraft('1e309')).toBeNull();
+    expect(audioBarNumberToBeat(musicalTime, 1e308)).toBeNull();
+    expect(audioBarNumberToBeat(musicalTime, Number.MAX_SAFE_INTEGER)).toBeNull();
+    expect(audioBarNumberToBeat(musicalTime, 0.5)).toBe(2);
+  });
+
   it('renders track lanes and enables both copy modes when the pattern fits', () => {
     const html = renderToStaticMarkup(<Arranger />);
 
@@ -126,6 +146,52 @@ describe('Arranger clip workflow', () => {
     expect(html).toContain('連動コピー');
     expect(html).toContain('連動を解除');
     expect(html).toContain('aria-pressed="true"');
+  });
+
+  it('renders non-destructive Audio Clip controls, source name and runtime damage status', () => {
+    const asset: ReadyAudioAsset = {
+      id: 'asset-arranger-audio',
+      availability: 'ready',
+      checksumSha256: 'b'.repeat(64),
+      originalName: 'reference mix.wav',
+      mediaType: 'audio/wav',
+      byteLength: 384_044,
+      sampleRate: 48_000,
+      channelCount: 2,
+      frameCount: 96_000,
+    };
+    const created = createAudioTrackClip(createDefaultProject('Audio Arranger'), asset, {
+      trackName: 'Reference',
+      idFactory: (kind) => `${kind}-arranger-audio`,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    activate(created.project, created.clipId);
+    const issueState = { [asset.id]: 'changed' as const };
+    useStore.setState({ audioAssetIssues: issueState });
+    Object.assign(useStore.getInitialState(), { audioAssetIssues: issueState });
+
+    const html = renderToStaticMarkup(<Arranger />);
+
+    expect(html).toContain('class="arranger__clip is-audio is-selected has-asset-issue"');
+    expect(html).toContain('reference mix.wav');
+    expect(html).toContain('aria-label="選択オーディオクリップの編集"');
+    expect(html).toContain('音声素材が変更または破損しています');
+    expect(html).toContain('正常な音声素材が残っている元の端末・プロファイルで開き直してください');
+    expect(html).toContain('プロジェクトJSONだけには音声本体が含まれず');
+    expect(html).toContain('配置と編集情報は保持されています');
+    expect(html).toContain('配置開始（小節・0から）');
+    expect(html).toContain('左端トリム（小節）');
+    expect(html).toContain('右端トリム（小節）');
+    expect(html).toContain('クリップゲイン（dB）');
+    expect(html).toContain('フェードイン（ms）');
+    expect(html).toContain('フェードアウト（ms）');
+    expect(html).toContain('素材範囲をクリップ末尾まで繰り返す');
+    expect(html).toContain('この位置で分割');
+    expect(html).toMatch(/<span>配置開始（小節・0から）<\/span><input[^>]*disabled=""/);
+    expect(html).toMatch(/<button[^>]*>クリップを削除<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>連動コピーは利用不可<\/button>/);
+    expect(html).toContain('クリップを削除');
   });
 
   it('invalidates success notices when undo restores the prior clip state', () => {

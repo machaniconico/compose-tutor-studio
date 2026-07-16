@@ -147,6 +147,74 @@ describe('playback topology changes', () => {
     })).toBe(true);
   });
 
+  it('invalidates playback for Audio Clip ranges, gain/fades, and asset identity changes', () => {
+    const project = createDefaultProject();
+    const asset = {
+      id: 'asset-audio-topology',
+      availability: 'ready' as const,
+      checksumSha256: 'a'.repeat(64),
+      originalName: 'recording.wav',
+      mediaType: 'audio/wav' as const,
+      byteLength: 1_000,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 480_000,
+    };
+    const clip = {
+      id: 'clip-audio-topology',
+      trackId: 'track-audio-topology',
+      type: 'audio' as const,
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      audioAssetId: asset.id,
+      sourceStartFrame: 0,
+      sourceFrameCount: 96_000,
+      fadeInFrames: 0,
+      fadeOutFrames: 0,
+      gainDb: 0,
+    };
+    const withAudio = {
+      ...project,
+      audioAssets: [asset],
+      tracks: [{
+        id: clip.trackId,
+        name: 'Audio',
+        type: 'audio' as const,
+        role: 'general' as const,
+        clips: [clip],
+        volume: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        effects: [],
+      }, ...project.tracks],
+    };
+
+    for (const field of [
+      'sourceStartFrame',
+      'sourceFrameCount',
+      'fadeInFrames',
+      'fadeOutFrames',
+      'gainDb',
+    ] as const) {
+      expect(hasPlaybackTopologyChanged(withAudio, {
+        ...withAudio,
+        tracks: withAudio.tracks.map((track) => track.id === clip.trackId
+          ? { ...track, clips: [{ ...clip, [field]: clip[field] + 1 }] }
+          : track),
+      }), field).toBe(true);
+    }
+    expect(hasPlaybackTopologyChanged(withAudio, {
+      ...withAudio,
+      audioAssets: [{ ...asset, checksumSha256: 'b'.repeat(64) }],
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(withAudio, {
+      ...withAudio,
+      audioAssets: [{ ...asset, originalName: 'renamed.wav' }],
+    })).toBe(false);
+  });
+
   it.each(['starting', 'playing'] as const)(
     'stops an active %s generation atomically when topology is adopted',
     (phase) => {

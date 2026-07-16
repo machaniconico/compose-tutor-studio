@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Clip, MusicalTimeIndex, Section, Track } from '@cts/project-model';
+import type { AudioClip, Clip, MusicalTimeIndex, Section, Track } from '@cts/project-model';
 import {
   addSection,
   barToBeatAt,
@@ -13,6 +13,8 @@ import {
 } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import { pxPerBeat } from '../timeline';
+import { AudioClipEditor } from './AudioClipEditor';
+import { audioAssetStatusLabel } from '../audioTrack/audioAssetPresentation';
 
 /** Section types with Japanese labels and an accent class. */
 const SECTION_TYPES: { type: Section['type']; label: string }[] = [
@@ -203,6 +205,7 @@ export function Arranger() {
   const zoomX = useStore((s) => s.editor.zoomX);
   const applyProjectChange = useStore((s) => s.applyProjectChange);
   const selectedClipId = useStore((s) => s.editor.selectedClipId);
+  const audioAssetIssues = useStore((s) => s.audioAssetIssues);
   const selectTrack = useStore((s) => s.selectTrack);
   const selectClip = useStore((s) => s.selectClip);
   const setActiveView = useStore((s) => s.setActiveView);
@@ -473,21 +476,33 @@ export function Arranger() {
                     style={{ left: barToBeatAt(musicalTime, bar) * ppb }}
                   />
                 ))}
-                {track.clips.map((clip, index) => (
-                  <button
+                {track.clips.map((clip, index) => {
+                  const asset = clip.type === 'audio'
+                    ? project.audioAssets.find((candidate) => candidate.id === clip.audioAssetId) ?? null
+                    : null;
+                  const assetIssue = asset ? audioAssetIssues[asset.id] ?? null : null;
+                  const assetLabel = clip.type === 'audio'
+                    ? asset?.availability === 'ready'
+                      ? asset.originalName
+                      : '音声素材なし'
+                    : null;
+                  const hasAssetIssue = clip.type === 'audio'
+                    && audioAssetStatusLabel(asset, assetIssue) !== '音声素材を確認済み';
+                  return (
+                    <button
                     type="button"
                     key={clip.id}
                     ref={(button) => {
                       if (button) clipButtonRefs.current.set(clip.id, button);
                       else clipButtonRefs.current.delete(clip.id);
                     }}
-                    className={`arranger__clip${selectedClipId === clip.id ? ' is-selected' : ''}${clip.aliasOf ? ' is-linked' : ''}`}
+                    className={`arranger__clip${clip.type === 'audio' ? ' is-audio' : ''}${selectedClipId === clip.id ? ' is-selected' : ''}${clip.aliasOf ? ' is-linked' : ''}${hasAssetIssue ? ' has-asset-issue' : ''}`}
                     style={{
                       left: clip.startBeat * ppb,
                       width: clip.lengthBeats * ppb,
                     }}
                     aria-pressed={selectedClipId === clip.id}
-                    aria-label={`${track.name}、クリップ${index + 1}、${beatAsBarNumber(musicalTime, clip.startBeat).toFixed(1)}小節から${(beatAsBarNumber(musicalTime, clip.startBeat + clip.lengthBeats) - beatAsBarNumber(musicalTime, clip.startBeat)).toFixed(1)}小節${clip.aliasOf ? '、連動コピー' : ''}`}
+                    aria-label={`${track.name}、クリップ${index + 1}${assetLabel ? `、${assetLabel}` : ''}、${beatAsBarNumber(musicalTime, clip.startBeat).toFixed(1)}小節から${(beatAsBarNumber(musicalTime, clip.startBeat + clip.lengthBeats) - beatAsBarNumber(musicalTime, clip.startBeat)).toFixed(1)}小節${clip.aliasOf ? '、連動コピー' : ''}${hasAssetIssue ? `、${audioAssetStatusLabel(asset, assetIssue)}` : ''}`}
                     onClick={() => selectArrangerClip(track, clip)}
                     onDoubleClick={() => {
                       selectArrangerClip(track, clip);
@@ -495,16 +510,30 @@ export function Arranger() {
                       else if (clip.type === 'midi') setActiveView('pianoRoll');
                     }}
                   >
-                    <span>{clip.aliasOf ? '連動' : `Clip ${index + 1}`}</span>
+                    <span>{assetLabel ?? (clip.aliasOf ? '連動' : `Clip ${index + 1}`)}</span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {selected ? (
+      {selected?.clip.type === 'audio' ? (
+        <AudioClipEditor
+          key={selected.clip.id}
+          clip={selected.clip as AudioClip}
+          trackName={selected.track.name}
+          asset={project.audioAssets.find((asset) => asset.id === selected.clip.audioAssetId) ?? null}
+          issue={
+            selected.clip.audioAssetId
+              ? audioAssetIssues[selected.clip.audioAssetId] ?? null
+              : null
+          }
+          musicalTime={musicalTime}
+        />
+      ) : selected ? (
         <ClipEditor
           key={selected.clip.id}
           clip={selected.clip}
@@ -518,7 +547,7 @@ export function Arranger() {
         />
       ) : (
         <p className="empty-hint">
-          クリップを選ぶと、配置、独立コピー、連動コピーを編集できます。
+          クリップを選ぶと、配置、トリム、コピーなどを編集できます。
         </p>
       )}
       {clipNotice ? (

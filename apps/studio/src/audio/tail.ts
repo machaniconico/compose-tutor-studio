@@ -64,6 +64,12 @@ export type AudioTailPlan = Readonly<{
   capped: boolean;
 }>;
 
+/** Source end relative to the planner's `startBeat`, used by Audio Clips. */
+export type AudioTailSource = Readonly<{
+  trackId: string;
+  endSeconds: number;
+}>;
+
 /**
  * Estimate the last audible delay echo relative to the end of the input.
  *
@@ -201,6 +207,7 @@ export function planAudioTail(
   startBeat = 0,
   endBeat = project.lengthBeats,
   sampleRate: number = DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
+  additionalSources: readonly AudioTailSource[] = [],
 ): AudioTailPlan {
   const safeStartBeat = finiteNonNegative(startBeat);
   const safeEndBeat = Number.isFinite(endBeat)
@@ -241,6 +248,21 @@ export function planAudioTail(
         sourceEndByTrack.get(track.id) ?? Number.NEGATIVE_INFINITY,
         sourceEnd,
       ),
+    );
+  }
+
+  for (const source of additionalSources) {
+    if (
+      !audibleTrackIds.has(source.trackId) ||
+      !tracks.has(source.trackId) ||
+      !Number.isFinite(source.endSeconds) ||
+      source.endSeconds < 0
+    ) {
+      continue;
+    }
+    sourceEndByTrack.set(
+      source.trackId,
+      Math.max(sourceEndByTrack.get(source.trackId) ?? Number.NEGATIVE_INFINITY, source.endSeconds),
     );
   }
 

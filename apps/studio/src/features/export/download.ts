@@ -9,13 +9,38 @@ export function safeFileStem(title: string): string {
 
 /** Trigger a browser download for a Blob under the given filename. */
 export function downloadBlob(blob: Blob, filename: string): void {
+  void downloadBlobAndWaitForHandoff(blob, filename).catch(() => undefined);
+}
+
+/**
+ * Trigger a browser download and settle after the object URL is revoked.
+ * Callers that own a memory lease can await this handoff before releasing it.
+ */
+export function downloadBlobAndWaitForHandoff(
+  blob: Blob,
+  filename: string,
+): Promise<void> {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
   // Revoke on the next tick so the click has a chance to start the download.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      try {
+        URL.revokeObjectURL(url);
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    }, 0);
+  });
 }

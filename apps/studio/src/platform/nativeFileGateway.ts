@@ -77,6 +77,8 @@ const OPEN_CANCELLED_TAG = 0;
 const OPEN_FILE_TAG = 1;
 const OPEN_FILE_HEADER_BYTES = 5;
 const MAX_FILENAME_UTF8_BYTES = 1_024;
+export const NATIVE_AUDIO_OPEN_ENVELOPE_MAX_BYTES =
+  OPEN_FILE_HEADER_BYTES + MAX_FILENAME_UTF8_BYTES + NATIVE_AUDIO_FILE_MAX_BYTES;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 const utf8Encoder = new TextEncoder();
 const nativeCommandErrorCodes = new Set<NativeFileGatewayErrorCode>([

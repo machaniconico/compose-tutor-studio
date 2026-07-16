@@ -35,8 +35,15 @@ import { createDefaultProject } from './defaultProject';
 import { nowIso, uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { type SaveFailureCode, toSaveFailure } from './persistence';
-import { selectedProjectRepository } from '../platform/runtime';
+import {
+  selectedAudioAssetRepository,
+  selectedProjectRepository,
+} from '../platform/runtime';
 import { studioRuntime } from '../platform/runtime';
+import {
+  AudioAssetRepositoryError,
+  type AudioAssetRepository,
+} from '../platform/audioAssetRepository';
 import {
   clearRendererStorageAndBrowsingData,
   createSecureEraseId,
@@ -56,7 +63,16 @@ export type EditorView = 'pianoRoll' | 'drums' | 'arranger';
 
 export type TransportPhase = 'stopped' | 'starting' | 'playing';
 
-export type AudioIssue = 'start-failed' | 'event-limit-exceeded' | 'interrupted' | null;
+export type AudioIssue =
+  | 'start-failed'
+  | 'event-limit-exceeded'
+  | 'audio-asset-missing'
+  | 'audio-asset-changed'
+  | 'audio-asset-unavailable'
+  | 'audio-decode-failed'
+  | 'audio-resource-limit'
+  | 'interrupted'
+  | null;
 
 export type TransportState = {
   /** Confirmed lifecycle state. `starting` is intent, `playing` means audio started. */
@@ -119,6 +135,8 @@ export type PersistenceNotice = Readonly<{
   message: string;
 }>;
 
+export type AudioAssetRuntimeIssue = 'missing' | 'changed' | 'unavailable';
+
 export type LocalDataEraseState = Readonly<{
   phase:
     | 'idle'
@@ -154,6 +172,7 @@ export type LocalDataEraseStoreDependencies = Readonly<{
 export type StudioStoreOptions = Readonly<{
   /** null explicitly disables the desktop-only erasure command. */
   localDataErase?: LocalDataEraseStoreDependencies | null;
+  audioAssetRepository?: AudioAssetRepository;
 }>;
 
 export type StoreState = {
@@ -170,6 +189,8 @@ export type StoreState = {
   localDataErase: LocalDataEraseState;
   persistenceNotice: PersistenceNotice | null;
   savedProjects: readonly ProjectSummary[];
+  /** Runtime-only evidence; Project metadata remains intact for relink/recovery. */
+  audioAssetIssues: Readonly<Record<string, AudioAssetRuntimeIssue>>;
 
   // history
   past: Project[];
@@ -275,6 +296,7 @@ export type StoreState = {
   /** Replace the whole project (e.g. template instantiation / file import). */
   replaceProject: (project: Project) => Promise<boolean>;
   clearPersistenceNotice: () => void;
+  refreshAudioAssetIssues: () => Promise<void>;
   /** Permanently seals this renderer and removes every native/local datum. */
   eraseAllLocalData: () => Promise<boolean>;
   /** Fail closed after the final normal-close IPC may have destroyed the window. */
@@ -376,7 +398,44 @@ function clipTopologyEqual(
     left.aliasOf === right.aliasOf &&
     left.stepsPerBar === right.stepsPerBar &&
     left.audioAssetId === right.audioAssetId &&
+    left.sourceStartFrame === right.sourceStartFrame &&
+    left.sourceFrameCount === right.sourceFrameCount &&
+    left.fadeInFrames === right.fadeInFrames &&
+    left.fadeOutFrames === right.fadeOutFrames &&
+    left.gainDb === right.gainDb &&
     grooveEqual
+  );
+}
+
+function audioAssetTopologyEqual(left: Project, right: Project): boolean {
+  return (
+    left.audioAssets.length === right.audioAssets.length &&
+    left.audioAssets.every((asset, index) => {
+      const candidate = right.audioAssets[index];
+      if (
+        !candidate ||
+        candidate.id !== asset.id ||
+        candidate.availability !== asset.availability
+      ) {
+        return false;
+      }
+      if (asset.availability === 'ready') {
+        return (
+          candidate.availability === 'ready' &&
+          candidate.checksumSha256 === asset.checksumSha256 &&
+          candidate.byteLength === asset.byteLength &&
+          candidate.sampleRate === asset.sampleRate &&
+          candidate.channelCount === asset.channelCount &&
+          candidate.frameCount === asset.frameCount &&
+          candidate.mediaType === asset.mediaType
+        );
+      }
+      return (
+        candidate.availability === 'unresolved' &&
+        candidate.reason === asset.reason &&
+        candidate.legacyAssetId === asset.legacyAssetId
+      );
+    })
   );
 }
 
@@ -437,6 +496,7 @@ function automationTopologyEqual(left: Project, right: Project): boolean {
 export function hasPlaybackTopologyChanged(current: Project, next: Project): boolean {
   if (current === next) return false;
   if (!musicalTimelineTopologyEqual(current, next)) return true;
+  if (!audioAssetTopologyEqual(current, next)) return true;
   if (!automationTopologyEqual(current, next)) return true;
   if (
     (current.automationLanes.length > 0 || next.automationLanes.length > 0) &&
@@ -587,6 +647,7 @@ export function createStudioStore(
   const startingActivationId = uid('activation');
   const coordinator = new ProjectSaveCoordinator({ repository });
   const crashProtectionAvailable = coordinator.supportsCrashProtection();
+  const audioAssetRepository = options.audioAssetRepository ?? selectedAudioAssetRepository;
   const localDataEraseDependencies: LocalDataEraseStoreDependencies | null =
     options.localDataErase === undefined
       ? studioRuntime.kind === 'native'
@@ -640,6 +701,67 @@ export function createStudioStore(
         },
       };
     }
+  };
+
+  const inspectAudioAssetIssues = async (
+    project: Project,
+  ): Promise<Readonly<Record<string, AudioAssetRuntimeIssue>>> => {
+    const issues: Record<string, AudioAssetRuntimeIssue> = {};
+    const verified = new Map<string, AudioAssetRuntimeIssue | null>();
+    for (const asset of project.audioAssets) {
+      if (asset.availability === 'unresolved') {
+        issues[asset.id] = 'missing';
+        continue;
+      }
+      const key = `${asset.checksumSha256}:${asset.byteLength}`;
+      let issue = verified.get(key);
+      if (issue === undefined) {
+        try {
+          await audioAssetRepository.verify({
+            checksumSha256: asset.checksumSha256,
+            byteLength: asset.byteLength,
+          });
+          issue = null;
+        } catch (error) {
+          issue = error instanceof AudioAssetRepositoryError
+            ? error.code === 'missing'
+              ? 'missing'
+              : error.code === 'checksum-mismatch' ||
+                  error.code === 'length-mismatch' ||
+                  error.code === 'corrupt' ||
+                  error.code === 'invalid-response'
+                ? 'changed'
+                : 'unavailable'
+            : 'unavailable';
+        }
+        verified.set(key, issue);
+      }
+      if (issue) issues[asset.id] = issue;
+    }
+    return issues;
+  };
+
+  const refreshAudioAssetIssuesNow = async (project = get().project): Promise<void> => {
+    const issues = await inspectAudioAssetIssues(project);
+    if (get().project !== project) return;
+    set({ audioAssetIssues: issues });
+  };
+
+  const audioAssetIssueNotice = (
+    issues: Readonly<Record<string, AudioAssetRuntimeIssue>>,
+  ): PersistenceNotice | null => {
+    const values = Object.values(issues);
+    if (values.length === 0) return null;
+    const changed = values.includes('changed');
+    const unavailable = values.includes('unavailable');
+    return {
+      kind: 'warning',
+      message: changed
+        ? '保存済み音声の内容が変更または破損しています。プロジェクトは開きましたが、該当クリップは再生・書き出しできません。'
+        : unavailable
+          ? '保存済み音声を現在確認できません。プロジェクトは開きましたが、確認できるまで該当クリップは再生・書き出しできません。'
+          : 'このプロジェクトが参照する音声ファイルが見つかりません。プロジェクトは開きましたが、該当クリップは再生・書き出しできません。',
+    };
   };
 
   const runProjectOperation = async (
@@ -1103,7 +1225,11 @@ export function createStudioStore(
     }
   };
 
-  const activateProject = (project: Project, loaded: LoadedProject | null): boolean => {
+  const activateProject = (
+    project: Project,
+    loaded: LoadedProject | null,
+    audioAssetIssues: Readonly<Record<string, AudioAssetRuntimeIssue>> = {},
+  ): boolean => {
     const activationId = uid('activation');
     const persisted = loaded !== null;
     const expectedHeadVersion = expectedHeadForLoaded(loaded);
@@ -1128,6 +1254,7 @@ export function createStudioStore(
       transport: makeTransport(get().transport.playbackRequestId + 1),
       past: [],
       future: [],
+      audioAssetIssues,
       saveState: makeSaveState(
         project,
         activationId,
@@ -1207,7 +1334,8 @@ export function createStudioStore(
     }
 
     if (restored.value) {
-      if (!activateProject(restored.value.project, restored.value)) {
+      const audioIssues = await inspectAudioAssetIssues(restored.value.project);
+      if (!activateProject(restored.value.project, restored.value, audioIssues)) {
         set({
           persistenceReady: true,
           persistenceNotice: {
@@ -1219,11 +1347,12 @@ export function createStudioStore(
       }
       if (restored.value.recovered) {
         const recoveredTitle = restored.value.project.title || '名称未設定';
+        const assetNotice = audioAssetIssueNotice(audioIssues);
         set({
-          persistenceNotice: {
-            kind: 'recovered',
-            message: `「${recoveredTitle}」を検証済みの保存世代から復元しました。`,
-          },
+          persistenceNotice: assetNotice ?? {
+              kind: 'recovered',
+              message: `「${recoveredTitle}」を検証済みの保存世代から復元しました。`,
+            },
         });
         // Repair a missing/corrupt/stale head only after the recovered bytes
         // have passed the canonical decoder.
@@ -1231,6 +1360,9 @@ export function createStudioStore(
           set({ persistenceReady: true });
           return true;
         }
+      } else {
+        const assetNotice = audioAssetIssueNotice(audioIssues);
+        if (assetNotice) set({ persistenceNotice: assetNotice });
       }
     }
     set({ persistenceReady: true });
@@ -1286,6 +1418,9 @@ export function createStudioStore(
     if (stamped.key !== current.key || stamped.scale !== current.scale) {
       publishScaleSnapStateIfEnabled();
     }
+    if (stamped.audioAssets !== current.audioAssets) {
+      void refreshAudioAssetIssuesNow(stamped);
+    }
     return true;
   };
 
@@ -1306,6 +1441,7 @@ export function createStudioStore(
     localDataErase: { phase: 'idle', eraseId: null, message: null },
     persistenceNotice: null,
     savedProjects: [],
+    audioAssetIssues: {},
     past: [],
     future: [],
 
@@ -1727,6 +1863,7 @@ export function createStudioStore(
       if (restored.key !== project.key || restored.scale !== project.scale) {
         publishScaleSnapStateIfEnabled();
       }
+      void refreshAudioAssetIssuesNow(restored);
     },
     redo: () => {
       if (get().projectOperationBusy) return;
@@ -1747,6 +1884,7 @@ export function createStudioStore(
       if (restored.key !== project.key || restored.scale !== project.scale) {
         publishScaleSnapStateIfEnabled();
       }
+      void refreshAudioAssetIssuesNow(restored);
     },
     canUndo: () => get().past.length > 0,
     canRedo: () => get().future.length > 0,
@@ -1869,7 +2007,7 @@ export function createStudioStore(
       // createDefaultProject() fixture remains the unsaved first-launch
       // preview, while templates are activated through replaceProject().
       const project = createEmptyProject({ title: title ?? '新しい曲' });
-      if (!activateProject(project, null)) return false;
+      if (!activateProject(project, null, {})) return false;
       if (!(await persistActivatedProject(project))) return false;
       publishAppEvent({
         type: 'project.created',
@@ -1896,15 +2034,20 @@ export function createStudioStore(
         }
         return false;
       }
-      if (!activateProject(loaded.value.project, loaded.value)) return false;
+      const audioIssues = await inspectAudioAssetIssues(loaded.value.project);
+      if (!activateProject(loaded.value.project, loaded.value, audioIssues)) return false;
       if (loaded.value.recovered) {
+        const assetNotice = audioAssetIssueNotice(audioIssues);
         set({
-          persistenceNotice: {
-            kind: 'recovered',
-            message: `「${loaded.value.project.title || '名称未設定'}」を検証済みの保存世代から復元しました。`,
-          },
+          persistenceNotice: assetNotice ?? {
+              kind: 'recovered',
+              message: `「${loaded.value.project.title || '名称未設定'}」を検証済みの保存世代から復元しました。`,
+            },
         });
         if (!(await persistActivatedProject(loaded.value.project))) return false;
+      } else {
+        const assetNotice = audioAssetIssueNotice(audioIssues);
+        if (assetNotice) set({ persistenceNotice: assetNotice });
       }
       return true;
     }),
@@ -1942,7 +2085,8 @@ export function createStudioStore(
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      if (!activateProject(copy, null)) return false;
+      const audioIssues = await inspectAudioAssetIssues(copy);
+      if (!activateProject(copy, null, audioIssues)) return false;
       await persistActivatedProject(copy);
       const saveFailed = get().saveState.phase === 'error';
       set({
@@ -1962,6 +2106,17 @@ export function createStudioStore(
     replaceProject: (project) => runProjectOperation(async () => {
       const decoded = decodeProject(project);
       if (!decoded.ok) return false;
+      const audioIssues = await inspectAudioAssetIssues(decoded.project);
+      const assetNotice = audioAssetIssueNotice(audioIssues);
+      if (assetNotice) {
+        set({
+          persistenceNotice: {
+            kind: 'warning',
+            message: 'このプロジェクトファイルには必要な音声本体が含まれていないため、読み込みを中止しました。同じ端末で音声が保管済みの場合のみ読み込めます。',
+          },
+        });
+        return false;
+      }
       if (!(await prepareProjectSwitch())) return false;
       const stamped = { ...decoded.project, updatedAt: nowIso() };
       const existing = await callRepository('load', () => repository.load(stamped.id), stamped.id);
@@ -1974,7 +2129,7 @@ export function createStudioStore(
         });
         return false;
       }
-      if (!activateProject(stamped, existing.value)) return false;
+      if (!activateProject(stamped, existing.value, audioIssues)) return false;
       if (!(await persistActivatedProject(stamped))) return false;
       publishAppEvent({
         type: 'project.created',
@@ -2068,7 +2223,12 @@ export function createStudioStore(
       if (deletingActive) {
         const restoredFallback = await callRepository('load', () => repository.loadMostRecent());
         if (restoredFallback.ok && restoredFallback.value) {
-          if (!activateProject(restoredFallback.value.project, restoredFallback.value)) return false;
+          const audioIssues = await inspectAudioAssetIssues(restoredFallback.value.project);
+          if (!activateProject(
+            restoredFallback.value.project,
+            restoredFallback.value,
+            audioIssues,
+          )) return false;
           if (
             restoredFallback.value.recovered &&
             !(await persistActivatedProject(restoredFallback.value.project))
@@ -2076,7 +2236,7 @@ export function createStudioStore(
             return false;
           }
         } else {
-          if (!activateProject(createDefaultProject(), null)) return false;
+          if (!activateProject(createDefaultProject(), null, {})) return false;
         }
       }
       await refreshSavedProjectsNow(false);
@@ -2092,6 +2252,7 @@ export function createStudioStore(
       return true;
     }),
     clearPersistenceNotice: () => set({ persistenceNotice: null }),
+    refreshAudioAssetIssues: () => refreshAudioAssetIssuesNow(),
     eraseAllLocalData: eraseAllLocalDataNow,
     markNativeCloseHandoffUnknown,
   };

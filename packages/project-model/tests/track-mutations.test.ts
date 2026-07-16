@@ -5,6 +5,7 @@ import {
   MAX_PROJECT_TRACKS,
   MAX_TRACK_NAME_CODE_POINTS,
   addTrack,
+  createAudioTrackClip,
   createEmptyProject,
   duplicateTrack,
   encodeProjectJson,
@@ -15,6 +16,7 @@ import {
   setTrackSynthPreset,
   validateProject,
   type Project,
+  type ReadyAudioAsset,
   type Track,
   type TrackIdFactory,
   type TrackMutationResult,
@@ -42,6 +44,20 @@ function expectFailure(result: TrackMutationResult, code: string) {
 function sequenceFactory(label = 'new'): TrackIdFactory {
   let count = 0;
   return (kind) => `${kind}-${label}-${++count}`;
+}
+
+function readyAudioAsset(id = 'track-removal-asset'): ReadyAudioAsset {
+  return {
+    id,
+    availability: 'ready',
+    checksumSha256: 'a'.repeat(64),
+    originalName: 'track-removal.wav',
+    mediaType: 'audio/wav',
+    byteLength: 192_044,
+    sampleRate: 48_000,
+    channelCount: 2,
+    frameCount: 48_000,
+  };
 }
 
 function richSourceProject(): Project {
@@ -432,6 +448,27 @@ describe('moveTrack and removeTrack', () => {
     expect(result.project.updatedAt).toBe(projectWithUserTrack.updatedAt);
     expectFailure(removeTrack(project, project.tracks.at(-1)!.id), 'master-protected');
     expectFailure(removeTrack(project, 'missing'), 'track-not-found');
+  });
+
+  it('prunes AudioAsset metadata on audio-track removal but preserves shared references', () => {
+    const created = createAudioTrackClip(base(), readyAudioAsset(), {
+      trackName: 'Imported audio',
+      idFactory: sequenceFactory('audio'),
+    }, fixedClock);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const shared = expectSuccess(duplicateTrack(created.project, created.trackId, {
+      idFactory: sequenceFactory('shared-audio'),
+    }));
+    const firstRemoval = expectSuccess(removeTrack(shared.project, created.trackId));
+    expect(firstRemoval.project.audioAssets).toEqual(created.project.audioAssets);
+    expect(validateProject(firstRemoval.project).ok).toBe(true);
+
+    const lastRemoval = expectSuccess(removeTrack(firstRemoval.project, shared.trackId));
+    expect(lastRemoval.project.audioAssets).toEqual([]);
+    expect(validateProject(lastRemoval.project).ok).toBe(true);
+    expect(encodeProjectJson(lastRemoval.project).ok).toBe(true);
   });
 
   it.each([

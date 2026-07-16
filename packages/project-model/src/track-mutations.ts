@@ -500,7 +500,22 @@ export function removeTrack(project: Project, trackId: string): TrackMutationRes
     const automationLanes = project.automationLanes.filter(
       (lane) => lane.target.trackId !== trackId,
     );
-    return success({ ...project, tracks, automationLanes }, trackId, true);
+    const removedAudioAssetIds = new Set(
+      track.clips
+        .filter((clip) => clip.type === 'audio')
+        .map((clip) => clip.audioAssetId),
+    );
+    const remainingAudioAssetIds = new Set(
+      tracks.flatMap((candidate) =>
+        candidate.clips
+          .filter((clip) => clip.type === 'audio')
+          .map((clip) => clip.audioAssetId),
+      ),
+    );
+    const audioAssets = project.audioAssets.filter(
+      (asset) => !removedAudioAssetIds.has(asset.id) || remainingAudioAssetIds.has(asset.id),
+    );
+    return success({ ...project, tracks, automationLanes, audioAssets }, trackId, true);
   });
 }
 

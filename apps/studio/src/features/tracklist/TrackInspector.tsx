@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { Track, TrackRole } from '@cts/project-model';
-import { useStore } from '../../state/store';
+import type { AudioAsset, Track, TrackRole } from '@cts/project-model';
+import { useStore, type AudioAssetRuntimeIssue } from '../../state/store';
 import {
   deleteStudioTrack,
   duplicateStudioTrack,
@@ -20,6 +20,7 @@ import {
   focusTrackSelectionControl,
   isLearningTrack,
 } from './trackPresentation';
+import { audioAssetPresentationStatus } from '../audioTrack/audioAssetPresentation';
 
 function playbackStoppedNotice(stopped: boolean): string {
   return stopped
@@ -30,6 +31,8 @@ function playbackStoppedNotice(stopped: boolean): string {
 /** Track controls that belong in the roomy inspector rather than 220px list rows. */
 export function TrackInspector() {
   const tracks = useStore((state) => state.project.tracks);
+  const audioAssets = useStore((state) => state.project.audioAssets);
+  const audioAssetIssues = useStore((state) => state.audioAssetIssues);
   const selectedTrackId = useStore((state) => state.editor.selectedTrackId);
   const track = tracks.find((candidate) => candidate.id === selectedTrackId) ?? null;
 
@@ -42,12 +45,22 @@ export function TrackInspector() {
     );
   }
 
-  return <TrackInspectorForm key={track.id} track={track} tracks={tracks} />;
+  return (
+    <TrackInspectorForm
+      key={track.id}
+      track={track}
+      tracks={tracks}
+      audioAssets={audioAssets}
+      audioAssetIssues={audioAssetIssues}
+    />
+  );
 }
 
 type TrackInspectorFormProps = Readonly<{
   track: Track;
   tracks: readonly Track[];
+  audioAssets: readonly AudioAsset[];
+  audioAssetIssues: Readonly<Record<string, AudioAssetRuntimeIssue>>;
 }>;
 
 type TrackInspectorStatus = Readonly<{
@@ -62,7 +75,12 @@ const TRACK_ROLE_OPTIONS: readonly Readonly<{ value: TrackRole; label: string }>
   { value: 'learning.melody', label: 'メロディ学習' },
 ];
 
-function TrackInspectorForm({ track, tracks }: TrackInspectorFormProps) {
+function TrackInspectorForm({
+  track,
+  tracks,
+  audioAssets,
+  audioAssetIssues,
+}: TrackInspectorFormProps) {
   const [nameDraft, setNameDraft] = useState(track.name);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [status, setStatus] = useState<TrackInspectorStatus | null>(null);
@@ -79,6 +97,13 @@ function TrackInspectorForm({ track, tracks }: TrackInspectorFormProps) {
       : null;
   const synthPreset = synthInstrument?.preset ?? null;
   const displayedPreset = synthPreset === null ? null : canonicalSynthPresetName(synthPreset);
+  const referencedAudioAssets = track.type === 'audio'
+    ? Array.from(new Set(
+        track.clips
+          .filter((clip) => clip.type === 'audio' && clip.audioAssetId)
+          .map((clip) => clip.audioAssetId as string),
+      )).map((id) => audioAssets.find((asset) => asset.id === id) ?? null)
+    : [];
 
   const showInfo = (message: string): void => setStatus({ message, kind: 'info' });
   const showError = (message: string): void => setStatus({ message, kind: 'error' });
@@ -247,6 +272,38 @@ function TrackInspectorForm({ track, tracks }: TrackInspectorFormProps) {
         </label>
       ) : null}
 
+      {track.type === 'audio' ? (
+        <div className="track-inspector__audio-assets" aria-label={`${track.name} 音声素材`}>
+          <span>音声素材</span>
+          {referencedAudioAssets.length === 0 ? (
+            <p className="track-inspector__help">このトラックには音声クリップがありません。</p>
+          ) : (
+            <ul>
+              {referencedAudioAssets.map((asset, index) => {
+                const issue = asset ? audioAssetIssues[asset.id] ?? null : 'missing';
+                const presentation = audioAssetPresentationStatus(asset, issue);
+                return (
+                  <li key={asset?.id ?? `missing-${index}`}>
+                    <strong>
+                      {asset?.availability === 'ready' ? asset.originalName : '参照情報なし'}
+                    </strong>
+                    {asset?.availability === 'ready' ? (
+                      <small>
+                        {(asset.sampleRate / 1_000).toFixed(1)} kHz・{asset.channelCount === 1 ? 'モノラル' : `${asset.channelCount} ch`}・{(asset.frameCount / asset.sampleRate).toFixed(2)}秒
+                      </small>
+                    ) : null}
+                    <span className={presentation.problem ? 'is-problem' : ''}>
+                      {presentation.label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <small>配置、トリム、ゲイン、フェード、分割はアレンジャーでクリップを選んで編集します。</small>
+        </div>
+      ) : null}
+
       {!isMaster ? (
         <div className="track-inspector__operations" role="group" aria-label={`${track.name} 管理`}>
           <button type="button" disabled={!canMoveUp} onClick={() => move('up')}>
@@ -316,7 +373,9 @@ export function DeleteTrackDialog({ track, onClose }: DeleteTrackDialogProps) {
     <Dialog title="トラックを削除" onClose={onClose}>
       <div className="track-delete">
         <p>
-          「{track.name}」と、クリップ{track.clips.length}個・イベント{noteCount}個を削除します。
+          {track.type === 'audio'
+            ? `「${track.name}」と、音声クリップ${track.clips.length}個を削除します。音声素材は元に戻す操作のため保持されます。`
+            : `「${track.name}」と、クリップ${track.clips.length}個・イベント${noteCount}個を削除します。`}
         </p>
         <p className="track-delete__undo">削除後も「元に戻す」で内容ごと復元できます。</p>
         {error ? (

@@ -14,7 +14,14 @@ import { uid } from '../../state/ids';
 import { publishAppEvent } from '../../state/appEvents';
 import { pushToast } from '../../state/tutorialBridge';
 import { renderProjectToWav, WavRenderLimitError } from '../../audio/wav';
-import { downloadBlob, safeFileStem } from './download';
+import { AudioAssetPlaybackError } from '../../audio/audioAssetResolver';
+import { AudioClipPlanLimitError } from '../../audio/audioClipPlanner';
+import {
+  downloadBlob,
+  downloadBlobAndWaitForHandoff,
+  safeFileStem,
+} from './download';
+import { saveWavRenderLease } from './wavExport';
 import { cloneProjectForImport } from './projectImport';
 import { studioRuntime } from '../../platform/runtime';
 import {
@@ -40,6 +47,33 @@ export function midiExportFailureMessage(error: unknown): string {
     }
   }
   return 'MIDIの書き出しに失敗しました。';
+}
+
+export function wavExportFailureMessage(error: unknown): string {
+  if (error instanceof ScheduleEventLimitError || error instanceof AudioClipPlanLimitError) {
+    return '再生イベントが多すぎてWAVを書き出せません。ノート、ドラム、オーディオクリップ、または連動コピーを減らしてください。';
+  }
+  if (error instanceof WavRenderLimitError) {
+    return 'WAV書き出しは5分以内の曲に対応しています。曲を短くしてください。';
+  }
+  if (error instanceof AudioAssetPlaybackError) {
+    if (error.code === 'asset-missing') {
+      return '保存済みの音声素材が見つからないためWAVを書き出せません。素材を保存した端末のアプリデータを確認してください。';
+    }
+    if (error.code === 'asset-changed') {
+      return '保存済みの音声素材が変更または破損しているためWAVを書き出せません。';
+    }
+    if (error.code === 'resolver-unavailable' || error.code === 'asset-unavailable') {
+      return '音声素材の保存領域へアクセスできないためWAVを書き出せません。端末の空き容量やアクセス権を確認してください。';
+    }
+    if (error.code === 'decode-failed') {
+      return '保存済みの音声素材を読み取れないためWAVを書き出せません。';
+    }
+    if (error.code === 'resource-limit') {
+      return '音声素材がWAV書き出し時のメモリ上限を超えています。使用する素材の数または長さを減らしてください。';
+    }
+  }
+  return 'WAVの書き出しに失敗しました。';
 }
 
 /** Export/import controls loaded only after their dialog opens. */
@@ -86,28 +120,19 @@ export function ExportMenuContent({
     const operation = 'wav-export' satisfies ExportOperation;
     if (!beginOperation(operation)) return;
     try {
-      const blob = await renderProjectToWav(project);
+      const rendered = await renderProjectToWav(project);
       const fileName = `${stem}.wav`;
-      if (isNative) {
-        const result = await nativeFileGateway.exportWav(
-          new Uint8Array(await blob.arrayBuffer()),
-          fileName,
-        );
-        if (result.status === 'cancelled') return;
-      } else {
-        downloadBlob(blob, fileName);
-      }
+      const result = await saveWavRenderLease(rendered, fileName, {
+        runtime: isNative ? 'native' : 'web',
+        exportNative: (bytes, suggestedFileName) =>
+          nativeFileGateway.exportWav(bytes, suggestedFileName),
+        downloadWeb: downloadBlobAndWaitForHandoff,
+      });
+      if (result.status === 'cancelled') return;
       publishAppEvent({ type: 'export.wav', payload: { format: 'wav' } });
       pushToast('WAVファイルを書き出しました。', 'success');
     } catch (error) {
-      pushToast(
-        error instanceof ScheduleEventLimitError
-          ? '再生イベントが多すぎてWAVを書き出せません。ノート、ドラム、または連動コピーを減らしてください。'
-          : error instanceof WavRenderLimitError
-            ? 'WAV書き出しは5分以内の曲に対応しています。曲を短くしてください。'
-            : 'WAVの書き出しに失敗しました。',
-        'error',
-      );
+      pushToast(wavExportFailureMessage(error), 'error');
     } finally {
       finishOperation(operation);
     }
@@ -261,7 +286,7 @@ export function ExportMenuContent({
                 }}
               />
               <p className="export-menu__hint">
-                書き出したファイル（.ctsproj.json）は、別のコピーとして読み込んで編集できます。
+                .ctsproj.jsonには編集情報だけを書き出し、Audio Trackの音声本体は含みません。同じ端末の素材保存領域がある場合に、別のコピーとして読み込んで編集できます。
               </p>
             </section>
     </div>

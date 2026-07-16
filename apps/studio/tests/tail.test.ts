@@ -75,6 +75,21 @@ function drumTrack(effects: EffectConfig[] = []): Track {
   };
 }
 
+function audioTrack(effects: EffectConfig[] = []): Track {
+  return {
+    id: 'audio',
+    name: 'Audio',
+    type: 'audio',
+    role: 'general',
+    clips: [],
+    volume: 1,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects,
+  };
+}
+
 function project(track: Track): Project {
   return {
     id: 'tail-project',
@@ -288,6 +303,23 @@ describe('planAudioTail', () => {
       fadeEndSeconds: null,
       capped: false,
     });
+  });
+
+  it('includes an audio clip source end in the same insert-tail model', () => {
+    const delay = effect('delay', { delayTime: 1, feedback: 0, mix: 1 });
+    const plan = planAudioTail(
+      project(audioTrack([delay])),
+      [],
+      0,
+      4,
+      DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
+      [{ trackId: 'audio', endSeconds: 2 }],
+    );
+
+    expect(plan.uncappedTailSeconds).toBeCloseTo(
+      0.75 + MASTER_LIMITER_LOOKAHEAD_SECONDS,
+      10,
+    );
   });
 
   it('includes Soft Pad attack/decay, release, and oscillator stop padding', () => {

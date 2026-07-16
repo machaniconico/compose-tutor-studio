@@ -15,15 +15,28 @@ import {
 } from './nativeLegacyMigration';
 import { nativeLegacyMigrationGateway } from './nativeLegacyMigrationGateway';
 import { tauriBridge, type TauriBridge } from './tauriBridge';
+import {
+  AudioAssetRepositoryError,
+  IndexedDbAudioAssetRepository,
+  NativeAudioAssetRepository,
+  type AudioAssetRepository,
+} from './audioAssetRepository';
+import {
+  AudioAssetPlaybackError,
+  setAudioAssetBytesResolver,
+  type AudioAssetBytesResolver,
+} from '../audio/audioAssetResolver';
 
 export type StudioRuntime =
   | Readonly<{
       kind: 'web';
       repository: ProjectRepository;
+      audioAssets: AudioAssetRepository;
     }>
   | Readonly<{
       kind: 'native';
       repository: NativeRecoveryProjectRepository;
+      audioAssets: AudioAssetRepository;
     }>;
 
 export type StudioRuntimeOptions = Readonly<{
@@ -31,6 +44,7 @@ export type StudioRuntimeOptions = Readonly<{
   browserRepository?: ProjectRepository;
   storage?: StorageLike | StorageProvider | null;
   migrationGateway?: NativeLegacyMigrationGateway;
+  audioAssetRepository?: AudioAssetRepository;
 }>;
 
 function webviewStorage(): StorageLike | null {
@@ -56,14 +70,63 @@ export function createStudioRuntime(options: StudioRuntimeOptions = {}): StudioR
         delegate: migratingRepository,
         journal: new NativeRecoveryJournal({ storage }),
       }),
+      audioAssets: options.audioAssetRepository ?? new NativeAudioAssetRepository(),
     };
   }
   return {
     kind: 'web',
     repository: options.browserRepository ?? browserProjectRepository,
+    audioAssets: options.audioAssetRepository ?? new IndexedDbAudioAssetRepository(),
+  };
+}
+
+/** Adapt platform persistence failures to the engine's stable playback contract. */
+export function createAudioAssetBytesResolver(
+  repository: AudioAssetRepository,
+): AudioAssetBytesResolver {
+  return {
+    async resolve(asset, signal) {
+      if (signal?.aborted) {
+        throw new AudioAssetPlaybackError('cancelled', asset.id);
+      }
+      try {
+        const bytes = await repository.read({
+          checksumSha256: asset.checksumSha256,
+          byteLength: asset.byteLength,
+        });
+        if (signal?.aborted) {
+          throw new AudioAssetPlaybackError('cancelled', asset.id);
+        }
+        return bytes;
+      } catch (error) {
+        if (error instanceof AudioAssetPlaybackError) throw error;
+        if (!(error instanceof AudioAssetRepositoryError)) {
+          throw new AudioAssetPlaybackError('asset-unavailable', asset.id, undefined, error);
+        }
+        if (error.code === 'missing') {
+          throw new AudioAssetPlaybackError('asset-missing', asset.id, undefined, error);
+        }
+        if (
+          error.code === 'checksum-mismatch' ||
+          error.code === 'length-mismatch' ||
+          error.code === 'corrupt' ||
+          error.code === 'invalid-response'
+        ) {
+          throw new AudioAssetPlaybackError('asset-changed', asset.id, undefined, error);
+        }
+        if (error.code === 'too-large') {
+          throw new AudioAssetPlaybackError('resource-limit', asset.id, undefined, error);
+        }
+        throw new AudioAssetPlaybackError('asset-unavailable', asset.id, undefined, error);
+      }
+    },
   };
 }
 
 /** Composition-root selection for the application. */
 export const studioRuntime = createStudioRuntime();
 export const selectedProjectRepository: ProjectRepository = studioRuntime.repository;
+export const selectedAudioAssetRepository: AudioAssetRepository = studioRuntime.audioAssets;
+export const releaseStudioAudioAssetResolver = setAudioAssetBytesResolver(
+  createAudioAssetBytesResolver(selectedAudioAssetRepository),
+);

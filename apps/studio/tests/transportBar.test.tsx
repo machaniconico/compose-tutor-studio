@@ -65,7 +65,25 @@ describe('TransportBar playback lifecycle', () => {
       audioIssue: 'event-limit-exceeded',
     });
     expect(html).toContain('再生イベントが多すぎます');
+    expect(html).toContain('オーディオクリップ');
     expect(html).toContain('連動コピーを減らして');
+    expect(html).toContain('編集内容はそのままです');
+    expect(html).not.toContain('出力先と端末の音量');
+  });
+
+  it.each([
+    ['audio-asset-missing', '音声素材が見つかりません'],
+    ['audio-asset-changed', '変更または破損'],
+    ['audio-asset-unavailable', '保存領域へ現在アクセスできません'],
+    ['audio-decode-failed', '音声素材を読み取れませんでした'],
+    ['audio-resource-limit', '再生時のメモリ上限'],
+  ] as const)('explains %s without generic device advice', (audioIssue, expected) => {
+    const html = renderTransport({
+      ...stopped,
+      playbackRequestId: 6,
+      audioIssue,
+    });
+    expect(html).toContain(expected);
     expect(html).toContain('編集内容はそのままです');
     expect(html).not.toContain('出力先と端末の音量');
   });
