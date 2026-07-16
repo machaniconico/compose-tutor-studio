@@ -1,5 +1,8 @@
 fn main() {
     const APPLICATION_COMMANDS: &[&str] = &[
+        "audio_asset_store",
+        "audio_asset_read",
+        "audio_asset_verify",
         "file_open_project",
         "file_open_midi",
         "file_open_audio",

@@ -4,6 +4,9 @@
   "description": "The main Studio renderer can access only application-owned persistence, WebView cleanup, native file, close-handoff, and close-event commands.",
   "windows": ["main"],
   "permissions": [
+    "allow-audio-asset-store",
+    "allow-audio-asset-read",
+    "allow-audio-asset-verify",
     "allow-persistence-initialize",
     "allow-persistence-list",
     "allow-persistence-load",

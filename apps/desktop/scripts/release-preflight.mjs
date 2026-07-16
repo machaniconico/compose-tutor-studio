@@ -87,6 +87,9 @@ const developmentCsp = Object.freeze({
   'connect-src': "'self' ipc: http://ipc.localhost https://ipc.localhost ws://127.0.0.1:5173",
 });
 const productionCapabilityPermissions = Object.freeze([
+  'allow-audio-asset-store',
+  'allow-audio-asset-read',
+  'allow-audio-asset-verify',
   'allow-persistence-initialize',
   'allow-persistence-list',
   'allow-persistence-load',
@@ -140,6 +143,7 @@ const productionCargoManifestIdentity = Object.freeze({
     rusqlite: { version: '=0.40.1', 'default-features': false, features: ['bundled'] },
     serde: { version: '=1.0.228', features: ['derive'] },
     serde_json: '=1.0.150',
+    sha2: '=0.10.9',
     tauri: { version: '2.11.5', features: [] },
     'tauri-plugin-dialog': {
       version: '=2.7.1',
@@ -469,7 +473,7 @@ const forbiddenPnpmConfigPaths = Object.freeze([
 const productionViteConfigSha256 =
   '459066c044ee244af72e720aaca9cbb59d7c90b469e84fee8ac784e9348c841b';
 const productionBuildScriptSha256 =
-  '5078cafbdfb6fa3d2319411a8d6fbb5e4596ecda596463b361f9b075b6537b70';
+  'fa2a85733d26d47475bce20bea09227d2d3e1691ac0acc8770f4c977afd0e3be';
 const productionPnpmWorkspaceSha256 =
   'ee8721472a25e9a96ce99ed400cdf4db51f97f6c4a092ae3f0b5ff3dc02aa45b';
 const productionPnpmLockSha256 =

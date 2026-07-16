@@ -152,7 +152,7 @@ fn schema_v3_project_value() -> Value {
         "audioAssets": [{
             "id": "asset-ready",
             "availability": "ready",
-            "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "checksumSha256": audio_asset_sha256(&vec![0u8; 4096]),
             "originalName": "recording.wav",
             "mediaType": "audio/wav",
             "byteLength": 4096,
@@ -1155,6 +1155,14 @@ fn schema_v3_project_round_trips_through_save_crash_draft_and_reopen() {
     let path = directory.path().join("projects.sqlite3");
     let repository = NativeRepository::new(path.clone());
     repository.initialize().expect("repository initializes");
+    let fixture_bytes = vec![0u8; 4096];
+    repository
+        .store_audio_asset(
+            audio_asset_sha256(&fixture_bytes),
+            fixture_bytes.len(),
+            fixture_bytes,
+        )
+        .expect("schema-v3 audio asset stores before project metadata");
     let project_json = schema_v3_project_json();
 
     repository
@@ -1192,6 +1200,261 @@ fn schema_v3_project_round_trips_through_save_crash_draft_and_reopen() {
         serde_json::from_str::<Value>(&project_json).unwrap()
     );
     assert!(!loaded.recovered);
+}
+
+#[test]
+fn audio_assets_are_content_addressed_deduplicated_and_tamper_evident() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let repository = NativeRepository::new(directory.path().join("projects.sqlite3"));
+    repository.initialize().expect("repository initializes");
+    let bytes = b"canonical 48 kHz PCM WAV fixture".to_vec();
+    let checksum = audio_asset_sha256(&bytes);
+
+    let first = repository
+        .store_audio_asset(checksum.clone(), bytes.len(), bytes.clone())
+        .expect("first store succeeds");
+    let second = repository
+        .store_audio_asset(checksum.clone(), bytes.len(), bytes.clone())
+        .expect("same content deduplicates");
+    assert!(!first.deduplicated);
+    assert!(second.deduplicated);
+    assert_eq!(
+        repository
+            .read_audio_asset(checksum.clone(), bytes.len())
+            .expect("stored bytes read"),
+        bytes
+    );
+
+    let object = directory
+        .path()
+        .join(AUDIO_ASSET_ROOT_DIRECTORY)
+        .join(AUDIO_ASSET_OBJECTS_DIRECTORY)
+        .join(&checksum);
+    fs::write(&object, vec![0u8; bytes.len()]).expect("test tampers owned object");
+    assert_eq!(
+        repository
+            .read_audio_asset(checksum, bytes.len())
+            .unwrap_err()
+            .code,
+        AudioAssetErrorCode::ChecksumMismatch
+    );
+}
+
+#[test]
+fn audio_asset_store_rejects_false_identity_before_creating_storage() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let repository = NativeRepository::new(directory.path().join("projects.sqlite3"));
+    repository.initialize().expect("repository initializes");
+    let bytes = b"not the claimed object".to_vec();
+
+    assert_eq!(
+        repository
+            .store_audio_asset("0".repeat(64), bytes.len(), bytes)
+            .unwrap_err()
+            .code,
+        AudioAssetErrorCode::ChecksumMismatch
+    );
+    assert!(!directory.path().join(AUDIO_ASSET_ROOT_DIRECTORY).exists());
+}
+
+#[test]
+fn startup_recovers_complete_staging_objects_before_project_load() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("projects.sqlite3");
+    let repository = NativeRepository::new(path.clone());
+    repository.initialize().expect("repository initializes");
+    let bytes = vec![0u8; 4096];
+    let checksum = audio_asset_sha256(&bytes);
+    repository
+        .store_audio_asset(checksum.clone(), bytes.len(), bytes.clone())
+        .expect("asset stores");
+    repository
+        .save(SaveRequestDto {
+            project_id: "schema-v3-project".to_owned(),
+            project_json: schema_v3_project_json(),
+            activation_id: "activation-staging-recovery".to_owned(),
+            revision: 1,
+            write_id: "write-staging-recovery".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("referencing project saves");
+    repository.close().expect("repository closes");
+
+    let root = directory.path().join(AUDIO_ASSET_ROOT_DIRECTORY);
+    let object = root.join(AUDIO_ASSET_OBJECTS_DIRECTORY).join(&checksum);
+    let staging = root
+        .join(AUDIO_ASSET_STAGING_DIRECTORY)
+        .join(format!("{checksum}.tmp"));
+    fs::rename(&object, &staging).expect("test simulates crash before promotion");
+
+    let reopened = NativeRepository::new(path);
+    reopened
+        .initialize()
+        .expect("startup promotes complete stage");
+    assert_eq!(
+        reopened
+            .read_audio_asset(checksum, bytes.len())
+            .expect("recovered asset reads"),
+        bytes
+    );
+    assert!(!staging.exists());
+}
+
+#[test]
+fn startup_collects_only_objects_unreachable_from_every_retained_generation() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("projects.sqlite3");
+    let repository = NativeRepository::new(path.clone());
+    repository.initialize().expect("repository initializes");
+    let bytes = vec![0u8; 4096];
+    let checksum = audio_asset_sha256(&bytes);
+    repository
+        .store_audio_asset(checksum.clone(), bytes.len(), bytes.clone())
+        .expect("asset stores");
+    let first = repository
+        .save(SaveRequestDto {
+            project_id: "schema-v3-project".to_owned(),
+            project_json: schema_v3_project_json(),
+            activation_id: "activation-generation-gc".to_owned(),
+            revision: 1,
+            write_id: "write-generation-gc-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("asset generation saves");
+    let without_audio = project_json("schema-v3-project", "No audio", 2);
+    let second = repository
+        .save(SaveRequestDto {
+            project_id: "schema-v3-project".to_owned(),
+            project_json: without_audio.clone(),
+            activation_id: "activation-generation-gc".to_owned(),
+            revision: 2,
+            write_id: "write-generation-gc-2".to_owned(),
+            expected_head: ExpectedHeadDto::Match {
+                version: first.head_version,
+            },
+            predecessor_write_id: Some("write-generation-gc-1".to_owned()),
+        })
+        .expect("new head no longer references asset");
+    repository.close().expect("repository closes");
+
+    let reopened = NativeRepository::new(path.clone());
+    reopened
+        .initialize()
+        .expect("startup scans retained generations");
+    reopened
+        .verify_audio_asset(checksum.clone(), bytes.len())
+        .expect("older retained generation keeps object reachable");
+    let third = reopened
+        .save(SaveRequestDto {
+            project_id: "schema-v3-project".to_owned(),
+            project_json: without_audio.clone(),
+            activation_id: "activation-generation-gc".to_owned(),
+            revision: 3,
+            write_id: "write-generation-gc-3".to_owned(),
+            expected_head: ExpectedHeadDto::Match {
+                version: second.head_version,
+            },
+            predecessor_write_id: Some("write-generation-gc-2".to_owned()),
+        })
+        .expect("third generation saves");
+    reopened
+        .save(SaveRequestDto {
+            project_id: "schema-v3-project".to_owned(),
+            project_json: without_audio,
+            activation_id: "activation-generation-gc".to_owned(),
+            revision: 4,
+            write_id: "write-generation-gc-4".to_owned(),
+            expected_head: ExpectedHeadDto::Match {
+                version: third.head_version,
+            },
+            predecessor_write_id: Some("write-generation-gc-3".to_owned()),
+        })
+        .expect("fourth generation prunes the asset generation");
+    reopened.close().expect("repository closes again");
+
+    let collected = NativeRepository::new(path);
+    collected.initialize().expect("startup GC completes");
+    assert_eq!(
+        collected
+            .read_audio_asset(checksum, bytes.len())
+            .unwrap_err()
+            .code,
+        AudioAssetErrorCode::Missing
+    );
+}
+
+#[test]
+fn native_save_and_crash_draft_require_every_ready_audio_binary() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let repository = NativeRepository::new(directory.path().join("projects.sqlite3"));
+    repository.initialize().expect("repository initializes");
+    let project_json = schema_v3_project_json();
+    let request = CrashDraftRequestDto {
+        project_id: "schema-v3-project".to_owned(),
+        project_json: project_json.clone(),
+        activation_id: "activation-audio-preflight".to_owned(),
+        revision: 1,
+        write_id: "write-audio-preflight".to_owned(),
+        expected_head: ExpectedHeadDto::Empty,
+        predecessor_write_id: None,
+    };
+
+    let error = repository.stage_crash_draft(request.clone()).unwrap_err();
+    assert_eq!(error.code, PersistenceErrorCode::CorruptData);
+    assert!(repository
+        .load("schema-v3-project".to_owned())
+        .expect("load remains available")
+        .is_none());
+
+    let bytes = vec![0u8; 4096];
+    repository
+        .store_audio_asset(audio_asset_sha256(&bytes), bytes.len(), bytes)
+        .expect("referenced asset stores");
+    repository
+        .stage_crash_draft(request)
+        .expect("draft succeeds only after asset verification");
+}
+
+#[test]
+fn erase_all_removes_audio_assets_with_the_database() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let repository = NativeRepository::new(directory.path().join("projects.sqlite3"));
+    repository.initialize().expect("repository initializes");
+    let bytes = b"asset erased with local data".to_vec();
+    repository
+        .store_audio_asset(audio_asset_sha256(&bytes), bytes.len(), bytes)
+        .expect("asset stores");
+    assert!(directory.path().join(AUDIO_ASSET_ROOT_DIRECTORY).exists());
+
+    repository
+        .prepare_erase_all(EraseAllRequestDto {
+            erase_id: ERASE_ID_A.to_owned(),
+        })
+        .expect("prepare removes every native data family");
+    assert!(!directory.path().join(AUDIO_ASSET_ROOT_DIRECTORY).exists());
+    repository
+        .complete_erase_all(EraseAllRequestDto {
+            erase_id: ERASE_ID_A.to_owned(),
+        })
+        .expect("erase completes");
+}
+
+#[cfg(unix)]
+#[test]
+fn audio_asset_root_symlink_is_rejected_without_touching_external_data() {
+    use std::os::unix::fs::symlink;
+
+    let app = tempfile::tempdir().expect("app directory");
+    let external = tempfile::tempdir().expect("external directory");
+    let sentinel = external.path().join("sentinel");
+    fs::write(&sentinel, b"outside").unwrap();
+    symlink(external.path(), app.path().join(AUDIO_ASSET_ROOT_DIRECTORY)).unwrap();
+    let repository = NativeRepository::new(app.path().join("projects.sqlite3"));
+    let error = repository.initialize().unwrap_err();
+    assert_eq!(error.code, PersistenceErrorCode::StorageUnavailable);
+    assert_eq!(fs::read(sentinel).unwrap(), b"outside");
 }
 
 fn save_request(

@@ -1,3 +1,4 @@
+mod native_audio_assets;
 mod native_close;
 mod native_files;
 mod native_persistence;
@@ -33,6 +34,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(NativeCloseState::default())
         .invoke_handler(tauri::generate_handler![
+            native_audio_assets::audio_asset_store,
+            native_audio_assets::audio_asset_read,
+            native_audio_assets::audio_asset_verify,
             native_files::file_open_project,
             native_files::file_open_midi,
             native_files::file_open_audio,

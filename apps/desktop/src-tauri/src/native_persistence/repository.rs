@@ -16,6 +16,7 @@ use rusqlite::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
@@ -29,9 +30,16 @@ use std::{
 };
 use tauri::{Manager, Runtime};
 
+use crate::native_audio_assets::{
+    AudioAssetErrorCode, AudioAssetErrorDto, AudioAssetStoreReceipt, AUDIO_ASSET_MAX_BYTES,
+};
+
 const DATABASE_FILE_NAME: &str = "projects-v1.sqlite3";
 const ERASE_MARKER_FILE_NAME: &str = "erase-all-v1.json";
 const PROCESS_LOCK_FILE_NAME: &str = ".compose-tutor-studio.lock";
+const AUDIO_ASSET_ROOT_DIRECTORY: &str = "audio-assets-v1";
+const AUDIO_ASSET_OBJECTS_DIRECTORY: &str = "sha256";
+const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
@@ -50,6 +58,10 @@ const MAX_LEGACY_SNAPSHOT_ENTRIES: usize = 4_096;
 const MAX_LEGACY_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CRASH_DRAFT_ENTRIES: usize = 64;
 const MAX_CRASH_DRAFT_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+// This is a repository-wide safety bound, not a per-project limit. Keep it
+// comfortably above the project schema limit so a long-lived library with
+// many retained projects does not fail initialization merely due to scale.
+const MAX_AUDIO_ASSET_STORAGE_ENTRIES: usize = 65_536;
 const RETAIN_GENERATIONS: usize = 3;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SAFE_SQLITE_VFS_NAME: &str = "cts-safe-vfs-v1";
@@ -840,6 +852,49 @@ impl NativeRepository {
         }
     }
 
+    pub(crate) fn store_audio_asset(
+        &self,
+        checksum: String,
+        expected_length: usize,
+        bytes: Vec<u8>,
+    ) -> Result<AudioAssetStoreReceipt, AudioAssetErrorDto> {
+        let mut runtime = self
+            .lock(RepositoryOperation::Save, None)
+            .map_err(audio_asset_persistence_error)?;
+        self.ensure_normal_operation_allowed(&mut runtime, RepositoryOperation::Save, None)
+            .map_err(audio_asset_persistence_error)?;
+        let app_directory = self
+            .path
+            .parent()
+            .ok_or_else(|| AudioAssetErrorDto::new(AudioAssetErrorCode::StorageUnavailable))?;
+        store_audio_asset_file(app_directory, checksum, expected_length, bytes)
+    }
+
+    pub(crate) fn read_audio_asset(
+        &self,
+        checksum: String,
+        expected_length: usize,
+    ) -> Result<Vec<u8>, AudioAssetErrorDto> {
+        let mut runtime = self
+            .lock(RepositoryOperation::Load, None)
+            .map_err(audio_asset_persistence_error)?;
+        self.ensure_normal_operation_allowed(&mut runtime, RepositoryOperation::Load, None)
+            .map_err(audio_asset_persistence_error)?;
+        let app_directory = self
+            .path
+            .parent()
+            .ok_or_else(|| AudioAssetErrorDto::new(AudioAssetErrorCode::StorageUnavailable))?;
+        read_audio_asset_file(app_directory, &checksum, expected_length)
+    }
+
+    pub(crate) fn verify_audio_asset(
+        &self,
+        checksum: String,
+        expected_length: usize,
+    ) -> Result<(), AudioAssetErrorDto> {
+        self.read_audio_asset(checksum, expected_length).map(|_| ())
+    }
+
     pub(crate) fn initialize(&self) -> Result<(), PersistenceErrorDto> {
         let mut runtime = self.lock(RepositoryOperation::Initialize, None)?;
         self.ensure_normal_operation_allowed(&mut runtime, RepositoryOperation::Initialize, None)?;
@@ -860,6 +915,7 @@ impl NativeRepository {
         })?;
 
         harden_app_data_directory_permissions(parent).map_err(|_| database_boundary_error())?;
+        recover_audio_asset_staging(parent)?;
         let mut before_open = self.inspect_and_harden_database_family()?;
         if before_open.main_identity().is_none() {
             create_private_database_file(&self.path).map_err(|_| database_boundary_error())?;
@@ -904,6 +960,7 @@ impl NativeRepository {
         }
         configuration?;
         replay_crash_drafts(&mut connection)?;
+        garbage_collect_audio_assets(&connection, parent)?;
         runtime.connection = Some(connection);
         runtime.vfs_boundary = Some(vfs_boundary);
         Ok(())
@@ -1249,8 +1306,17 @@ impl NativeRepository {
                 Some(&project_id),
             )
         })?;
+        let app_directory = self.path.parent().map(Path::to_path_buf).ok_or_else(|| {
+            persistence_error(
+                RepositoryOperation::Save,
+                PersistenceErrorCode::StorageUnavailable,
+                RetryPolicy::Never,
+                Some(&project_id),
+            )
+        })?;
 
         self.with_connection(RepositoryOperation::Save, Some(&project_id), |connection| {
+            verify_project_audio_assets(&app_directory, &canonical.value, &project_id)?;
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|error| write_sql_error(error, Some(&project_id)))?;
@@ -1483,11 +1549,20 @@ impl NativeRepository {
                 Some(&project_id),
             )
         })?;
+        let app_directory = self.path.parent().map(Path::to_path_buf).ok_or_else(|| {
+            persistence_error(
+                RepositoryOperation::Save,
+                PersistenceErrorCode::StorageUnavailable,
+                RetryPolicy::Never,
+                Some(&project_id),
+            )
+        })?;
 
         self.with_connection(
             RepositoryOperation::Save,
             Some(&project_id),
             |connection| {
+                verify_project_audio_assets(&app_directory, &canonical.value, &project_id)?;
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .map_err(|error| write_sql_error(error, Some(&project_id)))?;
@@ -2823,6 +2898,11 @@ impl NativeRepository {
         for path in self.database_family_paths() {
             remove_path_without_following(&path)?;
         }
+        let parent = self
+            .path
+            .parent()
+            .ok_or_else(|| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+        remove_audio_asset_root(parent)?;
         self.sync_database_parent()?;
         self.ensure_database_family_absent()
     }
@@ -2838,6 +2918,16 @@ impl NativeRepository {
                     ));
                 }
             }
+        }
+        let parent = self
+            .path
+            .parent()
+            .ok_or_else(|| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+        if !audio_asset_root_is_absent(parent)? {
+            return Err(erase_error(
+                PersistenceErrorCode::DeleteFailed,
+                RetryPolicy::Manual,
+            ));
         }
         Ok(())
     }
@@ -9787,6 +9877,609 @@ fn io_error_to_persistence(
         ),
     };
     persistence_error(operation, code, retry, project_id)
+}
+
+fn audio_asset_persistence_error(error: PersistenceErrorDto) -> AudioAssetErrorDto {
+    let code = match error.code {
+        PersistenceErrorCode::AccessDenied => AudioAssetErrorCode::AccessDenied,
+        PersistenceErrorCode::TooLarge | PersistenceErrorCode::QuotaExceeded => {
+            AudioAssetErrorCode::TooLarge
+        }
+        PersistenceErrorCode::CorruptData => AudioAssetErrorCode::Corrupt,
+        PersistenceErrorCode::WriteFailed | PersistenceErrorCode::DeleteFailed => {
+            AudioAssetErrorCode::WriteFailed
+        }
+        PersistenceErrorCode::ReadFailed => AudioAssetErrorCode::ReadFailed,
+        PersistenceErrorCode::StorageUnavailable
+        | PersistenceErrorCode::InvalidProject
+        | PersistenceErrorCode::SerializationFailed
+        | PersistenceErrorCode::UnsupportedVersion
+        | PersistenceErrorCode::Conflict
+        | PersistenceErrorCode::MigrationFailed => AudioAssetErrorCode::StorageUnavailable,
+    };
+    AudioAssetErrorDto::new(code)
+}
+
+fn audio_asset_io_error(error: std::io::Error, write: bool) -> AudioAssetErrorDto {
+    let code = match error.kind() {
+        IoErrorKind::NotFound if !write => AudioAssetErrorCode::Missing,
+        IoErrorKind::PermissionDenied => AudioAssetErrorCode::AccessDenied,
+        IoErrorKind::StorageFull | IoErrorKind::FileTooLarge => AudioAssetErrorCode::TooLarge,
+        IoErrorKind::InvalidData => AudioAssetErrorCode::Corrupt,
+        _ if write => AudioAssetErrorCode::WriteFailed,
+        _ => AudioAssetErrorCode::ReadFailed,
+    };
+    AudioAssetErrorDto::new(code)
+}
+
+fn audio_asset_sha256(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut checksum = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut checksum, "{byte:02x}");
+    }
+    checksum
+}
+
+fn audio_asset_paths(app_directory: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let root = app_directory.join(AUDIO_ASSET_ROOT_DIRECTORY);
+    let objects = root.join(AUDIO_ASSET_OBJECTS_DIRECTORY);
+    let staging = root.join(AUDIO_ASSET_STAGING_DIRECTORY);
+    (root, objects, staging)
+}
+
+fn validate_audio_asset_directory(path: &Path) -> std::io::Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == IoErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink()
+        || metadata_is_windows_reparse_point(&metadata)
+        || !metadata.is_dir()
+    {
+        return Err(unsafe_owned_entry_error());
+    }
+    harden_app_data_directory_permissions(path)?;
+    let _retained = open_retained_data_directory(path)?;
+    Ok(true)
+}
+
+fn ensure_audio_asset_directory(path: &Path) -> std::io::Result<()> {
+    if !validate_audio_asset_directory(path)? {
+        let parent = path
+            .parent()
+            .ok_or_else(|| std::io::Error::from(IoErrorKind::NotFound))?;
+        match fs::create_dir(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == IoErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        if !validate_audio_asset_directory(path)? {
+            return Err(std::io::Error::from(IoErrorKind::NotFound));
+        }
+        sync_parent_directory(parent)?;
+    }
+    Ok(())
+}
+
+fn ensure_audio_asset_directories(
+    app_directory: &Path,
+) -> Result<(PathBuf, PathBuf), AudioAssetErrorDto> {
+    harden_app_data_directory_permissions(app_directory)
+        .map_err(|error| audio_asset_io_error(error, true))?;
+    let (root, objects, staging) = audio_asset_paths(app_directory);
+    ensure_audio_asset_directory(&root).map_err(|error| audio_asset_io_error(error, true))?;
+    ensure_audio_asset_directory(&objects).map_err(|error| audio_asset_io_error(error, true))?;
+    ensure_audio_asset_directory(&staging).map_err(|error| audio_asset_io_error(error, true))?;
+    Ok((objects, staging))
+}
+
+fn validate_audio_asset_identity(
+    checksum: &str,
+    expected_length: usize,
+) -> Result<(), AudioAssetErrorDto> {
+    if !crate::native_audio_assets::valid_checksum(checksum) || expected_length == 0 {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::InvalidRequest));
+    }
+    if expected_length > AUDIO_ASSET_MAX_BYTES {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::TooLarge));
+    }
+    Ok(())
+}
+
+fn read_verified_audio_asset_path(
+    path: &Path,
+    checksum: &str,
+    expected_length: usize,
+) -> Result<Vec<u8>, AudioAssetErrorDto> {
+    let mut validated = inspect_existing_owned_regular_file(path, false)
+        .map_err(|error| audio_asset_io_error(error, false))?
+        .ok_or_else(|| AudioAssetErrorDto::new(AudioAssetErrorCode::Missing))?;
+    harden_validated_owned_file(&validated, false)
+        .map_err(|error| audio_asset_io_error(error, false))?;
+    let actual_length = usize::try_from(validated.facts.length)
+        .map_err(|_| AudioAssetErrorDto::new(AudioAssetErrorCode::TooLarge))?;
+    if actual_length > AUDIO_ASSET_MAX_BYTES {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::TooLarge));
+    }
+    if actual_length != expected_length {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::LengthMismatch));
+    }
+    let mut bytes = Vec::with_capacity(expected_length);
+    validated
+        .file
+        .read_to_end(&mut bytes)
+        .map_err(|error| audio_asset_io_error(error, false))?;
+    if bytes.len() != expected_length {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::LengthMismatch));
+    }
+    if audio_asset_sha256(&bytes) != checksum {
+        return Err(AudioAssetErrorDto::new(
+            AudioAssetErrorCode::ChecksumMismatch,
+        ));
+    }
+    if !opened_file_is_single_link_regular_and_matches_path(&validated.file, path, false)
+        .map_err(|error| audio_asset_io_error(error, false))?
+    {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::Corrupt));
+    }
+    Ok(bytes)
+}
+
+fn read_audio_asset_file(
+    app_directory: &Path,
+    checksum: &str,
+    expected_length: usize,
+) -> Result<Vec<u8>, AudioAssetErrorDto> {
+    validate_audio_asset_identity(checksum, expected_length)?;
+    let (root, objects, _) = audio_asset_paths(app_directory);
+    if !validate_audio_asset_directory(&root).map_err(|error| audio_asset_io_error(error, false))?
+        || !validate_audio_asset_directory(&objects)
+            .map_err(|error| audio_asset_io_error(error, false))?
+    {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::Missing));
+    }
+    read_verified_audio_asset_path(&objects.join(checksum), checksum, expected_length)
+}
+
+fn store_audio_asset_file(
+    app_directory: &Path,
+    checksum: String,
+    expected_length: usize,
+    bytes: Vec<u8>,
+) -> Result<AudioAssetStoreReceipt, AudioAssetErrorDto> {
+    validate_audio_asset_identity(&checksum, expected_length)?;
+    if bytes.len() != expected_length {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::LengthMismatch));
+    }
+    if audio_asset_sha256(&bytes) != checksum {
+        return Err(AudioAssetErrorDto::new(
+            AudioAssetErrorCode::ChecksumMismatch,
+        ));
+    }
+    let (objects, staging) = ensure_audio_asset_directories(app_directory)?;
+    let final_path = objects.join(&checksum);
+    if inspect_existing_owned_regular_file(&final_path, false)
+        .map_err(|error| audio_asset_io_error(error, false))?
+        .is_some()
+    {
+        read_verified_audio_asset_path(&final_path, &checksum, expected_length)?;
+        return Ok(AudioAssetStoreReceipt {
+            checksum_sha256: checksum,
+            byte_length: u64::try_from(expected_length).unwrap_or(u64::MAX),
+            deduplicated: true,
+        });
+    }
+
+    let staging_path = staging.join(format!("{checksum}.tmp"));
+    if let Some(stale) = inspect_existing_owned_regular_file(&staging_path, false)
+        .map_err(|error| audio_asset_io_error(error, true))?
+    {
+        harden_validated_owned_file(&stale, false)
+            .map_err(|error| audio_asset_io_error(error, true))?;
+        fs::remove_file(&staging_path).map_err(|error| audio_asset_io_error(error, true))?;
+        sync_parent_directory(&staging).map_err(|error| audio_asset_io_error(error, true))?;
+    }
+    create_private_database_file(&staging_path)
+        .map_err(|error| audio_asset_io_error(error, true))?;
+    let mut staging_file = open_path_without_following(&staging_path, true, false)
+        .map_err(|error| audio_asset_io_error(error, true))?;
+    if !opened_file_is_single_link_regular_and_matches_path(&staging_file, &staging_path, true)
+        .map_err(|error| audio_asset_io_error(error, true))?
+    {
+        return Err(AudioAssetErrorDto::new(AudioAssetErrorCode::Corrupt));
+    }
+    staging_file
+        .write_all(&bytes)
+        .map_err(|error| audio_asset_io_error(error, true))?;
+    staging_file
+        .sync_all()
+        .map_err(|error| audio_asset_io_error(error, true))?;
+    drop(staging_file);
+    read_verified_audio_asset_path(&staging_path, &checksum, expected_length)?;
+    fs::rename(&staging_path, &final_path).map_err(|error| audio_asset_io_error(error, true))?;
+    sync_parent_directory(&objects).map_err(|error| audio_asset_io_error(error, true))?;
+    sync_parent_directory(&staging).map_err(|error| audio_asset_io_error(error, true))?;
+    read_verified_audio_asset_path(&final_path, &checksum, expected_length)?;
+    Ok(AudioAssetStoreReceipt {
+        checksum_sha256: checksum,
+        byte_length: u64::try_from(expected_length).unwrap_or(u64::MAX),
+        deduplicated: false,
+    })
+}
+
+fn audio_asset_initialization_error(error: AudioAssetErrorDto) -> PersistenceErrorDto {
+    let (code, retry) = match error.code {
+        AudioAssetErrorCode::AccessDenied => {
+            (PersistenceErrorCode::AccessDenied, RetryPolicy::Manual)
+        }
+        AudioAssetErrorCode::TooLarge => (PersistenceErrorCode::TooLarge, RetryPolicy::Never),
+        AudioAssetErrorCode::StorageUnavailable => (
+            PersistenceErrorCode::StorageUnavailable,
+            RetryPolicy::Manual,
+        ),
+        AudioAssetErrorCode::ReadFailed => (PersistenceErrorCode::ReadFailed, RetryPolicy::Manual),
+        AudioAssetErrorCode::WriteFailed => {
+            (PersistenceErrorCode::WriteFailed, RetryPolicy::Manual)
+        }
+        AudioAssetErrorCode::InvalidRequest
+        | AudioAssetErrorCode::Missing
+        | AudioAssetErrorCode::Corrupt
+        | AudioAssetErrorCode::ChecksumMismatch
+        | AudioAssetErrorCode::LengthMismatch => {
+            (PersistenceErrorCode::CorruptData, RetryPolicy::Never)
+        }
+    };
+    persistence_error(RepositoryOperation::Initialize, code, retry, None)
+}
+
+fn recover_audio_asset_staging(app_directory: &Path) -> Result<(), PersistenceErrorDto> {
+    let (root, objects, staging) = audio_asset_paths(app_directory);
+    if !validate_audio_asset_directory(&root).map_err(|_| database_boundary_error())? {
+        return Ok(());
+    }
+    ensure_audio_asset_directory(&objects).map_err(|_| database_boundary_error())?;
+    ensure_audio_asset_directory(&staging).map_err(|_| database_boundary_error())?;
+    let entries = fs::read_dir(&staging)
+        .map_err(|error| audio_asset_initialization_error(audio_asset_io_error(error, false)))?;
+    let mut count = 0usize;
+    for entry in entries {
+        count = count.saturating_add(1);
+        if count > MAX_AUDIO_ASSET_STORAGE_ENTRIES {
+            return Err(persistence_error(
+                RepositoryOperation::Initialize,
+                PersistenceErrorCode::TooLarge,
+                RetryPolicy::Never,
+                None,
+            ));
+        }
+        let entry = entry.map_err(|error| {
+            audio_asset_initialization_error(audio_asset_io_error(error, false))
+        })?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or_else(database_boundary_error)?;
+        let checksum = name
+            .strip_suffix(".tmp")
+            .filter(|value| crate::native_audio_assets::valid_checksum(value))
+            .ok_or_else(database_boundary_error)?;
+        let staging_path = staging.join(name);
+        let mut validated = inspect_existing_owned_regular_file(&staging_path, false)
+            .map_err(|_| database_boundary_error())?
+            .ok_or_else(database_boundary_error)?;
+        harden_validated_owned_file(&validated, false).map_err(|_| database_boundary_error())?;
+        let length = usize::try_from(validated.facts.length).unwrap_or(usize::MAX);
+        let mut bytes = Vec::new();
+        let valid_length = length > 0 && length <= AUDIO_ASSET_MAX_BYTES;
+        let valid_content = if valid_length {
+            bytes.reserve(length);
+            validated.file.read_to_end(&mut bytes).is_ok()
+                && bytes.len() == length
+                && audio_asset_sha256(&bytes) == checksum
+        } else {
+            false
+        };
+        if !valid_content {
+            fs::remove_file(&staging_path).map_err(|error| {
+                audio_asset_initialization_error(audio_asset_io_error(error, true))
+            })?;
+            continue;
+        }
+
+        let final_path = objects.join(checksum);
+        if inspect_existing_owned_regular_file(&final_path, false)
+            .map_err(|_| database_boundary_error())?
+            .is_some()
+        {
+            read_verified_audio_asset_path(&final_path, checksum, length)
+                .map_err(audio_asset_initialization_error)?;
+            fs::remove_file(&staging_path).map_err(|error| {
+                audio_asset_initialization_error(audio_asset_io_error(error, true))
+            })?;
+        } else {
+            fs::rename(&staging_path, &final_path).map_err(|error| {
+                audio_asset_initialization_error(audio_asset_io_error(error, true))
+            })?;
+            sync_parent_directory(&objects).map_err(|error| {
+                audio_asset_initialization_error(audio_asset_io_error(error, true))
+            })?;
+            read_verified_audio_asset_path(&final_path, checksum, length)
+                .map_err(audio_asset_initialization_error)?;
+        }
+    }
+    sync_parent_directory(&staging)
+        .map_err(|error| audio_asset_initialization_error(audio_asset_io_error(error, true)))
+}
+
+fn collect_project_audio_checksums(bytes: &[u8], reachable: &mut HashSet<String>) -> Option<()> {
+    if bytes.len() > MAX_PROJECT_JSON_BYTES {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(bytes).ok()?;
+    let record = value.as_object()?;
+    let schema_version = record.get("schemaVersion")?.as_u64()?;
+    if !(MIN_PROJECT_SCHEMA_VERSION..=PROJECT_SCHEMA_VERSION).contains(&schema_version) {
+        return None;
+    }
+    let Some(assets) = record.get("audioAssets") else {
+        return Some(());
+    };
+    for asset in assets.as_array()? {
+        let asset = asset.as_object()?;
+        if asset.get("availability").and_then(Value::as_str) != Some("ready") {
+            continue;
+        }
+        let checksum = asset.get("checksumSha256")?.as_str()?;
+        if !crate::native_audio_assets::valid_checksum(checksum) {
+            return None;
+        }
+        reachable.insert(checksum.to_owned());
+    }
+    Some(())
+}
+
+fn reachable_audio_asset_checksums(
+    connection: &Connection,
+) -> Result<Option<HashSet<String>>, PersistenceErrorDto> {
+    let mut reachable = HashSet::new();
+    for sql in [
+        "SELECT payload_json FROM project_generations WHERE payload_json IS NOT NULL",
+        "SELECT payload_json FROM project_crash_drafts",
+    ] {
+        let mut statement = connection.prepare(sql).map_err(initialize_sql_error)?;
+        let mut rows = statement.query([]).map_err(initialize_sql_error)?;
+        let mut count = 0usize;
+        while let Some(row) = rows.next().map_err(initialize_sql_error)? {
+            count = count.saturating_add(1);
+            if count > 100_000 {
+                return Ok(None);
+            }
+            let payload: Vec<u8> = row.get(0).map_err(initialize_sql_error)?;
+            if collect_project_audio_checksums(&payload, &mut reachable).is_none() {
+                // Future/corrupt evidence makes deletion unsafe. Retain every
+                // object and let normal project diagnostics surface the row.
+                return Ok(None);
+            }
+        }
+    }
+    Ok(Some(reachable))
+}
+
+fn garbage_collect_audio_assets(
+    connection: &Connection,
+    app_directory: &Path,
+) -> Result<(), PersistenceErrorDto> {
+    let Some(reachable) = reachable_audio_asset_checksums(connection)? else {
+        return Ok(());
+    };
+    let (root, objects, _) = audio_asset_paths(app_directory);
+    if !validate_audio_asset_directory(&root).map_err(|_| database_boundary_error())?
+        || !validate_audio_asset_directory(&objects).map_err(|_| database_boundary_error())?
+    {
+        return Ok(());
+    }
+    let entries = fs::read_dir(&objects).map_err(|_| database_boundary_error())?;
+    let mut count = 0usize;
+    let mut changed = false;
+    for entry in entries {
+        count = count.saturating_add(1);
+        if count > MAX_AUDIO_ASSET_STORAGE_ENTRIES {
+            return Err(persistence_error(
+                RepositoryOperation::Initialize,
+                PersistenceErrorCode::TooLarge,
+                RetryPolicy::Never,
+                None,
+            ));
+        }
+        let entry = entry.map_err(|_| database_boundary_error())?;
+        let name = entry.file_name();
+        let checksum = name
+            .to_str()
+            .filter(|value| crate::native_audio_assets::valid_checksum(value))
+            .ok_or_else(database_boundary_error)?;
+        let path = objects.join(checksum);
+        let validated = inspect_existing_owned_regular_file(&path, false)
+            .map_err(|_| database_boundary_error())?
+            .ok_or_else(database_boundary_error)?;
+        harden_validated_owned_file(&validated, false).map_err(|_| database_boundary_error())?;
+        if reachable.contains(checksum) {
+            continue;
+        }
+        fs::remove_file(path).map_err(|_| {
+            persistence_error(
+                RepositoryOperation::Initialize,
+                PersistenceErrorCode::DeleteFailed,
+                RetryPolicy::Manual,
+                None,
+            )
+        })?;
+        changed = true;
+    }
+    if changed {
+        sync_parent_directory(&objects).map_err(|_| {
+            persistence_error(
+                RepositoryOperation::Initialize,
+                PersistenceErrorCode::DeleteFailed,
+                RetryPolicy::Manual,
+                None,
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn remove_audio_asset_directory(
+    path: &Path,
+    valid_name: impl Fn(&str) -> bool,
+) -> Result<(), PersistenceErrorDto> {
+    if !validate_audio_asset_directory(path)
+        .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?
+    {
+        return Ok(());
+    }
+    let entries = fs::read_dir(path)
+        .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+    let mut count = 0usize;
+    for entry in entries {
+        count = count.saturating_add(1);
+        if count > MAX_AUDIO_ASSET_STORAGE_ENTRIES {
+            return Err(erase_error(
+                PersistenceErrorCode::DeleteFailed,
+                RetryPolicy::Manual,
+            ));
+        }
+        let entry = entry
+            .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+        let name = entry.file_name();
+        let name = name
+            .to_str()
+            .filter(|name| valid_name(name))
+            .ok_or_else(|| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+        let member = path.join(name);
+        let validated = inspect_existing_owned_regular_file(&member, false)
+            .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?
+            .ok_or_else(|| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+        harden_validated_owned_file(&validated, false)
+            .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+        fs::remove_file(member)
+            .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+    }
+    fs::remove_dir(path)
+        .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))
+}
+
+fn remove_audio_asset_root(app_directory: &Path) -> Result<(), PersistenceErrorDto> {
+    let (root, objects, staging) = audio_asset_paths(app_directory);
+    if !validate_audio_asset_directory(&root)
+        .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?
+    {
+        return Ok(());
+    }
+    remove_audio_asset_directory(&objects, crate::native_audio_assets::valid_checksum)?;
+    remove_audio_asset_directory(&staging, |name| {
+        name.strip_suffix(".tmp")
+            .is_some_and(crate::native_audio_assets::valid_checksum)
+    })?;
+    let mut leftovers = fs::read_dir(&root)
+        .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+    if leftovers.next().is_some() {
+        return Err(erase_error(
+            PersistenceErrorCode::DeleteFailed,
+            RetryPolicy::Manual,
+        ));
+    }
+    fs::remove_dir(&root)
+        .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))?;
+    sync_parent_directory(app_directory)
+        .map_err(|_| erase_error(PersistenceErrorCode::DeleteFailed, RetryPolicy::Manual))
+}
+
+fn audio_asset_root_is_absent(app_directory: &Path) -> Result<bool, PersistenceErrorDto> {
+    let (root, _, _) = audio_asset_paths(app_directory);
+    match fs::symlink_metadata(root) {
+        Err(error) if error.kind() == IoErrorKind::NotFound => Ok(true),
+        Ok(_) | Err(_) => Ok(false),
+    }
+}
+
+fn verify_project_audio_assets(
+    app_directory: &Path,
+    project: &Value,
+    project_id: &str,
+) -> Result<(), PersistenceErrorDto> {
+    let Some(assets) = project.get("audioAssets").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    let mut checked = HashSet::new();
+    for asset in assets {
+        let Some(record) = asset.as_object() else {
+            return Err(persistence_error(
+                RepositoryOperation::Save,
+                PersistenceErrorCode::InvalidProject,
+                RetryPolicy::Never,
+                Some(project_id),
+            ));
+        };
+        if record.get("availability").and_then(Value::as_str) != Some("ready") {
+            continue;
+        }
+        let checksum = record
+            .get("checksumSha256")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                persistence_error(
+                    RepositoryOperation::Save,
+                    PersistenceErrorCode::InvalidProject,
+                    RetryPolicy::Never,
+                    Some(project_id),
+                )
+            })?;
+        let length = record
+            .get("byteLength")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                persistence_error(
+                    RepositoryOperation::Save,
+                    PersistenceErrorCode::InvalidProject,
+                    RetryPolicy::Never,
+                    Some(project_id),
+                )
+            })?;
+        if !checked.insert((checksum.to_owned(), length)) {
+            continue;
+        }
+        read_audio_asset_file(app_directory, checksum, length).map_err(|error| {
+            let (code, retry) = match error.code {
+                AudioAssetErrorCode::AccessDenied => {
+                    (PersistenceErrorCode::AccessDenied, RetryPolicy::Manual)
+                }
+                AudioAssetErrorCode::TooLarge => {
+                    (PersistenceErrorCode::TooLarge, RetryPolicy::Never)
+                }
+                AudioAssetErrorCode::StorageUnavailable => (
+                    PersistenceErrorCode::StorageUnavailable,
+                    RetryPolicy::Manual,
+                ),
+                AudioAssetErrorCode::ReadFailed => {
+                    (PersistenceErrorCode::ReadFailed, RetryPolicy::Manual)
+                }
+                AudioAssetErrorCode::InvalidRequest => {
+                    (PersistenceErrorCode::InvalidProject, RetryPolicy::Never)
+                }
+                AudioAssetErrorCode::Missing
+                | AudioAssetErrorCode::Corrupt
+                | AudioAssetErrorCode::ChecksumMismatch
+                | AudioAssetErrorCode::LengthMismatch
+                | AudioAssetErrorCode::WriteFailed => {
+                    (PersistenceErrorCode::CorruptData, RetryPolicy::Never)
+                }
+            };
+            persistence_error(RepositoryOperation::Save, code, retry, Some(project_id))
+        })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
