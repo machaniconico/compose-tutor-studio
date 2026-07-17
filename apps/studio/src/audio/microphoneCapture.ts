@@ -1,4 +1,5 @@
 import microphoneCaptureWorkletUrl from './microphoneCapture.worklet.ts?worker&url';
+import { MAX_MICROPHONE_INPUT_DEVICE_ID_LENGTH } from './microphoneInputDevices';
 
 export const MAX_MICROPHONE_CAPTURE_SECONDS = 60;
 export const MAX_MICROPHONE_CAPTURE_CHANNELS = 2;
@@ -92,6 +93,8 @@ export type StartMicrophoneCaptureOptions = Readonly<{
   signal?: AbortSignal;
   countdownSeconds?: number;
   maxDurationSeconds?: number;
+  /** Omit (or pass an empty id) to use the host's default audio input. */
+  inputDeviceId?: string;
   onCountdown?: (secondsRemaining: number) => void;
   onLevel?: (peak: number) => void;
   /** Live input monitoring. Disabled by default to avoid speaker feedback. */
@@ -358,6 +361,7 @@ async function permissionStream(
   platform: MicrophoneCapturePlatform,
   signal: AbortSignal | undefined,
   token: symbol,
+  inputDeviceId: string | undefined,
 ): Promise<{ stream: MediaStream | null; deferredRelease: boolean }> {
   if (!platform.mediaDevices) throw new MicrophoneCaptureError('unsupported');
   if (signal?.aborted) throw new MicrophoneCaptureError('cancelled');
@@ -368,6 +372,7 @@ async function permissionStream(
       echoCancellation: { ideal: false },
       noiseSuppression: { ideal: false },
       autoGainControl: { ideal: false },
+      ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
     },
   });
   if (!signal) return { stream: await request, deferredRelease: false };
@@ -439,6 +444,16 @@ export async function startMicrophoneCapture(
   if (!platformIsSupported(platform)) throw new MicrophoneCaptureError('unsupported');
   const countdownSeconds = countdownValue(options.countdownSeconds);
   const maxDurationSeconds = durationValue(options.maxDurationSeconds);
+  const inputDeviceId = options.inputDeviceId;
+  if (
+    inputDeviceId !== undefined
+    && (
+      typeof inputDeviceId !== 'string'
+      || inputDeviceId.length > MAX_MICROPHONE_INPUT_DEVICE_ID_LENGTH
+    )
+  ) {
+    throw new MicrophoneCaptureError('device-not-found');
+  }
   if (activeCaptureToken) throw new MicrophoneCaptureError('busy');
 
   const token = Symbol('microphone-capture');
@@ -475,7 +490,12 @@ export async function startMicrophoneCapture(
       platform.addWorkletModule(context, platform.workletModuleUrl),
       options.signal,
     );
-    const permission = await permissionStream(platform, options.signal, token);
+    const permission = await permissionStream(
+      platform,
+      options.signal,
+      token,
+      inputDeviceId,
+    );
     deferredRelease = permission.deferredRelease;
     stream = permission.stream;
     if (!stream) throw new MicrophoneCaptureError('cancelled');

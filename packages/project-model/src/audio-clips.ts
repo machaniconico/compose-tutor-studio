@@ -43,8 +43,10 @@ export type AudioClipMutationErrorCode =
   | 'audio-asset-not-found'
   | 'audio-asset-limit'
   | 'track-limit'
+  | 'track-not-found'
   | 'clip-limit'
   | 'clip-not-found'
+  | 'unsupported-track-type'
   | 'unsupported-clip-type'
   | 'invalid-track-name'
   | 'invalid-position'
@@ -92,6 +94,15 @@ export type SplitAudioClipResult =
 export type CreateAudioTrackClipOptions = Readonly<{
   startBeat?: number;
   trackName?: string;
+  loop?: boolean;
+  gainDb?: number;
+  fadeInFrames?: number;
+  fadeOutFrames?: number;
+  idFactory?: AudioClipIdFactory;
+}>;
+
+export type AppendAudioTrackClipOptions = Readonly<{
+  startBeat?: number;
   loop?: boolean;
   gainDb?: number;
   fadeInFrames?: number;
@@ -579,6 +590,129 @@ export function createAudioTrackClip(
       project: candidate,
       changed: true,
       trackId: track.id,
+      clipId: clip.id,
+      audioAssetId: asset.id,
+    };
+  });
+}
+
+/**
+ * Atomically adopt one verified asset and append its natural-rate Clip to an
+ * existing Audio Track. The target Track keeps its mixer/effect configuration,
+ * and no Track or routing node is created.
+ */
+export function appendAudioTrackClip(
+  project: Project,
+  trackId: string,
+  asset: ReadyAudioAsset,
+  options: AppendAudioTrackClipOptions = {},
+  clock: Clock = systemClock,
+): CreateAudioTrackClipResult {
+  return runMutation(project, () => {
+    const target = project.tracks.find((track) => track.id === trackId);
+    if (!target) {
+      return failure('track-not-found', `Audio Track not found: ${trackId}`);
+    }
+    if (target.type !== 'audio') {
+      return failure('unsupported-track-type', 'Recorded Audio Clips require an Audio Track.');
+    }
+    if (target.clips.length >= MAX_CLIPS_PER_TRACK) {
+      return failure(
+        'clip-limit',
+        `An Audio Track can contain at most ${MAX_CLIPS_PER_TRACK} clips.`,
+      );
+    }
+    if (asset.availability !== 'ready') {
+      return failure('audio-asset-not-ready', 'Only ready AudioAsset metadata can be adopted.');
+    }
+    if (project.audioAssets.length >= MAX_AUDIO_ASSETS) {
+      return failure('audio-asset-limit', `A project can contain at most ${MAX_AUDIO_ASSETS} audio assets.`);
+    }
+
+    const reserved = allEntityIds(project);
+    if (
+      typeof asset.id !== 'string'
+      || asset.id.length === 0
+      || asset.id.length > MAX_PROJECT_STRING_LENGTH
+    ) {
+      return failure('project-not-adoptable', 'The ready AudioAsset requires a bounded non-empty id.');
+    }
+    if (reserved.has(asset.id)) {
+      return failure('duplicate-id', `The AudioAsset id already exists: ${asset.id}`);
+    }
+    if (
+      !Number.isSafeInteger(asset.frameCount)
+      || asset.frameCount <= 0
+      || !Number.isSafeInteger(asset.sampleRate)
+      || asset.sampleRate <= 0
+    ) {
+      return failure('audio-asset-not-ready', 'The ready AudioAsset requires a valid frame count and sample rate.');
+    }
+    reserved.add(asset.id);
+
+    const startBeat = options.startBeat ?? 0;
+    if (!Number.isFinite(startBeat) || startBeat < 0) {
+      return failure('invalid-position', 'Audio Clip startBeat must be a non-negative finite number.');
+    }
+    const gainDb = options.gainDb ?? 0;
+    if (!Number.isFinite(gainDb) || gainDb < -96 || gainDb > 24) {
+      return failure('invalid-gain', 'Audio Clip gain must be between -96 dB and 24 dB.');
+    }
+    const fadeInFrames = options.fadeInFrames ?? 0;
+    const fadeOutFrames = options.fadeOutFrames ?? 0;
+    if (
+      !Number.isSafeInteger(fadeInFrames)
+      || fadeInFrames < 0
+      || !Number.isSafeInteger(fadeOutFrames)
+      || fadeOutFrames < 0
+      || fadeInFrames + fadeOutFrames > asset.frameCount
+    ) {
+      return failure(
+        'invalid-fades',
+        'Audio Clip fades must be non-negative frames within the source and timeline window.',
+      );
+    }
+
+    const allocatedClip = allocateId('clip', options.idFactory ?? defaultIdFactory, reserved);
+    if (!allocatedClip.ok) return allocatedClip;
+    const lengthBeats = naturalWindowLengthBeats(
+      project,
+      startBeat,
+      asset.frameCount,
+      asset.sampleRate,
+    );
+    const extension = extendProjectToInclude(project, startBeat + lengthBeats);
+    if (!extension.ok) return extension;
+
+    const clip: AudioClip = {
+      id: allocatedClip.id,
+      trackId: target.id,
+      type: 'audio',
+      startBeat,
+      lengthBeats,
+      loop: options.loop ?? false,
+      audioAssetId: asset.id,
+      sourceStartFrame: 0,
+      sourceFrameCount: asset.frameCount,
+      fadeInFrames,
+      fadeOutFrames,
+      gainDb,
+    };
+    const candidate: Project = {
+      ...extension.project,
+      audioAssets: [...extension.project.audioAssets, asset],
+      tracks: extension.project.tracks.map((track) =>
+        track.id === target.id
+          ? { ...track, clips: [...track.clips, clip] }
+          : track,
+      ),
+      updatedAt: nowIso(clock),
+    };
+    return {
+      ok: true,
+      project: candidate,
+      changed: true,
+      trackId: target.id,
       clipId: clip.id,
       audioAssetId: asset.id,
     };

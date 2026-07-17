@@ -69,9 +69,26 @@ describe('track management UI', () => {
     expect(html).toContain('初期値はOFF');
     expect(html).toContain('ヘッドホン');
     expect(html).toContain('ドライ音');
+    expect(html).toContain('入力デバイス');
+    expect(html).toContain('システム既定');
+    expect(html).toContain('aria-busy="true"');
     expect(html).toContain('type="checkbox"');
     expect(html).not.toContain('type="checkbox" checked');
     expect(html).toContain('録音を開始');
+  });
+
+  it('identifies an existing armed-track destination before recording starts', () => {
+    const html = renderToStaticMarkup(
+      <AudioTrackRecordingDialog
+        trackName="Lead Vocal"
+        targetTrackId="audio-track-lead"
+        onClose={() => undefined}
+        onCreated={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('既存トラック「Lead Vocal」へ保存します');
+    expect(html).not.toContain('新しいオーディオトラックへ保存します');
   });
 
   it('warns that project JSON needs the same local Audio Track asset store', () => {
@@ -127,6 +144,8 @@ describe('track management UI', () => {
     expect(html).toContain('モノラル');
     expect(html).toContain('音声素材が変更または破損しています');
     expect(html).toContain('アレンジャーでクリップを選んで編集');
+    expect(html).toContain('aria-label="Lead Vocal 録音待機"');
+    expect(html).toContain('このトラックを録音先にする');
   });
 
   it('keeps the Chords learning role while allowing an independent display name', () => {

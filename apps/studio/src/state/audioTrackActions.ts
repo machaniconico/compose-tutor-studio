@@ -1,4 +1,5 @@
 import {
+  appendAudioTrackClip,
   createAudioTrackClip,
   deleteAudioClip,
   duplicateAudioClip,
@@ -14,6 +15,9 @@ import {
   type Project,
   type ReadyAudioAsset,
   type SplitAudioClipResult,
+  MAX_AUDIO_ASSETS,
+  MAX_CLIPS_PER_TRACK,
+  MAX_PROJECT_TRACKS,
 } from '@cts/project-model';
 import {
   CanonicalAudioAssetError,
@@ -119,6 +123,15 @@ export type RecordStudioAudioTrackInput = Readonly<{
   fileName?: string;
   signal?: AbortSignal;
   onProgress?: (progress: CanonicalAudioAssetProgress) => void;
+}>;
+
+/** The exact destination frozen before microphone permission is requested. */
+export type StudioAudioTrackRecordingTarget =
+  | Readonly<{ kind: 'new-track'; trackName?: string }>
+  | Readonly<{ kind: 'existing-audio-track'; trackId: string }>;
+
+export type BeginStudioAudioTrackRecordingOptions = Readonly<{
+  target?: StudioAudioTrackRecordingTarget;
 }>;
 
 export type RecordStudioAudioTrackDependencies = Readonly<{
@@ -262,6 +275,7 @@ type StudioAudioTrackRecordingOwnership = {
   snapshot: Project;
   operationId: number;
   startBeat: number;
+  target: StudioAudioTrackRecordingTarget;
   playbackStopped: boolean;
   finalizing: boolean;
   finished: boolean;
@@ -281,8 +295,41 @@ export type BeginStudioAudioTrackRecordingResult =
     }>
   | Readonly<{
       ok: false;
-      code: 'decode-busy' | 'project-busy' | 'resource-limit-exceeded';
+      code:
+        | 'decode-busy'
+        | 'project-busy'
+        | 'resource-limit-exceeded'
+        | 'track-not-found'
+        | 'unsupported-track-type'
+        | 'audio-asset-limit'
+        | 'track-limit'
+        | 'clip-limit';
     }>;
+
+type BeginStudioAudioTrackRecordingFailure = Extract<
+  BeginStudioAudioTrackRecordingResult,
+  { ok: false }
+>;
+
+function recordingTargetPreflight(
+  project: Project,
+  target: StudioAudioTrackRecordingTarget,
+): BeginStudioAudioTrackRecordingFailure | null {
+  if (project.audioAssets.length >= MAX_AUDIO_ASSETS) {
+    return { ok: false, code: 'audio-asset-limit' };
+  }
+  if (target.kind === 'new-track') {
+    return project.tracks.length >= MAX_PROJECT_TRACKS
+      ? { ok: false, code: 'track-limit' }
+      : null;
+  }
+  const track = project.tracks.find((candidate) => candidate.id === target.trackId);
+  if (!track) return { ok: false, code: 'track-not-found' };
+  if (track.type !== 'audio') return { ok: false, code: 'unsupported-track-type' };
+  return track.clips.length >= MAX_CLIPS_PER_TRACK
+    ? { ok: false, code: 'clip-limit' }
+    : null;
+}
 
 function finishStudioAudioTrackRecordingOwnership(
   handle: StudioAudioTrackRecordingHandle,
@@ -301,18 +348,32 @@ function finishStudioAudioTrackRecordingOwnership(
  * Acquire every recording fence synchronously before asking for microphone
  * permission. The returned snapshot remains the only valid CAS base.
  */
-export function beginStudioAudioTrackRecording(): BeginStudioAudioTrackRecordingResult {
+export function beginStudioAudioTrackRecording(
+  options: BeginStudioAudioTrackRecordingOptions = {},
+): BeginStudioAudioTrackRecordingResult {
+  const state = useStore.getState();
+  const snapshot = state.project;
+  const requestedTarget = options.target ?? { kind: 'new-track' as const };
+  const target: StudioAudioTrackRecordingTarget = requestedTarget.kind === 'existing-audio-track'
+    ? Object.freeze({ kind: requestedTarget.kind, trackId: requestedTarget.trackId })
+    : Object.freeze({
+        kind: requestedTarget.kind,
+        ...(requestedTarget.trackName !== undefined
+          ? { trackName: requestedTarget.trackName }
+          : {}),
+      });
+  const preflight = recordingTargetPreflight(snapshot, target);
+  if (preflight) return preflight;
+
   const lease = tryAcquireAudioTrackImportLease();
   if (!lease) return { ok: false, code: 'decode-busy' };
 
-  const state = useStore.getState();
   const operationId = state.tryBeginAudioRecordingOperation();
   if (operationId === null) {
     finishAudioTrackImportLease(lease);
     return { ok: false, code: 'project-busy' };
   }
 
-  const snapshot = state.project;
   const startBeat = state.transport.positionBeat;
   const playbackStopped = state.transport.phase !== 'stopped';
   try {
@@ -336,6 +397,7 @@ export function beginStudioAudioTrackRecording(): BeginStudioAudioTrackRecording
     snapshot,
     operationId,
     startBeat,
+    target,
     playbackStopped,
     finalizing: false,
     finished: false,
@@ -949,6 +1011,7 @@ type AdoptCanonicalAudioTrackInput = Readonly<{
   snapshot: Project;
   recordingOperationId?: number;
   playbackStopped?: boolean;
+  targetTrackId?: string;
   canonical: CanonicalAudioAssetResult;
   receipt: AudioAssetStoreReceipt;
   fileName: string;
@@ -988,10 +1051,14 @@ function adoptCanonicalAudioTrack(
     channelCount: input.canonical.channelCount,
     frameCount: input.canonical.frameCount,
   };
-  const mutation = createAudioTrackClip(input.snapshot, asset, {
-    ...(input.trackName !== undefined ? { trackName: input.trackName } : {}),
-    ...(input.startBeat !== undefined ? { startBeat: input.startBeat } : {}),
-  });
+  const mutation = input.targetTrackId === undefined
+    ? createAudioTrackClip(input.snapshot, asset, {
+        ...(input.trackName !== undefined ? { trackName: input.trackName } : {}),
+        ...(input.startBeat !== undefined ? { startBeat: input.startBeat } : {}),
+      })
+    : appendAudioTrackClip(input.snapshot, input.targetTrackId, asset, {
+        ...(input.startBeat !== undefined ? { startBeat: input.startBeat } : {}),
+      });
   if (!mutation.ok) return importFailed(mutation.error.code);
 
   const wasActive = latest.transport.phase !== 'stopped';
@@ -1144,7 +1211,14 @@ async function recordStudioAudioTrackWithLease(
   ownership: StudioAudioTrackRecordingOwnership,
 ): Promise<RecordStudioAudioTrackResult> {
   const startingState = useStore.getState();
-  const { lease, snapshot, operationId, startBeat, playbackStopped } = ownership;
+  const {
+    lease,
+    snapshot,
+    operationId,
+    startBeat,
+    target,
+    playbackStopped,
+  } = ownership;
   if (
     startingState.projectOperationBusy
     || startingState.project !== snapshot
@@ -1187,14 +1261,20 @@ async function recordStudioAudioTrackWithLease(
     return importFailed(recordingErrorCode(error, signal));
   }
 
+  const newTrackName = target.kind === 'new-track'
+    ? target.trackName ?? input.trackName
+    : undefined;
   return adoptCanonicalAudioTrack({
     snapshot,
     recordingOperationId: operationId,
     playbackStopped,
+    ...(target.kind === 'existing-audio-track'
+      ? { targetTrackId: target.trackId }
+      : {}),
     canonical,
     receipt,
     fileName: input.fileName ?? 'microphone-recording.wav',
-    ...(input.trackName !== undefined ? { trackName: input.trackName } : {}),
+    ...(newTrackName !== undefined ? { trackName: newTrackName } : {}),
     startBeat,
     ...(dependencies.createAssetId ? { createAssetId: dependencies.createAssetId } : {}),
   });
@@ -1324,6 +1404,10 @@ export function studioAudioActionErrorMessage(code: StudioAudioActionErrorCode):
       return 'このプロジェクトの音声素材数が上限に達しています。不要な素材を整理してください。';
     case 'track-limit':
       return 'トラック数が上限の128件に達しています。不要なトラックを削除してください。';
+    case 'track-not-found':
+      return '録音先のオーディオトラックが見つかりません。録音待機を設定し直してください。';
+    case 'unsupported-track-type':
+      return '録音先にできるのはオーディオトラックだけです。';
     case 'clip-limit':
       return 'このトラックにはこれ以上クリップを追加できません。';
     case 'clip-not-found':

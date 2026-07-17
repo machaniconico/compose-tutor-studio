@@ -183,6 +183,13 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 成功時は音符候補をscroll可能な一覧で表示し、音名、編集可能なMIDI note、候補除外、反映先clip、リズム補正をkeyboardだけで操作できる
 - 反映buttonの直前に既存notesを置き換えることとUndo対応を明示する。解析成功時は候補結果へfocusを移し、確定後はPiano Rollへ移動して反映件数をlive statusとtoastで通知する
 
+### 2.11 Audio Track録音
+
+- Audio Trackだけに`R`の録音待機buttonを表示し、Track ListとInspectorの両方で同じ単一選択を`aria-pressed`、文字、形で示す。computed nameは`${Track名} 録音待機`とし、色だけに依存しない。Project操作または録音中は切替をdisabledにする
+- transportの録音buttonには、通常レイアウトで待機中のTrack名または`新規Track`を可視表示し、accessible name / titleでも録音先を伝える。最小高のcompact layoutでは編集領域を守るため補助表示だけを省略し、`R`の状態とaccessible name / titleは維持する。録音待機なしでは新規Audio Track、待機中ではその既存Trackへ新しいClipを追加する
+- 録音dialogは開始前に録音先と入力deviceを表示する。入力は`システム既定`を常に選べ、列挙済みdeviceのlabelが空なら`マイク N`を使う。`devicechange`後に選択済み入力が見つからなければalertと選び直しを表示し、一覧取得不可でもシステム既定による再試行を残す
+- 録音開始後は録音先と入力deviceを固定し、終了または破棄まで変更controlを表示しない。開始時に再生を停止する現行境界を説明し、伴奏を流したsample-accurate overdubや録音中のdevice hot switchを示唆しない
+
 ## 3. ナビゲーション
 
 | ショートカット | 状態 | 動作 |
@@ -236,7 +243,7 @@ Chord Track のコンテキスト内操作:
 | MIDI読み込み失敗 | 全failure pathで`MIDI読み込みによる曲・選択・表示の変更はありません。`を一度だけ伝え、上限、破損、対応形式、再試行を初心者向けに案内する |
 | Audio Track読み込み中 | dialogを`aria-busy`にし、検査 / decode / resample / encode / 保存の進捗とcancelを表示する。別Track追加、閉じる、再importを競合させない |
 | Audio Track入力が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、1〜2 channel、canonical output 128 MiB以下、decode PCM 256 MiB以下、source / decode / resample / WAV / 保存copyを含むphase peak 384 MiB以下という条件と、端末codecでdecodeできなかった可能性を分けて案内する。失敗時は曲・履歴・選択が不変であることを伝える |
-| Audio Track録音の開始前 | transportとTrack追加の両方から開ける。最大60秒、現在playheadへ新規Trackとして配置、3秒countdown、dry録音、端末内処理を説明する。入力monitorは初期OFFで、ON時はヘッドホン推奨を常時表示する |
+| Audio Track録音の開始前 | transportとTrack追加の両方から開ける。Track追加は常に新規Track、transportはAudio Trackの`R`が1件だけ待機中なら既存Trackへ新しいClip、待機なしなら新規Trackとして現在playheadへ配置する。システム既定または列挙済み入力を選び、最大60秒、3秒countdown、dry録音、開始時の再生停止、端末内処理を説明する。入力monitorは初期OFFで、ON時はヘッドホン推奨を常時表示する |
 | Audio Track録音中 | `録音中`を色以外の文字でも示し、経過時間、入力level meter、44px以上の`録音を終了して保存` / `録音を破棄`をkeyboard操作可能にする。録音・保存中のX / Escape / backdrop、Project切替、window closeは安全に拒否する |
 | Audio Track録音失敗 | permission拒否、マイクなし / 使用中 / 切断、短すぎる録音、memory上限、WAV変換、素材保存を区別し、再試行方法と`プロジェクトは変更されていません`を表示する。保存cancel後のlate resultを採用しない |
 | Audio Assetが見つからない / 変更された | 素材名と`見つかりません` / `内容が変わっています` / `保存場所を利用できません`をClipと編集panelに表示する。別fileへ黙って置換せず、元のprofile / 端末で開き直すよう案内する。保存場所を利用できない場合はstorage / 権限を確認して再読込する。配置と編集metadataは保持し、素材を必要とする編集controlを無効にするが、最後の参照を安全に外せる削除は利用可能にする |

@@ -81,6 +81,11 @@ function TrackInspectorForm({
   audioAssets,
   audioAssetIssues,
 }: TrackInspectorFormProps) {
+  const armedAudioTrackId = useStore((state) => state.armedAudioTrackId);
+  const setAudioTrackArmed = useStore((state) => state.setAudioTrackArmed);
+  const recordingControlsBusy = useStore(
+    (state) => state.projectOperationBusy || state.audioRecordingOperationId !== null,
+  );
   const [nameDraft, setNameDraft] = useState(track.name);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [status, setStatus] = useState<TrackInspectorStatus | null>(null);
@@ -273,35 +278,53 @@ function TrackInspectorForm({
       ) : null}
 
       {track.type === 'audio' ? (
-        <div className="track-inspector__audio-assets" aria-label={`${track.name} 音声素材`}>
-          <span>音声素材</span>
-          {referencedAudioAssets.length === 0 ? (
-            <p className="track-inspector__help">このトラックには音声クリップがありません。</p>
-          ) : (
-            <ul>
-              {referencedAudioAssets.map((asset, index) => {
-                const issue = asset ? audioAssetIssues[asset.id] ?? null : 'missing';
-                const presentation = audioAssetPresentationStatus(asset, issue);
-                return (
-                  <li key={asset?.id ?? `missing-${index}`}>
-                    <strong>
-                      {asset?.availability === 'ready' ? asset.originalName : '参照情報なし'}
-                    </strong>
-                    {asset?.availability === 'ready' ? (
-                      <small>
-                        {(asset.sampleRate / 1_000).toFixed(1)} kHz・{asset.channelCount === 1 ? 'モノラル' : `${asset.channelCount} ch`}・{(asset.frameCount / asset.sampleRate).toFixed(2)}秒
-                      </small>
-                    ) : null}
-                    <span className={presentation.problem ? 'is-problem' : ''}>
-                      {presentation.label}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <small>配置、トリム、ゲイン、フェード、分割はアレンジャーでクリップを選んで編集します。</small>
-        </div>
+        <>
+          <div className="track-inspector__record-arm">
+            <button
+              type="button"
+              className={armedAudioTrackId === track.id ? 'is-active' : ''}
+              aria-pressed={armedAudioTrackId === track.id}
+              aria-label={`${track.name} 録音待機`}
+              disabled={recordingControlsBusy}
+              onClick={() => setAudioTrackArmed(track.id)}
+            >
+              <span aria-hidden="true">R</span>
+              {armedAudioTrackId === track.id ? '録音待機中' : 'このトラックを録音先にする'}
+            </button>
+            <small>
+              録音待機中は、上部の「録音」からこのトラックへ新しいクリップを追加します。
+            </small>
+          </div>
+          <div className="track-inspector__audio-assets" aria-label={`${track.name} 音声素材`}>
+            <span>音声素材</span>
+            {referencedAudioAssets.length === 0 ? (
+              <p className="track-inspector__help">このトラックには音声クリップがありません。</p>
+            ) : (
+              <ul>
+                {referencedAudioAssets.map((asset, index) => {
+                  const issue = asset ? audioAssetIssues[asset.id] ?? null : 'missing';
+                  const presentation = audioAssetPresentationStatus(asset, issue);
+                  return (
+                    <li key={asset?.id ?? `missing-${index}`}>
+                      <strong>
+                        {asset?.availability === 'ready' ? asset.originalName : '参照情報なし'}
+                      </strong>
+                      {asset?.availability === 'ready' ? (
+                        <small>
+                          {(asset.sampleRate / 1_000).toFixed(1)} kHz・{asset.channelCount === 1 ? 'モノラル' : `${asset.channelCount} ch`}・{(asset.frameCount / asset.sampleRate).toFixed(2)}秒
+                        </small>
+                      ) : null}
+                      <span className={presentation.problem ? 'is-problem' : ''}>
+                        {presentation.label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <small>配置、トリム、ゲイン、フェード、分割はアレンジャーでクリップを選んで編集します。</small>
+          </div>
+        </>
       ) : null}
 
       {!isMaster ? (

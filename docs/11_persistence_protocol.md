@@ -29,7 +29,7 @@
 - v3 snapshotはTrack role、`lengthBeats`、tempo / 拍子map、AudioAsset metadata、AutomationLane、Audio Clipのasset ID / frame range / fade / gainを含む。`bpm` / `timeSignature` / `lengthBars`はmapから導くcompatibility mirrorとして同時に検証する。
 - v2→v3は固定tempo / 拍子をbeat 0 mapへ移し、保存順で最初に正規化名Chords / Bass / Melodyへ一致するinstrument Trackへroleを割り当てる。legacy audio参照は決定的な`unresolved` AudioAssetへ残すため、binaryが未解決でもproject metadataを失わず再保存できる。
 
-Project JSON transactionとAudio Asset objectは正本を分離する。production importは入力を48 kHz mono/stereo PCM16 WAVへ正規化し、binaryをSHA-256 content-addressed repositoryへ確定してから、開始時Projectがcurrentの場合だけready metadata / Audio Track / Audio Clipを1回のProject CASへ採用する。JSON transactionへbinaryを埋め込まないため単一filesystem transactionではないが、Projectが存在しないobjectを先に参照する順序を作らない。binary確定後にcancel / stale CAS / codec拒否となったobjectはorphanとして安全に残し、native起動時のgeneration-aware GCで回収する。
+Project JSON transactionとAudio Asset objectは正本を分離する。production import / Audio Track録音は入力を48 kHz mono/stereo PCM16 WAVへ正規化し、binaryをSHA-256 content-addressed repositoryへ確定してから、開始時Projectがcurrentの場合だけready metadataとAudio Clipを1回のProject CASへ採用する。importと録音待機なしの録音ではAudio Trackも作り、Record Armされた既存Audio Trackへの録音ではそのTrack / routingを変えずClipを追記する。Record Armと入力device IDはruntime-onlyでJSON transactionへ含めない。JSON transactionへbinaryを埋め込まないため単一filesystem transactionではないが、Projectが存在しないobjectを先に参照する順序を作らない。binary確定後にcancel / stale CAS / codec拒否となったobjectはorphanとして安全に残し、native起動時のgeneration-aware GCで回収する。
 
 ## 3. localStorageレコード
 

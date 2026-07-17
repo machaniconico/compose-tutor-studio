@@ -149,7 +149,8 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 | vocal-cut chunk/cancel | processingとWAV encodeがchunkごとに進捗を単調更新し、cancel後に古いgenerationが結果やdownloadを公開しないか |
 | humming pitch core | 50 / 1,000 Hz境界、2音＋無声、vibrato、強い第2倍音、逆相stereo、192 kHz downsampleのaliasingを合成fixtureで検査し、同入力 / 異chunkで結果が一致するか |
 | humming safety | 60秒UI上限、256 MiB PCM / working上限、NaN / Inf、32ch core上限、mono / stereo UI上限、巨大chunk、cancelをallocation / commit前に拒否するか |
-| microphone capture | secure context / AudioWorklet / device有無、権限拒否、single-flight、permission pending cancel後のlate stream停止、device切断、manual / exact 60秒停止、0.5秒未満、2ch / sample rate / memory上限、invalid chunk、flush timeoutでresourceを一度だけ解放するか |
+| microphone capture | secure context / AudioWorklet / device有無、権限拒否、single-flight、permission pending cancel後のlate stream停止、device切断、manual / exact 60秒停止、0.5秒未満、2ch / sample rate / memory上限、invalid chunk、flush timeoutでresourceを一度だけ解放するか。入力ID省略時はhost既定、明示時は`deviceId.exact`になり、take中に変更されないか |
+| microphone input inventory | `enumerateDevices()`からaudioinputだけを抽出し、duplicate IDは先頭だけ、空labelは`マイク N`、空IDはdialogのシステム既定optionへ統合されるか。unsupported / enumerate失敗でも既定入力を残し、`devicechange`再取得、stale generation破棄、選択device消失表示、unsubscribe exactly onceを検査する |
 | humming E2E | local mono WAVと合成MediaStreamの直接録音をAssistantから解析し、候補修正 / 除外、target / quantize確認後に2音をUndo 1回のProject changeとしてPiano Rollへ反映するか。権限拒否時にfile fallbackが残り、失敗 / cancelではProjectが不変か |
 
 ## 6. パフォーマンステスト
@@ -359,8 +360,11 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 ### 7.8 Batch 6 remaining gates
 
 - 実装済みのvolume / pan live/offline scheduling回帰を維持しつつ、Automationのlane edit / write / read UIを追加して保存・Undo・keyboard操作を検証する
-- 6a初回自動gateは最大60秒のmono/stereo capture、monitor初期OFF / opt-in、raw PCM→48 kHz PCM16 WAV→asset-first保存→新規Track / ClipのUndo 1回採用を検証する。未使用decoded cacheの開始前破棄、active cacheとGC未実施chunkを含む384 MiB planner、高sample-rate超過のallocation前拒否、capture開始からcancel後に残るresample work settlementまでのimport / record single-flight lease、permission cancel後のlate stream破棄、同一tick二重開始拒否、permission / device-ended / cancel / stale開始snapshot / playhead / revoked token / project switch / close拒否も自動検査する
-- 3OS実deviceでpermission、device loss、disk full、monitor feedback、close、再起動再生を確認する。record arm、device選択、shared AudioContext同期、latency補正、長時間streamingを閉じた後、cycle take / compingへ進む
+- 6a自動gateは最大60秒のmono/stereo capture、monitor初期OFF / opt-in、raw PCM→48 kHz PCM16 WAV→asset-first保存を検証する。録音待機なしは新規Track / Clip、単一の既存Audio Track待機中は同TrackへClipだけを追記し、Trackのvolume / pan / effects / routingを保持する。両経路を開始時snapshot / targetへのexact CAS、selection更新、Undo 1回として検査する
+- Record ArmはAudio Track以外を拒否し、同時1件のtoggle / replace、Project操作・録音中の変更拒否、Project切替時解除、delete / Undo / Redoでのtarget reconciliationを検査する。armと入力device preferenceの操作だけではProject identity / history / revision / autosave payload / `.ctsproj.json`が変わらないこと、開始後のarm / device変更が凍結済みtargetへ影響しないことを確認する
+- device列挙はdefault option、audioinput filter、duplicate、空label、enumeration失敗、`devicechange`、選択device消失をcomponent / unitで検査する。captureでは選択IDが`getUserMedia`のexact constraintになり、未選択時にdevice constraintを付けず、消失・Overconstrained / device-endedでProjectを採用しないことを確認する
+- 未使用decoded cacheの開始前破棄、active cacheとGC未実施chunkを含む384 MiB planner、高sample-rate超過のallocation前拒否、capture開始からcancel後に残るresample work settlementまでのimport / record single-flight lease、permission cancel後のlate stream破棄、同一tick二重開始拒否、permission / device-ended / cancel / stale開始snapshot / playhead / target / revoked token / project switch / close拒否も自動検査する
+- 3OS実deviceでpermission、システム既定 / 明示device選択、`devicechange` / device loss、Record Arm先への追記、disk full、monitor feedback、close、再起動再生を確認する。shared AudioContext同期、latency補正、再生中overdub、長時間streamingを閉じた後、cycle take / compingへ進む
 
 ## 8. 手動QAチェックリスト
 
@@ -375,7 +379,7 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - カラオケ作成で3 presetを比較し、A/Bの位置がずれず、cancel後に結果が現れず、mono / near-mono / 5分超過 / 128 MiB超過が具体的な案内になる
 - カラオケ作成前から品質限界と権利注意が読め、処理中もNetwork requestがなく、閉じた後に音声再生や一時URLが残らない
 - Track追加で楽器 / ドラム / オーディオ / stereo Busと4音色を迷わず選べ、Audioのlocal正規化・JSON非同梱、Busが複数Trackをまとめるreturnであることを理解できる。Mixerの「経路」でmain output、pre/post-fader send、送り量、有効状態をkeyboard / screen readerで操作でき、循環拒否の理由がalertになる。Masterの操作不可、学習role Trackは改名可・削除不可、一般Trackは名前にかかわらず削除可能という案内と、topology変更後もplayheadを保持する案内を確認できる
-- transportとTrack追加の両方からマイク録音を開始し、monitor初期OFF、ヘッドホン警告、3秒countdown、level、stop / discard、最大60秒、固定playhead配置を確認する。permission拒否、device切断、保存容量不足、録音中closeで既存曲が変わらず、成功後はUndo / Redoと再起動再生が一致する
+- transportとTrack追加の両方からマイク録音を開始し、システム既定 / 列挙済み入力の選択、device追加・切断時の一覧更新、monitor初期OFF、ヘッドホン警告、3秒countdown、level、stop / discard、最大60秒、固定playhead配置を確認する。Track追加と待機なしのtransportでは新規Track、Audio Trackの`R`を1件だけ待機させたtransportでは既存TrackへClipが増え、録音開始時に再生が止まることを確認する。permission拒否、選択device消失、保存容量不足、録音中closeで既存曲が変わらず、成功後はUndo / Redoと再起動再生が一致する
 
 ### 8.1 Native release candidate（macOS / Windows / Linux共通）
 

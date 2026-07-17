@@ -136,6 +136,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const saveToLocalStorage = useStore((s) => s.saveToLocalStorage);
   const projectOperationBusy = useStore((s) => s.projectOperationBusy);
   const audioRecordingOperationId = useStore((s) => s.audioRecordingOperationId);
+  const armedAudioTrackId = useStore((s) => s.armedAudioTrackId);
   const emergencyExportLock = useRef(false);
   const [emergencyExportBusy, setEmergencyExportBusy] = useState(false);
   const [recordingOpen, setRecordingOpen] = useState(false);
@@ -153,6 +154,12 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
     }),
     [project.lengthBeats, project.tempoMap, project.timeSignatureMap],
   );
+  const armedAudioTrack = project.tracks.find(
+    (track) => track.id === armedAudioTrackId && track.type === 'audio',
+  );
+  const recordingTargetLabel = armedAudioTrack
+    ? `録音先: ${armedAudioTrack.name}`
+    : '録音先: 新しいオーディオトラック';
   const exportEmergencyBackup = async () => {
     if (emergencyExportLock.current) return;
     emergencyExportLock.current = true;
@@ -209,11 +216,14 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           type="button"
           className="transport-bar__record"
           aria-haspopup="dialog"
+          aria-label={`録音を開く。${recordingTargetLabel}`}
+          title={recordingTargetLabel}
           disabled={projectOperationBusy || audioRecordingOperationId !== null}
           onClick={() => setRecordingOpen(true)}
         >
           <span aria-hidden="true" />
           録音
+          <small>{armedAudioTrack ? armedAudioTrack.name : '新規Track'}</small>
         </button>
 
         <button
@@ -316,7 +326,8 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
       </header>
       {recordingOpen ? (
         <AudioTrackRecordingDialog
-          trackName="マイク録音"
+          trackName={armedAudioTrack?.name ?? 'マイク録音'}
+          {...(armedAudioTrack ? { targetTrackId: armedAudioTrack.id } : {})}
           onClose={() => setRecordingOpen(false)}
           onCreated={() => setRecordingOpen(false)}
         />

@@ -26,6 +26,13 @@ const microphoneMocks = vi.hoisted(() => ({
   start: vi.fn(),
 }));
 
+const inputDeviceMocks = vi.hoisted(() => ({
+  enumerate: vi.fn(),
+  subscribe: vi.fn(),
+  unsubscribe: vi.fn(),
+  onDeviceChange: null as (() => void) | null,
+}));
+
 vi.mock('react', async (importOriginal) => {
   const react = await importOriginal<typeof import('react')>();
   return {
@@ -56,6 +63,15 @@ vi.mock('react', async (importOriginal) => {
 vi.mock('../src/audio/microphoneCapture', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/audio/microphoneCapture')>();
   return { ...actual, startMicrophoneCapture: microphoneMocks.start };
+});
+
+vi.mock('../src/audio/microphoneInputDevices', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/audio/microphoneInputDevices')>();
+  return {
+    ...actual,
+    enumerateMicrophoneInputDevices: inputDeviceMocks.enumerate,
+    subscribeToMicrophoneInputDeviceChanges: inputDeviceMocks.subscribe,
+  };
 });
 
 vi.mock('../src/state/audioTrackActions', () => ({
@@ -144,6 +160,13 @@ beforeEach(() => {
     playbackStopped: true,
   });
   actionMocks.record.mockResolvedValue({ ok: false, code: 'cancelled' });
+  inputDeviceMocks.enumerate.mockResolvedValue([]);
+  inputDeviceMocks.unsubscribe.mockReset();
+  inputDeviceMocks.onDeviceChange = null;
+  inputDeviceMocks.subscribe.mockImplementation((onChange: () => void) => {
+    inputDeviceMocks.onDeviceChange = onChange;
+    return inputDeviceMocks.unsubscribe;
+  });
 });
 
 describe('AudioTrackRecordingDialog interaction boundaries', () => {
@@ -168,6 +191,62 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     expect(microphoneMocks.start).toHaveBeenCalledWith(
       expect.objectContaining({ monitorInput: true }),
     );
+  });
+
+  it('freezes the selected input and new-track destination before permission', () => {
+    microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
+    const tree = renderDialog('idle', [], new Map([[10, 'usb-microphone']]));
+
+    button(tree, '録音を開始').props.onClick?.();
+
+    expect(actionMocks.begin).toHaveBeenCalledWith({
+      target: { kind: 'new-track', trackName: 'Lead Take' },
+    });
+    expect(microphoneMocks.start).toHaveBeenCalledWith(
+      expect.objectContaining({ inputDeviceId: 'usb-microphone' }),
+    );
+  });
+
+  it('keeps only the newest devicechange refresh and unsubscribes on cleanup', async () => {
+    let resolveInitial!: (devices: readonly { deviceId: string; label: string }[]) => void;
+    let resolveChanged!: (devices: readonly { deviceId: string; label: string }[]) => void;
+    inputDeviceMocks.enumerate
+      .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveChanged = resolve; }));
+    renderDialog();
+    const deviceEffect = hookState.effects[2];
+    if (!deviceEffect) throw new Error('device effect missing');
+    const cleanup = deviceEffect();
+    inputDeviceMocks.onDeviceChange?.();
+
+    const changedDevices = [{ deviceId: 'usb-new', label: 'New USB Mic' }];
+    resolveChanged(changedDevices);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(hookState.stateSetters[8]).toHaveBeenCalledWith(changedDevices);
+
+    resolveInitial([{ deviceId: 'usb-stale', label: 'Stale USB Mic' }]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(hookState.stateSetters[8]).not.toHaveBeenCalledWith([
+      { deviceId: 'usb-stale', label: 'Stale USB Mic' },
+    ]);
+
+    if (typeof cleanup !== 'function') throw new Error('device cleanup missing');
+    cleanup();
+    expect(inputDeviceMocks.unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a disappeared explicit input selected and asks for a deliberate recovery', () => {
+    const tree = renderDialog('idle', [], new Map<number, unknown>([
+      [8, []],
+      [9, 'ready'],
+      [10, 'missing-usb-microphone'],
+    ]));
+
+    expect(textContent(tree)).toContain('前回選択した入力（一覧で未確認）');
+    expect(textContent(tree)).toContain('選択した入力を現在の一覧で確認できません');
+    expect(textContent(tree)).toContain('システム既定');
   });
 
   it('aborts permission wait, releases ownership after cancellation settles, and closes', async () => {
@@ -321,6 +400,17 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     );
     expect(hookState.stateSetters[6]).toHaveBeenCalledWith('録音は開始していません。');
     expect(hookState.stateSetters[0]).toHaveBeenCalledWith('error');
+    expect(microphoneMocks.start).not.toHaveBeenCalled();
+  });
+
+  it('explains a stale armed destination without requesting microphone permission', () => {
+    actionMocks.begin.mockReturnValue({ ok: false, code: 'track-not-found' });
+    const tree = renderDialog();
+
+    button(tree, '録音を開始').props.onClick?.();
+
+    expect(hookState.stateSetters[7]).toHaveBeenCalledWith('action:track-not-found');
+    expect(hookState.stateSetters[6]).toHaveBeenCalledWith('録音は開始していません。');
     expect(microphoneMocks.start).not.toHaveBeenCalled();
   });
 });

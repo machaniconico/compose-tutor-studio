@@ -23,6 +23,11 @@ export function TrackList() {
   const setTrackVolume = useStore((s) => s.setTrackVolume);
   const toggleMute = useStore((s) => s.toggleMute);
   const toggleSolo = useStore((s) => s.toggleSolo);
+  const armedAudioTrackId = useStore((s) => s.armedAudioTrackId);
+  const setAudioTrackArmed = useStore((s) => s.setAudioTrackArmed);
+  const recordingControlsBusy = useStore(
+    (s) => s.projectOperationBusy || s.audioRecordingOperationId !== null,
+  );
 
   return (
     <nav className="track-list" aria-label="トラック一覧">
@@ -94,6 +99,19 @@ export function TrackList() {
                   aria-label={`${controlName} 音量`}
                   onChange={(event) => setTrackVolume(track.id, Number(event.target.value))}
                 />
+                {track.type === 'audio' ? (
+                  <button
+                    type="button"
+                    className={`mini-btn mini-btn--record${armedAudioTrackId === track.id ? ' is-active' : ''}`}
+                    aria-pressed={armedAudioTrackId === track.id}
+                    aria-label={`${controlName} 録音待機`}
+                    disabled={recordingControlsBusy}
+                    onClick={() => setAudioTrackArmed(track.id)}
+                    title={armedAudioTrackId === track.id ? '録音待機を解除' : 'このトラックを録音先にする'}
+                  >
+                    R
+                  </button>
+                ) : null}
                 {track.type !== 'master' ? (
                   <>
                     <button

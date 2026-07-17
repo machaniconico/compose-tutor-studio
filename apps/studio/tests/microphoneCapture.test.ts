@@ -16,6 +16,7 @@ import {
   type MicrophoneCaptureSession,
   type StartMicrophoneCaptureOptions,
 } from '../src/audio/microphoneCapture';
+import { MAX_MICROPHONE_INPUT_DEVICE_ID_LENGTH } from '../src/audio/microphoneInputDevices';
 
 type GraphHandlers = Parameters<MicrophoneCapturePlatform['createGraph']>[2];
 
@@ -258,6 +259,12 @@ describe('microphone capture support and ownership', () => {
     await expect(
       beginCapture(invalidHarness, { maxDurationSeconds: MIN_MICROPHONE_CAPTURE_SECONDS - 0.01 }),
     ).rejects.toMatchObject({ code: 'capture-failed' });
+    await expect(
+      beginCapture(invalidHarness, {
+        inputDeviceId: 'x'.repeat(MAX_MICROPHONE_INPUT_DEVICE_ID_LENGTH + 1),
+      }),
+    ).rejects.toMatchObject({ code: 'device-not-found' });
+    expect(invalidHarness.getUserMedia).not.toHaveBeenCalled();
 
     const validHarness = createHarness();
     const session = await beginCapture(validHarness);
@@ -287,6 +294,47 @@ describe('microphone capture support and ownership', () => {
     );
     monitored.cancel();
     await expect(monitored.result).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
+  it('omits a default input constraint and uses exact only for an explicit device', async () => {
+    const defaultHarness = createHarness();
+    const defaultSession = await beginCapture(defaultHarness);
+    expect(defaultHarness.getUserMedia).toHaveBeenCalledWith({
+      video: false,
+      audio: {
+        channelCount: { ideal: 1 },
+        echoCancellation: { ideal: false },
+        noiseSuppression: { ideal: false },
+        autoGainControl: { ideal: false },
+      },
+    });
+    defaultSession.cancel();
+    await expect(defaultSession.result).rejects.toMatchObject({ code: 'cancelled' });
+
+    const selectedHarness = createHarness();
+    const selectedSession = await beginCapture(selectedHarness, { inputDeviceId: 'usb-mic' });
+    expect(selectedHarness.getUserMedia).toHaveBeenCalledWith({
+      video: false,
+      audio: {
+        channelCount: { ideal: 1 },
+        echoCancellation: { ideal: false },
+        noiseSuppression: { ideal: false },
+        autoGainControl: { ideal: false },
+        deviceId: { exact: 'usb-mic' },
+      },
+    });
+    selectedSession.cancel();
+    await expect(selectedSession.result).rejects.toMatchObject({ code: 'cancelled' });
+
+    const emptyHarness = createHarness();
+    const emptySession = await beginCapture(emptyHarness, { inputDeviceId: '' });
+    expect(emptyHarness.getUserMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audio: expect.not.objectContaining({ deviceId: expect.anything() }),
+      }),
+    );
+    emptySession.cancel();
+    await expect(emptySession.result).rejects.toMatchObject({ code: 'cancelled' });
   });
 });
 

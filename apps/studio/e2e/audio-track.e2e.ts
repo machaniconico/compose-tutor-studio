@@ -48,6 +48,49 @@ async function indexedAudioAssetCount(page: Page): Promise<number> {
   }));
 }
 
+async function installSyntheticRecordingInput(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type RecordingTestWindow = Window & typeof globalThis & {
+      __ctsRecordingConstraints?: MediaStreamConstraints;
+    };
+    let stream: MediaStream | null = null;
+    const mediaDevices = navigator.mediaDevices;
+    const input = (deviceId: string, label: string): MediaDeviceInfo => ({
+      kind: 'audioinput',
+      deviceId,
+      label,
+      groupId: '',
+      toJSON: () => ({ kind: 'audioinput', deviceId, label, groupId: '' }),
+    });
+    Object.defineProperty(mediaDevices, 'enumerateDevices', {
+      configurable: true,
+      value: async () => [
+        input('built-in-microphone', 'Built-in Microphone'),
+        input('usb-vocal-microphone', 'USB Vocal Microphone'),
+      ],
+    });
+    Object.defineProperty(mediaDevices, 'getUserMedia', {
+      configurable: true,
+      value: async (constraints: MediaStreamConstraints) => {
+        (window as RecordingTestWindow).__ctsRecordingConstraints = constraints;
+        if (stream) return stream;
+        const context = new AudioContext({ sampleRate: 48_000 });
+        const destination = context.createMediaStreamDestination();
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.frequency.value = 220;
+        gain.gain.value = 0.25;
+        oscillator.connect(gain);
+        gain.connect(destination);
+        oscillator.start();
+        await context.resume();
+        stream = destination.stream;
+        return stream;
+      },
+    });
+  });
+}
+
 test('imports, edits, deduplicates and reloads a browser-persisted Audio Track', async ({ page }) => {
   const pageErrors: string[] = [];
   const fixture = createMonoFixture();
@@ -164,4 +207,65 @@ test('imports, edits, deduplicates and reloads a browser-persisted Audio Track',
   })).toBeChecked();
   await expect.poll(() => indexedAudioAssetCount(page)).toBe(1);
   expect(pageErrors).toEqual([]);
+});
+
+test('selects an exact input and records into one armed Audio Track with one-step Undo', async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  await installSyntheticRecordingInput(page);
+  await page.goto('/');
+  await dismissWelcome(page);
+
+  await page.getByRole('button', { name: '＋ 追加', exact: true }).click();
+  const addDialog = page.getByRole('dialog', { name: 'トラックを追加' });
+  await addDialog.getByRole('radio', { name: /オーディオトラック/ }).check();
+  await addDialog.getByLabel('名前', { exact: true }).fill('Record Target');
+  await addDialog.locator('input[type="file"]').setInputFiles({
+    name: 'record-target.wav',
+    mimeType: 'audio/wav',
+    buffer: createMonoFixture(),
+  });
+
+  const trackButton = page.getByRole('button', {
+    name: 'Record Target トラックを選択',
+    exact: true,
+  });
+  await expect(trackButton).toBeVisible({ timeout: 20_000 });
+  const trackCountBefore = await page.locator('.track-row').count();
+  const arm = page.locator('.track-list').getByRole('button', {
+    name: 'Record Target 録音待機',
+    exact: true,
+  });
+  await arm.click();
+  await expect(arm).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('button', { name: /録音を開く。録音先: Record Target/ }).click();
+  const recordingDialog = page.getByRole('dialog', { name: 'マイクをオーディオトラックへ録音' });
+  await expect(recordingDialog).toContainText('既存トラック「Record Target」');
+  await recordingDialog.getByLabel('入力デバイス').selectOption('usb-vocal-microphone');
+  await recordingDialog.getByRole('button', { name: '録音を開始' }).click();
+  await expect(recordingDialog.getByText('録音開始まで3秒', { exact: true })).toBeVisible();
+  await expect(recordingDialog.getByRole('status')).toContainText('録音中', { timeout: 7_000 });
+  await page.waitForTimeout(700);
+  await recordingDialog.getByRole('button', { name: '録音を終了して保存' }).click();
+  await expect(recordingDialog).toBeHidden({ timeout: 20_000 });
+
+  await expect(page.locator('.track-row')).toHaveCount(trackCountBefore);
+  await expect(page.locator('.arranger__clip.is-audio')).toHaveCount(2);
+  await expect(arm).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => {
+    type RecordingTestWindow = Window & typeof globalThis & {
+      __ctsRecordingConstraints?: MediaStreamConstraints;
+    };
+    const audio = (window as RecordingTestWindow).__ctsRecordingConstraints?.audio;
+    if (!audio || typeof audio === 'boolean') return null;
+    const requested = audio.deviceId;
+    if (!requested || typeof requested === 'string' || Array.isArray(requested)) return null;
+    return requested.exact;
+  })).toBe('usb-vocal-microphone');
+
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
+  await expect(page.locator('.arranger__clip.is-audio')).toHaveCount(1);
+  await expect(trackButton).toBeVisible();
 });

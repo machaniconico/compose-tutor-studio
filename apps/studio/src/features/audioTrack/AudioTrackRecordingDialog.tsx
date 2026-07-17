@@ -7,12 +7,20 @@ import {
   type MicrophonePcmCapture,
 } from '../../audio/microphoneCapture';
 import {
+  MicrophoneInputDeviceError,
+  enumerateMicrophoneInputDevices,
+  subscribeToMicrophoneInputDeviceChanges,
+  type MicrophoneInputDevice,
+} from '../../audio/microphoneInputDevices';
+import {
   beginStudioAudioTrackRecording,
   discardStudioAudioTrackRecording,
   recordStudioAudioTrack,
   studioAudioActionErrorMessage,
+  type StudioAudioActionErrorCode,
   type StudioAudioTrackRecordingHandle,
 } from '../../state/audioTrackActions';
+import { useStore } from '../../state/store';
 import { pushToast } from '../../state/tutorialBridge';
 import { Dialog } from '../common/Dialog';
 import { microphoneCaptureFailureMessage } from '../common/microphoneCaptureFailureMessage';
@@ -28,6 +36,8 @@ type RecordingPhase =
 
 type AudioTrackRecordingDialogProps = Readonly<{
   trackName: string;
+  /** When present, append the take to this existing Audio Track. */
+  targetTrackId?: string;
   onClose: () => void;
   onCreated: (trackId: string) => void;
   onBack?: () => void;
@@ -40,7 +50,7 @@ function formatElapsed(seconds: number): string {
 }
 
 function recordingBeginFailureMessage(
-  code: 'decode-busy' | 'project-busy' | 'resource-limit-exceeded',
+  code: StudioAudioActionErrorCode,
 ): string {
   switch (code) {
     case 'decode-busy':
@@ -49,12 +59,15 @@ function recordingBeginFailureMessage(
       return '録音用のメモリを安全に確保できませんでした。ほかの音声処理を終了してから再試行してください。';
     case 'project-busy':
       return 'プロジェクトを切り替え中、または別の録音が進行中です。完了してから再試行してください。';
+    default:
+      return studioAudioActionErrorMessage(code);
   }
 }
 
-/** Record one dry, bounded microphone take and create a new Audio Track at the playhead. */
+/** Record one dry, bounded take to a frozen new or existing Audio Track target. */
 export function AudioTrackRecordingDialog({
   trackName,
+  targetTrackId,
   onClose,
   onCreated,
   onBack,
@@ -67,6 +80,13 @@ export function AudioTrackRecordingDialog({
   const [progress, setProgress] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [inputDevices, setInputDevices] = useState<readonly MicrophoneInputDevice[]>([]);
+  const [inputDeviceListPhase, setInputDeviceListPhase] = useState<
+    'loading' | 'ready' | 'unsupported' | 'error'
+  >('loading');
+  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<string | null>(
+    useStore.getState().preferredMicrophoneInputDeviceId,
+  );
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
   const recordingHandleRef = useRef<StudioAudioTrackRecordingHandle | null>(null);
@@ -79,6 +99,7 @@ export function AudioTrackRecordingDialog({
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const stopButtonRef = useRef<HTMLButtonElement>(null);
   const processingStatusRef = useRef<HTMLParagraphElement>(null);
+  const inputDeviceRefreshGenerationRef = useRef(0);
 
   const discardRecordingOwnership = (): void => {
     const handle = recordingHandleRef.current;
@@ -190,7 +211,12 @@ export function AudioTrackRecordingDialog({
       recordingHandleRef.current !== null
       || (phase !== 'idle' && phase !== 'error')
     ) return;
-    const ownership = beginStudioAudioTrackRecording();
+    const frozenInputDeviceId = selectedInputDeviceId;
+    const ownership = beginStudioAudioTrackRecording({
+      target: targetTrackId === undefined
+        ? { kind: 'new-track', trackName }
+        : { kind: 'existing-audio-track', trackId: targetTrackId },
+    });
     if (!ownership.ok) {
       setError(recordingBeginFailureMessage(ownership.code));
       setStatus('録音は開始していません。');
@@ -215,6 +241,7 @@ export function AudioTrackRecordingDialog({
         signal: controller.signal,
         countdownSeconds: 3,
         maxDurationSeconds: MAX_MICROPHONE_CAPTURE_SECONDS,
+        ...(frozenInputDeviceId ? { inputDeviceId: frozenInputDeviceId } : {}),
         monitorInput,
         onCountdown: (secondsRemaining) => {
           if (!mountedRef.current || generation !== generationRef.current) return;
@@ -297,6 +324,46 @@ export function AudioTrackRecordingDialog({
   }, [phase]);
 
   useEffect(() => {
+    if (phase !== 'idle' && phase !== 'error') return;
+    let active = true;
+
+    const refresh = async (): Promise<void> => {
+      const generation = ++inputDeviceRefreshGenerationRef.current;
+      setInputDeviceListPhase('loading');
+      try {
+        const devices = await enumerateMicrophoneInputDevices();
+        if (!active || generation !== inputDeviceRefreshGenerationRef.current) return;
+        // An empty id is indistinguishable from the explicit system-default option.
+        setInputDevices(devices.filter((device) => device.deviceId.length > 0));
+        setInputDeviceListPhase('ready');
+      } catch (caught) {
+        if (!active || generation !== inputDeviceRefreshGenerationRef.current) return;
+        setInputDevices([]);
+        setInputDeviceListPhase(
+          caught instanceof MicrophoneInputDeviceError && caught.code === 'unsupported'
+            ? 'unsupported'
+            : 'error',
+        );
+      }
+    };
+
+    void refresh();
+    let unsubscribe = (): void => undefined;
+    try {
+      unsubscribe = subscribeToMicrophoneInputDeviceChanges(() => {
+        void refresh();
+      });
+    } catch {
+      // Device enumeration can still work when a host does not expose change events.
+    }
+    return () => {
+      active = false;
+      inputDeviceRefreshGenerationRef.current += 1;
+      unsubscribe();
+    };
+  }, [phase]);
+
+  useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -314,6 +381,18 @@ export function AudioTrackRecordingDialog({
   }, []);
 
   const closeLocked = !['idle', 'error'].includes(phase);
+  const selectedDeviceAbsentFromList = selectedInputDeviceId !== null
+    && !inputDevices.some((device) => device.deviceId === selectedInputDeviceId);
+  const selectedDeviceMissing = inputDeviceListPhase === 'ready'
+    && selectedDeviceAbsentFromList;
+  const unavailableSelectedDeviceLabel = selectedDeviceMissing
+    ? '前回選択した入力（一覧で未確認）'
+    : inputDeviceListPhase === 'loading'
+      ? '前回選択した入力（確認中）'
+      : '前回選択した入力';
+  const recordingTarget = targetTrackId === undefined
+    ? '新しいオーディオトラック'
+    : `既存トラック「${trackName}」`;
 
   return (
     <Dialog
@@ -325,11 +404,44 @@ export function AudioTrackRecordingDialog({
     >
       <div className="audio-track-recording">
         <p className="audio-track-recording__lead">
-          最大60秒の音声を端末内だけで録音し、現在の再生位置へ新しいオーディオトラックとして保存します。
+          最大60秒の音声を端末内だけで録音し、現在の再生位置から{recordingTarget}へ保存します。
         </p>
 
         {phase === 'idle' || phase === 'error' ? (
           <>
+            <div className="audio-track-recording__input-device">
+              <label htmlFor="audio-track-recording-input-device">入力デバイス</label>
+              <select
+                id="audio-track-recording-input-device"
+                value={selectedInputDeviceId ?? ''}
+                aria-busy={inputDeviceListPhase === 'loading' || undefined}
+                onChange={(event) => {
+                  const nextDeviceId = event.target.value || null;
+                  if (useStore.getState().setPreferredMicrophoneInputDeviceId(nextDeviceId)) {
+                    setSelectedInputDeviceId(nextDeviceId);
+                  }
+                }}
+              >
+                <option value="">システム既定</option>
+                {selectedDeviceAbsentFromList ? (
+                  <option value={selectedInputDeviceId ?? ''}>
+                    {unavailableSelectedDeviceLabel}
+                  </option>
+                ) : null}
+                {inputDevices.map((device) => (
+                  <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                ))}
+              </select>
+              {inputDeviceListPhase === 'loading' ? <small>入力一覧を確認しています…</small> : null}
+              {inputDeviceListPhase === 'unsupported' || inputDeviceListPhase === 'error' ? (
+                <small>入力一覧を取得できません。システム既定のマイクは使用できます。</small>
+              ) : null}
+              {selectedDeviceMissing ? (
+                <small className="is-problem" role="alert">
+                  選択した入力を現在の一覧で確認できません。接続を確認するか、別の入力を選んでください。
+                </small>
+              ) : null}
+            </div>
             <label className="audio-track-recording__monitor">
               <input
                 type="checkbox"

@@ -10,7 +10,7 @@
 - production executableと各OSのunsigned bundle生成
 - SQLite v2 transactionによる通常保存、debounce前crash-draft保護、旧localStorageのfail-closed移行
 - Rust所有のOS file pickerによるproject/MIDI/source audio読込とproject/MIDI/WAV atomic書出し
-- Assistantのハミング変換向けaudio-onlyマイク入力（録音PCMはrenderer memoryだけに保持し、Projectへ保存しない）
+- Assistantのハミング変換とAudio Track録音向けaudio-onlyマイク入力。ハミングの録音PCMはrenderer memoryだけに保持し、Audio Track録音はcanonical Assetだけをrepositoryへ保存する。Record Armと入力device IDはruntime-onlyでProjectへ保存しない
 - macOS WKWebViewで画面描画、再生/停止、SQLite保存、保護ACK直後の`SIGKILL`、process再起動復元を自動検証
 - marker付き二段階protocolによるapp-owned local dataの全消去と、クラッシュ後の起動前再開
 - Ubuntu / macOS / Windowsのdesktop matrixをrequired CIへ接続
@@ -104,7 +104,7 @@ pnpm verify:desktop
 12. checksum-valid markerと保存済みSQLite database一式、またはmarkerと単独sidecarから起動したWebDriver未登録binaryが、自動再開して正常終了し、family/markerを残さない。
 13. 全消去後の別processではSQLite正本由来の旧titleと保存一覧が戻らない。
 14. source audio pickerはWAV / MP3 / M4A / AACだけを受理し、絶対pathをrendererへ返さず、128 MiB超過と明白な拡張子 / container不一致をRustで予備拒否する。rendererは受け取ったbytesをWeb入力と同じ厳格parserで再検証する。
-15. microphoneは同一originのaudio-only要求だけを許可し、video / mixed要求を拒否する。signed candidateではmacOS / Windows / Linux各OSで初回許可、拒否後のfile fallback、再許可、録音停止、device切断を手動smokeする。
+15. microphoneは同一originのaudio-only要求だけを許可し、video / mixed要求を拒否する。signed candidateではmacOS / Windows / Linux各OSで初回許可、拒否後のfile fallback、再許可、システム既定 / 列挙済み入力のexact選択、`devicechange`、Record Arm先への追記、録音停止、device切断を手動smokeする。
 
 renderer-only Playwright E2Eは引き続き初回曲、MIDI/WAV/project export、競合・破損復旧を広く検査する。OS picker自体はRust helper testと手動3OS smokeで確認し、自動native E2Eはpathを公開するtest backdoorをproductionへ入れない。
 

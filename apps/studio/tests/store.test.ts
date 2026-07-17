@@ -2,9 +2,11 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppEvent } from '@cts/tutorial-engine';
 import {
   MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS,
+  createAudioTrackClip,
   duplicateClip,
   findClip,
   resolveClipContent,
+  type ReadyAudioAsset,
 } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 import { createDefaultProject } from '../src/state/defaultProject';
@@ -25,6 +27,27 @@ beforeEach(async () => {
   installLocalStorage();
   expect(await useStore.getState().createNewProject('テスト')).toBe(true);
 });
+
+function addAudioTrackFixture(suffix: string): string {
+  const asset: ReadyAudioAsset = {
+    id: `asset-arm-${suffix}`,
+    availability: 'ready',
+    checksumSha256: 'a'.repeat(64),
+    originalName: `${suffix}.wav`,
+    mediaType: 'audio/wav',
+    byteLength: 96_044,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount: 48_000,
+  };
+  const created = createAudioTrackClip(useStore.getState().project, asset, {
+    trackName: `Audio ${suffix}`,
+    idFactory: (kind) => `${kind}-arm-${suffix}`,
+  });
+  if (!created.ok) throw new Error(created.error.code);
+  expect(useStore.getState().applyProjectChange(() => created.project)).toBe(true);
+  return created.trackId;
+}
 
 describe('default project', () => {
   it('builds 120bpm / C major / 4/4 / 8 bars with the expected tracks', () => {
@@ -108,6 +131,136 @@ describe('microphone recording lifecycle fence', () => {
     expect(useStore.getState().tryBeginNativeClose()).toBe(true);
     useStore.getState().cancelNativeClose();
     expect(useStore.getState().projectOperationBusy).toBe(false);
+  });
+});
+
+describe('runtime Audio Track Record Arm', () => {
+  it('arms only one Audio Track, toggles the same Track off, and explicitly disarms', () => {
+    const firstAudioTrackId = addAudioTrackFixture('first');
+    const secondAudioTrackId = addAudioTrackFixture('second');
+    const instrumentTrack = useStore.getState().project.tracks.find(
+      (track) => track.type === 'instrument',
+    );
+    const masterTrack = useStore.getState().project.tracks.find(
+      (track) => track.type === 'master',
+    );
+
+    expect(useStore.getState().setAudioTrackArmed(firstAudioTrackId)).toBe(true);
+    expect(useStore.getState().armedAudioTrackId).toBe(firstAudioTrackId);
+
+    expect(useStore.getState().setAudioTrackArmed(secondAudioTrackId)).toBe(true);
+    expect(useStore.getState().armedAudioTrackId).toBe(secondAudioTrackId);
+
+    expect(useStore.getState().setAudioTrackArmed(instrumentTrack?.id ?? '')).toBe(false);
+    expect(useStore.getState().setAudioTrackArmed(masterTrack?.id ?? '')).toBe(false);
+    expect(useStore.getState().setAudioTrackArmed('missing-audio-track')).toBe(false);
+    expect(useStore.getState().armedAudioTrackId).toBe(secondAudioTrackId);
+
+    expect(useStore.getState().setAudioTrackArmed(secondAudioTrackId)).toBe(true);
+    expect(useStore.getState().armedAudioTrackId).toBeNull();
+    expect(useStore.getState().setAudioTrackArmed(firstAudioTrackId)).toBe(true);
+    expect(useStore.getState().setAudioTrackArmed(null)).toBe(true);
+    expect(useStore.getState().armedAudioTrackId).toBeNull();
+  });
+
+  it('does not change the Project, history, save revision, or autosave state', () => {
+    const audioTrackId = addAudioTrackFixture('runtime-only');
+    const before = useStore.getState();
+
+    expect(before.setAudioTrackArmed(audioTrackId)).toBe(true);
+
+    const after = useStore.getState();
+    expect(after.armedAudioTrackId).toBe(audioTrackId);
+    expect(after.project).toBe(before.project);
+    expect(after.project.updatedAt).toBe(before.project.updatedAt);
+    expect(after.past).toBe(before.past);
+    expect(after.future).toBe(before.future);
+    expect(after.saveState).toBe(before.saveState);
+    expect(after.saveState.revision).toBe(before.saveState.revision);
+  });
+
+  it('rejects Arm changes while recording or a Project operation owns the store', () => {
+    const firstAudioTrackId = addAudioTrackFixture('busy-first');
+    const secondAudioTrackId = addAudioTrackFixture('busy-second');
+    expect(useStore.getState().setAudioTrackArmed(firstAudioTrackId)).toBe(true);
+
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    expect(useStore.getState().setAudioTrackArmed(secondAudioTrackId)).toBe(false);
+    expect(useStore.getState().setAudioTrackArmed(firstAudioTrackId)).toBe(false);
+    expect(useStore.getState().setAudioTrackArmed(null)).toBe(false);
+    expect(useStore.getState().armedAudioTrackId).toBe(firstAudioTrackId);
+    useStore.getState().finishAudioRecordingOperation(operationId);
+
+    useStore.setState({ projectOperationBusy: true });
+    try {
+      expect(useStore.getState().setAudioTrackArmed(secondAudioTrackId)).toBe(false);
+      expect(useStore.getState().armedAudioTrackId).toBe(firstAudioTrackId);
+    } finally {
+      useStore.setState({ projectOperationBusy: false });
+    }
+  });
+
+  it('preserves a valid Arm across edits and clears it when Undo removes the target', () => {
+    const audioTrackId = addAudioTrackFixture('reconcile');
+    expect(useStore.getState().setAudioTrackArmed(audioTrackId)).toBe(true);
+
+    useStore.getState().setTitle('Armを保持する編集');
+    expect(useStore.getState().armedAudioTrackId).toBe(audioTrackId);
+
+    useStore.getState().undo();
+    expect(useStore.getState().armedAudioTrackId).toBe(audioTrackId);
+    useStore.getState().undo();
+    expect(useStore.getState().project.tracks.some((track) => track.id === audioTrackId)).toBe(false);
+    expect(useStore.getState().armedAudioTrackId).toBeNull();
+
+    useStore.getState().redo();
+    expect(useStore.getState().project.tracks.some((track) => track.id === audioTrackId)).toBe(true);
+    expect(useStore.getState().armedAudioTrackId).toBeNull();
+  });
+
+  it('clears Record Arm whenever a different Project is activated', async () => {
+    const audioTrackId = addAudioTrackFixture('activation');
+    expect(useStore.getState().setAudioTrackArmed(audioTrackId)).toBe(true);
+
+    await expect(useStore.getState().createNewProject('別のプロジェクト')).resolves.toBe(true);
+
+    expect(useStore.getState().armedAudioTrackId).toBeNull();
+    expect(useStore.getState().project.tracks.some((track) => track.id === audioTrackId)).toBe(false);
+  });
+
+  it('keeps the preferred microphone input runtime-only and across Project activation', async () => {
+    const before = useStore.getState();
+    expect(before.setPreferredMicrophoneInputDeviceId('usb-microphone')).toBe(true);
+
+    const selected = useStore.getState();
+    expect(selected.preferredMicrophoneInputDeviceId).toBe('usb-microphone');
+    expect(selected.project).toBe(before.project);
+    expect(selected.past).toBe(before.past);
+    expect(selected.future).toBe(before.future);
+    expect(selected.saveState).toBe(before.saveState);
+    expect(selected.setPreferredMicrophoneInputDeviceId('')).toBe(false);
+    expect(useStore.getState().preferredMicrophoneInputDeviceId).toBe('usb-microphone');
+
+    await expect(useStore.getState().createNewProject('入力設定を保持')).resolves.toBe(true);
+    expect(useStore.getState().preferredMicrophoneInputDeviceId).toBe('usb-microphone');
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId(null)).toBe(true);
+    expect(useStore.getState().preferredMicrophoneInputDeviceId).toBeNull();
+  });
+
+  it('rejects microphone input changes while recording owns the lifecycle', () => {
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('built-in-microphone')).toBe(true);
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-microphone')).toBe(false);
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId(null)).toBe(false);
+    expect(useStore.getState().preferredMicrophoneInputDeviceId).toBe('built-in-microphone');
+
+    useStore.getState().finishAudioRecordingOperation(operationId);
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-microphone')).toBe(true);
+    expect(useStore.getState().preferredMicrophoneInputDeviceId).toBe('usb-microphone');
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId(null)).toBe(true);
   });
 });
 

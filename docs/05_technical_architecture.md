@@ -244,6 +244,15 @@ import / Audio Asset付きlive startup / offline WAVは、単一moduleのprocess
 
 WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提供するが、nativeと同じgeneration-aware GCはまだ持たない。Project JSON単体にもbinaryを同梱しない。この2点は「asset保存済み」と「持ち運び可能bundle / 全browser orphan回収済み」を区別する明示的な制約である。
 
+### 5.10 Audio Track recording transaction（Batch 6a Record Arm / input selection）
+
+1. Storeは`armedAudioTrackId`と`preferredMicrophoneInputDeviceId`をrenderer runtimeだけに保持する。arm APIは既存Audio Trackだけを受理し、単一IDをtoggle / replaceする。Project操作・端末全消去・録音token所有中は変更を拒否する。Project activationではarmを解除し、Project commit / Undo / Redoでは同じAudio Trackが残る場合だけ維持する。両値をProject codec、history、SQLite、`.ctsproj.json`へ投影しない。
+2. `enumerateMicrophoneInputDevices`は`MediaDevices.enumerateDevices()`から`audioinput`だけを抽出し、opaqueなdevice IDを最初の1件へdeduplicateし、空labelを`マイク N`で表示する。`devicechange` subscriptionはdialogがidle / errorの間だけ一覧を再取得し、stale generationを採用しない。`null`はhost既定、明示IDは`getUserMedia`の`deviceId: { exact: id }`にする。開始後のdevice hot switchは行わない。
+3. 開始操作はmicrophone permission要求より前に、Asset / Track / Clip上限をpreflightし、Project snapshot、playhead、`new-track`または`existing-audio-track`のexact targetをimmutableな所有handleへ固定する。同じ同期境界でAudio import / recording共通single-flight lease、384 MiB capture予約、recording operation tokenを取得し、active playbackを停止する。したがって現行録音は固定playhead配置であり、共有再生clock上のoverdubではない。
+4. captureと48 kHz PCM16 WAV canonicalizeは初回Batch 6aのbounded raw PCM、最大60秒、1〜2 channel、dry capture、monitor初期OFF、permission cancel後のlate stream破棄、resource settlementまでのlease所有を維持する。列挙結果だけでは明示deviceの不在を断定せずexact指定を試み、`getUserMedia`が取得を拒否した場合だけtyped device failureとしてProject採用へ進めない。
+5. canonical bytesとchecksum receiptをcontent-addressed repositoryへ確定してから、開始時snapshotとexact recording tokenをCASする。`new-track`はAudioAsset / Track / Audio Clip / output routeを作り、`existing-audio-track`は対象Trackのmixer / effects / routingを変えずAudioAssetと全range Audio Clipだけを追記する。どちらも1回のdomain mutation、selection更新、Undo 1回としてcommitする。
+6. permission / device-ended / cancel / canonicalize / store失敗、stale snapshot、target消失、revoked tokenではProject / history / revision / selectionを変更しない。保存後CAS拒否のorphan bytesは許容するが、欠損bytesを参照するmetadataを作らない。shared AudioContextによるsample-accurate scheduling、latency compensation、playback中overdub、長時間streaming、cycle take / lane / compは後続境界である。
+
 ## 6. Audio実装方針
 
 ### 6.1 MVP

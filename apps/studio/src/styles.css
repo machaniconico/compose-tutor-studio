@@ -384,6 +384,16 @@ input[type='range'] {
   border-color: var(--danger);
 }
 
+.transport-bar__record small {
+  max-width: 96px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .field {
   display: inline-flex;
   align-items: center;
@@ -578,6 +588,17 @@ input[type='range'] {
   padding: 1px 7px;
   font-size: 11px;
   font-weight: 700;
+}
+
+.mini-btn--record {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.mini-btn--record.is-active {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 22%, var(--bg-input));
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
 }
 
 /* Track creation + inspector management. */
@@ -792,6 +813,39 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+}
+
+.track-inspector__record-arm {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-2);
+}
+
+.track-inspector__record-arm button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+
+.track-inspector__record-arm button > span {
+  color: var(--danger);
+  font-weight: 800;
+}
+
+.track-inspector__record-arm button.is-active {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 20%, var(--bg-input));
+  color: var(--text);
+}
+
+.track-inspector__record-arm small {
+  color: var(--text-dim);
+  line-height: 1.45;
 }
 
 .track-inspector__audio-assets > span {
@@ -2431,6 +2485,10 @@ button.pr__note:hover {
   .transport-bar__title {
     width: 160px;
     min-width: 120px;
+  }
+
+  .transport-bar__record small {
+    display: none;
   }
 
   .mixer-strip.is-expanded {
@@ -4116,6 +4174,31 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
 .audio-track-recording__hint {
   color: var(--text-dim);
   line-height: 1.55;
+}
+
+.audio-track-recording__input-device {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.audio-track-recording__input-device > label {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.audio-track-recording__input-device > select {
+  width: 100%;
+  min-height: 44px;
+}
+
+.audio-track-recording__input-device > small {
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.audio-track-recording__input-device > small.is-problem {
+  color: var(--danger);
 }
 
 .audio-track-recording__monitor {

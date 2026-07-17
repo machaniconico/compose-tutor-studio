@@ -140,6 +140,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | US-011 | 動画制作者・学習者として、利用許諾のある既存曲からカラオケ練習用音源を作りたい | Should | 対応するステレオ音源を端末内で中央定位軽減し、A/B試聴後にWAVを書き出せる |
 | US-012 | 作曲者として、曲に楽器・ドラム・音源・Busを足して音色と経路を整えたい | Must | production UIから安全に追加・複製・並べ替え・一般Track削除を行い、内蔵音色、main output、pre/post-fader sendを選んで保存・Undo・再生・WAVへ反映できる。schema v4では学習role Trackも改名できてroleを保持し、削除だけを保護する |
 | US-013 | 作曲者として、手元の音声を曲へ置いて非破壊編集したい | Must | WAV / MP3 / M4A / AACをAudio Trackへ読み込み、移動、左右trim、gain、fade、loop、split、独立複製、削除をUndo/Redoでき、live再生・WAV・再読込で同じ範囲を使う |
+| US-014 | 作曲者として、マイク入力を新規または既存のAudio Trackへ録音したい | Must | Audio Trackを1件だけ録音待機にでき、システム既定または列挙された入力を選び、最大60秒のdry録音を現在playheadから新しいClipとしてasset-firstで採用できる。成功はUndo 1回、失敗・cancelはProject不変とする |
 
 ## 3. MVP機能範囲
 
@@ -179,6 +180,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 - 簡易エフェクト: EQ/Filter、Delay、Reverb、Compressorの最小版
 - WAVレンダリング
 - app-owned Audio Assetのlive再生とoffline WAV取り込み。Project単体JSONには音声binaryを同梱せず、欠落・変更・storage不可を音声素材ごとに表示する
+- 最大60秒の単一マイク入力録音。録音待機なしでは新規Audio Track、録音待機中の既存Audio Trackでは同Trackへ新しいAudio Clipを追加する。録音待機と入力device選択はruntime-onlyでProjectへ保存しない
 - WAV/MP3/M4A/AACのステレオ音源を使う、ローカル完結の中央定位ボーカル軽減
 - stereo Bus、各non-Masterのmain output、pre/post-fader send / return。循環は候補Project採用前に拒否し、live再生とoffline WAVで同じrouting graphを使う
 
@@ -200,6 +202,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | 楽譜エディタ | 実装量が大きい | MIDI編集が安定後 |
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
 | VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
+| sample-accurate overdub / latency補正 / take-comp | 現行録音は開始時に再生を停止する固定playheadの単一入力で、共有audio clock、長時間streaming、take laneをまだ持たない | shared AudioContext同期とlatency補正を先に検証し、その後cycle take / compへ進む |
 
 ## 5. 非機能要件
 
@@ -225,6 +228,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 - 利用許諾のあるステレオ音源から、ローカル処理でカラオケ用WAVを作成できる
 - instrument / drum / Audio / Bus Trackの管理と音色・routing変更が、Master保護、schema v4学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
 - Audio Trackへ取り込んだ音声を非破壊編集でき、live再生とWAVが同じsource range / gain / fade / loopを使う。欠落・変更されたbinaryは別素材へ黙って置換せず、Project metadataを保持して説明する
+- システム既定または選択した単一マイクから、新規または録音待機中の既存Audio Trackへ録音できる。録音待機と入力deviceはProject保存・履歴を汚さず、採用したAsset / ClipだけをUndo 1回で戻せる
 - 主要ロジックにテストがある
 - 既存DAWのUIコピーではなく、独自デザインである
 
@@ -254,7 +258,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | Import | MIDI import | Yes | `.mid` / `.midi`を検証し、MTrkとchannelに応じた複数トラックを現在の曲へ追加する |
 | Vocal Cut | カラオケ作成 | Yes | ステレオ中央定位をローカル軽減し、A/B試聴後にPCM 16-bit WAVへ書き出す。ML stem分離ではない |
 | Track Management | Track追加・整理・音色 | Partial | production UIはinstrument / drum / stereo Busと音源fileからのAudio Trackを追加し、non-masterの複製・並べ替え、一般Trackの削除・改名、synth 4音色を扱う。schema v4では学習role Trackも改名可能でroleを保持し、削除だけを保護する。Folder / Stackは未実装 |
-| Audio Track | Audio file配置 | Yes | 入力をapp-owned 48 kHz mono/stereo PCM16 WAVへ正規化し、content-addressed保存、非破壊編集、live/WAV再生、欠落・変更診断を行う。Project JSON単体にはbinaryを同梱しない |
+| Audio Track | Audio file配置 / マイク録音 | Yes | fileまたは最大60秒の単一マイク入力をapp-owned 48 kHz mono/stereo PCM16 WAVへ正規化し、content-addressed保存、既存Audio TrackへのClip追記、非破壊編集、live/WAV再生、欠落・変更診断を行う。Project JSON単体にはbinaryを同梱しない |
 | Stem Separation | パート分離 | Future | 外部API/ローカルモデル検証後 |
 | Plugin Host | VST3/AU | Future | ライセンス/安定性確認後 |
 
@@ -507,6 +511,16 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - raw objectのchecksum / length検証とdecode cacheを共有し、raw preflightとdecoded PCMは各256 MiB以下に制限する。missing / changed / unavailable / decode / resource超過は型付きに分類し、Track / Clip単位の説明と再読み込み手段を表示する。metadataを自動的に`unresolved`へ書き換えたり、同名の別fileへ黙って置換したりしない
 - liveは実AudioContext sample rate確定後、resolver I/OとTrack graph生成前に未使用decoded LRUを解放し、active / in-flight cacheだけを保持量へ数える。resolve/hash phaseは`raw合計 + 2 × 最大raw + retained decoded`、decode phaseは`raw合計 + 最大raw decode copy + target-rate decoded合計 + retained decoded`をchecked加算し、大きい方が384 MiBを越えるProjectを型付きで拒否する
 - `.ctsproj.json`はschema v4 metadataとaudio routingのexact交換形式だがAudioAsset binaryを同梱しない。単体JSONを別端末・別profileで開く場合は、対応binaryが既に同じcontent-addressed repositoryに存在する時だけreadyとして採用し、それ以外は既存Projectを変更せず非同梱を説明する。per-song bundleは引き続き将来案である
+
+### 7.7 Audio Track録音 / Record Arm
+
+- Track ListとInspectorの`R`は既存Audio Trackだけを対象にし、同時に1件だけを録音待機にする。同じTrackの再操作で解除し、別Audio Trackの操作で録音先を切り替える。録音待機IDはruntime-onlyでProject / history / revision / autosave / SQLite / `.ctsproj.json`へ保存しない。Project切替では解除し、Track削除やUndo / Redoで対象が存在しなくなった時も解除する
+- transportの録音buttonは録音先を表示する。録音待機がなければ新規Audio Track、待機中ならその既存Audio Trackへ新しいAudio Clipを追加する。開始時にProject snapshot、現在playhead、録音先を同じ所有handleへ固定し、以後のUI状態で差し替えない。録音開始時はactive playbackを停止するため、現行は伴奏を流しながらのoverdubではない
+- dialogは`システム既定`に加え、`enumerateDevices()`で得た`audioinput`を選択肢にする。空labelには順番付きの代替名を表示し、同一device IDは1件にまとめる。選択IDはrenderer sessionのruntime-only preferenceでありProjectへ保存しない。明示選択時は`getUserMedia`へ`deviceId: { exact: id }`を渡し、未選択時はhost既定を使う
+- `devicechange`では待機中の一覧を再列挙する。権限前のprivacy制約でも一覧へ現れない場合があるため、選択済みdeviceを確認できない時は警告しつつ開始操作は残し、凍結したIDをexact指定する。実際に取得できなければtyped errorでProjectを変えず、別入力またはシステム既定を案内する。1 takeの入力IDは開始時に固定し、録音中のhot switchは行わない
+- captureは3秒countdown、最大60秒、1〜2 channel、dry録音、monitor初期OFFと明示opt-inを維持する。capture開始前に共有384 MiB予約とrecording tokenを同期取得し、asset上限、既存TrackのClip上限または新規Track上限を検査する
+- raw PCMを48 kHz PCM16 WAVへ正規化し、bytesとchecksum receiptをrepositoryへ確定してからだけProjectへ採用する。既存TrackではそのTrackのvolume / pan / effects / routingを保ったままAsset metadataと全range Clipを追記し、新規Trackでは従来どおりTrack / routing / Clipを作る。どちらも開始時snapshotへのexact CAS、Undo 1回、revision 1回として扱う
+- permission / device loss / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProject / history / selectionを変更しない。shared AudioContextによるsample-accurate同期、latency補正、再生中overdub、長時間streaming、cycle take / lane / compは未実装である
 
 ## 8. Mixer
 
@@ -1065,6 +1079,13 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 成功時は音符候補をscroll可能な一覧で表示し、音名、編集可能なMIDI note、候補除外、反映先clip、リズム補正をkeyboardだけで操作できる
 - 反映buttonの直前に既存notesを置き換えることとUndo対応を明示する。解析成功時は候補結果へfocusを移し、確定後はPiano Rollへ移動して反映件数をlive statusとtoastで通知する
 
+### 2.11 Audio Track録音
+
+- Audio Trackだけに`R`の録音待機buttonを表示し、Track ListとInspectorの両方で同じ単一選択を`aria-pressed`、文字、形で示す。computed nameは`${Track名} 録音待機`とし、色だけに依存しない。Project操作または録音中は切替をdisabledにする
+- transportの録音buttonには、通常レイアウトで待機中のTrack名または`新規Track`を可視表示し、accessible name / titleでも録音先を伝える。最小高のcompact layoutでは編集領域を守るため補助表示だけを省略し、`R`の状態とaccessible name / titleは維持する。録音待機なしでは新規Audio Track、待機中ではその既存Trackへ新しいClipを追加する
+- 録音dialogは開始前に録音先と入力deviceを表示する。入力は`システム既定`を常に選べ、列挙済みdeviceのlabelが空なら`マイク N`を使う。`devicechange`後に選択済み入力が見つからなければalertと選び直しを表示し、一覧取得不可でもシステム既定による再試行を残す
+- 録音開始後は録音先と入力deviceを固定し、終了または破棄まで変更controlを表示しない。開始時に再生を停止する現行境界を説明し、伴奏を流したsample-accurate overdubや録音中のdevice hot switchを示唆しない
+
 ## 3. ナビゲーション
 
 | ショートカット | 状態 | 動作 |
@@ -1118,7 +1139,7 @@ Chord Track のコンテキスト内操作:
 | MIDI読み込み失敗 | 全failure pathで`MIDI読み込みによる曲・選択・表示の変更はありません。`を一度だけ伝え、上限、破損、対応形式、再試行を初心者向けに案内する |
 | Audio Track読み込み中 | dialogを`aria-busy`にし、検査 / decode / resample / encode / 保存の進捗とcancelを表示する。別Track追加、閉じる、再importを競合させない |
 | Audio Track入力が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、1〜2 channel、canonical output 128 MiB以下、decode PCM 256 MiB以下、source / decode / resample / WAV / 保存copyを含むphase peak 384 MiB以下という条件と、端末codecでdecodeできなかった可能性を分けて案内する。失敗時は曲・履歴・選択が不変であることを伝える |
-| Audio Track録音の開始前 | transportとTrack追加の両方から開ける。最大60秒、現在playheadへ新規Trackとして配置、3秒countdown、dry録音、端末内処理を説明する。入力monitorは初期OFFで、ON時はヘッドホン推奨を常時表示する |
+| Audio Track録音の開始前 | transportとTrack追加の両方から開ける。Track追加は常に新規Track、transportはAudio Trackの`R`が1件だけ待機中なら既存Trackへ新しいClip、待機なしなら新規Trackとして現在playheadへ配置する。システム既定または列挙済み入力を選び、最大60秒、3秒countdown、dry録音、開始時の再生停止、端末内処理を説明する。入力monitorは初期OFFで、ON時はヘッドホン推奨を常時表示する |
 | Audio Track録音中 | `録音中`を色以外の文字でも示し、経過時間、入力level meter、44px以上の`録音を終了して保存` / `録音を破棄`をkeyboard操作可能にする。録音・保存中のX / Escape / backdrop、Project切替、window closeは安全に拒否する |
 | Audio Track録音失敗 | permission拒否、マイクなし / 使用中 / 切断、短すぎる録音、memory上限、WAV変換、素材保存を区別し、再試行方法と`プロジェクトは変更されていません`を表示する。保存cancel後のlate resultを採用しない |
 | Audio Assetが見つからない / 変更された | 素材名と`見つかりません` / `内容が変わっています` / `保存場所を利用できません`をClipと編集panelに表示する。別fileへ黙って置換せず、元のprofile / 端末で開き直すよう案内する。保存場所を利用できない場合はstorage / 権限を確認して再読込する。配置と編集metadataは保持し、素材を必要とする編集controlを無効にするが、最後の参照を安全に外せる削除は利用可能にする |
@@ -1405,6 +1426,15 @@ importはapp-wide leaseを1件だけ取得する。cancelは待機中UIを先に
 import / Audio Asset付きlive startup / offline WAVは、単一moduleのprocess-wide 384 MiB予約台帳を共有する。予約とresizeは既存予約とのchecked sumを同期的に検証してから一度に公開し、拒否時は台帳を変更しない。releaseは冪等である。native pickerは`openAudio`前に`2 × 最大response envelope + active / in-flight decoded cache`を予約するため、同時処理量によってはfile選択前に保守的拒否となる。response取得後はBlob allocation前に実sizeで再照合し、Blob生成直後はextra envelopeだけをselection leaseへ残した同じJavaScript turnでimportを開始する。importのplanner + cache予約が成功・拒否した後もselection leaseは呼出し元のfinallyでexactly once意味に解放する。import本体はplanner peakとactive / in-flight decoded cacheを予約し、実decode context rateでdecode前にresizeして実job settlementまで保持する。liveはactual-rate metadata peakをresolver前からdecoded cache lease取得まで保持し、その後のactive bytesはcache reservationとして後続見積りへ入る。WAVはoffline outputとPCM16のplatform handoff copiesを含むmetadata peakをresolver / `OfflineAudioContext`前に予約する。render / encode失敗はrendererのfinally、成功は移譲されたBlob leaseをWeb object URL revokeまたはnative `Blob.arrayBuffer()` / IPC settlement後のfinallyで解放する。
 
 WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提供するが、nativeと同じgeneration-aware GCはまだ持たない。Project JSON単体にもbinaryを同梱しない。この2点は「asset保存済み」と「持ち運び可能bundle / 全browser orphan回収済み」を区別する明示的な制約である。
+
+### 5.10 Audio Track recording transaction（Batch 6a Record Arm / input selection）
+
+1. Storeは`armedAudioTrackId`と`preferredMicrophoneInputDeviceId`をrenderer runtimeだけに保持する。arm APIは既存Audio Trackだけを受理し、単一IDをtoggle / replaceする。Project操作・端末全消去・録音token所有中は変更を拒否する。Project activationではarmを解除し、Project commit / Undo / Redoでは同じAudio Trackが残る場合だけ維持する。両値をProject codec、history、SQLite、`.ctsproj.json`へ投影しない。
+2. `enumerateMicrophoneInputDevices`は`MediaDevices.enumerateDevices()`から`audioinput`だけを抽出し、opaqueなdevice IDを最初の1件へdeduplicateし、空labelを`マイク N`で表示する。`devicechange` subscriptionはdialogがidle / errorの間だけ一覧を再取得し、stale generationを採用しない。`null`はhost既定、明示IDは`getUserMedia`の`deviceId: { exact: id }`にする。開始後のdevice hot switchは行わない。
+3. 開始操作はmicrophone permission要求より前に、Asset / Track / Clip上限をpreflightし、Project snapshot、playhead、`new-track`または`existing-audio-track`のexact targetをimmutableな所有handleへ固定する。同じ同期境界でAudio import / recording共通single-flight lease、384 MiB capture予約、recording operation tokenを取得し、active playbackを停止する。したがって現行録音は固定playhead配置であり、共有再生clock上のoverdubではない。
+4. captureと48 kHz PCM16 WAV canonicalizeは初回Batch 6aのbounded raw PCM、最大60秒、1〜2 channel、dry capture、monitor初期OFF、permission cancel後のlate stream破棄、resource settlementまでのlease所有を維持する。列挙結果だけでは明示deviceの不在を断定せずexact指定を試み、`getUserMedia`が取得を拒否した場合だけtyped device failureとしてProject採用へ進めない。
+5. canonical bytesとchecksum receiptをcontent-addressed repositoryへ確定してから、開始時snapshotとexact recording tokenをCASする。`new-track`はAudioAsset / Track / Audio Clip / output routeを作り、`existing-audio-track`は対象Trackのmixer / effects / routingを変えずAudioAssetと全range Audio Clipだけを追記する。どちらも1回のdomain mutation、selection更新、Undo 1回としてcommitする。
+6. permission / device-ended / cancel / canonicalize / store失敗、stale snapshot、target消失、revoked tokenではProject / history / revision / selectionを変更しない。保存後CAS拒否のorphan bytesは許容するが、欠損bytesを参照するmetadataを作らない。shared AudioContextによるsample-accurate scheduling、latency compensation、playback中overdub、長時間streaming、cycle take / lane / compは後続境界である。
 
 ## 6. Audio実装方針
 
@@ -1889,9 +1919,9 @@ live drainの所有権はProject schemaではなく`PlaybackController`のtransi
 
 ### 2.6.1 Transient Audio Track recording
 
-Audio Track録音のpermission、countdown、入力level、monitor opt-in、開始時Project snapshotとplayheadを束ねる所有handle、Abort generation、raw Float32 PCM、encode進捗はruntime-onlyであり、Project codec / SQLite / `.ctsproj.json`へ保存しない。初回のproduction境界は既定の単一input、1〜2 channel、最大60秒、dry録音、monitor初期OFFである。録音中のinput hot switch、record arm、latency補正、take laneはProject fieldとして先行追加しない。
+Audio Track録音のpermission、countdown、入力level、monitor opt-in、単一Audio Trackの`armedAudioTrackId`、host既定を表す`null`またはopaqueな`preferredMicrophoneInputDeviceId`、開始時Project snapshot / playhead / exact targetを束ねる所有handle、Abort generation、raw Float32 PCM、encode進捗はruntime-onlyであり、Project codec / history / SQLite / `.ctsproj.json`へ保存しない。production境界は単一input、1〜2 channel、最大60秒、dry録音、monitor初期OFFである。Record ArmはTrack fieldではなく1件だけのrenderer stateで、Project切替または対象Audio Track消失時に解除する。入力IDは明示選択時だけ`deviceId: { exact: id }`へ渡し、`null`はhost既定とする。録音中のinput hot switch、latency補正、take laneはProject fieldとして先行追加しない。
 
-capture開始前に同じ所有handleがProject切替 / close token、Audio Track import / recordingのsingle-flight lease、開始時Project snapshot / playheadを同期取得する。capture開始時に未使用のdecoded playback cacheを破棄し、残るactive cacheを含めてcaptureからcanonicalize / persistとcancel後に残るresample workのsettlementまで同じ384 MiB予約を同期resizeして所有する。permission待ちcancel後のlate streamはmicrophone内部tokenが停止・破棄まで所有し、PCM graphを作らない。GC未実施のworklet chunk 1組、連続source PCM、capture runtime overhead、real AudioBuffer copy、optional 48 kHz resample、PCM16 WAV、repository copyのphase peakをallocation前に検査する。高sample-rate / stereoで合算上限を超えるtakeはAudioBuffer作成前に拒否する。canonical WAV bytesとchecksum receiptを保存してからだけ、開始時Project snapshot / playheadとexact tokenへのCASで`ReadyAudioAsset`、新規Audio Track、全range Audio ClipをUndo 1回として採用する。permission / device loss / cancel / store失敗 / stale snapshot / revoked tokenではProjectとhistoryを変更しない。保存済みbytesだけが孤児になる場合は許容し、欠損bytesを参照するmetadataは作らない。
+capture開始前に同じ所有handleがProject切替 / close token、Audio Track import / recordingのsingle-flight lease、開始時Project snapshot / playheadと`new-track`または`existing-audio-track` targetを同期取得する。active playbackはこの時点で停止する。capture開始時に未使用のdecoded playback cacheを破棄し、残るactive cacheを含めてcaptureからcanonicalize / persistとcancel後に残るresample workのsettlementまで同じ384 MiB予約を同期resizeして所有する。permission待ちcancel後のlate streamはmicrophone内部tokenが停止・破棄まで所有し、PCM graphを作らない。GC未実施のworklet chunk 1組、連続source PCM、capture runtime overhead、real AudioBuffer copy、optional 48 kHz resample、PCM16 WAV、repository copyのphase peakをallocation前に検査する。高sample-rate / stereoで合算上限を超えるtakeはAudioBuffer作成前に拒否する。canonical WAV bytesとchecksum receiptを保存してからだけ、開始時Project snapshot / playhead / targetとexact tokenへのCASで`ReadyAudioAsset`と全range Audio ClipをUndo 1回として採用する。新規targetではAudio Track / output routeも作り、既存targetではTrack / routingを変えずClipを追記する。permission / device loss / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProjectとhistoryを変更しない。保存済みbytesだけが孤児になる場合は許容し、欠損bytesを参照するmetadataは作らない。shared AudioContext同期、sample-accurate overdub、latency補正、長時間streaming、take / compは未実装である。
 
 ### 2.7 Track管理とpreset（schema v4）
 
@@ -2401,7 +2431,8 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 | vocal-cut chunk/cancel | processingとWAV encodeがchunkごとに進捗を単調更新し、cancel後に古いgenerationが結果やdownloadを公開しないか |
 | humming pitch core | 50 / 1,000 Hz境界、2音＋無声、vibrato、強い第2倍音、逆相stereo、192 kHz downsampleのaliasingを合成fixtureで検査し、同入力 / 異chunkで結果が一致するか |
 | humming safety | 60秒UI上限、256 MiB PCM / working上限、NaN / Inf、32ch core上限、mono / stereo UI上限、巨大chunk、cancelをallocation / commit前に拒否するか |
-| microphone capture | secure context / AudioWorklet / device有無、権限拒否、single-flight、permission pending cancel後のlate stream停止、device切断、manual / exact 60秒停止、0.5秒未満、2ch / sample rate / memory上限、invalid chunk、flush timeoutでresourceを一度だけ解放するか |
+| microphone capture | secure context / AudioWorklet / device有無、権限拒否、single-flight、permission pending cancel後のlate stream停止、device切断、manual / exact 60秒停止、0.5秒未満、2ch / sample rate / memory上限、invalid chunk、flush timeoutでresourceを一度だけ解放するか。入力ID省略時はhost既定、明示時は`deviceId.exact`になり、take中に変更されないか |
+| microphone input inventory | `enumerateDevices()`からaudioinputだけを抽出し、duplicate IDは先頭だけ、空labelは`マイク N`、空IDはdialogのシステム既定optionへ統合されるか。unsupported / enumerate失敗でも既定入力を残し、`devicechange`再取得、stale generation破棄、選択device消失表示、unsubscribe exactly onceを検査する |
 | humming E2E | local mono WAVと合成MediaStreamの直接録音をAssistantから解析し、候補修正 / 除外、target / quantize確認後に2音をUndo 1回のProject changeとしてPiano Rollへ反映するか。権限拒否時にfile fallbackが残り、失敗 / cancelではProjectが不変か |
 
 ## 6. パフォーマンステスト
@@ -2611,8 +2642,11 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 ### 7.8 Batch 6 remaining gates
 
 - 実装済みのvolume / pan live/offline scheduling回帰を維持しつつ、Automationのlane edit / write / read UIを追加して保存・Undo・keyboard操作を検証する
-- 6a初回自動gateは最大60秒のmono/stereo capture、monitor初期OFF / opt-in、raw PCM→48 kHz PCM16 WAV→asset-first保存→新規Track / ClipのUndo 1回採用を検証する。未使用decoded cacheの開始前破棄、active cacheとGC未実施chunkを含む384 MiB planner、高sample-rate超過のallocation前拒否、capture開始からcancel後に残るresample work settlementまでのimport / record single-flight lease、permission cancel後のlate stream破棄、同一tick二重開始拒否、permission / device-ended / cancel / stale開始snapshot / playhead / revoked token / project switch / close拒否も自動検査する
-- 3OS実deviceでpermission、device loss、disk full、monitor feedback、close、再起動再生を確認する。record arm、device選択、shared AudioContext同期、latency補正、長時間streamingを閉じた後、cycle take / compingへ進む
+- 6a自動gateは最大60秒のmono/stereo capture、monitor初期OFF / opt-in、raw PCM→48 kHz PCM16 WAV→asset-first保存を検証する。録音待機なしは新規Track / Clip、単一の既存Audio Track待機中は同TrackへClipだけを追記し、Trackのvolume / pan / effects / routingを保持する。両経路を開始時snapshot / targetへのexact CAS、selection更新、Undo 1回として検査する
+- Record ArmはAudio Track以外を拒否し、同時1件のtoggle / replace、Project操作・録音中の変更拒否、Project切替時解除、delete / Undo / Redoでのtarget reconciliationを検査する。armと入力device preferenceの操作だけではProject identity / history / revision / autosave payload / `.ctsproj.json`が変わらないこと、開始後のarm / device変更が凍結済みtargetへ影響しないことを確認する
+- device列挙はdefault option、audioinput filter、duplicate、空label、enumeration失敗、`devicechange`、選択device消失をcomponent / unitで検査する。captureでは選択IDが`getUserMedia`のexact constraintになり、未選択時にdevice constraintを付けず、消失・Overconstrained / device-endedでProjectを採用しないことを確認する
+- 未使用decoded cacheの開始前破棄、active cacheとGC未実施chunkを含む384 MiB planner、高sample-rate超過のallocation前拒否、capture開始からcancel後に残るresample work settlementまでのimport / record single-flight lease、permission cancel後のlate stream破棄、同一tick二重開始拒否、permission / device-ended / cancel / stale開始snapshot / playhead / target / revoked token / project switch / close拒否も自動検査する
+- 3OS実deviceでpermission、システム既定 / 明示device選択、`devicechange` / device loss、Record Arm先への追記、disk full、monitor feedback、close、再起動再生を確認する。shared AudioContext同期、latency補正、再生中overdub、長時間streamingを閉じた後、cycle take / compingへ進む
 
 ## 8. 手動QAチェックリスト
 
@@ -2627,7 +2661,7 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - カラオケ作成で3 presetを比較し、A/Bの位置がずれず、cancel後に結果が現れず、mono / near-mono / 5分超過 / 128 MiB超過が具体的な案内になる
 - カラオケ作成前から品質限界と権利注意が読め、処理中もNetwork requestがなく、閉じた後に音声再生や一時URLが残らない
 - Track追加で楽器 / ドラム / オーディオ / stereo Busと4音色を迷わず選べ、Audioのlocal正規化・JSON非同梱、Busが複数Trackをまとめるreturnであることを理解できる。Mixerの「経路」でmain output、pre/post-fader send、送り量、有効状態をkeyboard / screen readerで操作でき、循環拒否の理由がalertになる。Masterの操作不可、学習role Trackは改名可・削除不可、一般Trackは名前にかかわらず削除可能という案内と、topology変更後もplayheadを保持する案内を確認できる
-- transportとTrack追加の両方からマイク録音を開始し、monitor初期OFF、ヘッドホン警告、3秒countdown、level、stop / discard、最大60秒、固定playhead配置を確認する。permission拒否、device切断、保存容量不足、録音中closeで既存曲が変わらず、成功後はUndo / Redoと再起動再生が一致する
+- transportとTrack追加の両方からマイク録音を開始し、システム既定 / 列挙済み入力の選択、device追加・切断時の一覧更新、monitor初期OFF、ヘッドホン警告、3秒countdown、level、stop / discard、最大60秒、固定playhead配置を確認する。Track追加と待機なしのtransportでは新規Track、Audio Trackの`R`を1件だけ待機させたtransportでは既存TrackへClipが増え、録音開始時に再生が止まることを確認する。permission拒否、選択device消失、保存容量不足、録音中closeで既存曲が変わらず、成功後はUndo / Redoと再起動再生が一致する
 
 ### 8.1 Native release candidate（macOS / Windows / Linux共通）
 

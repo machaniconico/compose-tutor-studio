@@ -741,6 +741,79 @@ describe('Studio Audio Track microphone recording', () => {
       .toBe(true);
   });
 
+  it('appends a take to the frozen existing Audio Track without creating routing', async () => {
+    const { result: imported } = await importFixture();
+    const before = useStore.getState();
+    const targetBefore = before.project.tracks.find((track) => track.id === imported.trackId);
+    if (!targetBefore) throw new Error('recording target fixture missing');
+    const trackCountBefore = before.project.tracks.length;
+    const routingBefore = before.project.audioRouting;
+    const historyBefore = before.past.length;
+    useStore.getState().setPosition(10);
+    const requestedTarget: {
+      kind: 'existing-audio-track';
+      trackId: string;
+    } = { kind: 'existing-audio-track', trackId: imported.trackId };
+    const ownership = actions.beginStudioAudioTrackRecording({
+      target: requestedTarget,
+    });
+    if (!ownership.ok) throw new Error(ownership.code);
+    requestedTarget.trackId = 'mutated-after-permission-boundary';
+
+    const result = await actions.recordStudioAudioTrack({
+      recordingHandle: ownership.handle,
+      capture: microphoneCaptureShape(),
+      fileName: 'Second Take.wav',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer: () => audioBufferShape(96_000, 48_000),
+      canonicalize: async () => canonicalResult(),
+      createAssetId: () => 'asset-recorded-existing-track',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      trackId: imported.trackId,
+      trackName: targetBefore.name,
+      audioAssetId: 'asset-recorded-existing-track',
+    });
+    if (!result.ok) throw new Error(result.code);
+    const adopted = useStore.getState();
+    const targetAfter = adopted.project.tracks.find((track) => track.id === imported.trackId);
+    expect(adopted.project.tracks).toHaveLength(trackCountBefore);
+    expect(adopted.project.audioRouting).toBe(routingBefore);
+    expect(targetAfter?.clips).toHaveLength(targetBefore.clips.length + 1);
+    expect(targetAfter?.clips.at(-1)).toMatchObject({
+      id: result.clipId,
+      type: 'audio',
+      startBeat: 10,
+      audioAssetId: 'asset-recorded-existing-track',
+    });
+    expect(adopted.past).toHaveLength(historyBefore + 1);
+
+    adopted.undo();
+    const undoneTarget = useStore.getState().project.tracks.find(
+      (track) => track.id === imported.trackId,
+    );
+    expect(undoneTarget?.clips).toHaveLength(targetBefore.clips.length);
+    expect(useStore.getState().project.tracks).toHaveLength(trackCountBefore);
+  });
+
+  it('rejects an invalid existing destination before reserving microphone ownership', () => {
+    expect(actions.beginStudioAudioTrackRecording({
+      target: { kind: 'existing-audio-track', trackId: 'missing-track' },
+    })).toEqual({ ok: false, code: 'track-not-found' });
+
+    const instrument = useStore.getState().project.tracks.find(
+      (track) => track.type === 'instrument',
+    );
+    expect(actions.beginStudioAudioTrackRecording({
+      target: { kind: 'existing-audio-track', trackId: instrument?.id ?? '' },
+    })).toEqual({ ok: false, code: 'unsupported-track-type' });
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
   it('counts stale capture chunks and rejects a 192 kHz stereo worst case before AudioBuffer allocation', () => {
     const worstCase = microphoneCaptureShape(60 * 192_000, 192_000, 2);
     expect(() => actions.planStudioAudioRecordingResources(worstCase))

@@ -3,6 +3,7 @@ import {
   MAX_AUDIO_ASSETS,
   MAX_CLIPS_PER_TRACK,
   MAX_PROJECT_TRACKS,
+  appendAudioTrackClip,
   createAudioTrackClip,
   createEmptyProject,
   deleteAudioClip,
@@ -268,6 +269,247 @@ describe('createAudioTrackClip', () => {
     const lengthBefore = structuredClone(fixture.project);
     expectFailure(moveAudioClip(fixture.project, fixture.clip.id, 1_023, t1), 'project-length-limit');
     expect(fixture.project).toEqual(lengthBefore);
+  });
+});
+
+describe('appendAudioTrackClip', () => {
+  it('adopts one ready asset on an existing Audio Track without creating routing or resetting mixer state', () => {
+    const fixture = audioFixture();
+    fixture.track.name = 'Armed Vocal';
+    fixture.track.color = '#123456';
+    fixture.track.volume = 0.7;
+    fixture.track.pan = -0.25;
+    fixture.track.mute = true;
+    fixture.track.solo = true;
+    const projectBefore = structuredClone(fixture.project);
+    const targetIndex = fixture.project.tracks.findIndex((track) => track.id === fixture.track.id);
+    const targetBefore = fixture.project.tracks[targetIndex]!;
+    const otherTracksBefore = fixture.project.tracks.filter((track) => track.id !== fixture.track.id);
+    const effectsBefore = targetBefore.effects;
+    const routingBefore = fixture.project.audioRouting;
+    const asset = readyAsset({
+      id: 'asset-recorded-take',
+      checksumSha256: 'b'.repeat(64),
+      originalName: 'recorded-take.wav',
+      frameCount: 48_000,
+      byteLength: 192_044,
+    });
+
+    const result = appendAudioTrackClip(fixture.project, fixture.track.id, asset, {
+      startBeat: 5,
+      gainDb: -6,
+      fadeInFrames: 240,
+      fadeOutFrames: 480,
+      idFactory: sequenceFactory('append'),
+    }, t1);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(fixture.project).toEqual(projectBefore);
+    expect(result).toMatchObject({
+      changed: true,
+      trackId: fixture.track.id,
+      clipId: 'clip-append-1',
+      audioAssetId: asset.id,
+    });
+    expect(result.project.tracks).toHaveLength(fixture.project.tracks.length);
+    expect(result.project.audioRouting).toBe(routingBefore);
+    expect(result.project.audioRouting.outputs).toBe(routingBefore.outputs);
+    expect(result.project.audioRouting.sends).toBe(routingBefore.sends);
+    const appendedTrack = result.project.tracks[targetIndex]!;
+    expect(appendedTrack).not.toBe(targetBefore);
+    expect(appendedTrack).toMatchObject({
+      id: fixture.track.id,
+      name: 'Armed Vocal',
+      color: '#123456',
+      volume: 0.7,
+      pan: -0.25,
+      mute: true,
+      solo: true,
+    });
+    expect(appendedTrack.effects).toBe(effectsBefore);
+    expect(appendedTrack.clips[0]).toBe(targetBefore.clips[0]);
+    expect(appendedTrack.clips[1]).toEqual({
+      id: result.clipId,
+      trackId: fixture.track.id,
+      type: 'audio',
+      startBeat: 5,
+      lengthBeats: 2,
+      loop: false,
+      audioAssetId: asset.id,
+      sourceStartFrame: 0,
+      sourceFrameCount: 48_000,
+      fadeInFrames: 240,
+      fadeOutFrames: 480,
+      gainDb: -6,
+    });
+    for (const otherTrack of otherTracksBefore) {
+      expect(result.project.tracks.find((track) => track.id === otherTrack.id)).toBe(otherTrack);
+    }
+    expect(result.project.audioAssets.slice(0, -1)).toEqual(fixture.project.audioAssets);
+    expect(result.project.audioAssets.at(-1)).toBe(asset);
+    expect(result.project.updatedAt).toBe('2026-07-17T01:00:00.000Z');
+    expect(validateProject(result.project).ok).toBe(true);
+  });
+
+  it('uses elapsed seconds across a variable tempo boundary', () => {
+    const fixture = audioFixture({ project: variableTempoProject() });
+    const asset = readyAsset({
+      id: 'asset-variable-tempo-take',
+      checksumSha256: 'c'.repeat(64),
+    });
+
+    const result = appendAudioTrackClip(fixture.project, fixture.track.id, asset, {
+      startBeat: 3,
+      idFactory: sequenceFactory('append-tempo'),
+    }, t1);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(findClip(result.project, result.clipId)?.clip).toMatchObject({
+      startBeat: 3,
+      // 0.5 s reaches beat 4 at 120 BPM; 1.5 s reaches beat 5.5 at 60 BPM.
+      lengthBeats: 2.5,
+      sourceFrameCount: 96_000,
+    });
+    expect(validateProject(result.project).ok).toBe(true);
+  });
+
+  it('extends the project to a bar boundary while keeping the existing Track and routing graph', () => {
+    const fixture = audioFixture({ project: createEmptyProject({ lengthBars: 1, clock: t0 }) });
+    const routingBefore = fixture.project.audioRouting;
+    const asset = readyAsset({
+      id: 'asset-extension-take',
+      checksumSha256: 'd'.repeat(64),
+      frameCount: 48_000,
+      byteLength: 192_044,
+    });
+
+    const result = appendAudioTrackClip(fixture.project, fixture.track.id, asset, {
+      startBeat: 5,
+      idFactory: sequenceFactory('append-extension'),
+    }, t1);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(findClip(result.project, result.clipId)?.clip).toMatchObject({
+      startBeat: 5,
+      lengthBeats: 2,
+    });
+    expect(result.project).toMatchObject({ lengthBars: 2, lengthBeats: 8 });
+    expect(result.project.audioRouting).toBe(routingBefore);
+    expect(validateProject(result.project).ok).toBe(true);
+  });
+
+  it('rejects missing and non-Audio targets without adopting the asset', () => {
+    const project = createEmptyProject({ clock: t0 });
+    const before = structuredClone(project);
+    const instrument = project.tracks.find((track) => track.type === 'instrument')!;
+    const master = project.tracks.find((track) => track.type === 'master')!;
+
+    expectFailure(
+      appendAudioTrackClip(project, 'missing-audio-track', readyAsset()),
+      'track-not-found',
+    );
+    expectFailure(
+      appendAudioTrackClip(project, instrument.id, readyAsset()),
+      'unsupported-track-type',
+    );
+    expectFailure(
+      appendAudioTrackClip(project, master.id, readyAsset()),
+      'unsupported-track-type',
+    );
+    expect(project).toEqual(before);
+  });
+
+  it('enforces asset and per-Track clip limits without partial insertion', () => {
+    const assetLimited = audioFixture();
+    assetLimited.project.audioAssets = [
+      assetLimited.asset,
+      ...Array.from({ length: MAX_AUDIO_ASSETS - 1 }, (_, index) => readyAsset({
+        id: `append-asset-limit-${index}`,
+        checksumSha256: index.toString(16).padStart(64, '0'),
+      })),
+    ];
+    expect(validateProject(assetLimited.project).ok).toBe(true);
+    const assetBefore = structuredClone(assetLimited.project);
+    expectFailure(
+      appendAudioTrackClip(
+        assetLimited.project,
+        assetLimited.track.id,
+        readyAsset({ id: 'asset-over-limit' }),
+      ),
+      'audio-asset-limit',
+    );
+    expect(assetLimited.project).toEqual(assetBefore);
+
+    const clipLimited = audioFixture();
+    clipLimited.track.clips = Array.from({ length: MAX_CLIPS_PER_TRACK }, (_, index) => ({
+      ...clipLimited.clip,
+      id: index === 0 ? clipLimited.clip.id : `append-clip-limit-${index}`,
+    }));
+    expect(validateProject(clipLimited.project).ok).toBe(true);
+    const clipBefore = structuredClone(clipLimited.project);
+    expectFailure(
+      appendAudioTrackClip(
+        clipLimited.project,
+        clipLimited.track.id,
+        readyAsset({ id: 'asset-clip-over-limit' }),
+      ),
+      'clip-limit',
+    );
+    expect(clipLimited.project).toEqual(clipBefore);
+  });
+
+  it('rejects asset and generated Clip id collisions, invalid fields, and timeline overflow atomically', () => {
+    const fixture = audioFixture({ project: createEmptyProject({ lengthBars: 256, clock: t0 }) });
+    const before = structuredClone(fixture.project);
+
+    expectFailure(
+      appendAudioTrackClip(
+        fixture.project,
+        fixture.track.id,
+        readyAsset({ id: fixture.clip.id }),
+      ),
+      'duplicate-id',
+    );
+    expectFailure(
+      appendAudioTrackClip(
+        fixture.project,
+        fixture.track.id,
+        readyAsset({ id: 'asset-generated-collision' }),
+        { idFactory: () => fixture.project.id },
+      ),
+      'duplicate-id',
+    );
+    expectFailure(
+      appendAudioTrackClip(
+        fixture.project,
+        fixture.track.id,
+        readyAsset({ id: 'asset-hostile-factory' }),
+        { idFactory: () => { throw new Error('boom'); } },
+      ),
+      'id-factory-failed',
+    );
+    expectFailure(
+      appendAudioTrackClip(
+        fixture.project,
+        fixture.track.id,
+        readyAsset({ id: 'asset-invalid-fades' }),
+        { fadeInFrames: 80_000, fadeOutFrames: 80_000 },
+      ),
+      'invalid-fades',
+    );
+    expectFailure(
+      appendAudioTrackClip(
+        fixture.project,
+        fixture.track.id,
+        readyAsset({ id: 'asset-timeline-overflow' }),
+        { startBeat: 1_023, idFactory: sequenceFactory('overflow') },
+      ),
+      'project-length-limit',
+    );
+    expect(fixture.project).toEqual(before);
   });
 });
 

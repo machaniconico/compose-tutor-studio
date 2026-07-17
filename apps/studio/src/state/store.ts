@@ -190,6 +190,10 @@ export type StoreState = {
   projectOperationBusy: boolean;
   /** Runtime-only token protecting an in-flight microphone take and its asset commit. */
   audioRecordingOperationId: number | null;
+  /** Runtime-only single-input destination. Never serialized into the Project. */
+  armedAudioTrackId: string | null;
+  /** Runtime-only host device preference. Never serialized into the Project. */
+  preferredMicrophoneInputDeviceId: string | null;
   localDataErase: LocalDataEraseState;
   persistenceNotice: PersistenceNotice | null;
   savedProjects: readonly ProjectSummary[];
@@ -281,6 +285,15 @@ export type StoreState = {
   toggleMetronome: () => void;
 
   // microphone recording lifecycle (runtime-only)
+  /**
+   * Arm exactly one existing Audio Track, toggle the same Track off, or pass
+   * null to disarm explicitly.
+   * Returns false while recording/project lifecycle work owns the store or
+   * when the requested track is not an Audio Track.
+   */
+  setAudioTrackArmed: (trackId: string | null) => boolean;
+  /** Select a host microphone input, or null for the host default. */
+  setPreferredMicrophoneInputDeviceId: (deviceId: string | null) => boolean;
   tryBeginAudioRecordingOperation: () => number | null;
   finishAudioRecordingOperation: (operationId: number) => void;
 
@@ -642,6 +655,19 @@ function reconcileEditorSelection(
       ? editor.selectedNoteIds.filter((id) => noteIds.has(id))
       : [],
   };
+}
+
+/** Keep runtime Record Arm only while its exact Audio Track still exists. */
+function reconcileArmedAudioTrackId(
+  armedAudioTrackId: string | null,
+  project: Project,
+): string | null {
+  if (armedAudioTrackId === null) return null;
+  return project.tracks.some(
+    (track) => track.id === armedAudioTrackId && track.type === 'audio',
+  )
+    ? armedAudioTrackId
+    : null;
 }
 
 /** Map over tracks immutably. */
@@ -1302,6 +1328,7 @@ export function createStudioStore(
     set({
       project,
       editor: makeEditor(project),
+      armedAudioTrackId: null,
       // Invalidate any audio startup that belongs to the previous project.
       // Never recycle request IDs: a stale async completion must not match a
       // later play attempt after a project switch.
@@ -1477,6 +1504,7 @@ export function createStudioStore(
       past,
       future: [],
       editor: reconcileEditorSelection(state.editor, stamped),
+      armedAudioTrackId: reconcileArmedAudioTrackId(state.armedAudioTrackId, stamped),
       transport: transportAfterProjectChange(state.transport, topologyChanged),
     }));
     if (stamped.key !== current.key || stamped.scale !== current.scale) {
@@ -1503,6 +1531,8 @@ export function createStudioStore(
     persistenceReady: false,
     projectOperationBusy: false,
     audioRecordingOperationId: null,
+    armedAudioTrackId: null,
+    preferredMicrophoneInputDeviceId: null,
     localDataErase: { phase: 'idle', eraseId: null, message: null },
     persistenceNotice: null,
     savedProjects: [],
@@ -1911,6 +1941,44 @@ export function createStudioStore(
       set((s) => ({ transport: { ...s.transport, metronome: !s.transport.metronome } })),
 
     // --- microphone recording lifecycle ---
+    setAudioTrackArmed: (trackId) => {
+      const state = get();
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+        || state.localDataErase.phase !== 'idle'
+      ) {
+        return false;
+      }
+      if (
+        trackId !== null
+        && !state.project.tracks.some(
+          (track) => track.id === trackId && track.type === 'audio',
+        )
+      ) {
+        return false;
+      }
+      const nextTrackId = trackId === state.armedAudioTrackId ? null : trackId;
+      if (state.armedAudioTrackId !== nextTrackId) {
+        set({ armedAudioTrackId: nextTrackId });
+      }
+      return true;
+    },
+    setPreferredMicrophoneInputDeviceId: (deviceId) => {
+      const state = get();
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+        || state.localDataErase.phase !== 'idle'
+      ) {
+        return false;
+      }
+      if (deviceId !== null && deviceId.length === 0) return false;
+      if (state.preferredMicrophoneInputDeviceId !== deviceId) {
+        set({ preferredMicrophoneInputDeviceId: deviceId });
+      }
+      return true;
+    },
     tryBeginAudioRecordingOperation: () => {
       const state = get();
       if (
@@ -1955,6 +2023,7 @@ export function createStudioStore(
         past: past.slice(0, -1),
         future: [project, ...future].slice(0, HISTORY_CAP),
         editor: reconcileEditorSelection(state.editor, restored),
+        armedAudioTrackId: reconcileArmedAudioTrackId(state.armedAudioTrackId, restored),
         transport: transportAfterProjectChange(state.transport, topologyChanged),
       }));
       if (restored.key !== project.key || restored.scale !== project.scale) {
@@ -1976,6 +2045,7 @@ export function createStudioStore(
         past: [...past, project].slice(-HISTORY_CAP),
         future: future.slice(1),
         editor: reconcileEditorSelection(state.editor, restored),
+        armedAudioTrackId: reconcileArmedAudioTrackId(state.armedAudioTrackId, restored),
         transport: transportAfterProjectChange(state.transport, topologyChanged),
       }));
       if (restored.key !== project.key || restored.scale !== project.scale) {

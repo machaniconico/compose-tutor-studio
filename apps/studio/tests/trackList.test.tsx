@@ -71,6 +71,36 @@ describe('TrackList mixer controls', () => {
     expect(html).not.toContain('aria-label="Master ソロ"');
   });
 
+  it('shows a single accessible Record Arm only for Audio Tracks', () => {
+    const asset: ReadyAudioAsset = {
+      id: 'asset-record-arm-row',
+      availability: 'ready',
+      checksumSha256: '7'.repeat(64),
+      originalName: 'armed.wav',
+      mediaType: 'audio/wav',
+      byteLength: 96_044,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 48_000,
+    };
+    const created = createAudioTrackClip(useStore.getState().project, asset, {
+      trackName: 'Vocal Take',
+      idFactory: (kind) => `${kind}-record-arm-row`,
+    });
+    if (!created.ok) throw new Error(created.error.code);
+    useStore.setState({ project: created.project });
+    expect(useStore.getState().setAudioTrackArmed(created.trackId)).toBe(true);
+    Object.assign(useStore.getInitialState(), useStore.getState());
+
+    const html = renderToStaticMarkup(<TrackList />);
+    expect(html).toContain('aria-label="Vocal Take 録音待機"');
+    expect(html).toMatch(
+      /<button[^>]*mini-btn--record is-active[^>]*aria-pressed="true"[^>]*>R<\/button>/,
+    );
+    expect(html.match(/mini-btn--record/g) ?? []).toHaveLength(1);
+    expect(html).not.toContain('aria-label="Master 録音待機"');
+  });
+
   it('exposes the currently selected track as a pressed selection button', () => {
     const html = renderToStaticMarkup(<TrackList />);
     expect(html).toMatch(
