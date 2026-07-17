@@ -28,7 +28,10 @@ fn microphone_request_is_allowed(requests_audio: bool, requests_video: bool) -> 
 #[cfg(target_os = "linux")]
 fn install_linux_microphone_permission_handler(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     window.with_webview(|webview| {
-        use webkit2gtk::{prelude::*, UserMediaPermissionRequest};
+        use webkit2gtk::{
+            glib::prelude::Cast, PermissionRequestExt, UserMediaPermissionRequest,
+            UserMediaPermissionRequestExt, WebViewExt,
+        };
 
         webview
             .inner()
