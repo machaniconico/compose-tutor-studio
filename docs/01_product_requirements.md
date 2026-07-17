@@ -120,7 +120,7 @@
 | 楽譜エディタ | 実装量が大きい | MIDI編集が安定後 |
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
 | VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
-| sample-accurate overdub / latency補正 / take-comp | 現行録音は開始時に再生を停止する固定playheadの単一入力で、共有audio clock、長時間streaming、take laneをまだ持たない | shared AudioContext同期とlatency補正を先に検証し、その後cycle take / compへ進む |
+| punch / cycle take / comp / 実測latency校正 | 単一入力の伴奏同期録音と推定＋手動位置補正までは持つが、再生中の任意punch、長時間streaming、loopback実測、take laneはまだ持たない | 3OS実機で共有clockと推定補正を検証し、loopback校正、cycle take、非破壊compの順で進む |
 
 ## 5. 非機能要件
 

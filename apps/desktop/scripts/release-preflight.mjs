@@ -488,7 +488,7 @@ const productionPnpmWorkspaceSha256 =
 const productionPnpmLockSha256 =
   '6f2b5ce87aee0531c88150ead63bd21c556572201e74b91178043fd255171a85';
 const productionInfoPlistSha256 =
-  '9b8ad65c1570c183cc23ac83b44cef3c221bdec3d7357dc0091d71bbb178c736';
+  '33fe001fcd59ffb037152843f269503897cf1fad46b22a569dd2e78f96380dbf';
 const productionEntitlementsSha256 =
   '289696af9834a7ee41aca4c1cd3aa95fc38f9ae2e83655b1d4b86c1ccab771ee';
 const productionRedirectsSource = `# Cloudflare Pages SPA fallback.

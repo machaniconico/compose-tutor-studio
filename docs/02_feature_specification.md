@@ -279,12 +279,13 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 ### 7.7 Audio Track録音 / Record Arm
 
 - Track ListとInspectorの`R`は既存Audio Trackだけを対象にし、同時に1件だけを録音待機にする。同じTrackの再操作で解除し、別Audio Trackの操作で録音先を切り替える。録音待機IDはruntime-onlyでProject / history / revision / autosave / SQLite / `.ctsproj.json`へ保存しない。Project切替では解除し、Track削除やUndo / Redoで対象が存在しなくなった時も解除する
-- transportの録音buttonは録音先を表示する。録音待機がなければ新規Audio Track、待機中ならその既存Audio Trackへ新しいAudio Clipを追加する。開始時にProject snapshot、現在playhead、録音先を同じ所有handleへ固定し、以後のUI状態で差し替えない。録音開始時はactive playbackを停止するため、現行は伴奏を流しながらのoverdubではない
+- transportの録音buttonは録音先を表示する。録音待機がなければ新規Audio Track、待機中ならその既存Audio Trackへ新しいAudio Clipを追加する。開始操作でProject snapshot、現在playhead、録音先を同じ所有handleへ固定し、既存の再生があれば停止する。3秒countdown後、app-wide AudioContext上の同じ将来render frameをWorkletへarmしてから、そのplayheadをanchorに伴奏再生とcaptureを同時開始する。現在再生中の流れを保ったまま途中でpunch-inする方式ではない
 - dialogは`システム既定`に加え、`enumerateDevices()`で得た`audioinput`を選択肢にする。空labelには順番付きの代替名を表示し、同一device IDは1件にまとめる。選択IDはrenderer sessionのruntime-only preferenceでありProjectへ保存しない。明示選択時は`getUserMedia`へ`deviceId: { exact: id }`を渡し、未選択時はhost既定を使う
 - `devicechange`では待機中の一覧を再列挙する。権限前のprivacy制約でも一覧へ現れない場合があるため、選択済みdeviceを確認できない時は警告しつつ開始操作は残し、凍結したIDをexact指定する。実際に取得できなければtyped errorでProjectを変えず、別入力またはシステム既定を案内する。1 takeの入力IDは開始時に固定し、録音中のhot switchは行わない
-- captureは3秒countdown、最大60秒、1〜2 channel、dry録音、monitor初期OFFと明示opt-inを維持する。capture開始前に共有384 MiB予約とrecording tokenを同期取得し、asset上限、既存TrackのClip上限または新規Track上限を検査する
-- raw PCMを48 kHz PCM16 WAVへ正規化し、bytesとchecksum receiptをrepositoryへ確定してからだけProjectへ採用する。既存TrackではそのTrackのvolume / pan / effects / routingを保ったままAsset metadataと全range Clipを追記し、新規Trackでは従来どおりTrack / routing / Clipを作る。どちらも開始時snapshotへのexact CAS、Undo 1回、revision 1回として扱う
-- permission / device loss / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProject / history / selectionを変更しない。shared AudioContextによるsample-accurate同期、latency補正、再生中overdub、長時間streaming、cycle take / lane / compは未実装である
+- captureは3秒countdown、最大60秒、1〜2 channel、dry録音、monitor初期OFFと明示opt-inを維持する。capture開始前に共有384 MiB予約とrecording tokenを同期取得し、asset上限、既存TrackのClip上限または新規Track上限を検査する。Workletはabsolute context frameとsequenceをchunkへ付け、arm frame途中のrender quantumも正確にsliceし、欠落・重複・世代変更をfail closedにする。借用したapp AudioContextはcapture側でcloseしない
+- 録音位置補正はruntime-onlyの`自動（推定） / 自動なし`と整数-500〜+500 msの手動offsetを持つ。正値は早め、負値は遅らせる。自動値はinput track、`baseLatency`、`outputLatency`、Master limiter look-aheadの申告値・既知値を合算する推定であり、物理loopback実測とは表示しない。capture first frameを可変tempo mapでbeatへ変換し、曲頭より前になる時はstartBeatを0にclampしてcanonical assetの`sourceStartFrame / sourceFrameCount`を非破壊trimする
+- raw PCMを48 kHz PCM16 WAVへ正規化し、bytesとchecksum receiptをrepositoryへ確定してからだけProjectへ採用する。既存TrackではそのTrackのvolume / pan / effects / routingを保ったままAsset metadataと補正済みsource rangeのClipを追記し、新規TrackではTrack / routing / Clipを作る。どちらも開始時snapshotへのexact CAS、Undo 1回、revision 1回として扱う
+- permission / device loss / context世代変更 / clock不連続 / arm失敗 / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProject / history / selectionを変更しない。transport loopはtake / compがない間は開始前に拒否する。入力hot switch、長時間streaming、再生中の任意punch、cycle take / lane / comp、loopback実測校正は未実装である
 
 ## 8. Mixer
 

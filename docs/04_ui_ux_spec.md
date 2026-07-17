@@ -188,7 +188,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Audio Trackだけに`R`の録音待機buttonを表示し、Track ListとInspectorの両方で同じ単一選択を`aria-pressed`、文字、形で示す。computed nameは`${Track名} 録音待機`とし、色だけに依存しない。Project操作または録音中は切替をdisabledにする
 - transportの録音buttonには、通常レイアウトで待機中のTrack名または`新規Track`を可視表示し、accessible name / titleでも録音先を伝える。最小高のcompact layoutでは編集領域を守るため補助表示だけを省略し、`R`の状態とaccessible name / titleは維持する。録音待機なしでは新規Audio Track、待機中ではその既存Trackへ新しいClipを追加する
 - 録音dialogは開始前に録音先と入力deviceを表示する。入力は`システム既定`を常に選べ、列挙済みdeviceのlabelが空なら`マイク N`を使う。`devicechange`後に選択済み入力が見つからなければalertと選び直しを表示し、一覧取得不可でもシステム既定による再試行を残す
-- 録音開始後は録音先と入力deviceを固定し、終了または破棄まで変更controlを表示しない。開始時に再生を停止する現行境界を説明し、伴奏を流したsample-accurate overdubや録音中のdevice hot switchを示唆しない
+- 録音開始後は録音先と入力deviceを固定し、終了または破棄まで変更controlを表示しない。3秒後に伴奏と録音を同じaudio clockで開始し、録音中は色だけでなく「録音中・伴奏再生中」と表示する。開始前に`自動（推定） / 自動なし`と-500〜+500 msの手動offsetを選べるようにし、正値=早め、負値=遅め、自動値は実測校正ではないことを常時説明する。transport loop、再生中の任意punch、device hot switchを対応済みと示唆しない
 
 ## 3. ナビゲーション
 

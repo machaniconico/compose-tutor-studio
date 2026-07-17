@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>ハミングをメロディに変換するため、マイク入力を使用します。</string>
+	<string>鼻歌をメロディに変換したり、オーディオトラックへ録音したりするため、マイク入力を使用します。</string>
 </dict>
 </plist>
