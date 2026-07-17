@@ -41,6 +41,7 @@ type PlaybackLifecycleControlProps = {
   transport: TransportState;
   onPlay: () => void;
   onStop: () => void;
+  playDisabled?: boolean;
 };
 
 /** Format an absolute beat against the project's active time-signature map. */
@@ -61,6 +62,7 @@ export function PlaybackLifecycleControl({
   transport,
   onPlay,
   onStop,
+  playDisabled = false,
 }: PlaybackLifecycleControlProps) {
   const isStarting = transport.phase === 'starting';
   const isPlaying = transport.phase === 'playing';
@@ -91,6 +93,7 @@ export function PlaybackLifecycleControl({
         className={isPlaying ? 'is-active' : ''}
         aria-busy={isStarting || undefined}
         aria-describedby="transport-playback-status"
+        disabled={!isActive && playDisabled}
         onClick={() => (isActive ? onStop() : onPlay())}
       >
         {isStarting ? '開始を中止' : isPlaying ? '一時停止' : '再生'}
@@ -130,8 +133,8 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const setTitle = useStore((s) => s.setTitle);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
-  const canUndo = useStore((s) => s.past.length > 0);
-  const canRedo = useStore((s) => s.future.length > 0);
+  const canUndo = useStore((s) => s.audioRecordingOperationId === null && s.past.length > 0);
+  const canRedo = useStore((s) => s.audioRecordingOperationId === null && s.future.length > 0);
   const saveState = useStore((s) => s.saveState);
   const saveToLocalStorage = useStore((s) => s.saveToLocalStorage);
   const projectOperationBusy = useStore((s) => s.projectOperationBusy);
@@ -140,6 +143,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const emergencyExportLock = useRef(false);
   const [emergencyExportBusy, setEmergencyExportBusy] = useState(false);
   const [recordingOpen, setRecordingOpen] = useState(false);
+  const recordingControlsLocked = audioRecordingOperationId !== null;
 
   // Connect the store to the audio engine once. The bridge confirms the
   // asynchronous starting -> playing transition; this component only sends
@@ -210,7 +214,12 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           はじめてガイド
         </button>
 
-        <PlaybackLifecycleControl transport={transport} onPlay={play} onStop={stop} />
+        <PlaybackLifecycleControl
+          transport={transport}
+          onPlay={play}
+          onStop={stop}
+          playDisabled={recordingControlsLocked}
+        />
 
         <button
           type="button"
@@ -239,6 +248,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           type="button"
           className={transport.loopEnabled ? 'is-active' : ''}
           aria-pressed={transport.loopEnabled}
+          disabled={recordingControlsLocked}
           onClick={() => toggleLoop()}
         >
           ループ
@@ -248,6 +258,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           type="button"
           className={transport.metronome ? 'is-active' : ''}
           aria-pressed={transport.metronome}
+          disabled={recordingControlsLocked}
           onClick={() => toggleMetronome()}
         >
           メトロノーム
@@ -265,6 +276,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
             min={20}
             max={300}
             value={project.bpm}
+            disabled={recordingControlsLocked}
             onChange={(e) => setBpm(Number(e.target.value) || project.bpm)}
           />
         </div>
@@ -274,6 +286,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           <select
             id="key-select"
             value={project.key}
+            disabled={recordingControlsLocked}
             onChange={(e) => setKey(e.target.value as MusicalKey)}
           >
             {KEYS.map((k) => (
@@ -289,6 +302,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           <select
             id="scale-select"
             value={project.scale}
+            disabled={recordingControlsLocked}
             onChange={(e) => setScale(e.target.value as ScaleName)}
           >
             {SCALES.map((s) => (
@@ -310,6 +324,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           className="transport-bar__title"
           aria-label="プロジェクト名"
           value={project.title}
+          disabled={recordingControlsLocked}
           onChange={(e) => setTitle(e.target.value)}
         />
 

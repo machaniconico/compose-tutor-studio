@@ -15,6 +15,8 @@ import {
   type Project,
   type ReadyAudioAsset,
   type SplitAudioClipResult,
+  compileMusicalTime,
+  secondsBetweenBeats,
   MAX_AUDIO_ASSETS,
   MAX_CLIPS_PER_TRACK,
   MAX_PROJECT_TRACKS,
@@ -27,6 +29,9 @@ import {
   type CanonicalAudioResampleJob,
 } from '../audio/canonicalAudioAsset';
 import { getAudioAssetPlaybackCache } from '../audio/audioAssetResolver';
+import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from '../audio/masterBus';
+import type { SynchronizedRecordingPlaybackClock } from '../audio/playback';
+import { planSynchronizedRecordingPlacement } from '../audio/recordingAlignment';
 import {
   AudioResourceReservationError,
   MAX_HEAVY_AUDIO_RESOURCE_BYTES,
@@ -51,6 +56,7 @@ import {
   MAX_MICROPHONE_CAPTURE_PCM_BYTES,
   MAX_MICROPHONE_CAPTURE_SAMPLE_RATE,
   MAX_MICROPHONE_CAPTURE_SECONDS,
+  MIN_MICROPHONE_CAPTURE_SECONDS,
   MICROPHONE_CAPTURE_RESERVATION_BYTES,
   type MicrophonePcmCapture,
 } from '../audio/microphoneCapture';
@@ -64,7 +70,12 @@ import {
 } from '../platform/audioAssetRepository';
 import { studioRuntime } from '../platform/runtime';
 import { uid } from './ids';
-import { useStore } from './store';
+import {
+  MAX_RECORDING_LATENCY_ADJUSTMENT_MS,
+  MIN_RECORDING_LATENCY_ADJUSTMENT_MS,
+  useStore,
+  type RecordingLatencyCompensationMode,
+} from './store';
 
 export type StudioAudioActionErrorCode =
   | AudioClipMutationErrorCode
@@ -78,6 +89,9 @@ export type StudioAudioActionErrorCode =
   | 'resource-limit-exceeded'
   | 'canonicalize-failed'
   | 'asset-store-failed'
+  | 'transport-loop-enabled'
+  | 'recording-window-too-short'
+  | 'recording-alignment-failed'
   | 'commit-rejected';
 
 export type StudioAudioClipCommandResult =
@@ -277,9 +291,21 @@ type StudioAudioTrackRecordingOwnership = {
   startBeat: number;
   target: StudioAudioTrackRecordingTarget;
   playbackStopped: boolean;
+  synchronization: StudioAudioTrackRecordingSynchronization | null;
   finalizing: boolean;
   finished: boolean;
 };
+
+type StudioAudioTrackRecordingSynchronization = Readonly<{
+  contextGeneration: number;
+  sampleRate: number;
+  anchorContextFrame: number;
+  anchorBeat: number;
+  requestId: number;
+  compensationMode: RecordingLatencyCompensationMode;
+  manualAdjustmentMs: number;
+  estimatedPlaybackLatencySeconds: number;
+}>;
 
 const studioAudioTrackRecordingOwnership = new WeakMap<
   StudioAudioTrackRecordingHandle,
@@ -303,7 +329,9 @@ export type BeginStudioAudioTrackRecordingResult =
         | 'unsupported-track-type'
         | 'audio-asset-limit'
         | 'track-limit'
-        | 'clip-limit';
+        | 'clip-limit'
+        | 'transport-loop-enabled'
+        | 'recording-window-too-short';
     }>;
 
 type BeginStudioAudioTrackRecordingFailure = Extract<
@@ -364,6 +392,27 @@ export function beginStudioAudioTrackRecording(
       });
   const preflight = recordingTargetPreflight(snapshot, target);
   if (preflight) return preflight;
+  if (state.transport.loopEnabled) {
+    return { ok: false, code: 'transport-loop-enabled' };
+  }
+  const startBeat = state.transport.positionBeat;
+  try {
+    const remainingSeconds = secondsBetweenBeats(
+      compileMusicalTime(snapshot),
+      startBeat,
+      snapshot.lengthBeats,
+    );
+    if (
+      !Number.isFinite(startBeat)
+      || startBeat < 0
+      || startBeat >= snapshot.lengthBeats
+      || remainingSeconds < MIN_MICROPHONE_CAPTURE_SECONDS
+    ) {
+      return { ok: false, code: 'recording-window-too-short' };
+    }
+  } catch {
+    return { ok: false, code: 'recording-window-too-short' };
+  }
 
   const lease = tryAcquireAudioTrackImportLease();
   if (!lease) return { ok: false, code: 'decode-busy' };
@@ -374,7 +423,6 @@ export function beginStudioAudioTrackRecording(
     return { ok: false, code: 'project-busy' };
   }
 
-  const startBeat = state.transport.positionBeat;
   const playbackStopped = state.transport.phase !== 'stopped';
   try {
     if (playbackStopped) state.stop();
@@ -399,10 +447,99 @@ export function beginStudioAudioTrackRecording(
     startBeat,
     target,
     playbackStopped,
+    synchronization: null,
     finalizing: false,
     finished: false,
   });
   return { ok: true, handle, startBeat, playbackStopped };
+}
+
+function finiteNonNegativeLatency(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : 0;
+}
+
+/**
+ * Freeze the browser's output-path estimate without claiming physical
+ * calibration. The master limiter has the Web Audio compressor's fixed
+ * look-ahead in addition to the host-reported device values.
+ */
+export function estimateStudioRecordingPlaybackLatencySeconds(
+  context: AudioContext,
+): number {
+  let baseLatency = 0;
+  let outputLatency = 0;
+  try {
+    baseLatency = finiteNonNegativeLatency(context.baseLatency);
+  } catch {
+    // A host property getter is advisory; the known graph delay still applies.
+  }
+  try {
+    outputLatency = finiteNonNegativeLatency(context.outputLatency);
+  } catch {
+    // Older Web Audio hosts may not expose an output-device estimate.
+  }
+  return baseLatency + outputLatency + MASTER_LIMITER_LOOKAHEAD_SECONDS;
+}
+
+/**
+ * Bind an owned take to the one playback/capture clock selected by the audio
+ * bridge. The binding is one-shot and remains immutable through finalization.
+ */
+export function bindStudioAudioTrackRecordingToPlayback(
+  handle: StudioAudioTrackRecordingHandle,
+  clock: SynchronizedRecordingPlaybackClock,
+): boolean {
+  const ownership = studioAudioTrackRecordingOwnership.get(handle);
+  const state = useStore.getState();
+  if (
+    !ownership
+    || ownership.finished
+    || ownership.finalizing
+    || ownership.synchronization !== null
+    || ownership.lease !== activeAudioTrackImportLease
+    || state.project !== ownership.snapshot
+    || state.audioRecordingOperationId !== ownership.operationId
+    || state.transport.phase !== 'playing'
+    || state.transport.playbackRequestId !== clock.requestId
+    || clock.projectSnapshot !== ownership.snapshot
+    || clock.anchorBeat !== ownership.startBeat
+    || clock.context.sampleRate !== clock.sampleRate
+    || !Number.isSafeInteger(clock.contextGeneration)
+    || clock.contextGeneration <= 0
+    || !Number.isSafeInteger(clock.sampleRate)
+    || clock.sampleRate <= 0
+    || !Number.isSafeInteger(clock.anchorContextFrame)
+    || clock.anchorContextFrame < 0
+    || !Number.isSafeInteger(clock.requestId)
+    || clock.requestId < 0
+  ) {
+    return false;
+  }
+  const compensationMode = state.recordingLatencyCompensationMode;
+  const manualAdjustmentMs = state.recordingLatencyAdjustmentMs;
+  if (
+    (compensationMode !== 'estimated' && compensationMode !== 'off')
+    || !Number.isSafeInteger(manualAdjustmentMs)
+    || manualAdjustmentMs < MIN_RECORDING_LATENCY_ADJUSTMENT_MS
+    || manualAdjustmentMs > MAX_RECORDING_LATENCY_ADJUSTMENT_MS
+  ) {
+    return false;
+  }
+  ownership.synchronization = Object.freeze({
+    contextGeneration: clock.contextGeneration,
+    sampleRate: clock.sampleRate,
+    anchorContextFrame: clock.anchorContextFrame,
+    anchorBeat: clock.anchorBeat,
+    requestId: clock.requestId,
+    compensationMode,
+    manualAdjustmentMs,
+    estimatedPlaybackLatencySeconds: estimateStudioRecordingPlaybackLatencySeconds(
+      clock.context,
+    ),
+  });
+  return true;
 }
 
 /** Release a take that never transferred into finalization. Idempotent. */
@@ -1017,6 +1154,8 @@ type AdoptCanonicalAudioTrackInput = Readonly<{
   fileName: string;
   trackName?: string;
   startBeat?: number;
+  sourceStartFrame?: number;
+  sourceFrameCount?: number;
   createAssetId?: () => string;
 }>;
 
@@ -1055,17 +1194,28 @@ function adoptCanonicalAudioTrack(
     ? createAudioTrackClip(input.snapshot, asset, {
         ...(input.trackName !== undefined ? { trackName: input.trackName } : {}),
         ...(input.startBeat !== undefined ? { startBeat: input.startBeat } : {}),
+        ...(input.sourceStartFrame !== undefined ? { sourceStartFrame: input.sourceStartFrame } : {}),
+        ...(input.sourceFrameCount !== undefined ? { sourceFrameCount: input.sourceFrameCount } : {}),
       })
     : appendAudioTrackClip(input.snapshot, input.targetTrackId, asset, {
         ...(input.startBeat !== undefined ? { startBeat: input.startBeat } : {}),
+        ...(input.sourceStartFrame !== undefined ? { sourceStartFrame: input.sourceStartFrame } : {}),
+        ...(input.sourceFrameCount !== undefined ? { sourceFrameCount: input.sourceFrameCount } : {}),
       });
   if (!mutation.ok) return importFailed(mutation.error.code);
 
   const wasActive = latest.transport.phase !== 'stopped';
-  const committed = latest.applyVerifiedAudioAssetAddition(
-    (current) => (current === input.snapshot ? mutation.project : current),
-    mutation.audioAssetId,
-  );
+  const committed = input.recordingOperationId === undefined
+    ? latest.applyVerifiedAudioAssetAddition(
+        (current) => (current === input.snapshot ? mutation.project : current),
+        mutation.audioAssetId,
+      )
+    : latest.applyVerifiedRecordingAudioAssetAddition({
+        operationId: input.recordingOperationId,
+        expectedSnapshot: input.snapshot,
+        verifiedAudioAssetId: mutation.audioAssetId,
+        nextProject: mutation.project,
+      });
   if (!committed || useStore.getState().project === input.snapshot) {
     return importFailed('commit-rejected');
   }
@@ -1218,6 +1368,7 @@ async function recordStudioAudioTrackWithLease(
     startBeat,
     target,
     playbackStopped,
+    synchronization,
   } = ownership;
   if (
     startingState.projectOperationBusy
@@ -1225,6 +1376,21 @@ async function recordStudioAudioTrackWithLease(
     || startingState.audioRecordingOperationId !== operationId
   ) {
     return importFailed('commit-rejected');
+  }
+  if (
+    synchronization !== null
+    && (
+      input.capture.contextGeneration !== synchronization.contextGeneration
+      || input.capture.sampleRate !== synchronization.sampleRate
+      || !Number.isSafeInteger(input.capture.firstContextFrame)
+      || input.capture.firstContextFrame < 0
+      || !Number.isSafeInteger(input.capture.endContextFrameExclusive)
+      || !Number.isSafeInteger(input.capture.firstContextFrame + input.capture.length)
+      || input.capture.endContextFrameExclusive
+        !== input.capture.firstContextFrame + input.capture.length
+    )
+  ) {
+    return importFailed('recording-alignment-failed');
   }
   const signal = input.signal ?? new AbortController().signal;
   const canonicalize = dependencies.canonicalize ?? canonicalizeAudioAsset;
@@ -1264,6 +1430,36 @@ async function recordStudioAudioTrackWithLease(
   const newTrackName = target.kind === 'new-track'
     ? target.trackName ?? input.trackName
     : undefined;
+  let placement = {
+    startBeat,
+    sourceStartFrame: 0,
+    sourceFrameCount: canonical.frameCount,
+  };
+  if (synchronization !== null) {
+    const inputLatencySeconds = finiteNonNegativeLatency(
+      input.capture.inputLatencySeconds,
+    );
+    const planned = planSynchronizedRecordingPlacement({
+      musicalTime: compileMusicalTime(snapshot),
+      playbackAnchorBeat: synchronization.anchorBeat,
+      playbackAnchorFrame: synchronization.anchorContextFrame,
+      captureFirstFrame: input.capture.firstContextFrame,
+      captureFrameCount: input.capture.length,
+      captureSampleRate: input.capture.sampleRate,
+      canonicalFrameCount: canonical.frameCount,
+      canonicalSampleRate: canonical.sampleRate,
+      automaticEstimatedLatencySeconds: synchronization.compensationMode === 'estimated'
+        ? synchronization.estimatedPlaybackLatencySeconds + inputLatencySeconds
+        : 0,
+      manualOffsetMilliseconds: synchronization.manualAdjustmentMs,
+    });
+    if (!planned.ok) return importFailed('recording-alignment-failed');
+    placement = {
+      startBeat: planned.placement.startBeat,
+      sourceStartFrame: planned.placement.sourceStartFrame,
+      sourceFrameCount: planned.placement.sourceFrameCount,
+    };
+  }
   return adoptCanonicalAudioTrack({
     snapshot,
     recordingOperationId: operationId,
@@ -1275,7 +1471,7 @@ async function recordStudioAudioTrackWithLease(
     receipt,
     fileName: input.fileName ?? 'microphone-recording.wav',
     ...(newTrackName !== undefined ? { trackName: newTrackName } : {}),
-    startBeat,
+    ...placement,
     ...(dependencies.createAssetId ? { createAssetId: dependencies.createAssetId } : {}),
   });
 }
@@ -1410,6 +1606,12 @@ export function studioAudioActionErrorMessage(code: StudioAudioActionErrorCode):
       return '録音先にできるのはオーディオトラックだけです。';
     case 'clip-limit':
       return 'このトラックにはこれ以上クリップを追加できません。';
+    case 'transport-loop-enabled':
+      return 'ループ録音はテイク機能の追加後に対応します。いったんループをオフにして録音してください。';
+    case 'recording-window-too-short':
+      return '現在位置から曲末までが短すぎます。0.5秒以上手前へ移動してから録音してください。';
+    case 'recording-alignment-failed':
+      return '録音と伴奏の時間位置を安全に照合できませんでした。入力デバイスを確認して録音し直してください。';
     case 'clip-not-found':
       return '対象のオーディオクリップが見つかりません。選び直してください。';
     case 'unsupported-clip-type':

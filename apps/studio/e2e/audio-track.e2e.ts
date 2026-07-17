@@ -243,13 +243,20 @@ test('selects an exact input and records into one armed Audio Track with one-ste
   await page.getByRole('button', { name: /録音を開く。録音先: Record Target/ }).click();
   const recordingDialog = page.getByRole('dialog', { name: 'マイクをオーディオトラックへ録音' });
   await expect(recordingDialog).toContainText('既存トラック「Record Target」');
+  await expect(recordingDialog.getByLabel('自動補正')).toHaveValue('estimated');
+  await expect(recordingDialog).toContainText('実測校正ではありません');
   await recordingDialog.getByLabel('入力デバイス').selectOption('usb-vocal-microphone');
   await recordingDialog.getByRole('button', { name: '録音を開始' }).click();
   await expect(recordingDialog.getByText('録音開始まで3秒', { exact: true })).toBeVisible();
-  await expect(recordingDialog.getByRole('status')).toContainText('録音中', { timeout: 7_000 });
+  await expect(recordingDialog.getByRole('status')).toContainText(
+    '録音中・伴奏再生中',
+    { timeout: 7_000 },
+  );
+  await expect(page.locator('#transport-playback-status')).toHaveText('再生中です。');
   await page.waitForTimeout(700);
   await recordingDialog.getByRole('button', { name: '録音を終了して保存' }).click();
   await expect(recordingDialog).toBeHidden({ timeout: 20_000 });
+  await expect(page.locator('#transport-playback-status')).toHaveText('再生は停止しています。');
 
   await expect(page.locator('.track-row')).toHaveCount(trackCountBefore);
   await expect(page.locator('.arranger__clip.is-audio')).toHaveCount(2);

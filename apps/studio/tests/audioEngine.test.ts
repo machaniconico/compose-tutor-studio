@@ -109,6 +109,9 @@ describe('AudioEngine', () => {
     expect(firstResult.context).toBe(context.asAudioContext());
     expect(secondResult.context).toBe(context.asAudioContext());
     expect(firstResult.master).toBe(context.gain);
+    expect(firstResult.contextGeneration).toBe(1);
+    expect(secondResult.contextGeneration).toBe(1);
+    expect(engine.contextGeneration).toBe(1);
   });
 
   it('does not expose a partial graph and can retry after graph construction fails', async () => {
@@ -125,12 +128,14 @@ describe('AudioEngine', () => {
 
     await expect(engine.ensureContext()).rejects.toThrow('limiter unavailable');
     expect(engine.isInitialized).toBe(false);
+    expect(engine.contextGeneration).toBe(0);
     expect(failedContext.gain.disconnect).toHaveBeenCalledTimes(1);
     expect(failedContext.close).toHaveBeenCalledTimes(1);
 
     const result = await engine.ensureContext();
     expect(factory).toHaveBeenCalledTimes(2);
     expect(result.context).toBe(recoveredContext.asAudioContext());
+    expect(result.contextGeneration).toBe(1);
     expect(engine.isInitialized).toBe(true);
   });
 
@@ -177,10 +182,10 @@ describe('AudioEngine', () => {
     const states: string[] = [];
     const unsubscribe = engine.subscribeStateChange((state) => states.push(state));
 
-    await engine.ensureContext();
+    const first = await engine.ensureContext();
     firstContext.transitionTo('interrupted');
     firstContext.transitionTo('closed');
-    await engine.ensureContext();
+    const second = await engine.ensureContext();
     secondContext.transitionTo('suspended');
 
     expect(factory).toHaveBeenCalledTimes(2);
@@ -189,6 +194,9 @@ describe('AudioEngine', () => {
       expect.any(Function),
     );
     expect(states).toEqual(['interrupted', 'closed', 'suspended']);
+    expect(first.contextGeneration).toBe(1);
+    expect(second.contextGeneration).toBe(2);
+    expect(engine.contextGeneration).toBe(2);
 
     unsubscribe();
     secondContext.transitionTo('running');

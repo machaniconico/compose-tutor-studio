@@ -1172,6 +1172,24 @@ export class Scheduler {
     );
   }
 
+  /** Start from an explicit AudioContext anchor, typically a future frame. */
+  startAt(
+    events: readonly ScheduledEvent[],
+    tempo: TempoSource,
+    startBeat: number,
+    loop: LoopRegion | null,
+    endBeat: number,
+    anchorTime: number,
+  ): void {
+    this.startIndexedAt(
+      createScheduleEventIndex(events, isValidLoop(loop) ? loop : null),
+      tempo,
+      startBeat,
+      endBeat,
+      anchorTime,
+    );
+  }
+
   /** Start from an already-built index after caller-side safety preflight. */
   startIndexed(
     eventIndex: ScheduleEventIndex,
@@ -1179,6 +1197,28 @@ export class Scheduler {
     startBeat: number,
     endBeat: number,
   ): void {
+    // Preserve the legacy failure boundary: a throwing clock stops the prior
+    // schedule before the exception escapes.
+    this.stop();
+    this.startIndexedAt(eventIndex, tempo, startBeat, endBeat, this.clock());
+  }
+
+  /**
+   * Start from an already-built index at an exact AudioContext time.
+   *
+   * A future anchor lets another realtime participant arm itself against the
+   * same integer context frame before either playback or capture becomes live.
+   */
+  startIndexedAt(
+    eventIndex: ScheduleEventIndex,
+    tempo: TempoSource,
+    startBeat: number,
+    endBeat: number,
+    anchorTime: number,
+  ): void {
+    if (!Number.isFinite(anchorTime) || anchorTime < 0) {
+      throw new RangeError('Scheduler anchorTime must be a non-negative finite number.');
+    }
     this.stop();
     this.tempo = tempo;
     this.eventIndex = eventIndex;
@@ -1189,7 +1229,7 @@ export class Scheduler {
     this.endBeat = Number.isFinite(endBeat) ? endBeat : Infinity;
     this.anchorBeat = startBeat;
     this.scheduledBeat = startBeat;
-    this.anchorTime = this.clock();
+    this.anchorTime = anchorTime;
     this.running = true;
     // Surface a synchronous first-window failure to startup. Later timer
     // failures stop once and cross the session's interruption boundary.
@@ -1211,8 +1251,10 @@ export class Scheduler {
    * the playback layer to drive the on-screen playhead. Loop-wrapped.
    */
   currentBeat(): number {
+    const now = this.clock();
+    if (now < this.anchorTime) return this.anchorBeat;
     const raw = timeToBeat(
-      this.clock(),
+      now,
       this.transportTempo,
       this.anchorBeat,
       this.anchorTime,
@@ -1239,12 +1281,14 @@ export class Scheduler {
   private scheduleTick(): void {
     const now = this.clock();
     const horizonTime = now + this.lookaheadS;
-    const playheadBeat = timeToBeat(
-      now,
-      this.transportTempo,
-      this.anchorBeat,
-      this.anchorTime,
-    );
+    const playheadBeat = now < this.anchorTime
+      ? this.anchorBeat
+      : timeToBeat(
+          now,
+          this.transportTempo,
+          this.anchorBeat,
+          this.anchorTime,
+        );
     // Convert the time horizon into a playhead-beat horizon.
     const horizonBeat = timeToBeat(
       horizonTime,

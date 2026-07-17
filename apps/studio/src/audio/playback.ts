@@ -73,6 +73,7 @@ import {
 import {
   beatToTime,
   createScheduleEventIndex,
+  LOOKAHEAD_S,
   loopBeatTimeMapping,
   preflightLoopScheduleDensity,
   resolveDrumOccurrence,
@@ -92,6 +93,11 @@ import {
 
 /** Position update rate while playing (ms ~= 30fps). */
 const POSITION_TICK_MS = 33;
+/** Web Audio render quanta are fixed at 128 sample-frames. */
+export const AUDIO_RENDER_QUANTUM_FRAMES = 128;
+/** Leave one lookahead plus browser/worklet acknowledgement headroom. */
+export const SYNCHRONIZED_RECORDING_START_LEAD_SECONDS = LOOKAHEAD_S + 0.13;
+const SYNCHRONIZED_ANCHOR_POLL_MS = 8;
 
 type RuntimeSession = PlaybackSession & {
   requestId: number;
@@ -115,6 +121,7 @@ type RuntimeSession = PlaybackSession & {
   readonly loop: LoopRegion | null;
   readonly lengthBeats: number;
   readonly projectSnapshot: Project;
+  readonly contextGeneration: number;
   readonly routingPlan: CompiledAudioRoutingPlan;
   readonly scheduleEvents: readonly ScheduledEvent[];
   readonly everAudibleTrackIds: Set<string>;
@@ -151,6 +158,313 @@ class CancelledPlaybackRequest extends Error {
     super('Playback request was superseded before audio startup completed.');
     this.name = 'CancelledPlaybackRequest';
   }
+}
+
+export type SynchronizedRecordingPlaybackErrorCode =
+  | 'bridge-unavailable'
+  | 'cancelled'
+  | 'capture-arm-failed'
+  | 'context-changed'
+  | 'invalid-start'
+  | 'loop-enabled'
+  | 'playback-start-failed'
+  | 'request-rejected'
+  | 'stale-operation'
+  | 'stale-request'
+  | 'start-deadline-missed';
+
+export class SynchronizedRecordingPlaybackError extends Error {
+  constructor(readonly code: SynchronizedRecordingPlaybackErrorCode) {
+    super(code);
+    this.name = 'SynchronizedRecordingPlaybackError';
+  }
+}
+
+export type SynchronizedRecordingPlaybackClock = Readonly<{
+  context: AudioContext;
+  contextGeneration: number;
+  sampleRate: number;
+  anchorContextFrame: number;
+  anchorBeat: number;
+  tempo: BeatTimeMapping;
+  requestId: number;
+  projectSnapshot: Project;
+}>;
+
+export type StartSynchronizedRecordingPlaybackOptions = Readonly<{
+  operationId: number;
+  projectSnapshot: Project;
+  startBeat: number;
+  signal: AbortSignal;
+  armCapture: (
+    context: AudioContext,
+    startFrame: number,
+    contextGeneration: number,
+  ) => Promise<void>;
+}>;
+
+type SynchronizedStartIntent = StartSynchronizedRecordingPlaybackOptions & {
+  requestId: number;
+  claimed: boolean;
+  settled: boolean;
+  resolveClock: (clock: SynchronizedRecordingPlaybackClock) => void;
+  rejectClock: (error: SynchronizedRecordingPlaybackError) => void;
+  clockPromise: Promise<SynchronizedRecordingPlaybackClock>;
+  removeAbortListener: () => void;
+};
+
+const synchronizedStartIntents = new Map<number, SynchronizedStartIntent>();
+
+function synchronizedError(
+  code: SynchronizedRecordingPlaybackErrorCode,
+): SynchronizedRecordingPlaybackError {
+  return new SynchronizedRecordingPlaybackError(code);
+}
+
+function rejectSynchronizedIntent(
+  intent: SynchronizedStartIntent,
+  error: SynchronizedRecordingPlaybackError,
+): void {
+  if (intent.settled) return;
+  intent.settled = true;
+  intent.rejectClock(error);
+}
+
+function resolveSynchronizedIntent(
+  intent: SynchronizedStartIntent,
+  clock: SynchronizedRecordingPlaybackClock,
+): void {
+  if (intent.settled) return;
+  intent.settled = true;
+  intent.resolveClock(clock);
+}
+
+function classifySynchronizedIntentFailure(
+  intent: SynchronizedStartIntent,
+  requestId: number,
+  error: unknown,
+): SynchronizedRecordingPlaybackError {
+  if (error instanceof SynchronizedRecordingPlaybackError) return error;
+  if (intent.signal.aborted) return synchronizedError('cancelled');
+  const state = useStore.getState();
+  if (
+    state.project !== intent.projectSnapshot
+    || state.audioRecordingOperationId !== intent.operationId
+  ) {
+    return synchronizedError('stale-operation');
+  }
+  if (
+    state.transport.playbackRequestId !== requestId
+    || state.transport.phase !== 'starting'
+    || state.transport.positionBeat !== intent.startBeat
+  ) {
+    return synchronizedError('stale-request');
+  }
+  if (state.transport.loopEnabled) return synchronizedError('loop-enabled');
+  return synchronizedError('playback-start-failed');
+}
+
+function takeSynchronizedStartIntent(requestId: number): SynchronizedStartIntent | null {
+  const intent = synchronizedStartIntents.get(requestId) ?? null;
+  if (!intent) return null;
+  synchronizedStartIntents.delete(requestId);
+  intent.claimed = true;
+  return intent;
+}
+
+/** Pick a future, render-quantum-aligned frame without using a wall clock. */
+export function planSynchronizedRecordingStartFrame(
+  currentContextTime: number,
+  sampleRate: number,
+): number {
+  if (
+    !Number.isFinite(currentContextTime)
+    || currentContextTime < 0
+    || !Number.isSafeInteger(sampleRate)
+    || sampleRate <= 0
+  ) {
+    throw synchronizedError('invalid-start');
+  }
+  const currentFrame = Math.ceil(currentContextTime * sampleRate);
+  const leadFrames = Math.ceil(SYNCHRONIZED_RECORDING_START_LEAD_SECONDS * sampleRate);
+  const candidate = currentFrame + leadFrames;
+  const aligned = Math.ceil(candidate / AUDIO_RENDER_QUANTUM_FRAMES)
+    * AUDIO_RENDER_QUANTUM_FRAMES;
+  if (!Number.isSafeInteger(currentFrame) || !Number.isSafeInteger(aligned)) {
+    throw synchronizedError('invalid-start');
+  }
+  return aligned;
+}
+
+function assertSynchronizedIntentCurrent(
+  intent: SynchronizedStartIntent,
+  context: AudioContext,
+  contextGeneration: number,
+  isCurrent: () => boolean,
+): void {
+  if (intent.signal.aborted) throw synchronizedError('cancelled');
+  const state = useStore.getState();
+  if (
+    !isCurrent()
+    || state.transport.playbackRequestId !== intent.requestId
+    || state.transport.phase !== 'starting'
+    || state.transport.positionBeat !== intent.startBeat
+  ) {
+    throw synchronizedError('stale-request');
+  }
+  if (
+    state.project !== intent.projectSnapshot
+    || state.audioRecordingOperationId !== intent.operationId
+  ) {
+    throw synchronizedError('stale-operation');
+  }
+  if (state.transport.loopEnabled) throw synchronizedError('loop-enabled');
+  const engine = getAudioEngine();
+  if (
+    engine.audioContext !== context
+    || engine.contextGeneration !== contextGeneration
+    || String(context.state) !== 'running'
+  ) {
+    throw synchronizedError('context-changed');
+  }
+}
+
+async function waitForSynchronizedAnchor(
+  intent: SynchronizedStartIntent,
+  context: AudioContext,
+  contextGeneration: number,
+  anchorTime: number,
+  isCurrent: () => boolean,
+): Promise<void> {
+  for (;;) {
+    assertSynchronizedIntentCurrent(intent, context, contextGeneration, isCurrent);
+    const remainingSeconds = anchorTime - context.currentTime;
+    if (remainingSeconds <= 0) return;
+    await new Promise<void>((resolve) => {
+      setTimeout(
+        resolve,
+        Math.max(1, Math.min(SYNCHRONIZED_ANCHOR_POLL_MS, remainingSeconds * 1_000)),
+      );
+    });
+  }
+}
+
+async function armSynchronizedCapture(
+  intent: SynchronizedStartIntent,
+  context: AudioContext,
+  anchorContextFrame: number,
+  contextGeneration: number,
+): Promise<void> {
+  const deadlineSeconds = (
+    anchorContextFrame / context.sampleRate
+    - context.currentTime
+    - LOOKAHEAD_S
+  );
+  if (intent.signal.aborted) throw synchronizedError('cancelled');
+  if (deadlineSeconds <= 0) throw synchronizedError('start-deadline-missed');
+
+  let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  let removeAbortListener = (): void => undefined;
+  const guard = new Promise<never>((_resolve, reject) => {
+    const onAbort = (): void => reject(synchronizedError('cancelled'));
+    intent.signal.addEventListener('abort', onAbort, { once: true });
+    removeAbortListener = () => intent.signal.removeEventListener('abort', onAbort);
+    if (intent.signal.aborted) onAbort();
+    deadlineTimer = setTimeout(
+      () => reject(synchronizedError('start-deadline-missed')),
+      Math.max(1, deadlineSeconds * 1_000),
+    );
+  });
+
+  let captureArm: Promise<void>;
+  try {
+    captureArm = intent.armCapture(
+      context,
+      anchorContextFrame,
+      contextGeneration,
+    );
+  } catch {
+    removeAbortListener();
+    if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+    throw synchronizedError('capture-arm-failed');
+  }
+
+  try {
+    await Promise.race([captureArm, guard]);
+  } catch (error) {
+    if (error instanceof SynchronizedRecordingPlaybackError) throw error;
+    throw synchronizedError('capture-arm-failed');
+  } finally {
+    removeAbortListener();
+    if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+  }
+}
+
+function waitForSynchronizedPlaybackConfirmation(
+  intent: SynchronizedStartIntent,
+  clock: SynchronizedRecordingPlaybackClock,
+): Promise<SynchronizedRecordingPlaybackClock> {
+  return new Promise((resolve, reject) => {
+    let unsubscribe = (): void => undefined;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let finished = false;
+    const finish = (
+      value?: SynchronizedRecordingPlaybackClock,
+      error?: SynchronizedRecordingPlaybackError,
+    ): void => {
+      if (finished) return;
+      finished = true;
+      unsubscribe();
+      if (pollTimer !== null) clearInterval(pollTimer);
+      if (error) reject(error);
+      else if (value) resolve(value);
+      else reject(synchronizedError('playback-start-failed'));
+    };
+    const inspect = (): void => {
+      if (intent.signal.aborted) {
+        finish(undefined, synchronizedError('cancelled'));
+        return;
+      }
+      if (!bridge.installed || bridge.controller === null) {
+        finish(undefined, synchronizedError('bridge-unavailable'));
+        return;
+      }
+      const state = useStore.getState();
+      if (
+        state.project !== intent.projectSnapshot
+        || state.audioRecordingOperationId !== intent.operationId
+      ) {
+        finish(undefined, synchronizedError('stale-operation'));
+        return;
+      }
+      if (state.transport.loopEnabled) {
+        finish(undefined, synchronizedError('loop-enabled'));
+        return;
+      }
+      if (state.transport.positionBeat !== intent.startBeat) {
+        finish(undefined, synchronizedError('stale-request'));
+        return;
+      }
+      if (
+        state.transport.phase === 'playing'
+        && state.transport.playbackRequestId === clock.requestId
+      ) {
+        finish(clock);
+        return;
+      }
+      if (
+        state.transport.playbackRequestId !== clock.requestId
+        || state.transport.phase === 'stopped'
+      ) {
+        finish(undefined, synchronizedError('playback-start-failed'));
+      }
+    };
+    unsubscribe = useStore.subscribe(inspect);
+    // Bridge teardown itself is not a Zustand transition. A small bounded poll
+    // closes that otherwise silent race while startup is awaiting confirmation.
+    pollTimer = setInterval(inspect, SYNCHRONIZED_ANCHOR_POLL_MS);
+    inspect();
+  });
 }
 
 /** Map bounded startup failures to the transport issue vocabulary. */
@@ -471,6 +785,118 @@ export function initAudioBridge(): () => void {
   };
 }
 
+/**
+ * Start one transport generation whose playback and microphone capture share
+ * an exact future AudioContext frame.
+ *
+ * The store performs the operation/loop/position transition atomically. This
+ * layer owns the realtime preparation, render-thread arm acknowledgement and
+ * confirmation barrier at the selected context frame.
+ */
+export function startSynchronizedRecordingPlayback(
+  options: StartSynchronizedRecordingPlaybackOptions,
+): Promise<SynchronizedRecordingPlaybackClock> {
+  const state = useStore.getState();
+  if (options.signal.aborted) {
+    return Promise.reject(synchronizedError('cancelled'));
+  }
+  if (
+    state.project !== options.projectSnapshot
+    || state.audioRecordingOperationId !== options.operationId
+  ) {
+    return Promise.reject(synchronizedError('stale-operation'));
+  }
+  if (state.transport.loopEnabled) {
+    return Promise.reject(synchronizedError('loop-enabled'));
+  }
+  if (
+    !Number.isFinite(options.startBeat)
+    || options.startBeat < 0
+    || options.startBeat >= options.projectSnapshot.lengthBeats
+  ) {
+    return Promise.reject(synchronizedError('invalid-start'));
+  }
+  if (state.transport.phase !== 'stopped') {
+    return Promise.reject(synchronizedError('request-rejected'));
+  }
+  if (!bridge.installed || bridge.controller === null) {
+    return Promise.reject(synchronizedError('bridge-unavailable'));
+  }
+
+  const expectedRequestId = state.transport.playbackRequestId + 1;
+  let resolveClock!: (clock: SynchronizedRecordingPlaybackClock) => void;
+  let rejectClock!: (error: SynchronizedRecordingPlaybackError) => void;
+  const clockPromise = new Promise<SynchronizedRecordingPlaybackClock>((resolve, reject) => {
+    resolveClock = resolve;
+    rejectClock = reject;
+  });
+  const intent: SynchronizedStartIntent = {
+    ...options,
+    requestId: expectedRequestId,
+    claimed: false,
+    settled: false,
+    resolveClock,
+    rejectClock,
+    clockPromise,
+    removeAbortListener: () => undefined,
+  };
+  synchronizedStartIntents.set(expectedRequestId, intent);
+
+  const requestId = state.startAudioRecordingPlayback(
+    options.operationId,
+    options.startBeat,
+  );
+  if (requestId !== expectedRequestId) {
+    synchronizedStartIntents.delete(expectedRequestId);
+    if (requestId !== null) stopSynchronizedRecordingPlayback(requestId);
+    rejectSynchronizedIntent(intent, synchronizedError('request-rejected'));
+    return clockPromise;
+  }
+
+  // Zustand subscribers run before the action returns. The bridge therefore
+  // must have claimed this intent synchronously; otherwise no controller owns
+  // the accepted transport generation and the promise could never settle.
+  if (!intent.claimed) {
+    synchronizedStartIntents.delete(requestId);
+    stopSynchronizedRecordingPlayback(requestId);
+    rejectSynchronizedIntent(intent, synchronizedError('bridge-unavailable'));
+    return clockPromise;
+  }
+
+  const onAbort = (): void => {
+    synchronizedStartIntents.delete(requestId);
+    rejectSynchronizedIntent(intent, synchronizedError('cancelled'));
+    stopSynchronizedRecordingPlayback(requestId);
+    if (!intent.claimed) intent.removeAbortListener();
+  };
+  options.signal.addEventListener('abort', onAbort, { once: true });
+  intent.removeAbortListener = () => options.signal.removeEventListener('abort', onAbort);
+  if (options.signal.aborted) onAbort();
+
+  return clockPromise.then((clock) =>
+    waitForSynchronizedPlaybackConfirmation(intent, clock)
+  ).catch((error: unknown) => {
+    stopSynchronizedRecordingPlayback(requestId);
+    if (!intent.claimed) intent.removeAbortListener();
+    throw error;
+  });
+}
+
+/** Stop only the exact synchronized playback generation named by the caller. */
+export function stopSynchronizedRecordingPlayback(requestId: number): boolean {
+  if (!Number.isSafeInteger(requestId) || requestId < 0) return false;
+  const state = useStore.getState();
+  if (
+    state.transport.phase === 'stopped'
+    || state.transport.playbackRequestId !== requestId
+  ) {
+    return false;
+  }
+  state.stop();
+  const stopped = useStore.getState().transport;
+  return stopped.phase === 'stopped' && stopped.playbackRequestId !== requestId;
+}
+
 /** Reserve startup atomically through verified decoded lease acquisition. */
 export async function acquireRuntimeProjectAudioBuffers(
   project: Project,
@@ -528,9 +954,52 @@ async function createRuntimeSession(
   handlers: PlaybackSessionHandlers,
   isCurrent: () => boolean,
 ): Promise<RuntimeSession> {
+  const synchronizedIntent = takeSynchronizedStartIntent(requestId);
+  try {
+    return await createRuntimeSessionImpl(
+      requestId,
+      handlers,
+      isCurrent,
+      synchronizedIntent,
+    );
+  } catch (error) {
+    if (synchronizedIntent) {
+      rejectSynchronizedIntent(
+        synchronizedIntent,
+        classifySynchronizedIntentFailure(synchronizedIntent, requestId, error),
+      );
+      synchronizedIntent.removeAbortListener();
+    }
+    throw error;
+  }
+}
+
+async function createRuntimeSessionImpl(
+  requestId: number,
+  handlers: PlaybackSessionHandlers,
+  isCurrent: () => boolean,
+  synchronizedIntent: SynchronizedStartIntent | null,
+): Promise<RuntimeSession> {
   const initialStore = useStore.getState();
   const project = initialStore.project;
   const transport = initialStore.transport;
+  if (synchronizedIntent) {
+    if (synchronizedIntent.signal.aborted) throw synchronizedError('cancelled');
+    if (
+      project !== synchronizedIntent.projectSnapshot
+      || initialStore.audioRecordingOperationId !== synchronizedIntent.operationId
+    ) {
+      throw synchronizedError('stale-operation');
+    }
+    if (
+      transport.phase !== 'starting'
+      || transport.playbackRequestId !== requestId
+      || transport.positionBeat !== synchronizedIntent.startBeat
+    ) {
+      throw synchronizedError('stale-request');
+    }
+    if (transport.loopEnabled) throw synchronizedError('loop-enabled');
+  }
   const engine = getAudioEngine();
   const compiledRouting = compileAudioRouting(project);
   if (!compiledRouting.ok) {
@@ -549,10 +1018,18 @@ async function createRuntimeSession(
   void contextActivation.catch(() => {
     // The authoritative rejection is awaited below if this request survives.
   });
-  const { context, master } = await contextActivation;
+  const { context, master, contextGeneration } = await contextActivation;
   if (!isCurrent()) throw new CancelledPlaybackRequest();
   if (String(context.state) !== 'running') {
     throw new Error(`AudioContext did not enter the running state (${String(context.state)}).`);
+  }
+  if (synchronizedIntent) {
+    assertSynchronizedIntentCurrent(
+      synchronizedIntent,
+      context,
+      contextGeneration,
+      isCurrent,
+    );
   }
 
   const { index: musicalTime, tempo } = createProjectMusicalTime(project);
@@ -605,6 +1082,25 @@ async function createRuntimeSession(
     audioBuffers.release();
     throw new CancelledPlaybackRequest();
   }
+  if (synchronizedIntent) {
+    try {
+      assertSynchronizedIntentCurrent(
+        synchronizedIntent,
+        context,
+        contextGeneration,
+        isCurrent,
+      );
+      if (
+        startupStore.project !== project
+        || startupStore.transport.positionBeat !== synchronizedIntent.startBeat
+      ) {
+        throw synchronizedError('stale-operation');
+      }
+    } catch (error) {
+      audioBuffers.release();
+      throw error;
+    }
+  }
   const startupTracks = startupStore.project.tracks;
   const startupTransport = startupStore.transport;
   const startBeat = (
@@ -612,6 +1108,10 @@ async function createRuntimeSession(
     startupTransport.positionBeat >= 0 &&
     startupTransport.positionBeat < lengthBeats
   ) ? startupTransport.positionBeat : 0;
+  if (synchronizedIntent && startBeat !== synchronizedIntent.startBeat) {
+    audioBuffers.release();
+    throw synchronizedError('stale-request');
+  }
   const metronomeOn = startupTransport.metronome;
   const now = engine.now();
   let session: RuntimeSession | null = null;
@@ -634,6 +1134,7 @@ async function createRuntimeSession(
   const disposeResources = (): void => {
     if (disposed) return;
     disposed = true;
+    synchronizedIntent?.removeAbortListener();
     cancelNaturalDrainTimer();
     cancelNaturalDrainTimer = () => {};
     unsubscribeContext();
@@ -738,7 +1239,48 @@ async function createRuntimeSession(
       ...(loop ? {} : { onEnd: handlers.onEnd }),
     });
 
-    const anchorTime = engine.now();
+    let anchorTime = engine.now();
+    let synchronizedClock: SynchronizedRecordingPlaybackClock | null = null;
+    if (synchronizedIntent) {
+      assertSynchronizedIntentCurrent(
+        synchronizedIntent,
+        context,
+        contextGeneration,
+        isCurrent,
+      );
+      const anchorContextFrame = planSynchronizedRecordingStartFrame(
+        context.currentTime,
+        context.sampleRate,
+      );
+      anchorTime = anchorContextFrame / context.sampleRate;
+      await armSynchronizedCapture(
+        synchronizedIntent,
+        context,
+        anchorContextFrame,
+        contextGeneration,
+      );
+      assertSynchronizedIntentCurrent(
+        synchronizedIntent,
+        context,
+        contextGeneration,
+        isCurrent,
+      );
+      const currentContextFrame = Math.ceil(context.currentTime * context.sampleRate);
+      const minimumScheduleLeadFrames = Math.ceil(LOOKAHEAD_S * context.sampleRate);
+      if (anchorContextFrame - currentContextFrame < minimumScheduleLeadFrames) {
+        throw synchronizedError('start-deadline-missed');
+      }
+      synchronizedClock = Object.freeze({
+        context,
+        contextGeneration,
+        sampleRate: context.sampleRate,
+        anchorContextFrame,
+        anchorBeat: startBeat,
+        tempo,
+        requestId,
+        projectSnapshot: project,
+      });
+    }
     const startupRoutingMix = resolveAudioRoutingMix(startupStore.project, routingPlan);
     const everAudibleTrackIds = new Set(startupRoutingMix.audibleChannelIds);
     const everAudibleEdgeIds = new Set(startupRoutingMix.activeEdgeIds);
@@ -810,6 +1352,7 @@ async function createRuntimeSession(
       loop,
       lengthBeats,
       projectSnapshot: project,
+      contextGeneration,
       routingPlan,
       scheduleEvents,
       everAudibleTrackIds,
@@ -834,11 +1377,35 @@ async function createRuntimeSession(
     });
 
     const endBeat = loop ? Infinity : lengthBeats;
+    if (synchronizedIntent && synchronizedClock) {
+      assertSynchronizedIntentCurrent(
+        synchronizedIntent,
+        context,
+        contextGeneration,
+        isCurrent,
+      );
+      if (context.currentTime >= anchorTime) {
+        throw synchronizedError('start-deadline-missed');
+      }
+    }
     startupAnchorTime = anchorTime;
-    scheduler.startIndexed(scheduleIndex, tempo, startBeat, endBeat);
-    startupAnchorTime = null;
+    try {
+      scheduler.startIndexedAt(scheduleIndex, tempo, startBeat, endBeat, anchorTime);
+    } finally {
+      startupAnchorTime = null;
+    }
     if (!scheduler.isRunning || String(context.state) !== 'running' || !isCurrent()) {
       throw new CancelledPlaybackRequest();
+    }
+    if (synchronizedIntent && synchronizedClock) {
+      await waitForSynchronizedAnchor(
+        synchronizedIntent,
+        context,
+        contextGeneration,
+        anchorTime,
+        isCurrent,
+      );
+      resolveSynchronizedIntent(synchronizedIntent, synchronizedClock);
     }
     startPositionLoop(runtimeSession);
     return runtimeSession;

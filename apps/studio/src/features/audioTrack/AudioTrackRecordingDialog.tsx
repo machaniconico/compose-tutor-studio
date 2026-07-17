@@ -6,6 +6,11 @@ import {
   type MicrophoneCaptureSession,
   type MicrophonePcmCapture,
 } from '../../audio/microphoneCapture';
+import { getAudioEngine } from '../../audio/engine';
+import {
+  startSynchronizedRecordingPlayback,
+  stopSynchronizedRecordingPlayback,
+} from '../../audio/playback';
 import {
   MicrophoneInputDeviceError,
   enumerateMicrophoneInputDevices,
@@ -14,13 +19,19 @@ import {
 } from '../../audio/microphoneInputDevices';
 import {
   beginStudioAudioTrackRecording,
+  bindStudioAudioTrackRecordingToPlayback,
   discardStudioAudioTrackRecording,
   recordStudioAudioTrack,
   studioAudioActionErrorMessage,
   type StudioAudioActionErrorCode,
   type StudioAudioTrackRecordingHandle,
 } from '../../state/audioTrackActions';
-import { useStore } from '../../state/store';
+import {
+  MAX_RECORDING_LATENCY_ADJUSTMENT_MS,
+  MIN_RECORDING_LATENCY_ADJUSTMENT_MS,
+  useStore,
+  type RecordingLatencyCompensationMode,
+} from '../../state/store';
 import { pushToast } from '../../state/tutorialBridge';
 import { Dialog } from '../common/Dialog';
 import { microphoneCaptureFailureMessage } from '../common/microphoneCaptureFailureMessage';
@@ -29,6 +40,7 @@ type RecordingPhase =
   | 'idle'
   | 'requesting'
   | 'countdown'
+  | 'preparing'
   | 'recording'
   | 'stopping'
   | 'processing'
@@ -47,6 +59,30 @@ function formatElapsed(seconds: number): string {
   const bounded = Math.max(0, Math.min(MAX_MICROPHONE_CAPTURE_SECONDS, Math.floor(seconds)));
   const minutes = Math.floor(bounded / 60);
   return `${minutes}:${String(bounded % 60).padStart(2, '0')}`;
+}
+
+function awaitAudioActivationOrCancel<T>(
+  activation: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (value?: T, error?: unknown): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      if (error !== undefined) reject(error);
+      else if (value !== undefined) resolve(value);
+      else reject(new MicrophoneCaptureError('capture-failed'));
+    };
+    const onAbort = (): void => finish(undefined, new MicrophoneCaptureError('cancelled'));
+    void activation.then(
+      (value) => finish(value),
+      (error: unknown) => finish(undefined, error),
+    );
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function recordingBeginFailureMessage(
@@ -87,10 +123,17 @@ export function AudioTrackRecordingDialog({
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<string | null>(
     useStore.getState().preferredMicrophoneInputDeviceId,
   );
+  const [latencyCompensationMode, setLatencyCompensationMode] =
+    useState<RecordingLatencyCompensationMode>(
+      useStore.getState().recordingLatencyCompensationMode,
+    );
+  const [latencyAdjustmentText, setLatencyAdjustmentText] = useState(
+    String(useStore.getState().recordingLatencyAdjustmentMs),
+  );
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
   const recordingHandleRef = useRef<StudioAudioTrackRecordingHandle | null>(null);
-  const playbackStoppedRef = useRef(false);
+  const synchronizedPlaybackRequestIdRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<MicrophoneCaptureSession | null>(null);
   const cancelRequestedRef = useRef(false);
@@ -100,6 +143,7 @@ export function AudioTrackRecordingDialog({
   const stopButtonRef = useRef<HTMLButtonElement>(null);
   const processingStatusRef = useRef<HTMLParagraphElement>(null);
   const inputDeviceRefreshGenerationRef = useRef(0);
+  const captureStopRequestedRef = useRef(false);
 
   const discardRecordingOwnership = (): void => {
     const handle = recordingHandleRef.current;
@@ -108,7 +152,15 @@ export function AudioTrackRecordingDialog({
     discardStudioAudioTrackRecording(handle);
   };
 
+  const stopPairedPlayback = (): void => {
+    const requestId = synchronizedPlaybackRequestIdRef.current;
+    synchronizedPlaybackRequestIdRef.current = null;
+    if (requestId !== null) stopSynchronizedRecordingPlayback(requestId);
+  };
+
   const finishCaptureError = (caught: unknown, generation: number): void => {
+    captureStopRequestedRef.current = true;
+    stopPairedPlayback();
     discardRecordingOwnership();
     if (!mountedRef.current || generation !== generationRef.current) return;
     abortRef.current = null;
@@ -131,6 +183,7 @@ export function AudioTrackRecordingDialog({
     capture: MicrophonePcmCapture,
     generation: number,
   ): Promise<void> => {
+    stopPairedPlayback();
     if (!mountedRef.current || generation !== generationRef.current) {
       discardRecordingOwnership();
       return;
@@ -177,13 +230,18 @@ export function AudioTrackRecordingDialog({
         setPhase('error');
         return;
       }
-      const stopped = playbackStoppedRef.current
-        ? ' 再生を停止した位置へ配置しました。'
-        : '';
       const deduplicated = result.deduplicated
         ? ' 同じ音声素材は重複保存していません。'
         : '';
-      pushToast(`「${result.trackName}」へ録音を保存しました。${stopped}${deduplicated}`, 'success');
+      const compensation = latencyCompensationMode === 'estimated'
+        ? ' 推定レイテンシ補正を適用しました。'
+        : Number(latencyAdjustmentText) === 0
+          ? ''
+          : ' 手動の録音位置補正を適用しました。';
+      pushToast(
+        `「${result.trackName}」へ録音を保存し、伴奏と同期した位置へ配置しました。${compensation}${deduplicated}`,
+        'success',
+      );
       onCreated(result.trackId);
     } catch (caught) {
       if (!mountedRef.current || generation !== generationRef.current) return;
@@ -211,6 +269,18 @@ export function AudioTrackRecordingDialog({
       recordingHandleRef.current !== null
       || (phase !== 'idle' && phase !== 'error')
     ) return;
+    const frozenLatencyAdjustmentMs = Number(latencyAdjustmentText);
+    if (
+      !Number.isSafeInteger(frozenLatencyAdjustmentMs)
+      || frozenLatencyAdjustmentMs < MIN_RECORDING_LATENCY_ADJUSTMENT_MS
+      || frozenLatencyAdjustmentMs > MAX_RECORDING_LATENCY_ADJUSTMENT_MS
+      || !useStore.getState().setRecordingLatencyAdjustmentMs(frozenLatencyAdjustmentMs)
+    ) {
+      setError('手動補正は-500 msから+500 msの整数で入力してください。');
+      setStatus('録音は開始していません。');
+      setPhase('error');
+      return;
+    }
     const frozenInputDeviceId = selectedInputDeviceId;
     const ownership = beginStudioAudioTrackRecording({
       target: targetTrackId === undefined
@@ -224,9 +294,12 @@ export function AudioTrackRecordingDialog({
       return;
     }
     recordingHandleRef.current = ownership.handle;
-    playbackStoppedRef.current = ownership.playbackStopped;
+    const projectSnapshot = useStore.getState().project;
+    const engineActivation = getAudioEngine().ensureContext();
+    void engineActivation.catch(() => undefined);
     const generation = ++generationRef.current;
     cancelRequestedRef.current = false;
+    captureStopRequestedRef.current = false;
     setError(null);
     setStatus(null);
     setProgress(null);
@@ -237,16 +310,60 @@ export function AudioTrackRecordingDialog({
     try {
       const controller = new AbortController();
       abortRef.current = controller;
+      const activated = await awaitAudioActivationOrCancel(engineActivation, controller.signal);
+      if (!mountedRef.current || generation !== generationRef.current) {
+        throw new MicrophoneCaptureError('cancelled');
+      }
       const session = await startMicrophoneCapture({
         signal: controller.signal,
         countdownSeconds: 3,
         maxDurationSeconds: MAX_MICROPHONE_CAPTURE_SECONDS,
         ...(frozenInputDeviceId ? { inputDeviceId: frozenInputDeviceId } : {}),
         monitorInput,
+        borrowedAudioContext: {
+          context: activated.context,
+          contextGeneration: activated.contextGeneration,
+        },
+        synchronize: async ({
+          context,
+          contextGeneration,
+          armAtFrame,
+        }) => {
+          if (
+            context !== activated.context
+            || contextGeneration !== activated.contextGeneration
+          ) {
+            throw new MicrophoneCaptureError('synchronization-failed');
+          }
+          const clock = await startSynchronizedRecordingPlayback({
+            operationId: ownership.handle.operationId,
+            projectSnapshot,
+            startBeat: ownership.startBeat,
+            signal: controller.signal,
+            armCapture: async (playbackContext, startFrame, playbackGeneration) => {
+              if (
+                playbackContext !== context
+                || playbackGeneration !== contextGeneration
+              ) {
+                throw new MicrophoneCaptureError('synchronization-failed');
+              }
+              await armAtFrame(startFrame);
+            },
+          });
+          synchronizedPlaybackRequestIdRef.current = clock.requestId;
+          if (!bindStudioAudioTrackRecordingToPlayback(ownership.handle, clock)) {
+            stopPairedPlayback();
+            throw new MicrophoneCaptureError('synchronization-failed');
+          }
+        },
         onCountdown: (secondsRemaining) => {
           if (!mountedRef.current || generation !== generationRef.current) return;
           setCountdown(secondsRemaining);
           setPhase('countdown');
+        },
+        onPreparing: () => {
+          if (!mountedRef.current || generation !== generationRef.current) return;
+          setPhase('preparing');
         },
         onLevel: (nextLevel) => {
           if (!mountedRef.current || generation !== generationRef.current) return;
@@ -263,9 +380,10 @@ export function AudioTrackRecordingDialog({
       }
       abortRef.current = null;
       sessionRef.current = session;
-      setPhase('recording');
       void session.result.then(
         (capture) => {
+          captureStopRequestedRef.current = true;
+          stopPairedPlayback();
           if (cancelRequestedRef.current) {
             discardRecordingOwnership();
             if (mountedRef.current && generation === generationRef.current) {
@@ -278,6 +396,19 @@ export function AudioTrackRecordingDialog({
         },
         (caught: unknown) => finishCaptureError(caught, generation),
       );
+      const pairedRequestId = synchronizedPlaybackRequestIdRef.current;
+      const transport = useStore.getState().transport;
+      if (
+        pairedRequestId === null
+        || transport.phase !== 'playing'
+        || transport.playbackRequestId !== pairedRequestId
+      ) {
+        captureStopRequestedRef.current = true;
+        setPhase('stopping');
+        void session.stop().catch(() => undefined);
+      } else {
+        setPhase('recording');
+      }
     } catch (caught) {
       finishCaptureError(caught, generation);
     }
@@ -289,15 +420,19 @@ export function AudioTrackRecordingDialog({
       return;
     }
     cancelRequestedRef.current = true;
+    captureStopRequestedRef.current = true;
     setPhase(phase === 'processing' ? 'processing' : 'stopping');
     if (phase === 'processing') setStatus('保存処理を安全に中止しています…');
     abortRef.current?.abort();
     sessionRef.current?.cancel();
+    stopPairedPlayback();
   };
 
   const stopRecording = (): void => {
     if (phase !== 'recording' || !sessionRef.current) return;
+    captureStopRequestedRef.current = true;
     setPhase('stopping');
+    stopPairedPlayback();
     void sessionRef.current.stop().catch(() => undefined);
   };
 
@@ -313,7 +448,7 @@ export function AudioTrackRecordingDialog({
   }, [phase]);
 
   useEffect(() => {
-    if (!['requesting', 'countdown', 'recording', 'processing', 'error'].includes(phase)) return;
+    if (!['requesting', 'countdown', 'preparing', 'recording', 'processing', 'error'].includes(phase)) return;
     const frame = window.requestAnimationFrame(() => {
       if (phase === 'recording') stopButtonRef.current?.focus();
       else if (phase === 'processing') processingStatusRef.current?.focus();
@@ -365,12 +500,28 @@ export function AudioTrackRecordingDialog({
 
   useEffect(() => {
     mountedRef.current = true;
+    const unsubscribeTransport = useStore.subscribe((state, previous) => {
+      if (
+        previous.transport.phase !== 'stopped'
+        && state.transport.phase === 'stopped'
+        && sessionRef.current !== null
+        && !cancelRequestedRef.current
+        && !captureStopRequestedRef.current
+        && !finalizingRef.current
+      ) {
+        captureStopRequestedRef.current = true;
+        setPhase('stopping');
+        void sessionRef.current.stop().catch(() => undefined);
+      }
+    });
     return () => {
+      unsubscribeTransport();
       mountedRef.current = false;
       generationRef.current += 1;
       const captureCleanupPending = abortRef.current !== null || sessionRef.current !== null;
       abortRef.current?.abort();
       sessionRef.current?.cancel();
+      stopPairedPlayback();
       // Permission/capture owns browser resources until its promise settles.
       // Its existing success/error callback releases the opaque lease after
       // the worklet, stream, and AudioContext have actually been cleaned up.
@@ -400,11 +551,11 @@ export function AudioTrackRecordingDialog({
       className="dialog--audio-track-recording"
       onClose={cancelRecording}
       closeDisabled={closeLocked}
-      busy={phase === 'requesting' || phase === 'stopping' || phase === 'processing'}
+      busy={phase === 'requesting' || phase === 'preparing' || phase === 'stopping' || phase === 'processing'}
     >
       <div className="audio-track-recording">
         <p className="audio-track-recording__lead">
-          最大60秒の音声を端末内だけで録音し、現在の再生位置から{recordingTarget}へ保存します。
+          最大60秒の音声を端末内だけで録音します。3秒のカウント後、準備が整い次第、現在位置から伴奏と録音を同時に始め、{recordingTarget}へ配置します。
         </p>
 
         {phase === 'idle' || phase === 'error' ? (
@@ -442,6 +593,58 @@ export function AudioTrackRecordingDialog({
                 </small>
               ) : null}
             </div>
+            <fieldset className="audio-track-recording__latency">
+              <legend>録音位置補正</legend>
+              <label htmlFor="audio-track-recording-latency-mode">自動補正</label>
+              <select
+                id="audio-track-recording-latency-mode"
+                value={latencyCompensationMode}
+                aria-describedby="audio-track-recording-latency-help"
+                onChange={(event) => {
+                  const next = event.currentTarget.value as RecordingLatencyCompensationMode;
+                  if (useStore.getState().setRecordingLatencyCompensationMode(next)) {
+                    setLatencyCompensationMode(next);
+                  }
+                }}
+              >
+                <option value="estimated">自動（推定）</option>
+                <option value="off">自動補正なし（手動のみ）</option>
+              </select>
+              <small id="audio-track-recording-latency-help">
+                自動はブラウザと入力・出力デバイスの申告値による推定です。実測校正ではありません。
+              </small>
+              <label htmlFor="audio-track-recording-latency-adjustment">
+                手動オフセット（ms）
+              </label>
+              <input
+                id="audio-track-recording-latency-adjustment"
+                type="number"
+                min={MIN_RECORDING_LATENCY_ADJUSTMENT_MS}
+                max={MAX_RECORDING_LATENCY_ADJUSTMENT_MS}
+                step={1}
+                value={latencyAdjustmentText}
+                aria-describedby="audio-track-recording-latency-adjustment-help"
+                onChange={(event) => setLatencyAdjustmentText(event.currentTarget.value)}
+                onBlur={() => {
+                  const next = Number(latencyAdjustmentText);
+                  if (
+                    Number.isSafeInteger(next)
+                    && next >= MIN_RECORDING_LATENCY_ADJUSTMENT_MS
+                    && next <= MAX_RECORDING_LATENCY_ADJUSTMENT_MS
+                    && useStore.getState().setRecordingLatencyAdjustmentMs(next)
+                  ) {
+                    setLatencyAdjustmentText(String(next));
+                  } else {
+                    setLatencyAdjustmentText(
+                      String(useStore.getState().recordingLatencyAdjustmentMs),
+                    );
+                  }
+                }}
+              />
+              <small id="audio-track-recording-latency-adjustment-help">
+                正の値で録音を早め、負の値で遅らせます（-500〜+500 ms）。
+              </small>
+            </fieldset>
             <label className="audio-track-recording__monitor">
               <input
                 type="checkbox"
@@ -453,7 +656,7 @@ export function AudioTrackRecordingDialog({
                 <small>初期値はOFFです。ONにする場合は、ハウリングを防ぐためヘッドホンを使用してください。</small>
               </span>
             </label>
-            <p>開始後に3秒のカウントが入ります。録音音声はエフェクトを通さないドライ音です。</p>
+            <p>録音音声はエフェクトを通さないドライ音です。ループ録音は現在未対応です。</p>
             {status ? <p className="audio-track-recording__status" role="status">{status}</p> : null}
             {error ? <p className="track-management__error" role="alert">{error}</p> : null}
             <div className="audio-track-recording__actions">
@@ -484,7 +687,15 @@ export function AudioTrackRecordingDialog({
             <p className="audio-track-recording__countdown" role="status" aria-live="assertive">
               録音開始まで{countdown}秒
             </p>
-            <p>カウントのあとに録音を開始します。</p>
+            <p>カウントのあと、伴奏と録音を同じオーディオ時計で開始します。</p>
+            <button ref={cancelButtonRef} type="button" onClick={cancelRecording}>キャンセル</button>
+          </>
+        ) : null}
+
+        {phase === 'preparing' ? (
+          <>
+            <p role="status" aria-live="polite">伴奏と録音を同期する準備をしています…</p>
+            <p>準備ができ次第、同じオーディオ時計で開始します。</p>
             <button ref={cancelButtonRef} type="button" onClick={cancelRecording}>キャンセル</button>
           </>
         ) : null}
@@ -493,7 +704,7 @@ export function AudioTrackRecordingDialog({
           <>
             <p className="audio-track-recording__state" role="status" aria-live="polite">
               <span aria-hidden="true" className="audio-track-recording__indicator" />
-              {phase === 'recording' ? '録音中' : '録音を終了しています…'}
+              {phase === 'recording' ? '録音中・伴奏再生中' : '録音と伴奏を終了しています…'}
             </p>
             <p className="audio-track-recording__time" role="timer" aria-label="録音時間">
               {formatElapsed(elapsedSeconds)} / 1:00

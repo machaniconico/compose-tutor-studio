@@ -17,6 +17,7 @@ const hookState = vi.hoisted(() => ({
 const actionMocks = vi.hoisted(() => ({
   handle: { operationId: 41 },
   begin: vi.fn(),
+  bind: vi.fn(),
   discard: vi.fn(),
   record: vi.fn(),
   pushToast: vi.fn(),
@@ -24,6 +25,18 @@ const actionMocks = vi.hoisted(() => ({
 
 const microphoneMocks = vi.hoisted(() => ({
   start: vi.fn(),
+}));
+
+const audioMocks = vi.hoisted(() => ({
+  context: {
+    sampleRate: 48_000,
+    state: 'running',
+    baseLatency: 0.01,
+    outputLatency: 0.02,
+  },
+  ensureContext: vi.fn(),
+  startPlayback: vi.fn(),
+  stopPlayback: vi.fn(),
 }));
 
 const inputDeviceMocks = vi.hoisted(() => ({
@@ -65,6 +78,15 @@ vi.mock('../src/audio/microphoneCapture', async (importOriginal) => {
   return { ...actual, startMicrophoneCapture: microphoneMocks.start };
 });
 
+vi.mock('../src/audio/engine', () => ({
+  getAudioEngine: () => ({ ensureContext: audioMocks.ensureContext }),
+}));
+
+vi.mock('../src/audio/playback', () => ({
+  startSynchronizedRecordingPlayback: audioMocks.startPlayback,
+  stopSynchronizedRecordingPlayback: audioMocks.stopPlayback,
+}));
+
 vi.mock('../src/audio/microphoneInputDevices', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/audio/microphoneInputDevices')>();
   return {
@@ -76,6 +98,7 @@ vi.mock('../src/audio/microphoneInputDevices', async (importOriginal) => {
 
 vi.mock('../src/state/audioTrackActions', () => ({
   beginStudioAudioTrackRecording: actionMocks.begin,
+  bindStudioAudioTrackRecordingToPlayback: actionMocks.bind,
   discardStudioAudioTrackRecording: actionMocks.discard,
   recordStudioAudioTrack: actionMocks.record,
   studioAudioActionErrorMessage: (code: string) => `action:${code}`,
@@ -160,6 +183,23 @@ beforeEach(() => {
     playbackStopped: true,
   });
   actionMocks.record.mockResolvedValue({ ok: false, code: 'cancelled' });
+  actionMocks.bind.mockReturnValue(true);
+  audioMocks.ensureContext.mockResolvedValue({
+    context: audioMocks.context,
+    contextGeneration: 7,
+    master: {},
+  });
+  audioMocks.startPlayback.mockResolvedValue({
+    context: audioMocks.context,
+    contextGeneration: 7,
+    sampleRate: 48_000,
+    anchorContextFrame: 96_000,
+    anchorBeat: 4,
+    tempo: {},
+    requestId: 42,
+    projectSnapshot: {},
+  });
+  audioMocks.stopPlayback.mockReturnValue(true);
   inputDeviceMocks.enumerate.mockResolvedValue([]);
   inputDeviceMocks.unsubscribe.mockReset();
   inputDeviceMocks.onDeviceChange = null;
@@ -170,34 +210,67 @@ beforeEach(() => {
 });
 
 describe('AudioTrackRecordingDialog interaction boundaries', () => {
-  it('synchronously ignores a same-tick double start while permission is pending', () => {
+  it('synchronously ignores a same-tick double start while permission is pending', async () => {
     microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
     const tree = renderDialog();
     const start = button(tree, '録音を開始');
 
     start.props.onClick?.();
     start.props.onClick?.();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(actionMocks.begin).toHaveBeenCalledOnce();
     expect(microphoneMocks.start).toHaveBeenCalledOnce();
   });
 
-  it('passes an explicit monitor opt-in to microphone capture', () => {
+  it('cancels a pending audio-context activation without leaking recording ownership', async () => {
+    let resolveActivation!: (value: unknown) => void;
+    audioMocks.ensureContext.mockReturnValue(new Promise((resolve) => {
+      resolveActivation = resolve;
+    }));
+    const refs: Array<{ current: unknown }> = [];
+    const idle = renderDialog('idle', refs);
+    button(idle, '録音を開始').props.onClick?.();
+
+    const requesting = renderDialog('requesting', refs);
+    button(requesting, 'キャンセル').props.onClick?.();
+    await vi.waitFor(() => {
+      expect(actionMocks.discard).toHaveBeenCalledWith(actionMocks.handle);
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+    expect(microphoneMocks.start).not.toHaveBeenCalled();
+
+    resolveActivation({
+      context: audioMocks.context,
+      contextGeneration: 7,
+      master: {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(microphoneMocks.start).not.toHaveBeenCalled();
+  });
+
+  it('passes an explicit monitor opt-in to microphone capture', async () => {
     microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
     const tree = renderDialog('idle', [], new Map([[1, true]]));
 
     button(tree, '録音を開始').props.onClick?.();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(microphoneMocks.start).toHaveBeenCalledWith(
       expect.objectContaining({ monitorInput: true }),
     );
   });
 
-  it('freezes the selected input and new-track destination before permission', () => {
+  it('freezes the selected input and new-track destination before permission', async () => {
     microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
     const tree = renderDialog('idle', [], new Map([[10, 'usb-microphone']]));
 
     button(tree, '録音を開始').props.onClick?.();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(actionMocks.begin).toHaveBeenCalledWith({
       target: { kind: 'new-track', trackName: 'Lead Take' },
@@ -205,6 +278,61 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     expect(microphoneMocks.start).toHaveBeenCalledWith(
       expect.objectContaining({ inputDeviceId: 'usb-microphone' }),
     );
+  });
+
+  it('borrows the live audio clock and binds capture to the exact playback frame', async () => {
+    microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
+    const tree = renderDialog();
+
+    button(tree, '録音を開始').props.onClick?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const captureOptions = microphoneMocks.start.mock.calls[0]?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    expect(captureOptions).toEqual(expect.objectContaining({
+      borrowedAudioContext: {
+        context: audioMocks.context,
+        contextGeneration: 7,
+      },
+      synchronize: expect.any(Function),
+    }));
+    const synchronize = captureOptions?.synchronize;
+    if (typeof synchronize !== 'function') throw new Error('synchronizer missing');
+    const armAtFrame = vi.fn(async () => undefined);
+    await synchronize({
+      context: audioMocks.context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      renderQuantumSize: 128,
+      earliestStartFrame: 90_000,
+      armAtFrame,
+    });
+
+    expect(audioMocks.startPlayback).toHaveBeenCalledWith(expect.objectContaining({
+      operationId: 41,
+      startBeat: 4,
+      signal: expect.any(AbortSignal),
+      armCapture: expect.any(Function),
+    }));
+    const playbackOptions = audioMocks.startPlayback.mock.calls[0]?.[0];
+    if (!playbackOptions || typeof playbackOptions.armCapture !== 'function') {
+      throw new Error('playback arm callback missing');
+    }
+    await playbackOptions.armCapture(audioMocks.context, 96_000, 7);
+    expect(armAtFrame).toHaveBeenCalledWith(96_000);
+    expect(actionMocks.bind).toHaveBeenCalledWith(
+      actionMocks.handle,
+      expect.objectContaining({ requestId: 42, anchorContextFrame: 96_000 }),
+    );
+  });
+
+  it('labels automatic latency as an estimate and explains manual direction', () => {
+    const tree = renderDialog();
+    expect(textContent(tree)).toContain('自動（推定）');
+    expect(textContent(tree)).toContain('実測校正ではありません');
+    expect(textContent(tree)).toContain('正の値で録音を早め、負の値で遅らせます');
   });
 
   it('keeps only the newest devicechange refresh and unsubscribes on cleanup', async () => {
@@ -257,6 +385,7 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     const refs: Array<{ current: unknown }> = [];
     const idle = renderDialog('idle', refs);
     button(idle, '録音を開始').props.onClick?.();
+    await vi.waitFor(() => expect(microphoneMocks.start).toHaveBeenCalledOnce());
 
     const abort = vi.fn();
     refs[4] = { current: { abort } };
@@ -266,11 +395,10 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     expect(abort).toHaveBeenCalledOnce();
 
     rejectPermission(new MicrophoneCaptureError('cancelled'));
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(actionMocks.discard).toHaveBeenCalledWith(actionMocks.handle);
-    expect(onClose).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(actionMocks.discard).toHaveBeenCalledWith(actionMocks.handle);
+      expect(onClose).toHaveBeenCalledOnce();
+    });
   });
 
   it('keeps ownership through unmount until active capture cleanup settles', async () => {
@@ -284,7 +412,7 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
       maxDurationSeconds: 60,
       result,
       elapsedSeconds: () => 0,
-      stop: vi.fn(),
+      stop: vi.fn(async () => undefined),
       cancel,
     });
     const refs: Array<{ current: unknown }> = [];
@@ -295,25 +423,24 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     if (typeof cleanup !== 'function') throw new Error('lifecycle cleanup missing');
 
     button(tree, '録音を開始').props.onClick?.();
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(refs[5]?.current).toBeTruthy());
     cleanup();
 
     expect(cancel).toHaveBeenCalledOnce();
     expect(actionMocks.discard).not.toHaveBeenCalled();
 
     rejectCapture(new MicrophoneCaptureError('cancelled'));
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(actionMocks.discard).toHaveBeenCalledOnce();
-    expect(actionMocks.discard).toHaveBeenCalledWith(actionMocks.handle);
+    await vi.waitFor(() => {
+      expect(actionMocks.discard).toHaveBeenCalledOnce();
+      expect(actionMocks.discard).toHaveBeenCalledWith(actionMocks.handle);
+    });
   });
 
   it('offers distinct stop/save and discard controls for an active session', () => {
     const stop = vi.fn(async () => undefined);
     const cancel = vi.fn();
     const refs: Array<{ current: unknown }> = [];
+    refs[3] = { current: 42 };
     refs[5] = { current: { stop, cancel } };
     const tree = renderDialog('recording', refs);
 
@@ -322,6 +449,8 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
 
     expect(stop).toHaveBeenCalledOnce();
     expect(cancel).toHaveBeenCalledOnce();
+    expect(audioMocks.stopPlayback).toHaveBeenCalledOnce();
+    expect(audioMocks.stopPlayback).toHaveBeenCalledWith(42);
     expect(tree.props.closeDisabled).toBe(true);
   });
 
@@ -336,14 +465,13 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
       maxDurationSeconds: 60,
       result,
       elapsedSeconds: () => 1,
-      stop: vi.fn(),
+      stop: vi.fn(async () => undefined),
       cancel,
     });
     const refs: Array<{ current: unknown }> = [];
     const idle = renderDialog('idle', refs);
     button(idle, '録音を開始').props.onClick?.();
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(refs[5]?.current).toBeTruthy());
 
     const recording = renderDialog('recording', refs);
     button(recording, '録音を破棄').props.onClick?.();
@@ -353,15 +481,18 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
       sampleRate: 48_000,
       durationSeconds: 1,
       stopReason: 'manual',
+      contextGeneration: 1,
+      firstContextFrame: 0,
+      endContextFrameExclusive: 48_000,
+      inputLatencySeconds: null,
       getChannelData: () => new Float32Array(48_000),
     });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(cancel).toHaveBeenCalledOnce();
-    expect(actionMocks.discard).toHaveBeenCalledOnce();
-    expect(actionMocks.record).not.toHaveBeenCalled();
-    expect(onClose).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(actionMocks.discard).toHaveBeenCalledOnce();
+      expect(actionMocks.record).not.toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalledOnce();
+    });
   });
 
   it('announces countdown units and moves focus to the stop control', () => {
@@ -387,6 +518,14 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('announces synchronization preparation after the countdown', () => {
+    const preparing = renderDialog('preparing');
+    const status = findElement(preparing, (element) => element.props.role === 'status');
+
+    expect(textContent(status)).toContain('伴奏と録音を同期する準備をしています');
+    expect(status?.props['aria-live']).toBe('polite');
   });
 
   it('uses recording-specific recovery copy when capture memory is unavailable', () => {

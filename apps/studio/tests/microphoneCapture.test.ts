@@ -67,12 +67,18 @@ class FakeAudioTrack extends EventTarget {
   readonly stop = vi.fn();
   readyState: MediaStreamTrackState = 'live';
 
-  constructor(private readonly channelCount: number | undefined = 1) {
+  constructor(
+    private readonly channelCount: number | undefined = 1,
+    private readonly latency: number | undefined = undefined,
+  ) {
     super();
   }
 
   getSettings(): MediaTrackSettings {
-    return this.channelCount === undefined ? {} : { channelCount: this.channelCount };
+    return {
+      ...(this.channelCount === undefined ? {} : { channelCount: this.channelCount }),
+      ...(this.latency === undefined ? {} : { latency: this.latency }),
+    } as MediaTrackSettings;
   }
 
   emitEnded(): void {
@@ -116,6 +122,11 @@ function createHarness(options: HarnessOptions = {}) {
       ? options.sampleRate
       : () => options.sampleRate ?? 8_000,
   });
+  Object.defineProperty(context, 'currentTime', {
+    configurable: true,
+    enumerable: true,
+    get: () => clock.now() / 1_000,
+  });
 
   const getUserMedia = vi.fn(
     options.getUserMedia ?? (async () => stream),
@@ -124,12 +135,27 @@ function createHarness(options: HarnessOptions = {}) {
     options.addWorkletModule ?? (async () => undefined),
   );
   const flush = vi.fn();
+  let armedStartFrame = 0;
+  let nextContextFrame = 0;
+  let nextSequence = 0;
+  let firstContextFrame: number | null = null;
+  const arm = vi.fn((startFrame: number, maximumFrames: number) => {
+    armedStartFrame = startFrame;
+    nextContextFrame = startFrame;
+    handlers?.onArmed({
+      type: 'armed',
+      startFrame,
+      endFrameExclusive: startFrame + maximumFrames,
+      observedFrame: 0,
+    });
+  });
   const disconnect = vi.fn();
   let handlers: GraphHandlers | null = null;
   const createGraph = vi.fn(
     (_context: AudioContext, _stream: MediaStream, nextHandlers: GraphHandlers) => {
       handlers = nextHandlers;
-      return { flush, disconnect };
+      nextHandlers.onReady({ type: 'ready', currentFrame: 0, renderQuantumSize: 128 });
+      return { arm, flush, disconnect };
     },
   );
   const platform: MicrophoneCapturePlatform = {
@@ -163,16 +189,40 @@ function createHarness(options: HarnessOptions = {}) {
     getUserMedia,
     addWorkletModule,
     createGraph,
+    arm,
     flush,
     disconnect,
-    emitChunk(channels: readonly Float32Array[], peak = 0.5): void {
-      graphHandlers().onChunk(channels, peak);
+    emitChunk(
+      channels: readonly Float32Array[],
+      peak = 0.5,
+      timing?: Readonly<{ sequence?: number; firstContextFrame?: number }>,
+    ): void {
+      const frameCount = channels[0]?.length ?? 0;
+      const chunkFirstFrame = timing?.firstContextFrame ?? nextContextFrame;
+      if (firstContextFrame === null && frameCount > 0) firstContextFrame = chunkFirstFrame;
+      graphHandlers().onChunk(channels, peak, {
+        sequence: timing?.sequence ?? nextSequence,
+        firstContextFrame: chunkFirstFrame,
+      });
+      nextSequence = (timing?.sequence ?? nextSequence) + 1;
+      nextContextFrame = chunkFirstFrame + frameCount;
     },
-    emitFlushed(): void {
-      graphHandlers().onFlushed();
+    emitFlushed(
+      reason: 'manual' | 'duration-limit' = 'manual',
+      endFrameExclusive: number = nextContextFrame,
+    ): void {
+      graphHandlers().onStopped({
+        type: 'stopped',
+        reason,
+        firstContextFrame,
+        endContextFrameExclusive: firstContextFrame === null ? null : endFrameExclusive,
+      });
     },
     emitWorkletError(code?: string): void {
       graphHandlers().onError(code);
+    },
+    get armedStartFrame(): number {
+      return armedStartFrame;
     },
   };
 }
@@ -296,6 +346,93 @@ describe('microphone capture support and ownership', () => {
     await expect(monitored.result).rejects.toMatchObject({ code: 'cancelled' });
   });
 
+  it('borrows the playback context, synchronizes to an exact future frame, and never closes it', async () => {
+    const harness = createHarness({
+      audioTracks: [new FakeAudioTrack(1, 0.0125)],
+    });
+    let chosenStartFrame = -1;
+    const session = await beginCapture(harness, {
+      borrowedAudioContext: {
+        context: harness.context,
+        contextGeneration: 42,
+      },
+      synchronize: async ({
+        context,
+        contextGeneration,
+        sampleRate,
+        renderQuantumSize,
+        earliestStartFrame,
+        armAtFrame,
+      }) => {
+        expect(context).toBe(harness.context);
+        expect(contextGeneration).toBe(42);
+        expect(sampleRate).toBe(8_000);
+        expect(renderQuantumSize).toBe(128);
+        expect(earliestStartFrame % renderQuantumSize).toBe(0);
+        chosenStartFrame = earliestStartFrame + 17;
+        await armAtFrame(chosenStartFrame);
+      },
+    });
+
+    expect(harness.platform.createAudioContext).not.toHaveBeenCalled();
+    expect(harness.arm).toHaveBeenCalledWith(chosenStartFrame, 8_000);
+    harness.emitChunk([new Float32Array(4_000).fill(0.25)]);
+    const result = session.stop();
+    harness.emitFlushed('manual');
+
+    await expect(result).resolves.toMatchObject({
+      contextGeneration: 42,
+      firstContextFrame: chosenStartFrame,
+      endContextFrameExclusive: chosenStartFrame + 4_000,
+      inputLatencySeconds: 0.0125,
+    });
+    expect(harness.close).not.toHaveBeenCalled();
+  });
+
+  it('loads the capture worklet only once when a borrowed context is reused', async () => {
+    const harness = createHarness();
+    const borrowedAudioContext = {
+      context: harness.context,
+      contextGeneration: 9,
+    } as const;
+    const first = await beginCapture(harness, { borrowedAudioContext });
+    first.cancel();
+    await expect(first.result).rejects.toMatchObject({ code: 'cancelled' });
+
+    const second = await beginCapture(harness, { borrowedAudioContext });
+    second.cancel();
+    await expect(second.result).rejects.toMatchObject({ code: 'cancelled' });
+
+    expect(harness.addWorkletModule).toHaveBeenCalledTimes(1);
+    expect(harness.disconnect).toHaveBeenCalledTimes(2);
+    expect(harness.close).not.toHaveBeenCalled();
+  });
+
+  it('requires a synchronizer to arm capture exactly once', async () => {
+    const unarmed = createHarness();
+    await expect(beginCapture(unarmed, {
+      borrowedAudioContext: {
+        context: unarmed.context,
+        contextGeneration: 3,
+      },
+      synchronize: () => undefined,
+    })).rejects.toMatchObject({ code: 'synchronization-failed' });
+    expect(unarmed.close).not.toHaveBeenCalled();
+
+    const doubleArm = createHarness();
+    await expect(beginCapture(doubleArm, {
+      borrowedAudioContext: {
+        context: doubleArm.context,
+        contextGeneration: 4,
+      },
+      synchronize: async ({ earliestStartFrame, armAtFrame }) => {
+        await armAtFrame(earliestStartFrame);
+        await armAtFrame(earliestStartFrame + 128);
+      },
+    })).rejects.toMatchObject({ code: 'synchronization-failed' });
+    expect(doubleArm.close).not.toHaveBeenCalled();
+  });
+
   it('omits a default input constraint and uses exact only for an explicit device', async () => {
     const defaultHarness = createHarness();
     const defaultSession = await beginCapture(defaultHarness);
@@ -303,6 +440,8 @@ describe('microphone capture support and ownership', () => {
       video: false,
       audio: {
         channelCount: { ideal: 1 },
+        sampleRate: { ideal: 8_000 },
+        latency: { ideal: 0 },
         echoCancellation: { ideal: false },
         noiseSuppression: { ideal: false },
         autoGainControl: { ideal: false },
@@ -317,6 +456,8 @@ describe('microphone capture support and ownership', () => {
       video: false,
       audio: {
         channelCount: { ideal: 1 },
+        sampleRate: { ideal: 8_000 },
+        latency: { ideal: 0 },
         echoCancellation: { ideal: false },
         noiseSuppression: { ideal: false },
         autoGainControl: { ideal: false },
@@ -347,7 +488,7 @@ describe('microphone capture completion', () => {
     harness.emitChunk([new Float32Array(5_000).fill(-1)], 0.75);
 
     expect(harness.flush).toHaveBeenCalledTimes(1);
-    harness.emitFlushed();
+    harness.emitFlushed('duration-limit', harness.armedStartFrame + 8_000);
     const capture = await session.result;
 
     expect(capture).toMatchObject({
@@ -356,6 +497,9 @@ describe('microphone capture completion', () => {
       sampleRate: 8_000,
       durationSeconds: 1,
       stopReason: 'duration-limit',
+      firstContextFrame: harness.armedStartFrame,
+      endContextFrameExclusive: harness.armedStartFrame + 8_000,
+      inputLatencySeconds: null,
     });
     expect(Array.from(capture.getChannelData(0).slice(4_998, 5_003))).toEqual([
       4_998,
@@ -375,9 +519,9 @@ describe('microphone capture completion', () => {
     const session = await beginCapture(harness);
     harness.emitChunk([new Float32Array(4_000).fill(0.2)]);
 
-    harness.clock.advance(1_000);
+    harness.clock.advance((harness.armedStartFrame / 8_000 + 1) * 1_000 + 2_000);
     expect(harness.flush).toHaveBeenCalledTimes(1);
-    harness.emitFlushed();
+    harness.emitFlushed('duration-limit');
 
     await expect(session.result).resolves.toMatchObject({
       length: 4_000,
@@ -395,8 +539,8 @@ describe('microphone capture completion', () => {
       new Float32Array(4_000).fill(0.1),
       new Float32Array(4_000).fill(-0.1),
     ]);
-    harness.clock.advance(250);
-    expect(session.elapsedSeconds()).toBe(0.25);
+    harness.clock.advance(harness.armedStartFrame / 8 + 250);
+    expect(session.elapsedSeconds()).toBeCloseTo(0.25);
 
     const firstStop = session.stop();
     const secondStop = session.stop();
@@ -591,8 +735,36 @@ describe('microphone capture validation and worklet failures', () => {
   });
 
   it.each([
+    [
+      'sequence gap',
+      (harness: ReturnType<typeof createHarness>) => {
+        harness.emitChunk([new Float32Array(10)], 0.5, { sequence: 1 });
+      },
+    ],
+    [
+      'absolute-frame gap',
+      (harness: ReturnType<typeof createHarness>) => {
+        harness.emitChunk([new Float32Array(10)]);
+        harness.emitChunk([new Float32Array(10)], 0.5, {
+          firstContextFrame: harness.armedStartFrame + 11,
+        });
+      },
+    ],
+  ] as const)('rejects a capture-clock discontinuity: %s', async (_label, emit) => {
+    const harness = createHarness();
+    const session = await beginCapture(harness);
+
+    emit(harness);
+
+    await expect(session.result).rejects.toMatchObject({ code: 'clock-discontinuity' });
+  });
+
+  it.each([
     ['channel-limit-exceeded', 'channel-limit-exceeded'],
     ['channel-layout-changed', 'channel-limit-exceeded'],
+    ['clock-discontinuity', 'clock-discontinuity'],
+    ['invalid-arm', 'synchronization-failed'],
+    ['arm-frame-passed', 'synchronization-failed'],
     ['processor-error', 'worklet-failed'],
     [undefined, 'worklet-failed'],
   ] as const)('maps worklet error %s to %s', async (workletCode, captureCode) => {

@@ -30,6 +30,9 @@ export function microphoneCaptureFailureMessage(error: unknown): string {
         return 'この端末では録音用のメモリを安全に確保できませんでした。ほかの音声処理を終了してください。';
       case 'cancelled':
         return '';
+      case 'synchronization-failed':
+      case 'clock-discontinuity':
+        return '再生と録音の同期を保てませんでした。音声デバイスを確認して、もう一度録音してください。';
       case 'worklet-failed':
       case 'capture-failed':
         break;

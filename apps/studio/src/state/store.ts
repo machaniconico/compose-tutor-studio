@@ -63,6 +63,11 @@ export type EditorView = 'pianoRoll' | 'drums' | 'arranger';
 
 export type TransportPhase = 'stopped' | 'starting' | 'playing';
 
+export type RecordingLatencyCompensationMode = 'estimated' | 'off';
+
+export const MIN_RECORDING_LATENCY_ADJUSTMENT_MS = -500;
+export const MAX_RECORDING_LATENCY_ADJUSTMENT_MS = 500;
+
 export type AudioIssue =
   | 'start-failed'
   | 'event-limit-exceeded'
@@ -177,6 +182,13 @@ export type StudioStoreOptions = Readonly<{
   audioAssetRepository?: AudioAssetRepository;
 }>;
 
+export type VerifiedRecordingAudioAssetAddition = Readonly<{
+  operationId: number;
+  expectedSnapshot: Project;
+  verifiedAudioAssetId: string;
+  nextProject: Project;
+}>;
+
 export type StoreState = {
   project: Project;
   transport: TransportState;
@@ -194,6 +206,10 @@ export type StoreState = {
   armedAudioTrackId: string | null;
   /** Runtime-only host device preference. Never serialized into the Project. */
   preferredMicrophoneInputDeviceId: string | null;
+  /** Runtime-only recording placement policy. Never serialized into the Project. */
+  recordingLatencyCompensationMode: RecordingLatencyCompensationMode;
+  /** Positive values move a recorded take earlier; negative values move it later. */
+  recordingLatencyAdjustmentMs: number;
   localDataErase: LocalDataEraseState;
   persistenceNotice: PersistenceNotice | null;
   savedProjects: readonly ProjectSummary[];
@@ -210,6 +226,10 @@ export type StoreState = {
   applyVerifiedAudioAssetAddition: (
     fn: (p: Project) => Project,
     verifiedAudioAssetId: string,
+  ) => boolean;
+  /** Commit exactly one recording-owned asset/clip addition against its frozen snapshot. */
+  applyVerifiedRecordingAudioAssetAddition: (
+    addition: VerifiedRecordingAudioAssetAddition,
   ) => boolean;
 
   // project metadata actions
@@ -258,6 +278,11 @@ export type StoreState = {
   // engine subscribes to these via `initAudioBridge()` (src/audio/playback.ts)
   // so the store never imports audio code.
   play: () => void;
+  /**
+   * Start the exact playback generation paired with an owned microphone take.
+   * Returns its request id, or null when the operation/position is no longer valid.
+   */
+  startAudioRecordingPlayback: (operationId: number, startBeat: number) => number | null;
   /** Confirm an audio start only when it still belongs to the active request. */
   confirmPlaybackStarted: (requestId: number) => void;
   /** Reject a failed audio start only when it still belongs to the active request. */
@@ -294,6 +319,8 @@ export type StoreState = {
   setAudioTrackArmed: (trackId: string | null) => boolean;
   /** Select a host microphone input, or null for the host default. */
   setPreferredMicrophoneInputDeviceId: (deviceId: string | null) => boolean;
+  setRecordingLatencyCompensationMode: (mode: RecordingLatencyCompensationMode) => boolean;
+  setRecordingLatencyAdjustmentMs: (milliseconds: number) => boolean;
   tryBeginAudioRecordingOperation: () => number | null;
   finishAudioRecordingOperation: (operationId: number) => void;
 
@@ -689,6 +716,148 @@ function pitchInScale(project: Project, pitch: number): boolean {
   } catch {
     return false;
   }
+}
+
+const RECORDING_PROJECT_MUTABLE_KEYS = new Set([
+  'audioAssets',
+  'tracks',
+  'audioRouting',
+  'lengthBars',
+  'lengthBeats',
+  'updatedAt',
+]);
+const TRACK_CLIP_KEY = new Set(['clips']);
+const ROUTING_OUTPUTS_KEY = new Set(['outputs']);
+
+function sameOwnPropertiesExcept(
+  left: object,
+  right: object,
+  excludedKeys: ReadonlySet<string>,
+): boolean {
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]);
+  for (const key of keys) {
+    if (excludedKeys.has(key)) continue;
+    if (
+      !Object.prototype.hasOwnProperty.call(leftRecord, key)
+      || !Object.prototype.hasOwnProperty.call(rightRecord, key)
+      || leftRecord[key] !== rightRecord[key]
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hasVerifiedReadyAudioAssetAppend(
+  current: Project,
+  next: Project,
+  verifiedAudioAssetId: string,
+): boolean {
+  return next.audioAssets.length === current.audioAssets.length + 1
+    && current.audioAssets.every((asset, index) => next.audioAssets[index] === asset)
+    && next.audioAssets.at(-1)?.id === verifiedAudioAssetId
+    && next.audioAssets.at(-1)?.availability === 'ready';
+}
+
+function isExistingTrackRecordingAddition(
+  current: Project,
+  next: Project,
+  verifiedAudioAssetId: string,
+): boolean {
+  if (
+    next.audioRouting !== current.audioRouting
+    || next.tracks.length !== current.tracks.length
+  ) {
+    return false;
+  }
+  let appendedTrackCount = 0;
+  for (let index = 0; index < current.tracks.length; index += 1) {
+    const currentTrack = current.tracks[index];
+    const nextTrack = next.tracks[index];
+    if (!currentTrack || !nextTrack) return false;
+    if (nextTrack === currentTrack) continue;
+    if (
+      appendedTrackCount !== 0
+      || currentTrack.type !== 'audio'
+      || nextTrack.type !== 'audio'
+      || !sameOwnPropertiesExcept(currentTrack, nextTrack, TRACK_CLIP_KEY)
+      || nextTrack.clips.length !== currentTrack.clips.length + 1
+      || !currentTrack.clips.every((clip, clipIndex) => nextTrack.clips[clipIndex] === clip)
+    ) {
+      return false;
+    }
+    const appendedClip = nextTrack.clips.at(-1);
+    if (
+      appendedClip?.type !== 'audio'
+      || appendedClip.trackId !== currentTrack.id
+      || appendedClip.audioAssetId !== verifiedAudioAssetId
+    ) {
+      return false;
+    }
+    appendedTrackCount += 1;
+  }
+  return appendedTrackCount === 1;
+}
+
+function isNewTrackRecordingAddition(
+  current: Project,
+  next: Project,
+  verifiedAudioAssetId: string,
+): boolean {
+  if (next.tracks.length !== current.tracks.length + 1) return false;
+  const masterIndex = current.tracks.findIndex((track) => track.type === 'master');
+  if (masterIndex < 0) return false;
+  if (
+    !current.tracks.slice(0, masterIndex).every(
+      (track, index) => next.tracks[index] === track,
+    )
+    || !current.tracks.slice(masterIndex).every(
+      (track, index) => next.tracks[masterIndex + index + 1] === track,
+    )
+  ) {
+    return false;
+  }
+  const addedTrack = next.tracks[masterIndex];
+  const addedClip = addedTrack?.clips[0];
+  if (
+    addedTrack?.type !== 'audio'
+    || addedTrack.clips.length !== 1
+    || addedClip?.type !== 'audio'
+    || addedClip.trackId !== addedTrack.id
+    || addedClip.audioAssetId !== verifiedAudioAssetId
+  ) {
+    return false;
+  }
+  if (
+    !sameOwnPropertiesExcept(current.audioRouting, next.audioRouting, ROUTING_OUTPUTS_KEY)
+    || next.audioRouting.outputs.length !== current.audioRouting.outputs.length + 1
+    || !current.audioRouting.outputs.every(
+      (route, index) => next.audioRouting.outputs[index] === route,
+    )
+  ) {
+    return false;
+  }
+  const addedOutput = next.audioRouting.outputs.at(-1);
+  return addedOutput?.sourceTrackId === addedTrack.id
+    && addedOutput.destination.type === 'master';
+}
+
+function isVerifiedRecordingAudioAssetAddition(
+  current: Project,
+  next: Project,
+  verifiedAudioAssetId: string,
+): boolean {
+  return next !== current
+    && sameOwnPropertiesExcept(current, next, RECORDING_PROJECT_MUTABLE_KEYS)
+    && next.lengthBars >= current.lengthBars
+    && next.lengthBeats >= current.lengthBeats
+    && hasVerifiedReadyAudioAssetAppend(current, next, verifiedAudioAssetId)
+    && (
+      isExistingTrackRecordingAddition(current, next, verifiedAudioAssetId)
+      || isNewTrackRecordingAddition(current, next, verifiedAudioAssetId)
+    );
 }
 
 function makeSaveState(
@@ -1465,16 +1634,28 @@ export function createStudioStore(
   const commitProject = (
     next: Project,
     verifiedAddedAudioAssetId?: string,
+    recordingAuthorization?: Readonly<{
+      operationId: number;
+      expectedSnapshot: Project;
+    }>,
   ): boolean => {
-    if (get().projectOperationBusy) return false;
-    const current = get().project;
+    const stateAtCommit = get();
+    if (stateAtCommit.projectOperationBusy) return false;
+    if (stateAtCommit.audioRecordingOperationId !== null) {
+      if (
+        recordingAuthorization === undefined
+        || recordingAuthorization.operationId !== stateAtCommit.audioRecordingOperationId
+        || recordingAuthorization.expectedSnapshot !== stateAtCommit.project
+      ) {
+        return false;
+      }
+    } else if (recordingAuthorization !== undefined) {
+      return false;
+    }
+    const current = stateAtCommit.project;
     if (next === current) return verifiedAddedAudioAssetId === undefined;
-    const verifiedAddition = verifiedAddedAudioAssetId === undefined
-      ? false
-      : next.audioAssets.length === current.audioAssets.length + 1
-        && current.audioAssets.every((asset, index) => next.audioAssets[index] === asset)
-        && next.audioAssets.at(-1)?.id === verifiedAddedAudioAssetId
-        && next.audioAssets.at(-1)?.availability === 'ready';
+    const verifiedAddition = verifiedAddedAudioAssetId !== undefined
+      && hasVerifiedReadyAudioAssetAppend(current, next, verifiedAddedAudioAssetId);
     if (verifiedAddedAudioAssetId !== undefined && !verifiedAddition) return false;
     const stamped: Project = { ...next, updatedAt: nowIso() };
     const encoded = encodeProjectJson(stamped);
@@ -1533,6 +1714,8 @@ export function createStudioStore(
     audioRecordingOperationId: null,
     armedAudioTrackId: null,
     preferredMicrophoneInputDeviceId: null,
+    recordingLatencyCompensationMode: 'estimated',
+    recordingLatencyAdjustmentMs: 0,
     localDataErase: { phase: 'idle', eraseId: null, message: null },
     persistenceNotice: null,
     savedProjects: [],
@@ -1541,8 +1724,33 @@ export function createStudioStore(
     future: [],
 
     applyProjectChange: (fn) => commitProject(fn(get().project)),
-    applyVerifiedAudioAssetAddition: (fn, verifiedAudioAssetId) =>
-      commitProject(fn(get().project), verifiedAudioAssetId),
+    applyVerifiedAudioAssetAddition: (fn, verifiedAudioAssetId) => {
+      const state = get();
+      if (state.audioRecordingOperationId !== null) return false;
+      return commitProject(fn(state.project), verifiedAudioAssetId);
+    },
+    applyVerifiedRecordingAudioAssetAddition: (addition) => {
+      const state = get();
+      if (
+        state.audioRecordingOperationId !== addition.operationId
+        || state.project !== addition.expectedSnapshot
+        || !isVerifiedRecordingAudioAssetAddition(
+          addition.expectedSnapshot,
+          addition.nextProject,
+          addition.verifiedAudioAssetId,
+        )
+      ) {
+        return false;
+      }
+      return commitProject(
+        addition.nextProject,
+        addition.verifiedAudioAssetId,
+        {
+          operationId: addition.operationId,
+          expectedSnapshot: addition.expectedSnapshot,
+        },
+      );
+    },
 
     // --- project metadata ---
     setBpm: (bpm) => {
@@ -1792,7 +2000,11 @@ export function createStudioStore(
     // --- transport ---
     play: () => {
       const state = get();
-      if (state.projectOperationBusy || state.transport.phase !== 'stopped') return;
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+        || state.transport.phase !== 'stopped'
+      ) return;
       const projectLength = transportProjectLengthBeats(state.project);
       const positionBeat =
         projectLength > 0 &&
@@ -1811,6 +2023,33 @@ export function createStudioStore(
           positionBeat,
         },
       });
+    },
+    startAudioRecordingPlayback: (operationId, startBeat) => {
+      const state = get();
+      const projectLength = transportProjectLengthBeats(state.project);
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== operationId
+        || state.transport.phase !== 'stopped'
+        || state.transport.loopEnabled
+        || !Number.isFinite(startBeat)
+        || startBeat < 0
+        || startBeat >= projectLength
+      ) {
+        return null;
+      }
+      const requestId = state.transport.playbackRequestId + 1;
+      set({
+        transport: {
+          ...state.transport,
+          phase: 'starting',
+          isPlaying: false,
+          playbackRequestId: requestId,
+          audioIssue: null,
+          positionBeat: startBeat,
+        },
+      });
+      return requestId;
     },
     confirmPlaybackStarted: (requestId) => {
       const state = get();
@@ -1910,6 +2149,7 @@ export function createStudioStore(
     setPosition: (beat) => set((s) => ({ transport: { ...s.transport, positionBeat: beat } })),
     toggleLoop: () =>
       set((s) => {
+        if (s.audioRecordingOperationId !== null) return s;
         const projectLength = transportProjectLengthBeats(s.project);
         const bounds = safeLoopBounds(
           s.transport.loopStartBeat,
@@ -1938,7 +2178,9 @@ export function createStudioStore(
         };
       }),
     toggleMetronome: () =>
-      set((s) => ({ transport: { ...s.transport, metronome: !s.transport.metronome } })),
+      set((s) => s.audioRecordingOperationId === null
+        ? { transport: { ...s.transport, metronome: !s.transport.metronome } }
+        : s),
 
     // --- microphone recording lifecycle ---
     setAudioTrackArmed: (trackId) => {
@@ -1979,6 +2221,38 @@ export function createStudioStore(
       }
       return true;
     },
+    setRecordingLatencyCompensationMode: (mode) => {
+      const state = get();
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+        || state.localDataErase.phase !== 'idle'
+        || (mode !== 'estimated' && mode !== 'off')
+      ) {
+        return false;
+      }
+      if (state.recordingLatencyCompensationMode !== mode) {
+        set({ recordingLatencyCompensationMode: mode });
+      }
+      return true;
+    },
+    setRecordingLatencyAdjustmentMs: (milliseconds) => {
+      const state = get();
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+        || state.localDataErase.phase !== 'idle'
+        || !Number.isSafeInteger(milliseconds)
+        || milliseconds < MIN_RECORDING_LATENCY_ADJUSTMENT_MS
+        || milliseconds > MAX_RECORDING_LATENCY_ADJUSTMENT_MS
+      ) {
+        return false;
+      }
+      if (state.recordingLatencyAdjustmentMs !== milliseconds) {
+        set({ recordingLatencyAdjustmentMs: milliseconds });
+      }
+      return true;
+    },
     tryBeginAudioRecordingOperation: () => {
       const state = get();
       if (
@@ -2010,7 +2284,7 @@ export function createStudioStore(
 
     // --- history ---
     undo: () => {
-      if (get().projectOperationBusy) return;
+      if (get().projectOperationBusy || get().audioRecordingOperationId !== null) return;
       const { past, project, future } = get();
       const previous = past[past.length - 1];
       if (!previous) return;
@@ -2032,7 +2306,7 @@ export function createStudioStore(
       void refreshAudioAssetIssuesNow(restored);
     },
     redo: () => {
-      if (get().projectOperationBusy) return;
+      if (get().projectOperationBusy || get().audioRecordingOperationId !== null) return;
       const { past, project, future } = get();
       const next = future[0];
       if (!next) return;
@@ -2053,8 +2327,8 @@ export function createStudioStore(
       }
       void refreshAudioAssetIssuesNow(restored);
     },
-    canUndo: () => get().past.length > 0,
-    canRedo: () => get().future.length > 0,
+    canUndo: () => get().audioRecordingOperationId === null && get().past.length > 0,
+    canRedo: () => get().audioRecordingOperationId === null && get().future.length > 0,
 
     // --- persistence ---
     initializePersistence: () => {

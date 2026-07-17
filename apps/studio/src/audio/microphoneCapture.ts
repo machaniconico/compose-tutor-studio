@@ -27,6 +27,8 @@ export type MicrophoneCaptureErrorCode =
   | 'sample-rate-out-of-range'
   | 'channel-limit-exceeded'
   | 'resource-limit-exceeded'
+  | 'synchronization-failed'
+  | 'clock-discontinuity'
   | 'worklet-failed'
   | 'capture-failed';
 
@@ -43,6 +45,14 @@ export type MicrophonePcmCapture = Readonly<{
   sampleRate: number;
   durationSeconds: number;
   stopReason: 'manual' | 'duration-limit';
+  /** Generation supplied by the shared AudioContext owner, or a standalone generation. */
+  contextGeneration: number;
+  /** Shared AudioContext frame of the first retained PCM sample. */
+  firstContextFrame: number;
+  /** Exclusive shared AudioContext frame immediately after the final retained sample. */
+  endContextFrameExclusive: number;
+  /** Input-track latency snapshot in seconds. Missing/invalid host estimates become null. */
+  inputLatencySeconds: number | null;
   getChannelData: (channel: number) => Float32Array;
 }>;
 
@@ -56,12 +66,19 @@ export type MicrophoneCaptureSession = Readonly<{
 }>;
 
 type CaptureGraphHandlers = Readonly<{
-  onChunk: (channels: readonly Float32Array[], peak: number) => void;
-  onFlushed: () => void;
+  onReady: (ready: WorkletReadyMessage) => void;
+  onArmed: (armed: WorkletArmedMessage) => void;
+  onChunk: (
+    channels: readonly Float32Array[],
+    peak: number,
+    timing: Readonly<{ sequence: number; firstContextFrame: number }>,
+  ) => void;
+  onStopped: (stopped: WorkletStoppedMessage) => void;
   onError: (code?: string) => void;
 }>;
 
 type CaptureGraph = Readonly<{
+  arm: (startFrame: number, maximumFrames: number) => void;
   flush: () => void;
   disconnect: () => void;
 }>;
@@ -89,6 +106,24 @@ export type MicrophoneCapturePlatform = Readonly<{
   clearTimer: (timer: ReturnType<typeof setTimeout>) => void;
 }>;
 
+export type BorrowedMicrophoneAudioContext = Readonly<{
+  /** Context remains owned by the caller and is never closed by microphone capture. */
+  context: AudioContext;
+  /** Monotonic generation that changes whenever the owner replaces its context. */
+  contextGeneration: number;
+}>;
+
+export type MicrophoneCaptureSynchronization = Readonly<{
+  context: AudioContext;
+  contextGeneration: number;
+  sampleRate: number;
+  renderQuantumSize: number;
+  /** Future, render-quantum-aligned candidate. The coordinator may choose a later frame. */
+  earliestStartFrame: number;
+  /** Arms the Worklet once and resolves only after its rendering-thread acknowledgement. */
+  armAtFrame: (startFrame: number) => Promise<void>;
+}>;
+
 export type StartMicrophoneCaptureOptions = Readonly<{
   signal?: AbortSignal;
   countdownSeconds?: number;
@@ -96,22 +131,54 @@ export type StartMicrophoneCaptureOptions = Readonly<{
   /** Omit (or pass an empty id) to use the host's default audio input. */
   inputDeviceId?: string;
   onCountdown?: (secondsRemaining: number) => void;
+  /** Countdown finished; the capture graph is being prepared and synchronized. */
+  onPreparing?: () => void;
   onLevel?: (peak: number) => void;
   /** Live input monitoring. Disabled by default to avoid speaker feedback. */
   monitorInput?: boolean;
+  /** Borrow the playback AudioContext so capture and transport use one audio clock. */
+  borrowedAudioContext?: BorrowedMicrophoneAudioContext;
+  /** Choose the exact future capture frame. Omit for legacy standalone auto-arm behavior. */
+  synchronize?: (
+    synchronization: MicrophoneCaptureSynchronization,
+  ) => void | Promise<void>;
   /** Deterministic test seam. Production callers must omit this. */
   platform?: MicrophoneCapturePlatform;
 }>;
 
 type WorkletChunkMessage = Readonly<{
   type: 'chunk';
+  sequence: number;
+  firstContextFrame: number;
   channelCount: number;
   frameCount: number;
   peak: number;
   channels: readonly ArrayBuffer[];
 }>;
 
+type WorkletReadyMessage = Readonly<{
+  type: 'ready';
+  currentFrame: number;
+  renderQuantumSize: number;
+}>;
+
+type WorkletArmedMessage = Readonly<{
+  type: 'armed';
+  startFrame: number;
+  endFrameExclusive: number;
+  observedFrame: number;
+}>;
+
+type WorkletStoppedMessage = Readonly<{
+  type: 'stopped';
+  reason: 'manual' | 'duration-limit';
+  firstContextFrame: number | null;
+  endContextFrameExclusive: number | null;
+}>;
+
 let activeCaptureToken: symbol | null = null;
+let standaloneContextGeneration = 0;
+const loadedWorkletModules = new WeakMap<AudioContext, Promise<void>>();
 
 function stopStream(stream: MediaStream | null | undefined): void {
   for (const track of stream?.getTracks() ?? []) track.stop();
@@ -121,11 +188,61 @@ function releaseCaptureToken(token: symbol): void {
   if (activeCaptureToken === token) activeCaptureToken = null;
 }
 
+function safeContextFrame(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function workletReadyMessage(value: unknown): WorkletReadyMessage | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<WorkletReadyMessage>;
+  if (
+    candidate.type !== 'ready'
+    || !safeContextFrame(candidate.currentFrame)
+    || !Number.isSafeInteger(candidate.renderQuantumSize)
+    || (candidate.renderQuantumSize ?? 0) <= 0
+    || (candidate.renderQuantumSize ?? 65_537) > 65_536
+  ) return null;
+  return candidate as WorkletReadyMessage;
+}
+
+function workletArmedMessage(value: unknown): WorkletArmedMessage | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<WorkletArmedMessage>;
+  if (
+    candidate.type !== 'armed'
+    || !safeContextFrame(candidate.startFrame)
+    || !safeContextFrame(candidate.endFrameExclusive)
+    || !safeContextFrame(candidate.observedFrame)
+    || (candidate.endFrameExclusive ?? 0) <= (candidate.startFrame ?? 0)
+    || (candidate.observedFrame ?? Number.MAX_SAFE_INTEGER) > (candidate.startFrame ?? -1)
+  ) return null;
+  return candidate as WorkletArmedMessage;
+}
+
+function workletStoppedMessage(value: unknown): WorkletStoppedMessage | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<WorkletStoppedMessage>;
+  const first = candidate.firstContextFrame;
+  const end = candidate.endContextFrameExclusive;
+  if (
+    candidate.type !== 'stopped'
+    || (candidate.reason !== 'manual' && candidate.reason !== 'duration-limit')
+    || !(
+      (first === null && end === null)
+      || (safeContextFrame(first) && safeContextFrame(end) && end > first)
+    )
+  ) return null;
+  return candidate as WorkletStoppedMessage;
+}
+
 function workletChunkMessage(value: unknown): WorkletChunkMessage | null {
   if (typeof value !== 'object' || value === null || !('type' in value)) return null;
   const candidate = value as Partial<WorkletChunkMessage>;
   if (
     candidate.type !== 'chunk' ||
+    !Number.isSafeInteger(candidate.sequence) ||
+    (candidate.sequence ?? -1) < 0 ||
+    !safeContextFrame(candidate.firstContextFrame) ||
     !Number.isSafeInteger(candidate.channelCount) ||
     (candidate.channelCount ?? 0) < 1 ||
     (candidate.channelCount ?? 0) > MAX_MICROPHONE_CAPTURE_CHANNELS ||
@@ -178,8 +295,22 @@ function createBrowserGraph(
       handlers.onError();
       return;
     }
-    if (event.data.type === 'flushed') {
-      handlers.onFlushed();
+    if (event.data.type === 'ready') {
+      const ready = workletReadyMessage(event.data);
+      if (ready) handlers.onReady(ready);
+      else handlers.onError();
+      return;
+    }
+    if (event.data.type === 'armed') {
+      const armed = workletArmedMessage(event.data);
+      if (armed) handlers.onArmed(armed);
+      else handlers.onError();
+      return;
+    }
+    if (event.data.type === 'stopped') {
+      const stopped = workletStoppedMessage(event.data);
+      if (stopped) handlers.onStopped(stopped);
+      else handlers.onError();
       return;
     }
     if (event.data.type === 'error') {
@@ -197,6 +328,7 @@ function createBrowserGraph(
     handlers.onChunk(
       chunk.channels.map((channel) => new Float32Array(channel)),
       chunk.peak,
+      { sequence: chunk.sequence, firstContextFrame: chunk.firstContextFrame },
     );
   };
   const onProcessorError = (): void => handlers.onError('processor-error');
@@ -209,8 +341,13 @@ function createBrowserGraph(
 
   let disconnected = false;
   return {
+    arm(startFrame, maximumFrames): void {
+      if (!disconnected) {
+        worklet.port.postMessage({ type: 'arm', startFrame, maximumFrames });
+      }
+    },
     flush(): void {
-      if (!disconnected) worklet.port.postMessage({ type: 'flush' });
+      if (!disconnected) worklet.port.postMessage({ type: 'stop' });
     },
     disconnect(): void {
       if (disconnected) return;
@@ -227,6 +364,20 @@ function createBrowserGraph(
       }
     },
   };
+}
+
+function addWorkletModuleOnce(
+  platform: MicrophoneCapturePlatform,
+  context: AudioContext,
+): Promise<void> {
+  const existing = loadedWorkletModules.get(context);
+  if (existing) return existing;
+  const loading = platform.addWorkletModule(context, platform.workletModuleUrl);
+  loadedWorkletModules.set(context, loading);
+  void loading.catch(() => {
+    if (loadedWorkletModules.get(context) === loading) loadedWorkletModules.delete(context);
+  });
+  return loading;
 }
 
 function browserPlatform(): MicrophoneCapturePlatform {
@@ -362,18 +513,24 @@ async function permissionStream(
   signal: AbortSignal | undefined,
   token: symbol,
   inputDeviceId: string | undefined,
+  sampleRate: number,
 ): Promise<{ stream: MediaStream | null; deferredRelease: boolean }> {
   if (!platform.mediaDevices) throw new MicrophoneCaptureError('unsupported');
   if (signal?.aborted) throw new MicrophoneCaptureError('cancelled');
+  const audioConstraints: MediaTrackConstraints & Readonly<{
+    latency: Readonly<{ ideal: number }>;
+  }> = {
+    channelCount: { ideal: 1 },
+    sampleRate: { ideal: sampleRate },
+    latency: { ideal: 0 },
+    echoCancellation: { ideal: false },
+    noiseSuppression: { ideal: false },
+    autoGainControl: { ideal: false },
+    ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
+  };
   const request = platform.mediaDevices.getUserMedia({
     video: false,
-    audio: {
-      channelCount: { ideal: 1 },
-      echoCancellation: { ideal: false },
-      noiseSuppression: { ideal: false },
-      autoGainControl: { ideal: false },
-      ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
-    },
+    audio: audioConstraints,
   });
   if (!signal) return { stream: await request, deferredRelease: false };
 
@@ -454,17 +611,40 @@ export async function startMicrophoneCapture(
   ) {
     throw new MicrophoneCaptureError('device-not-found');
   }
+  const borrowed = options.borrowedAudioContext;
+  if (
+    borrowed !== undefined
+    && (
+      typeof borrowed !== 'object'
+      || borrowed === null
+      || typeof borrowed.context !== 'object'
+      || borrowed.context === null
+      || !Number.isSafeInteger(borrowed.contextGeneration)
+      || borrowed.contextGeneration < 0
+    )
+  ) {
+    throw new MicrophoneCaptureError('synchronization-failed');
+  }
   if (activeCaptureToken) throw new MicrophoneCaptureError('busy');
 
   const token = Symbol('microphone-capture');
   activeCaptureToken = token;
   let context: AudioContext | null = null;
   let stream: MediaStream | null = null;
+  let graph: CaptureGraph | null = null;
   let deferredRelease = false;
+  const ownsContext = borrowed === undefined;
+  let contextGeneration = borrowed?.contextGeneration ?? 0;
 
   try {
     if (options.signal?.aborted) throw new MicrophoneCaptureError('cancelled');
-    context = platform.createAudioContext();
+    context = borrowed?.context ?? platform.createAudioContext();
+    if (ownsContext) {
+      standaloneContextGeneration = standaloneContextGeneration >= Number.MAX_SAFE_INTEGER
+        ? 1
+        : standaloneContextGeneration + 1;
+      contextGeneration = standaloneContextGeneration;
+    }
     if (
       !Number.isSafeInteger(context.sampleRate) ||
       context.sampleRate < 8_000 ||
@@ -487,7 +667,7 @@ export async function startMicrophoneCapture(
       await awaitSetupOrCancel(context.resume(), options.signal);
     }
     await awaitSetupOrCancel(
-      platform.addWorkletModule(context, platform.workletModuleUrl),
+      addWorkletModuleOnce(platform, context),
       options.signal,
     );
     const permission = await permissionStream(
@@ -495,6 +675,7 @@ export async function startMicrophoneCapture(
       options.signal,
       token,
       inputDeviceId,
+      context.sampleRate,
     );
     deferredRelease = permission.deferredRelease;
     stream = permission.stream;
@@ -513,6 +694,14 @@ export async function startMicrophoneCapture(
     ) {
       throw new MicrophoneCaptureError('channel-limit-exceeded');
     }
+    const reportedInputLatency = (
+      tracks[0]?.getSettings() as (MediaTrackSettings & { latency?: unknown }) | undefined
+    )?.latency;
+    const inputLatencySeconds = typeof reportedInputLatency === 'number'
+      && Number.isFinite(reportedInputLatency)
+      && reportedInputLatency >= 0
+      ? reportedInputLatency
+      : null;
 
     for (let remaining = countdownSeconds; remaining > 0; remaining -= 1) {
       options.onCountdown?.(remaining);
@@ -525,15 +714,19 @@ export async function startMicrophoneCapture(
     if (tracks.some((track) => track.readyState === 'ended')) {
       throw new MicrophoneCaptureError('device-ended');
     }
+    options.onPreparing?.();
 
     const chunks: Array<readonly Float32Array[]> = [];
     let channelCount = 0;
     let totalFrames = 0;
+    let firstContextFrame: number | null = null;
+    let expectedNextContextFrame: number | null = null;
+    let expectedSequence = 0;
     let state: 'recording' | 'stopping' | 'finalizing' | 'settled' = 'recording';
     let stopReason: MicrophonePcmCapture['stopReason'] = 'manual';
     let automaticTimer: ReturnType<typeof setTimeout> | null = null;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
-    let graph: CaptureGraph | null = null;
+    let armedStartFrame: number | null = null;
     const startedAt = platform.now();
     let resolveResult!: (capture: MicrophonePcmCapture) => void;
     let rejectResult!: (error: MicrophoneCaptureError) => void;
@@ -541,6 +734,28 @@ export async function startMicrophoneCapture(
       resolveResult = resolve;
       rejectResult = reject;
     });
+    // Setup can fail before the session promise is returned. Keep that original
+    // promise observable without allowing an unhandled-rejection report.
+    void result.catch(() => undefined);
+
+    let resolveReady!: (ready: WorkletReadyMessage) => void;
+    let rejectReady!: (error: MicrophoneCaptureError) => void;
+    const readyResult = new Promise<WorkletReadyMessage>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    let resolveArmed!: (armed: WorkletArmedMessage) => void;
+    let rejectArmed!: (error: MicrophoneCaptureError) => void;
+    const armedResult = new Promise<WorkletArmedMessage>((resolve, reject) => {
+      resolveArmed = resolve;
+      rejectArmed = reject;
+    });
+    let setupSettled = false;
+    const failSetup = (error: MicrophoneCaptureError): void => {
+      if (setupSettled) return;
+      rejectReady(error);
+      rejectArmed(error);
+    };
 
     const removeEndedListeners = (): void => {
       for (const track of tracks) track.removeEventListener('ended', onTrackEnded);
@@ -556,12 +771,13 @@ export async function startMicrophoneCapture(
       stream = null;
       const closing = context;
       context = null;
-      if (closing) await closing.close().catch(() => undefined);
+      if (closing && ownsContext) await closing.close().catch(() => undefined);
       releaseCaptureToken(token);
     };
     const settleError = (error: MicrophoneCaptureError): void => {
       if (state === 'finalizing' || state === 'settled') return;
       state = 'finalizing';
+      failSetup(error);
       void closeResources().finally(() => {
         state = 'settled';
         rejectResult(error);
@@ -572,7 +788,13 @@ export async function startMicrophoneCapture(
       state = 'finalizing';
       let capture: MicrophonePcmCapture;
       try {
-        if (channelCount < 1 || totalFrames < context!.sampleRate * MIN_MICROPHONE_CAPTURE_SECONDS) {
+        if (
+          channelCount < 1
+          || firstContextFrame === null
+          || expectedNextContextFrame === null
+          || expectedNextContextFrame - firstContextFrame !== totalFrames
+          || totalFrames < context!.sampleRate * MIN_MICROPHONE_CAPTURE_SECONDS
+        ) {
           throw new MicrophoneCaptureError('too-short');
         }
         const channels = concatenateChannels(chunks, channelCount, totalFrames);
@@ -584,6 +806,10 @@ export async function startMicrophoneCapture(
           sampleRate,
           durationSeconds: totalFrames / sampleRate,
           stopReason,
+          contextGeneration,
+          firstContextFrame,
+          endContextFrameExclusive: expectedNextContextFrame,
+          inputLatencySeconds,
           getChannelData(channel: number): Float32Array {
             const samples = channels[channel];
             if (!samples) throw new MicrophoneCaptureError('channel-limit-exceeded');
@@ -625,7 +851,21 @@ export async function startMicrophoneCapture(
     const onSignalAbort = (): void => settleError(new MicrophoneCaptureError('cancelled'));
 
     graph = platform.createGraph(context, stream, {
-      onChunk(nextChannels, peak): void {
+      onReady(ready): void {
+        resolveReady(ready);
+      },
+      onArmed(armed): void {
+        if (
+          armedStartFrame === null
+          || armed.startFrame !== armedStartFrame
+          || armed.endFrameExclusive !== armedStartFrame + maximumFrames
+        ) {
+          settleError(new MicrophoneCaptureError('synchronization-failed'));
+          return;
+        }
+        resolveArmed(armed);
+      },
+      onChunk(nextChannels, peak, timing): void {
         if (state !== 'recording' && state !== 'stopping') return;
         if (
           nextChannels.length < 1 ||
@@ -633,6 +873,24 @@ export async function startMicrophoneCapture(
           nextChannels.some((channel) => channel.length !== nextChannels[0]?.length)
         ) {
           settleError(new MicrophoneCaptureError('capture-failed'));
+          return;
+        }
+        if (
+          timing.sequence !== expectedSequence
+          || !safeContextFrame(timing.firstContextFrame)
+          || (
+            expectedNextContextFrame === null
+            && (
+              armedStartFrame === null
+              || timing.firstContextFrame !== armedStartFrame
+            )
+          )
+          || (
+            expectedNextContextFrame !== null
+            && timing.firstContextFrame !== expectedNextContextFrame
+          )
+        ) {
+          settleError(new MicrophoneCaptureError('clock-discontinuity'));
           return;
         }
         if (channelCount === 0) channelCount = nextChannels.length;
@@ -643,12 +901,15 @@ export async function startMicrophoneCapture(
         const frameCount = nextChannels[0]?.length ?? 0;
         const acceptedFrames = Math.min(frameCount, maximumFrames - totalFrames);
         if (acceptedFrames > 0) {
+          if (firstContextFrame === null) firstContextFrame = timing.firstContextFrame;
           chunks.push(
             acceptedFrames === frameCount
               ? nextChannels
               : nextChannels.map((channel) => channel.slice(0, acceptedFrames)),
           );
           totalFrames += acceptedFrames;
+          expectedNextContextFrame = timing.firstContextFrame + acceptedFrames;
+          expectedSequence += 1;
           try {
             options.onLevel?.(peak);
           } catch {
@@ -657,25 +918,135 @@ export async function startMicrophoneCapture(
         }
         if (totalFrames >= maximumFrames) requestStop('duration-limit');
       },
-      onFlushed(): void {
-        if (state === 'stopping') settleCapture();
+      onStopped(stopped): void {
+        if (state !== 'recording' && state !== 'stopping') return;
+        const stopWasRequested = state === 'stopping';
+        if (
+          (totalFrames === 0
+            ? stopped.firstContextFrame !== null || stopped.endContextFrameExclusive !== null
+            : stopped.firstContextFrame !== firstContextFrame
+              || stopped.endContextFrameExclusive !== expectedNextContextFrame)
+        ) {
+          settleError(new MicrophoneCaptureError('clock-discontinuity'));
+          return;
+        }
+        if (!stopWasRequested) stopReason = stopped.reason;
+        settleCapture();
       },
       onError(code): void {
+        let captureCode: MicrophoneCaptureErrorCode = 'worklet-failed';
+        if (code === 'channel-limit-exceeded' || code === 'channel-layout-changed') {
+          captureCode = 'channel-limit-exceeded';
+        } else if (code === 'clock-discontinuity') {
+          captureCode = 'clock-discontinuity';
+        } else if (code === 'arm-frame-passed' || code === 'invalid-arm') {
+          captureCode = 'synchronization-failed';
+        }
         settleError(
-          new MicrophoneCaptureError(
-            code === 'channel-limit-exceeded' || code === 'channel-layout-changed'
-              ? 'channel-limit-exceeded'
-              : 'worklet-failed',
-          ),
+          new MicrophoneCaptureError(captureCode),
         );
       },
     }, { monitorInput: options.monitorInput === true });
     for (const track of tracks) track.addEventListener('ended', onTrackEnded);
     options.signal?.addEventListener('abort', onSignalAbort, { once: true });
+
+    const ready = await awaitSetupOrCancel(readyResult, options.signal);
+    const currentTimeFrames = Number.isFinite(context.currentTime)
+      ? Math.ceil(Math.max(0, context.currentTime) * context.sampleRate)
+      : ready.currentFrame;
+    const leadFrames = Math.max(
+      ready.renderQuantumSize * 2,
+      Math.ceil(context.sampleRate * 0.05),
+    );
+    const unalignedEarliest = Math.max(ready.currentFrame, currentTimeFrames) + leadFrames;
+    const earliestStartFrame = Math.ceil(
+      unalignedEarliest / ready.renderQuantumSize,
+    ) * ready.renderQuantumSize;
+    if (!safeContextFrame(earliestStartFrame)) {
+      throw new MicrophoneCaptureError('synchronization-failed');
+    }
+
+    let armCalled = false;
+    let armAttempt: Promise<void> | null = null;
+    let armFailure: MicrophoneCaptureError | null = null;
+    const rejectedArmAttempt = (error: MicrophoneCaptureError): Promise<void> => {
+      const failure = Promise.reject<void>(error);
+      // A synchronizer may intentionally fire-and-forget armAtFrame. Mark a
+      // rejected attempt as observed while preserving rejection for awaiters.
+      void failure.catch(() => undefined);
+      return failure;
+    };
+    const armAtFrame = (startFrame: number): Promise<void> => {
+      if (armCalled) {
+        const error = new MicrophoneCaptureError('synchronization-failed');
+        armFailure = error;
+        return rejectedArmAttempt(error);
+      }
+      armCalled = true;
+      if (
+        !safeContextFrame(startFrame)
+        || startFrame < earliestStartFrame
+        || !Number.isSafeInteger(startFrame + maximumFrames)
+      ) {
+        const error = new MicrophoneCaptureError('synchronization-failed');
+        armFailure = error;
+        armAttempt = rejectedArmAttempt(error);
+        return armAttempt;
+      }
+      armedStartFrame = startFrame;
+      try {
+        graph?.arm(startFrame, maximumFrames);
+      } catch {
+        const error = new MicrophoneCaptureError('worklet-failed');
+        armFailure = error;
+        armAttempt = rejectedArmAttempt(error);
+        return armAttempt;
+      }
+      armAttempt = armedResult.then(() => undefined);
+      return armAttempt;
+    };
+
+    if (options.synchronize) {
+      try {
+        await awaitSetupOrCancel(
+          Promise.resolve(options.synchronize({
+            context,
+            contextGeneration,
+            sampleRate: context.sampleRate,
+            renderQuantumSize: ready.renderQuantumSize,
+            earliestStartFrame,
+            armAtFrame,
+          })),
+          options.signal,
+        );
+      } catch (error) {
+        if (error instanceof MicrophoneCaptureError) throw error;
+        throw new MicrophoneCaptureError('synchronization-failed');
+      }
+      if (armFailure) throw armFailure;
+      const synchronizedArmAttempt = armAttempt as Promise<void> | null;
+      if (!armCalled || synchronizedArmAttempt === null) {
+        throw new MicrophoneCaptureError('synchronization-failed');
+      }
+      await awaitSetupOrCancel(synchronizedArmAttempt, options.signal);
+    } else {
+      await awaitSetupOrCancel(armAtFrame(earliestStartFrame), options.signal);
+    }
+    if (armedStartFrame === null) {
+      throw new MicrophoneCaptureError('synchronization-failed');
+    }
+    const watchdogCurrentFrame = Number.isFinite(context.currentTime)
+      ? Math.max(0, context.currentTime) * context.sampleRate
+      : ready.currentFrame;
+    const secondsUntilArm = Math.max(
+      0,
+      (armedStartFrame - watchdogCurrentFrame) / context.sampleRate,
+    );
     automaticTimer = platform.setTimer(
       () => requestStop('duration-limit'),
-      maxDurationSeconds * 1_000,
+      (secondsUntilArm + maxDurationSeconds) * 1_000 + FLUSH_TIMEOUT_MS,
     );
+    setupSettled = true;
 
     return {
       startedAt,
@@ -683,7 +1054,12 @@ export async function startMicrophoneCapture(
       result,
       elapsedSeconds: () => Math.min(
         maxDurationSeconds,
-        Math.max(0, (platform.now() - startedAt) / 1_000),
+        Math.max(
+          0,
+          armedStartFrame === null || context === null || !Number.isFinite(context.currentTime)
+            ? (platform.now() - startedAt) / 1_000
+            : (context.currentTime * context.sampleRate - armedStartFrame) / context.sampleRate,
+        ),
       ),
       stop: () => {
         requestStop('manual');
@@ -692,8 +1068,9 @@ export async function startMicrophoneCapture(
       cancel: () => settleError(new MicrophoneCaptureError('cancelled')),
     };
   } catch (error) {
+    graph?.disconnect();
     stopStream(stream);
-    if (context) await context.close().catch(() => undefined);
+    if (context && ownsContext) await context.close().catch(() => undefined);
     if (!deferredRelease) releaseCaptureToken(token);
     throw mappedCaptureError(error);
   }

@@ -308,6 +308,10 @@ describe('HummingRecordingDialog accessibility and recovery', () => {
       sampleRate: 48_000,
       durationSeconds: 1,
       stopReason: 'manual',
+      contextGeneration: 1,
+      firstContextFrame: 0,
+      endContextFrameExclusive: 48_000,
+      inputLatencySeconds: null,
       getChannelData: () => new Float32Array(48_000),
     });
     await Promise.resolve();

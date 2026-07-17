@@ -5,8 +5,9 @@
 // handler, which runs inside a click). The engine also exposes suspend/resume so
 // playback can release the hardware when idle.
 //
-// This module is the only place that constructs a (live, non-offline)
-// AudioContext, which keeps the singleton invariant simple.
+// This module owns the app-wide realtime output AudioContext. Short-lived
+// decode/capture helpers may own isolated contexts, but transport playback and
+// synchronized Audio Track recording share this engine generation.
 
 import { buildMasterBus } from './masterBus';
 import { disposeMasterMeter } from './graph';
@@ -26,6 +27,8 @@ type ActivationFlight = {
  */
 export class AudioEngine {
   private context: AudioContext | null = null;
+  /** Monotonic identity for each successfully committed realtime context. */
+  private generation = 0;
   /** Master input node: per-track chains connect here. */
   private masterBus: GainNode | null = null;
   /** Soft limiter on the master bus before the destination. */
@@ -61,6 +64,17 @@ export class AudioEngine {
   }
 
   /**
+   * Identity of the currently committed realtime context.
+   *
+   * Zero means no context has ever been committed. A replacement context
+   * always receives a different positive generation so stale recording frame
+   * coordinates can never be adopted against a newer device clock.
+   */
+  get contextGeneration(): number {
+    return this.generation;
+  }
+
+  /**
    * Subscribe before or after context creation. The subscription follows any
    * replacement context created after the browser closes the previous one.
    */
@@ -84,7 +98,11 @@ export class AudioEngine {
    * resume it if the browser auto-suspended it, and return the context plus the
    * master input node that per-track chains should connect to.
    */
-  async ensureContext(): Promise<{ context: AudioContext; master: GainNode }> {
+  async ensureContext(): Promise<{
+    context: AudioContext;
+    master: GainNode;
+    contextGeneration: number;
+  }> {
     // Intentionally stays before the first await: browser gesture authorization
     // can be lost at a microtask boundary in stricter Web Audio implementations.
     const context = this.getOrCreateContext();
@@ -107,7 +125,11 @@ export class AudioEngine {
       );
     }
 
-    return { context, master: this.requireMaster() };
+    return {
+      context,
+      master: this.requireMaster(),
+      contextGeneration: this.generation,
+    };
   }
 
   /** The master input node. Throws if the context has not been created yet. */
@@ -187,6 +209,9 @@ export class AudioEngine {
     this.context = context;
     this.masterBus = master;
     this.limiter = limiter;
+    this.generation = this.generation === Number.MAX_SAFE_INTEGER
+      ? 1
+      : this.generation + 1;
     return context;
   }
 

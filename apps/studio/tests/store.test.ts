@@ -6,6 +6,7 @@ import {
   duplicateClip,
   findClip,
   resolveClipContent,
+  type Project,
   type ReadyAudioAsset,
 } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
@@ -47,6 +48,26 @@ function addAudioTrackFixture(suffix: string): string {
   if (!created.ok) throw new Error(created.error.code);
   expect(useStore.getState().applyProjectChange(() => created.project)).toBe(true);
   return created.trackId;
+}
+
+function createRecordingAdditionFixture(snapshot: Project, suffix: string) {
+  const asset: ReadyAudioAsset = {
+    id: `asset-recording-${suffix}`,
+    availability: 'ready',
+    checksumSha256: 'b'.repeat(64),
+    originalName: `${suffix}.wav`,
+    mediaType: 'audio/wav',
+    byteLength: 96_044,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount: 48_000,
+  };
+  const created = createAudioTrackClip(snapshot, asset, {
+    trackName: `Recording ${suffix}`,
+    idFactory: (kind) => `${kind}-recording-${suffix}`,
+  });
+  if (!created.ok) throw new Error(created.error.code);
+  return created;
 }
 
 describe('default project', () => {
@@ -131,6 +152,148 @@ describe('microphone recording lifecycle fence', () => {
     expect(useStore.getState().tryBeginNativeClose()).toBe(true);
     useStore.getState().cancelNativeClose();
     expect(useStore.getState().projectOperationBusy).toBe(false);
+  });
+
+  it('uses an operation-owned transport start and rejects normal or looped playback', () => {
+    const state = useStore.getState();
+    const operationId = state.tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+
+    state.play();
+    expect(useStore.getState().transport.phase).toBe('stopped');
+    expect(state.startAudioRecordingPlayback(operationId + 1, 4)).toBeNull();
+
+    const requestId = state.startAudioRecordingPlayback(operationId, 4);
+    expect(requestId).not.toBeNull();
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'starting',
+      playbackRequestId: requestId,
+      positionBeat: 4,
+    });
+    useStore.getState().stop();
+    state.finishAudioRecordingOperation(operationId);
+
+    useStore.getState().toggleLoop();
+    const loopedOperationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (loopedOperationId === null) throw new Error('looped recording token missing');
+    expect(useStore.getState().startAudioRecordingPlayback(loopedOperationId, 4)).toBeNull();
+    useStore.getState().finishAudioRecordingOperation(loopedOperationId);
+    useStore.getState().toggleLoop();
+  });
+
+  it('fences Project mutations, history, loop, and metronome for the whole take', () => {
+    useStore.getState().setTitle('録音前');
+    const before = useStore.getState();
+    const operationId = before.tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+
+    useStore.getState().setTitle('反映しない');
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      bpm: 160,
+    }))).toBe(false);
+    useStore.getState().undo();
+    useStore.getState().redo();
+    useStore.getState().toggleLoop();
+    useStore.getState().toggleMetronome();
+
+    const during = useStore.getState();
+    expect(during.project).toBe(before.project);
+    expect(during.past).toBe(before.past);
+    expect(during.future).toBe(before.future);
+    expect(during.saveState).toBe(before.saveState);
+    expect(during.transport.loopEnabled).toBe(before.transport.loopEnabled);
+    expect(during.transport.metronome).toBe(before.transport.metronome);
+    expect(during.canUndo()).toBe(false);
+    expect(during.canRedo()).toBe(false);
+
+    during.finishAudioRecordingOperation(operationId);
+    useStore.getState().setTitle('録音後');
+    expect(useStore.getState().project.title).toBe('録音後');
+  });
+
+  it('does not let the generic verified-asset API bypass an active recording fence', () => {
+    const snapshot = useStore.getState().project;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createRecordingAdditionFixture(snapshot, 'generic-fence');
+
+    try {
+      expect(useStore.getState().applyVerifiedAudioAssetAddition(
+        () => addition.project,
+        addition.audioAssetId,
+      )).toBe(false);
+      expect(useStore.getState().project).toBe(snapshot);
+    } finally {
+      useStore.getState().finishAudioRecordingOperation(operationId);
+    }
+  });
+
+  it('requires the exact recording operation and frozen Project snapshot', () => {
+    const snapshot = useStore.getState().project;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createRecordingAdditionFixture(snapshot, 'exact-owner');
+
+    try {
+      expect(useStore.getState().applyVerifiedRecordingAudioAssetAddition({
+        operationId: operationId + 1,
+        expectedSnapshot: snapshot,
+        verifiedAudioAssetId: addition.audioAssetId,
+        nextProject: addition.project,
+      })).toBe(false);
+      expect(useStore.getState().applyVerifiedRecordingAudioAssetAddition({
+        operationId,
+        expectedSnapshot: { ...snapshot },
+        verifiedAudioAssetId: addition.audioAssetId,
+        nextProject: addition.project,
+      })).toBe(false);
+      expect(useStore.getState().project).toBe(snapshot);
+    } finally {
+      useStore.getState().finishAudioRecordingOperation(operationId);
+    }
+  });
+
+  it('rejects unrelated Project changes bundled with a recording addition', () => {
+    const snapshot = useStore.getState().project;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createRecordingAdditionFixture(snapshot, 'bundled-change');
+
+    try {
+      expect(useStore.getState().applyVerifiedRecordingAudioAssetAddition({
+        operationId,
+        expectedSnapshot: snapshot,
+        verifiedAudioAssetId: addition.audioAssetId,
+        nextProject: { ...addition.project, bpm: snapshot.bpm + 1 },
+      })).toBe(false);
+      expect(useStore.getState().project).toBe(snapshot);
+    } finally {
+      useStore.getState().finishAudioRecordingOperation(operationId);
+    }
+  });
+
+  it('commits one exact recording addition as one revision and one Undo step', () => {
+    const before = useStore.getState();
+    const operationId = before.tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createRecordingAdditionFixture(before.project, 'exact-commit');
+
+    expect(useStore.getState().applyVerifiedRecordingAudioAssetAddition({
+      operationId,
+      expectedSnapshot: before.project,
+      verifiedAudioAssetId: addition.audioAssetId,
+      nextProject: addition.project,
+    })).toBe(true);
+    const committed = useStore.getState();
+    expect(committed.project.audioAssets.at(-1)?.id).toBe(addition.audioAssetId);
+    expect(committed.past).toHaveLength(before.past.length + 1);
+    expect(committed.saveState.revision).toBe(before.saveState.revision + 1);
+
+    committed.finishAudioRecordingOperation(operationId);
+    useStore.getState().undo();
+    const undone = useStore.getState().project;
+    expect({ ...undone, updatedAt: before.project.updatedAt }).toEqual(before.project);
   });
 });
 
@@ -261,6 +424,33 @@ describe('runtime Audio Track Record Arm', () => {
     expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-microphone')).toBe(true);
     expect(useStore.getState().preferredMicrophoneInputDeviceId).toBe('usb-microphone');
     expect(useStore.getState().setPreferredMicrophoneInputDeviceId(null)).toBe(true);
+  });
+
+  it('keeps latency compensation preferences runtime-only, bounded, and frozen per take', () => {
+    const before = useStore.getState();
+    expect(before.setRecordingLatencyCompensationMode('off')).toBe(true);
+    expect(before.setRecordingLatencyAdjustmentMs(125)).toBe(true);
+
+    const selected = useStore.getState();
+    expect(selected.recordingLatencyCompensationMode).toBe('off');
+    expect(selected.recordingLatencyAdjustmentMs).toBe(125);
+    expect(selected.project).toBe(before.project);
+    expect(selected.past).toBe(before.past);
+    expect(selected.saveState).toBe(before.saveState);
+    expect(selected.setRecordingLatencyAdjustmentMs(-501)).toBe(false);
+    expect(selected.setRecordingLatencyAdjustmentMs(501)).toBe(false);
+    expect(selected.setRecordingLatencyAdjustmentMs(1.5)).toBe(false);
+
+    const operationId = selected.tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    expect(useStore.getState().setRecordingLatencyCompensationMode('estimated')).toBe(false);
+    expect(useStore.getState().setRecordingLatencyAdjustmentMs(0)).toBe(false);
+    expect(useStore.getState().recordingLatencyCompensationMode).toBe('off');
+    expect(useStore.getState().recordingLatencyAdjustmentMs).toBe(125);
+
+    useStore.getState().finishAudioRecordingOperation(operationId);
+    expect(useStore.getState().setRecordingLatencyCompensationMode('estimated')).toBe(true);
+    expect(useStore.getState().setRecordingLatencyAdjustmentMs(0)).toBe(true);
   });
 });
 

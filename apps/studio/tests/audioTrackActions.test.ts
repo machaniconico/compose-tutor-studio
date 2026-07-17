@@ -75,6 +75,10 @@ function microphoneCaptureShape(
     sampleRate,
     durationSeconds: length / sampleRate,
     stopReason: 'manual',
+    contextGeneration: 1,
+    firstContextFrame: 0,
+    endContextFrameExclusive: length,
+    inputLatencySeconds: null,
     getChannelData: (channel) => channelData[channel]!,
   };
 }
@@ -697,6 +701,110 @@ describe('Studio Audio Track import', () => {
 });
 
 describe('Studio Audio Track microphone recording', () => {
+  it('binds one shared clock and applies estimated plus manual latency to placement', async () => {
+    useStore.getState().setPosition(4);
+    expect(useStore.getState().setRecordingLatencyAdjustmentMs(20)).toBe(true);
+    const ownership = actions.beginStudioAudioTrackRecording();
+    if (!ownership.ok) throw new Error(ownership.code);
+    const snapshot = useStore.getState().project;
+    const requestId = useStore.getState().startAudioRecordingPlayback(
+      ownership.handle.operationId,
+      ownership.startBeat,
+    );
+    if (requestId === null) throw new Error('recording playback request missing');
+    useStore.getState().confirmPlaybackStarted(requestId);
+    const context = {
+      sampleRate: 48_000,
+      baseLatency: 0.01,
+      outputLatency: 0.02,
+    } as AudioContext;
+    const clock = {
+      context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: 4,
+      tempo: {},
+      requestId,
+      projectSnapshot: snapshot,
+    } as Parameters<typeof actions.bindStudioAudioTrackRecordingToPlayback>[1];
+
+    expect(actions.estimateStudioRecordingPlaybackLatencySeconds(context)).toBeCloseTo(0.036, 12);
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, clock)).toBe(true);
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, clock)).toBe(false);
+
+    const capture = {
+      ...microphoneCaptureShape(),
+      contextGeneration: 7,
+      firstContextFrame: 96_000,
+      endContextFrameExclusive: 192_000,
+      inputLatencySeconds: 0.014,
+    };
+    const result = await actions.recordStudioAudioTrack({
+      recordingHandle: ownership.handle,
+      capture,
+      trackName: 'Aligned Take',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer: () => audioBufferShape(96_000, 48_000),
+      canonicalize: async () => canonicalResult(),
+      createAssetId: () => 'asset-aligned-recording',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    const clip = useStore.getState().project.tracks
+      .flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === result.clipId);
+    expect(clip).toMatchObject({
+      type: 'audio',
+      startBeat: 3.86,
+      sourceStartFrame: 0,
+      sourceFrameCount: 96_000,
+    });
+  });
+
+  it('rejects a capture from a replacement audio-context generation before allocation', async () => {
+    useStore.getState().setPosition(4);
+    const ownership = actions.beginStudioAudioTrackRecording();
+    if (!ownership.ok) throw new Error(ownership.code);
+    const snapshot = useStore.getState().project;
+    const requestId = useStore.getState().startAudioRecordingPlayback(
+      ownership.handle.operationId,
+      ownership.startBeat,
+    );
+    if (requestId === null) throw new Error('recording playback request missing');
+    useStore.getState().confirmPlaybackStarted(requestId);
+    const context = { sampleRate: 48_000, baseLatency: 0, outputLatency: 0 } as AudioContext;
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, {
+      context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: 4,
+      tempo: {},
+      requestId,
+      projectSnapshot: snapshot,
+    } as Parameters<typeof actions.bindStudioAudioTrackRecordingToPlayback>[1])).toBe(true);
+    const createAudioBuffer = vi.fn(() => audioBufferShape(96_000, 48_000));
+
+    await expect(actions.recordStudioAudioTrack({
+      recordingHandle: ownership.handle,
+      capture: {
+        ...microphoneCaptureShape(),
+        contextGeneration: 8,
+        firstContextFrame: 96_000,
+        endContextFrameExclusive: 192_000,
+      },
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer,
+      canonicalize: async () => canonicalResult(),
+    })).resolves.toEqual({ ok: false, code: 'recording-alignment-failed' });
+    expect(createAudioBuffer).not.toHaveBeenCalled();
+    expect(useStore.getState().project).toBe(snapshot);
+  });
+
   it('persists canonical bytes and adopts a playhead-positioned track in one Undo step', async () => {
     const repository = new MemoryAudioAssetRepository();
     useStore.getState().setPosition(6);
@@ -814,6 +922,26 @@ describe('Studio Audio Track microphone recording', () => {
     expect(getReservedHeavyAudioResourceBytes()).toBe(0);
   });
 
+  it('rejects loop recording and a sub-0.5-second song-end window before permission', () => {
+    useStore.getState().toggleLoop();
+    expect(actions.beginStudioAudioTrackRecording()).toEqual({
+      ok: false,
+      code: 'transport-loop-enabled',
+    });
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+
+    useStore.getState().toggleLoop();
+    const endBeat = useStore.getState().project.lengthBeats;
+    useStore.getState().setPosition(endBeat - 0.01);
+    expect(actions.beginStudioAudioTrackRecording()).toEqual({
+      ok: false,
+      code: 'recording-window-too-short',
+    });
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
   it('counts stale capture chunks and rejects a 192 kHz stereo worst case before AudioBuffer allocation', () => {
     const worstCase = microphoneCaptureShape(60 * 192_000, 192_000, 2);
     expect(() => actions.planStudioAudioRecordingResources(worstCase))
@@ -873,10 +1001,11 @@ describe('Studio Audio Track microphone recording', () => {
       canonicalize: () => canonical,
       createAssetId: () => 'asset-stale-recording',
     });
-    expect(useStore.getState().applyProjectChange((project) => ({
-      ...project,
-      title: '録音中の別編集',
-    }))).toBe(true);
+    // Public Project actions are fenced for the whole take. Force a hostile
+    // external replacement to keep the exact-snapshot CAS regression covered.
+    useStore.setState((state) => ({
+      project: { ...state.project, title: '録音中の別編集' },
+    }));
     release(canonicalResult());
 
     await expect(pending).resolves.toEqual({ ok: false, code: 'commit-rejected' });
@@ -887,10 +1016,9 @@ describe('Studio Audio Track microphone recording', () => {
 
   it('uses the project snapshot from capture start as the only commit base', async () => {
     const recordingHandle = beginRecordingHandle();
-    expect(useStore.getState().applyProjectChange((project) => ({
-      ...project,
-      title: '録音開始後の外部編集',
-    }))).toBe(true);
+    useStore.setState((state) => ({
+      project: { ...state.project, title: '録音開始後の外部編集' },
+    }));
     const createAudioBuffer = vi.fn(() => audioBufferShape(96_000, 48_000));
 
     await expect(actions.recordStudioAudioTrack({

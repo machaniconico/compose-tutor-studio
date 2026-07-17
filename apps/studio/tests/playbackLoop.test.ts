@@ -17,12 +17,17 @@ import {
   reserveHeavyAudioResources,
 } from '../src/audio/audioResourceReservation';
 import {
+  AUDIO_RENDER_QUANTUM_FRAMES,
   acquireRuntimeProjectAudioBuffers,
   classifyPlaybackStartFailure,
   normalizeTransportLoop,
+  planSynchronizedRecordingStartFrame,
   shouldRefreshAudioAssetIssuesAfterFailure,
+  startSynchronizedRecordingPlayback,
+  stopSynchronizedRecordingPlayback,
 } from '../src/audio/playback';
 import { AudioRoutingGraphError } from '../src/audio/graph';
+import { useStore } from '../src/state/store';
 
 function projectWithReadyAudioAsset(checksumSha256 = '0'.repeat(64)) {
   const asset: ReadyAudioAsset = {
@@ -72,6 +77,87 @@ describe('normalizeTransportLoop', () => {
       startBeat: 0,
       endBeat: 8,
     });
+  });
+});
+
+describe('synchronized recording playback boundary', () => {
+  it('chooses a safely future, render-quantum-aligned integer context frame', () => {
+    const sampleRate = 48_000;
+    const currentTime = 1.001;
+    const frame = planSynchronizedRecordingStartFrame(currentTime, sampleRate);
+
+    expect(Number.isSafeInteger(frame)).toBe(true);
+    expect(frame % AUDIO_RENDER_QUANTUM_FRAMES).toBe(0);
+    expect(frame).toBeGreaterThan(Math.ceil(currentTime * sampleRate));
+  });
+
+  it('rejects aborted, stale and looped starts before mutating transport', async () => {
+    const original = useStore.getState();
+    const controller = new AbortController();
+    controller.abort();
+    try {
+      await expect(startSynchronizedRecordingPlayback({
+        operationId: 1,
+        projectSnapshot: original.project,
+        startBeat: 0,
+        signal: controller.signal,
+        armCapture: async () => undefined,
+      })).rejects.toMatchObject({ code: 'cancelled' });
+
+      useStore.setState({
+        audioRecordingOperationId: 41,
+        transport: { ...original.transport, phase: 'stopped', loopEnabled: false },
+      });
+      await expect(startSynchronizedRecordingPlayback({
+        operationId: 41,
+        projectSnapshot: { ...original.project },
+        startBeat: 0,
+        signal: new AbortController().signal,
+        armCapture: async () => undefined,
+      })).rejects.toMatchObject({ code: 'stale-operation' });
+
+      useStore.setState({
+        transport: { ...original.transport, phase: 'stopped', loopEnabled: true },
+      });
+      await expect(startSynchronizedRecordingPlayback({
+        operationId: 41,
+        projectSnapshot: original.project,
+        startBeat: 0,
+        signal: new AbortController().signal,
+        armCapture: async () => undefined,
+      })).rejects.toMatchObject({ code: 'loop-enabled' });
+    } finally {
+      useStore.setState({
+        project: original.project,
+        transport: original.transport,
+        audioRecordingOperationId: original.audioRecordingOperationId,
+      });
+    }
+  });
+
+  it('stops only the exact active playback request', () => {
+    const original = useStore.getState();
+    try {
+      useStore.setState({
+        transport: {
+          ...original.transport,
+          phase: 'playing',
+          isPlaying: true,
+          playbackRequestId: 500,
+        },
+      });
+
+      expect(stopSynchronizedRecordingPlayback(499)).toBe(false);
+      expect(useStore.getState().transport.playbackRequestId).toBe(500);
+      expect(stopSynchronizedRecordingPlayback(500)).toBe(true);
+      expect(useStore.getState().transport).toMatchObject({
+        phase: 'stopped',
+        isPlaying: false,
+        playbackRequestId: 501,
+      });
+    } finally {
+      useStore.setState({ transport: original.transport });
+    }
   });
 });
 

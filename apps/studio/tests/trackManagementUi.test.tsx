@@ -64,7 +64,7 @@ describe('track management UI', () => {
     expect(html).toContain('マイクをオーディオトラックへ録音');
     expect(html).toContain('最大60秒');
     expect(html).toContain('端末内だけで録音');
-    expect(html).toContain('現在の再生位置');
+    expect(html).toContain('現在位置から伴奏と録音を同時に始め');
     expect(html).toContain('録音中に入力を聴く');
     expect(html).toContain('初期値はOFF');
     expect(html).toContain('ヘッドホン');
@@ -87,8 +87,8 @@ describe('track management UI', () => {
       />,
     );
 
-    expect(html).toContain('既存トラック「Lead Vocal」へ保存します');
-    expect(html).not.toContain('新しいオーディオトラックへ保存します');
+    expect(html).toContain('既存トラック「Lead Vocal」へ配置します');
+    expect(html).not.toContain('新しいオーディオトラックへ配置します');
   });
 
   it('warns that project JSON needs the same local Audio Track asset store', () => {

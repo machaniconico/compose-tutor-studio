@@ -257,6 +257,76 @@ describe('Scheduler metronome windows', () => {
   });
 });
 
+describe('Scheduler explicit future anchor', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('clamps the playhead before the anchor and schedules the first event at the exact time', () => {
+    vi.useFakeTimers();
+    let now = 1;
+    const dueTimes: number[] = [];
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: (events) => dueTimes.push(...events.map((event) => event.time)),
+      tickMs: 25,
+      lookaheadS: 0.12,
+    });
+
+    scheduler.startAt(
+      [{ beat: 4, payload: 'first' }],
+      120,
+      4,
+      null,
+      8,
+      2,
+    );
+    expect(scheduler.currentBeat()).toBe(4);
+    expect(dueTimes).toEqual([]);
+
+    now = 1.9;
+    vi.advanceTimersByTime(25);
+    expect(dueTimes).toEqual([2]);
+    expect(scheduler.currentBeat()).toBe(4);
+
+    now = 2.25;
+    expect(scheduler.currentBeat()).toBeCloseTo(4.5, 10);
+    scheduler.stop();
+  });
+
+  it('rejects an invalid explicit anchor without starting a timer', () => {
+    vi.useFakeTimers();
+    const scheduler = new Scheduler({
+      clock: () => 0,
+      fire: () => undefined,
+    });
+
+    expect(() => scheduler.startAt([], 120, 0, null, 4, Number.NaN))
+      .toThrow('anchorTime');
+    expect(scheduler.isRunning).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the legacy stopped boundary when the normal-start clock throws', () => {
+    vi.useFakeTimers();
+    let clockFails = false;
+    const scheduler = new Scheduler({
+      clock: () => {
+        if (clockFails) throw new Error('clock unavailable');
+        return 0;
+      },
+      fire: () => undefined,
+    });
+    scheduler.start([], 120, 0, null, 4);
+    expect(scheduler.isRunning).toBe(true);
+
+    clockFails = true;
+    expect(() => scheduler.start([], 120, 0, null, 4)).toThrow('clock unavailable');
+    expect(scheduler.isRunning).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe('Scheduler delayed tick recovery', () => {
   afterEach(() => {
     vi.useRealTimers();
