@@ -433,6 +433,7 @@ dependencies = [
  "tauri-plugin-wdio-webdriver",
  "tempfile",
  "thiserror 2.0.18",
+ "webkit2gtk",
  "windows-sys 0.61.2",
 ]
 

@@ -74,7 +74,7 @@
       "dangerousDisableAssetCspModification": false,
       "headers": {
         "X-Content-Type-Options": "nosniff",
-        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+        "Permissions-Policy": "camera=(), microphone=(self), geolocation=(), payment=(), usb=()"
       }
     }
   },
@@ -97,7 +97,9 @@
     },
     "macOS": {
       "minimumSystemVersion": "12.4",
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist"
     },
     "linux": {
       "appimage": {

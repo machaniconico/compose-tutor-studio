@@ -149,7 +149,8 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 | vocal-cut chunk/cancel | processingとWAV encodeがchunkごとに進捗を単調更新し、cancel後に古いgenerationが結果やdownloadを公開しないか |
 | humming pitch core | 50 / 1,000 Hz境界、2音＋無声、vibrato、強い第2倍音、逆相stereo、192 kHz downsampleのaliasingを合成fixtureで検査し、同入力 / 異chunkで結果が一致するか |
 | humming safety | 60秒UI上限、256 MiB PCM / working上限、NaN / Inf、32ch core上限、mono / stereo UI上限、巨大chunk、cancelをallocation / commit前に拒否するか |
-| humming E2E | local mono WAVをAssistantから解析し、候補修正 / 除外、target / quantize確認後に2音をUndo 1回のProject changeとしてPiano Rollへ反映するか。失敗 / cancelではProjectが不変か |
+| microphone capture | secure context / AudioWorklet / device有無、権限拒否、single-flight、permission pending cancel後のlate stream停止、device切断、manual / exact 60秒停止、0.5秒未満、2ch / sample rate / memory上限、invalid chunk、flush timeoutでresourceを一度だけ解放するか |
+| humming E2E | local mono WAVと合成MediaStreamの直接録音をAssistantから解析し、候補修正 / 除外、target / quantize確認後に2音をUndo 1回のProject changeとしてPiano Rollへ反映するか。権限拒否時にfile fallbackが残り、失敗 / cancelではProjectが不変か |
 
 ## 6. パフォーマンステスト
 

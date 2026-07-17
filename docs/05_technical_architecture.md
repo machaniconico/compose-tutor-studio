@@ -196,10 +196,12 @@ drum Clipの表示小節数はdomain値を変更せず、Clip開始位置からc
 
 ### 5.6 鼻歌transcription transaction
 
-1. Vocal-cutと同じstrict source parser / native basename+bytes gatewayを使い、32 MiB、60秒、mono / stereo、256 MiB working memoryへ狭めてpreflightする
-2. decode後PCMを非破壊で検証し、極性整合mix、anti-alias low-pass、8 kHz resample、50〜1,000 Hz pitch frame解析をchunked async pipelineで実行する。全sampleの有限性とPCM byte上限は解析signal確保前に検査する
-3. pitch frameを無声区間、中央値、semitone hysteresisで単音note候補へまとめる。強い第2倍音はfundamental energyと倍周期scoreを併用してoctave候補を補正する
-4. 候補修正、除外、target Clip、quantizeはReact local stateに保持する。確定時だけseconds→beats mappingとproject validationを行い、`replaceClipNotes`の単一changeで全notesを採用する
+1. マイク入力はユーザーgestureから`getUserMedia({ video: false })`を要求し、echo cancellation / noise suppression / auto gainを無効希望として渡す。AudioWorkletは最大2 channelのraw PCMをbounded chunkでtransferし、monitor graphをgain 0でdestinationへ接続してfeedbackを作らない。exact 60秒frame cap、0.5秒最小長、single-flight capture lease、track-ended、Abort、flush timeoutの全経路でtrack / graph / AudioContextを解放する
+2. Web / Windowsは同一originのaudio-only要求だけをPermissions Policyで許可する。macOS bundleは`NSMicrophoneUsageDescription`とaudio-input entitlementを持ち、Linux WebKitGTKは`UserMediaPermissionRequest`のaudio-onlyだけをallowしてvideo / mixed requestをdenyする。camera権限、native command、network接続権限は追加しない
+3. file入力はVocal-cutと同じstrict source parser / native basename+bytes gatewayを使い、32 MiB、60秒、mono / stereo、256 MiB working memoryへ狭めてpreflightする。マイク録音はchunk列と最終連続PCMの同時保持を含む208 MiB capture reservationを保持し、終了後に実PCM量から解析reservationへ切り替える。両経路とも384 MiB shared audio resource ledgerを迂回しない
+4. decodeまたは録音後PCMを非破壊で検証し、極性整合mix、anti-alias low-pass、8 kHz resample、50〜1,000 Hz pitch frame解析をchunked async pipelineで実行する。全sampleの有限性とPCM byte上限は解析signal確保前に検査する
+5. pitch frameを無声区間、中央値、semitone hysteresisで単音note候補へまとめる。強い第2倍音はfundamental energyと倍周期scoreを併用してoctave候補を補正する
+6. 候補修正、除外、target Clip、quantizeはReact local stateに保持する。確定時だけseconds→beats mappingとproject validationを行い、`replaceClipNotes`の単一changeで全notesを採用する
 
 decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否ではProject fingerprintを変えない。schema v4ではcompiled tempo mapの共通seconds↔beat resolverを使い、beat 0だけの固定mapも同じ経路で従来と同じ結果にする。
 

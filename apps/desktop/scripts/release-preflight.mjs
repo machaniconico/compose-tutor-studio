@@ -158,6 +158,11 @@ const productionCargoManifestIdentity = Object.freeze({
   },
   target: {
     'cfg(unix)': { dependencies: { libc: '=0.2.186' } },
+    'cfg(target_os = "linux")': {
+      dependencies: {
+        webkit2gtk: { version: '=2.0.2', features: ['v2_40'] },
+      },
+    },
     'cfg(windows)': {
       dependencies: {
         'windows-sys': {
@@ -391,6 +396,8 @@ const productionBundleIdentity = Object.freeze({
   macOS: {
     minimumSystemVersion: '12.4',
     hardenedRuntime: true,
+    entitlements: 'Entitlements.plist',
+    infoPlist: 'Info.plist',
   },
   linux: {
     appimage: {
@@ -480,6 +487,10 @@ const productionPnpmWorkspaceSha256 =
   'ee8721472a25e9a96ce99ed400cdf4db51f97f6c4a092ae3f0b5ff3dc02aa45b';
 const productionPnpmLockSha256 =
   '6f2b5ce87aee0531c88150ead63bd21c556572201e74b91178043fd255171a85';
+const productionInfoPlistSha256 =
+  '9b8ad65c1570c183cc23ac83b44cef3c221bdec3d7357dc0091d71bbb178c736';
+const productionEntitlementsSha256 =
+  '289696af9834a7ee41aca4c1cd3aa95fc38f9ae2e83655b1d4b86c1ccab771ee';
 const productionRedirectsSource = `# Cloudflare Pages SPA fallback.
 # Compose Tutor Studio は単一ページ (クライアントルーターなし) なので、
 # 未知のパスは常に index.html を 200 で返してアプリを起動させる。
@@ -1226,6 +1237,18 @@ export async function validateDesktopSecurityPolicy({
 
   await requireNoPlatformTauriOverrides(tauriRoot);
   await requireNoRepositoryCargoConfig(rootDir);
+  await Promise.all([
+    requirePinnedTextFile(
+      path.join(tauriRoot, 'Info.plist'),
+      productionInfoPlistSha256,
+      'apps/desktop/src-tauri/Info.plist',
+    ),
+    requirePinnedTextFile(
+      path.join(tauriRoot, 'Entitlements.plist'),
+      productionEntitlementsSha256,
+      'apps/desktop/src-tauri/Entitlements.plist',
+    ),
+  ]);
   await requirePinnedViteConfig(rootDir);
   await requirePinnedPublicDirectory(rootDir);
   await requirePinnedPnpmWorkspace(rootDir);
@@ -1315,7 +1338,7 @@ export async function validateDesktopSecurityPolicy({
   requireExact('Tauri production CSP', security?.csp, productionCsp);
   requireExact('Tauri production headers', security?.headers, {
     'X-Content-Type-Options': 'nosniff',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
   });
   if (security?.freezePrototype !== true) fail('Tauri prototype freezing must remain enabled');
   if (security?.dangerousDisableAssetCspModification !== false) {
@@ -1333,7 +1356,7 @@ export async function validateDesktopSecurityPolicy({
       dangerousDisableAssetCspModification: false,
       headers: {
         'X-Content-Type-Options': 'nosniff',
-        'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+        'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
       },
     },
   );

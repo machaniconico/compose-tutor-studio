@@ -33,6 +33,9 @@ thiserror = "=2.0.18"
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.186"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 

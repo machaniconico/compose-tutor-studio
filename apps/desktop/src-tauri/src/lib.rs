@@ -20,6 +20,38 @@ fn navigation_is_allowed(url: &Url, allow_dev_origin: bool) -> bool {
     bundled_origin || dev_origin
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn microphone_request_is_allowed(requests_audio: bool, requests_video: bool) -> bool {
+    requests_audio && !requests_video
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_microphone_permission_handler(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    window.with_webview(|webview| {
+        use webkit2gtk::{prelude::*, UserMediaPermissionRequest};
+
+        webview
+            .inner()
+            .connect_permission_request(|_, permission_request| {
+                let Some(media_request) =
+                    permission_request.downcast_ref::<UserMediaPermissionRequest>()
+                else {
+                    return false;
+                };
+
+                if microphone_request_is_allowed(
+                    media_request.is_for_audio_device(),
+                    media_request.is_for_video_device(),
+                ) {
+                    permission_request.allow();
+                } else {
+                    permission_request.deny();
+                }
+                true
+            });
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -99,6 +131,9 @@ pub fn run() {
                 .on_new_window(|_, _| NewWindowResponse::Deny)
                 .build()?;
 
+            #[cfg(target_os = "linux")]
+            install_linux_microphone_permission_handler(&_main_window)?;
+
             #[cfg(feature = "native-test")]
             native_test_close::install(_main_window)?;
 
@@ -110,7 +145,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::navigation_is_allowed;
+    use super::{microphone_request_is_allowed, navigation_is_allowed};
     use tauri::Url;
 
     #[test]
@@ -139,5 +174,13 @@ mod tests {
                 "unexpectedly allowed {url}"
             );
         }
+    }
+
+    #[test]
+    fn permits_only_audio_only_user_media_requests() {
+        assert!(microphone_request_is_allowed(true, false));
+        assert!(!microphone_request_is_allowed(false, false));
+        assert!(!microphone_request_is_allowed(false, true));
+        assert!(!microphone_request_is_allowed(true, true));
     }
 }

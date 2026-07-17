@@ -34,6 +34,13 @@ import {
   type HummingTranscriptionProgress,
 } from '../../audio/hummingTranscription';
 import {
+  AudioResourceReservationError,
+  checkedHeavyAudioResourceTotal,
+  reserveHeavyAudioResources,
+  type HeavyAudioResourceReservation,
+} from '../../audio/audioResourceReservation';
+import type { MicrophonePcmCapture } from '../../audio/microphoneCapture';
+import {
   MAX_VOCAL_CUT_DECODER_RESYNC_SECONDS,
   VocalCutError,
   validateVocalCutEncodedTiming,
@@ -54,6 +61,7 @@ import {
   hummingMelodyToNoteEvents,
   type HummingQuantize,
 } from './hummingToNotes';
+import { HummingRecordingDialog } from './HummingRecordingDialog';
 
 const MAX_HUMMING_SOURCE_SECONDS = 60;
 const MAX_HUMMING_SOURCE_BYTES = 32 * 1024 * 1024;
@@ -71,6 +79,11 @@ type Detection = Readonly<{
 type AppliedSnapshot = Readonly<{
   clipId: string;
   notesFingerprint: string;
+}>;
+
+type SourcePreflight = Readonly<{
+  durationSeconds: number;
+  estimatedWorkingBytes: number;
 }>;
 
 class HummingAssistantError extends Error {
@@ -155,7 +168,8 @@ function failureMessage(error: unknown): string {
   }
   if (
     (error instanceof HummingAssistantError && error.code === 'resource-limit-exceeded') ||
-    (error instanceof HummingTranscriptionError && error.code === 'resource-limit-exceeded')
+    (error instanceof HummingTranscriptionError && error.code === 'resource-limit-exceeded') ||
+    error instanceof AudioResourceReservationError
   ) {
     return 'この音源は端末内で安全に解析できるメモリ上限を超えています。短い音源に分けてください。';
   }
@@ -205,7 +219,7 @@ function preflightSource(
   presentationDurationSeconds: number,
   sourceBytes: number,
   decodeSampleRate: number,
-): number {
+): SourcePreflight {
   validateVocalCutEncodedTiming({
     format: descriptor.format,
     sampleRate: descriptor.sampleRate,
@@ -234,11 +248,12 @@ function preflightSource(
   const frames = Math.ceil(descriptor.decodeDurationSeconds * decodeSampleRate);
   const analysisBytes =
     Math.ceil(MAX_HUMMING_SOURCE_SECONDS * 8_000) * Float64Array.BYTES_PER_ELEMENT;
-  const estimatedWorkingBytes =
-    sourceBytes * 3 +
-    frames * descriptor.decodeChannelCountUpperBound * Float32Array.BYTES_PER_ELEMENT +
-    analysisBytes +
-    HUMMING_RUNTIME_OVERHEAD_BYTES;
+  const estimatedWorkingBytes = checkedHeavyAudioResourceTotal([
+    sourceBytes * 3,
+    frames * descriptor.decodeChannelCountUpperBound * Float32Array.BYTES_PER_ELEMENT,
+    analysisBytes,
+    HUMMING_RUNTIME_OVERHEAD_BYTES,
+  ]);
   if (
     !Number.isSafeInteger(frames) ||
     frames <= 0 ||
@@ -247,11 +262,49 @@ function preflightSource(
   ) {
     throw new HummingAssistantError('resource-limit-exceeded');
   }
-  return Math.min(
-    presentationDurationSeconds,
-    descriptor.containerDurationSeconds,
-    MAX_HUMMING_SOURCE_SECONDS,
-  );
+  return {
+    durationSeconds: Math.min(
+      presentationDurationSeconds,
+      descriptor.containerDurationSeconds,
+      MAX_HUMMING_SOURCE_SECONDS,
+    ),
+    estimatedWorkingBytes,
+  };
+}
+
+function preflightCapturedPcm(buffer: AudioBufferShape): SourcePreflight {
+  if (buffer.numberOfChannels < 1 || buffer.numberOfChannels > 2) {
+    throw new HummingAssistantError('channel-limit-exceeded');
+  }
+  if (
+    !Number.isSafeInteger(buffer.length) ||
+    buffer.length <= 0 ||
+    !Number.isSafeInteger(buffer.sampleRate) ||
+    buffer.sampleRate < 8_000 ||
+    buffer.sampleRate > 192_000
+  ) {
+    throw new HummingAssistantError('resource-limit-exceeded');
+  }
+  const durationSeconds = buffer.length / buffer.sampleRate;
+  if (!Number.isFinite(durationSeconds) || durationSeconds > MAX_HUMMING_SOURCE_SECONDS) {
+    throw new HummingAssistantError('duration-limit-exceeded');
+  }
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    if (buffer.getChannelData(channel).length !== buffer.length) {
+      throw new HummingAssistantError('decode-failed');
+    }
+  }
+  const analysisBytes =
+    Math.ceil(MAX_HUMMING_SOURCE_SECONDS * 8_000) * Float64Array.BYTES_PER_ELEMENT;
+  const estimatedWorkingBytes = checkedHeavyAudioResourceTotal([
+    buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT,
+    analysisBytes,
+    HUMMING_RUNTIME_OVERHEAD_BYTES,
+  ]);
+  if (estimatedWorkingBytes > MAX_HUMMING_WORKING_BYTES) {
+    throw new HummingAssistantError('resource-limit-exceeded');
+  }
+  return { durationSeconds, estimatedWorkingBytes };
 }
 
 function trimDecodedPadding(
@@ -285,7 +338,7 @@ function trimDecodedPadding(
   };
 }
 
-/** File-based humming assistant; microphone capture is intentionally a later permissioned step. */
+/** Local microphone/file humming transcription with explicit preview before MIDI replacement. */
 export function HummingMelodyAssistant() {
   const project = useStore((state) => state.project);
   const targetClips = useMemo(
@@ -310,13 +363,15 @@ export function HummingMelodyAssistant() {
   const [decodePending, setDecodePending] = useState(false);
   const [decodeStalled, setDecodeStalled] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
-  const [status, setStatus] = useState('録音済みの鼻歌ファイルを選んでください。');
+  const [status, setStatus] = useState('マイクで録音するか、録音済みの鼻歌ファイルを選んでください。');
   const [error, setError] = useState<string | null>(null);
   const [detection, setDetection] = useState<Detection | null>(null);
   const [applied, setApplied] = useState(false);
   const [appliedSnapshot, setAppliedSnapshot] = useState<AppliedSnapshot | null>(null);
+  const [recordingOpen, setRecordingOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sourceButtonRef = useRef<HTMLButtonElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
   const removeButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -325,7 +380,7 @@ export function HummingMelodyAssistant() {
   const contextRef = useRef<AudioContext | null>(null);
   const mountedRef = useRef(true);
   const isNative = studioRuntime.kind === 'native';
-  const busy = phase !== 'idle' || decodePending;
+  const busy = phase !== 'idle' || decodePending || recordingOpen;
 
   const invalidateAppliedResult = (message: string): void => {
     appliedRef.current = false;
@@ -389,6 +444,32 @@ export function HummingMelodyAssistant() {
     return () => window.clearTimeout(timeout);
   }, [decodePending]);
 
+  const analyzeBuffer = async (
+    generation: number,
+    controller: AbortController,
+    fileName: string,
+    durationSeconds: number,
+    buffer: AudioBufferShape,
+  ): Promise<boolean> => {
+    setPhase('analyzing');
+    setProgress(0);
+    setStatus('声の高さと音の区切りを解析しています…');
+    const notes = await transcribeHummingToMelody(buffer, {
+      signal: controller.signal,
+      onProgress: (next) => {
+        if (generation !== generationRef.current) return;
+        setProgress(progressPercent(next));
+      },
+    });
+    if (notes.length === 0) throw new HummingAssistantError('no-notes');
+    if (notes.length > 512) throw new HummingAssistantError('too-many-notes');
+    if (generation !== generationRef.current || controller.signal.aborted) return false;
+    setDetection({ fileName, durationSeconds, notes });
+    setProgress(100);
+    setStatus(`${notes.length}個の音符候補を検出しました。対象を確認して反映してください。`);
+    return true;
+  };
+
   const processSource = async (
     fileName: string,
     blob: Blob,
@@ -408,6 +489,8 @@ export function HummingMelodyAssistant() {
     setStatus('音声ファイルを確認しています…');
     let url: string | null = null;
     let context: AudioContext | null = null;
+    let decodeJob: SourceAudioDecodeJob | null = null;
+    let resourceReservation: HeavyAudioResourceReservation | null = null;
     try {
       validateSourceAudioBlobSize(blob.size, byteLength);
       if (byteLength > MAX_HUMMING_SOURCE_BYTES) {
@@ -431,17 +514,20 @@ export function HummingMelodyAssistant() {
       if (controller.signal.aborted) throw new HummingTranscriptionError('cancelled');
       context = createDecodeContext();
       contextRef.current = context;
-      const durationSeconds = preflightSource(
+      const sourcePreflight = preflightSource(
         descriptor,
         presentationDurationSeconds,
         normalizedBlob.size,
         context.sampleRate,
       );
+      resourceReservation = reserveHeavyAudioResources(
+        sourcePreflight.estimatedWorkingBytes,
+      );
       setPhase('decoding');
       setStatus('音声を端末内で読み込んでいます…');
       let decoded: AudioBuffer;
       try {
-        const decodeJob = startExclusiveSourceAudioDecode(context, normalizedBlob);
+        decodeJob = startExclusiveSourceAudioDecode(context, normalizedBlob);
         watchDecodeJob(decodeJob);
         decoded = await awaitSourceAudioDecodeOrCancel(decodeJob, controller.signal);
       } catch (decodeError) {
@@ -455,22 +541,13 @@ export function HummingMelodyAssistant() {
       }
       if (controller.signal.aborted) throw new HummingTranscriptionError('cancelled');
       const bounded = trimDecodedPadding(decoded, descriptor);
-      setPhase('analyzing');
-      setProgress(0);
-      setStatus('声の高さと音の区切りを解析しています…');
-      const notes = await transcribeHummingToMelody(bounded, {
-        signal: controller.signal,
-        onProgress: (next) => {
-          if (generation !== generationRef.current) return;
-          setProgress(progressPercent(next));
-        },
-      });
-      if (notes.length === 0) throw new HummingAssistantError('no-notes');
-      if (notes.length > 512) throw new HummingAssistantError('too-many-notes');
-      if (generation !== generationRef.current || controller.signal.aborted) return;
-      setDetection({ fileName, durationSeconds, notes });
-      setProgress(100);
-      setStatus(`${notes.length}個の音符候補を検出しました。対象を確認して反映してください。`);
+      await analyzeBuffer(
+        generation,
+        controller,
+        fileName,
+        sourcePreflight.durationSeconds,
+        bounded,
+      );
     } catch (caught) {
       if (generation !== generationRef.current) return;
       const cancelled =
@@ -489,13 +566,65 @@ export function HummingMelodyAssistant() {
       if (url) URL.revokeObjectURL(url);
       if (contextRef.current === context) contextRef.current = null;
       if (context) void context.close().catch(() => undefined);
+      if (resourceReservation) {
+        const release = (): void => resourceReservation?.release();
+        if (decodeJob) void decodeJob.settled.then(release, release);
+        else release();
+      }
+      if (abortRef.current === controller) abortRef.current = null;
+      if (generation === generationRef.current) setPhase('idle');
+    }
+  };
+
+  const processCapture = async (capture: MicrophonePcmCapture): Promise<void> => {
+    const generation = ++generationRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setPhase('analyzing');
+    setProgress(0);
+    setError(null);
+    setDetection(null);
+    appliedRef.current = false;
+    setApplied(false);
+    setAppliedSnapshot(null);
+    setStatus('マイク録音を端末内で解析しています…');
+    let resourceReservation: HeavyAudioResourceReservation | null = null;
+    try {
+      const capturePreflight = preflightCapturedPcm(capture);
+      resourceReservation = reserveHeavyAudioResources(
+        capturePreflight.estimatedWorkingBytes,
+      );
+      const detected = await analyzeBuffer(
+        generation,
+        controller,
+        'マイク録音',
+        capturePreflight.durationSeconds,
+        capture,
+      );
+      if (detected) {
+        window.requestAnimationFrame(() => resultRef.current?.focus());
+      }
+    } catch (caught) {
+      if (generation !== generationRef.current) return;
+      const cancelled =
+        controller.signal.aborted ||
+        (caught instanceof HummingTranscriptionError && caught.code === 'cancelled');
+      setProgress(null);
+      setError(cancelled ? null : failureMessage(caught));
+      setStatus(
+        cancelled
+          ? '鼻歌の解析を中止しました。'
+          : '鼻歌をメロディに変換できませんでした。',
+      );
+    } finally {
+      resourceReservation?.release();
       if (abortRef.current === controller) abortRef.current = null;
       if (generation === generationRef.current) setPhase('idle');
     }
   };
 
   const chooseNativeSource = async (): Promise<void> => {
-    if (busy) return;
+    if (phase !== 'idle' || decodePending) return;
     const pickerGeneration = ++generationRef.current;
     setPhase('opening');
     setError(null);
@@ -542,6 +671,20 @@ export function HummingMelodyAssistant() {
     event.currentTarget.value = '';
     if (!file || busy) return;
     void processSource(file.name, file, file.size);
+  };
+
+  const openRecording = (): void => {
+    if (phase !== 'idle' || decodePending || recordingOpen) return;
+    const state = useStore.getState();
+    if (state.transport.phase !== 'stopped') state.stop();
+    setError(null);
+    setRecordingOpen(true);
+  };
+
+  const chooseFileFromRecording = (): void => {
+    setRecordingOpen(false);
+    if (isNative) void chooseNativeSource();
+    else fileInputRef.current?.click();
   };
 
   const applyDetection = (): void => {
@@ -596,21 +739,30 @@ export function HummingMelodyAssistant() {
     <section className="panel-section assistant__humming" aria-labelledby="humming-title">
       <p className="panel-section__title" id="humming-title">鼻歌からメロディ</p>
       <p className="assistant__hint">
-        伴奏のない単音の鼻歌を端末内で解析し、MIDI音符にします。まずは録音済みファイルに対応します。
+        伴奏のない単音の鼻歌を端末内で解析し、MIDI音符にします。録音データや解析結果を外部へ送信しません。
       </p>
 
-      <button
-        ref={sourceButtonRef}
-        type="button"
-        className="assistant__generate"
-        disabled={busy}
-        onClick={() => {
-          if (isNative) void chooseNativeSource();
-          else fileInputRef.current?.click();
-        }}
-      >
-        {decodePending ? '読み込み終了待ち…' : busy ? '解析中…' : '鼻歌ファイルを選ぶ'}
-      </button>
+      <div className="assistant__humming-actions">
+        <button
+          type="button"
+          className="assistant__generate"
+          disabled={busy}
+          onClick={openRecording}
+        >
+          マイクで鼻歌を録音
+        </button>
+        <button
+          ref={sourceButtonRef}
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            if (isNative) void chooseNativeSource();
+            else fileInputRef.current?.click();
+          }}
+        >
+          {decodePending ? '読み込み終了待ち…' : phase !== 'idle' ? '解析中…' : '録音済みファイルを選ぶ'}
+        </button>
+      </div>
       <input
         ref={fileInputRef}
         className="visually-hidden"
@@ -624,7 +776,9 @@ export function HummingMelodyAssistant() {
           解析を中止
         </button>
       ) : null}
-      <p className="assistant__hint">WAV / MP3 / M4A（AAC-LC）/ AAC、32 MB・60秒まで。</p>
+      <p className="assistant__hint">
+        マイク録音は60秒まで（保存しません）。ファイルはWAV / MP3 / M4A（AAC-LC）/ AAC、32 MB・60秒まで。
+      </p>
       {decodeStalled ? (
         <p role="alert" className="assistant__humming-error">
           読み込みに時間がかかっています。作曲内容を保存してから、Web版は再読み込み、デスクトップ版は再起動してください。
@@ -642,7 +796,13 @@ export function HummingMelodyAssistant() {
       {error ? <p role="alert" className="assistant__humming-error">{error}</p> : null}
 
       {detection ? (
-        <div className="assistant__humming-result">
+        <div
+          ref={resultRef}
+          className="assistant__humming-result"
+          role="region"
+          aria-label="鼻歌の解析結果"
+          tabIndex={-1}
+        >
           <p>
             <strong>{detection.notes.length}音</strong>を検出 — {detection.fileName}（{Math.round(detection.durationSeconds)}秒）
           </p>
@@ -760,6 +920,13 @@ export function HummingMelodyAssistant() {
             {applied ? 'メロディクリップへ反映済み' : 'メロディクリップへ反映'}
           </button>
         </div>
+      ) : null}
+      {recordingOpen ? (
+        <HummingRecordingDialog
+          onClose={() => setRecordingOpen(false)}
+          onCaptured={(capture) => void processCapture(capture)}
+          onChooseFile={chooseFileFromRecording}
+        />
       ) : null}
     </section>
   );

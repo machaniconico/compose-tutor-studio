@@ -1,48 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-
-const SAMPLE_RATE = 44_100;
+import { createTwoNoteHummingFixture } from './fixtures/humming-audio';
 
 async function dismissOnboarding(page: Page): Promise<void> {
   const welcome = page.getByRole('dialog', { name: 'ようこそ' });
   if (await welcome.isVisible()) {
     await welcome.getByRole('button', { name: 'あとで', exact: true }).click();
   }
-}
-
-function createHummingFixture(): Buffer {
-  const firstFrames = Math.round(SAMPLE_RATE * 0.55);
-  const silenceFrames = Math.round(SAMPLE_RATE * 0.1);
-  const secondFrames = Math.round(SAMPLE_RATE * 0.55);
-  const frames = firstFrames + silenceFrames + secondFrames;
-  const dataBytes = frames * 2;
-  const bytes = Buffer.alloc(44 + dataBytes);
-  bytes.write('RIFF', 0, 'ascii');
-  bytes.writeUInt32LE(36 + dataBytes, 4);
-  bytes.write('WAVE', 8, 'ascii');
-  bytes.write('fmt ', 12, 'ascii');
-  bytes.writeUInt32LE(16, 16);
-  bytes.writeUInt16LE(1, 20);
-  bytes.writeUInt16LE(1, 22);
-  bytes.writeUInt32LE(SAMPLE_RATE, 24);
-  bytes.writeUInt32LE(SAMPLE_RATE * 2, 28);
-  bytes.writeUInt16LE(2, 32);
-  bytes.writeUInt16LE(16, 34);
-  bytes.write('data', 36, 'ascii');
-  bytes.writeUInt32LE(dataBytes, 40);
-  for (let frame = 0; frame < frames; frame += 1) {
-    const frequency =
-      frame < firstFrames
-        ? 440
-        : frame >= firstFrames + silenceFrames
-          ? 523.251
-          : 0;
-    const sample =
-      frequency === 0
-        ? 0
-        : 0.55 * Math.sin((2 * Math.PI * frequency * frame) / SAMPLE_RATE);
-    bytes.writeInt16LE(Math.round(sample * 0x7fff), 44 + frame * 2);
-  }
-  return bytes;
 }
 
 test('converts a local monophonic humming file into editable melody notes', async ({ page }) => {
@@ -55,7 +18,7 @@ test('converts a local monophonic humming file into editable melody notes', asyn
   await section.locator('input[type="file"]').setInputFiles({
     name: 'two-note-humming.wav',
     mimeType: 'audio/wav',
-    buffer: createHummingFixture(),
+    buffer: createTwoNoteHummingFixture(),
   });
 
   await expect(section.getByRole('status')).toContainText('2個の音符候補', {
@@ -88,7 +51,7 @@ test('edits and removes candidates before one atomic apply', async ({ page }) =>
   await section.locator('input[type="file"]').setInputFiles({
     name: 'editable-humming.wav',
     mimeType: 'audio/wav',
-    buffer: createHummingFixture(),
+    buffer: createTwoNoteHummingFixture(),
   });
   await expect(section.getByRole('status')).toContainText('2個の音符候補', {
     timeout: 15_000,
@@ -142,7 +105,7 @@ test('cancels a pending decode without changing the project', async ({ page }) =
   await section.locator('input[type="file"]').setInputFiles({
     name: 'cancelled-humming.wav',
     mimeType: 'audio/wav',
-    buffer: createHummingFixture(),
+    buffer: createTwoNoteHummingFixture(),
   });
   await section.getByRole('button', { name: '解析を中止' }).dispatchEvent('click');
   await expect(section.getByRole('status')).toContainText('中止');
@@ -152,7 +115,7 @@ test('cancels a pending decode without changing the project', async ({ page }) =
   await page.evaluate(() => (
     window as typeof window & { __releaseHummingDecode?: () => void }
   ).__releaseHummingDecode?.());
-  await expect(section.getByRole('button', { name: '鼻歌ファイルを選ぶ' })).toBeEnabled();
+  await expect(section.getByRole('button', { name: '録音済みファイルを選ぶ' })).toBeEnabled();
   await expect(undo).toBeDisabled();
 });
 
@@ -195,11 +158,11 @@ test('cancels browser metadata loading immediately', async ({ page }) => {
   await section.locator('input[type="file"]').setInputFiles({
     name: 'metadata-cancel.wav',
     mimeType: 'audio/wav',
-    buffer: createHummingFixture(),
+    buffer: createTwoNoteHummingFixture(),
   });
   await section.getByRole('button', { name: '解析を中止' }).dispatchEvent('click');
   await expect(section.getByRole('status')).toContainText('中止', { timeout: 1_000 });
-  await expect(section.getByRole('button', { name: '鼻歌ファイルを選ぶ' })).toBeEnabled();
+  await expect(section.getByRole('button', { name: '録音済みファイルを選ぶ' })).toBeEnabled();
   await expect(page.getByRole('button', { name: '元に戻す' })).toBeDisabled();
 
   await page.evaluate(() => (

@@ -177,10 +177,11 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 
 ### 2.10 鼻歌からメロディ
 
-- Assistant内に「鼻歌からメロディ」を置き、「端末内」「録音済みfile」「単音限定」「32 MB・60秒」を選択前から表示する
+- Assistant内に「鼻歌からメロディ」を置き、主操作を「マイクで鼻歌を録音」、fallbackを「録音済みファイルを選ぶ」とする。「端末内」「単音限定」「録音は保存しない」「fileは32 MB・両入力60秒」を開始前から表示する
+- 録音dialogは説明と明示的な開始buttonを初期focusにし、許可待ち→3秒countdown→録音中→終了処理をstatusで示す。録音中は経過時間、入力level meter、終了して解析、破棄をkeyboardで操作でき、暗黙dismissは無効にする。許可拒否やdevice失敗後は再試行とfile fallbackを同じdialogに残す
 - file確認、decode、sample検証、channel極性整合、mix、pitch解析を総合progressと`aria-live`で通知し、解析中はcancelを表示する
 - 成功時は音符候補をscroll可能な一覧で表示し、音名、編集可能なMIDI note、候補除外、反映先clip、リズム補正をkeyboardだけで操作できる
-- 反映buttonの直前に既存notesを置き換えることとUndo対応を明示する。確定後はPiano Rollへ移動し、反映件数をlive statusとtoastで通知する
+- 反映buttonの直前に既存notesを置き換えることとUndo対応を明示する。解析成功時は候補結果へfocusを移し、確定後はPiano Rollへ移動して反映件数をlive statusとtoastで通知する
 
 ## 3. ナビゲーション
 

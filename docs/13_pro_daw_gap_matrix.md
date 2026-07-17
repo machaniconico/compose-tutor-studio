@@ -37,7 +37,7 @@
 | Audio Asset / Audio Track | 音声をプロジェクトへ読み込み、region/event として配置・分割・trim・fade・crossfade・loop・gain 調整できる | **部分**: WAV / MP3 / M4A / AACをlocalで48 kHz mono/stereo PCM16 WAVへ正規化し、app-owned content-addressed objectとして保存する。production UIからmove、左右trim、gain、fade、loop、split、独立duplicate、deleteができ、shared plannerでlive / WAVを一致させる。missing / changed表示もある。waveform、crossfade、rate/stretch、loop中left trim / split、portable bundleはない | P0 | Batch 5の非破壊source rangeとasset integrityを回帰維持し、crossfade / waveform / persisted loop phaseは独立した後続incrementにする | [Cubase Pro Help](https://www.steinberg.help/r/cubase-pro/15.0/en), [Logic Pro project basics](https://support.apple.com/en-ie/guide/logicpro/lgcpe9cc47b2/mac) |
 | Audio 録音、take、comping | Audio/MIDI 録音、cycle take、punch、lane/take folder、comping、複数入力を扱える | **未実装**: record arm、入力 device、monitoring、録音 file、take/lane/comp の production 導線がない | P1 | 実装済みschema v4 Audio Asset / Track基盤を使い、単一入力録音→cycle takes→非破壊compの順で実装する。初回からmulti-I/O全対応を約束しない | [Cubase recording lanes and takes](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/track_handling/track_handling_lanes_working_with_c.html), [Logic Pro recording overview](https://support.apple.com/guide/logicpro/overview-lgcp7f3af10b/mac), [Logic Pro comping](https://support.apple.com/guide/logicpro/comping-overview-lgcp317d758e/10.7/mac/11.0) |
 | Audio の time / pitch 編集 | Cubase は AudioWarp / VariAudio、Logic は Flex Time / Flex Pitch で timing と pitch を編集できる | **未実装**: rate 1.0の非破壊frame trimはあるが、waveform editor、warp marker、pitch segment、formant、audio quantizeはない | P1 | Audio Clip source rangeとtempo mapは基盤として利用し、次にtime stretch、単音pitch correctionの順で評価する | [Cubase AudioWarp](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/sample_editor_window/sample_editor_inspector_audiowarp_r.html), [Cubase VariAudio](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/sample_editor_variaudio/sample_editor_variaudio_c.html), [Logic Pro Flex overview](https://support.apple.com/guide/logicpro/flex-time-pitch-logic-pro-mac-audio-track-lgcp308143aa/mac), [Logic Pro Flex Pitch editing](https://support.apple.com/guide/logicpro/edit-pitch-and-timing-with-flex-pitch-lgcpc53e6bef/mac) |
-| ハミング / 単音音声 → Melody MIDI | VariAudio と Flex Pitch は、解析済みの単音音声から MIDI note を生成できる | **部分**: 60秒以内の録音済み単音ファイルをローカル解析し、検出結果を確認して既存 MIDI Clip へ1回の変更で配置できる。マイク直録り、波形/pitch segment手修正、polyphonic transcriptionはない | P0 | 現行のfile decode → pitch/onset → confidence → tempo/grid quantize →確認→NoteEvent確定を堅牢化する。次にマイク権限と録音Asset基盤へ接続し、歌詞認識とは分離する | [Cubase Extracting MIDI from Audio](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/sample_editor_variaudio/sample_editor_variaudio_midi_extract_from_audio_t.html), [Logic Pro Create MIDI from Flex Pitch Data](https://support.apple.com/guide/logicpro/create-midi-from-audio-recordings-lgcpe2fd1b83/mac) |
+| ハミング / 単音音声 → Melody MIDI | VariAudio と Flex Pitch は、解析済みの単音音声から MIDI note を生成できる | **部分**: 60秒以内のマイク直録りまたは録音済み単音ファイルをローカル解析し、検出結果を確認して既存 MIDI Clip へ1回の変更で配置できる。権限・device失敗時のfile fallback、exact録音上限、ローカル一時PCMまで実装済み。波形/pitch segment手修正、polyphonic transcriptionはない | P0 | 現行のcapture/file decode → pitch/onset → confidence → tempo/grid quantize →確認→NoteEvent確定を回帰維持し、次はpitch segment手修正を独立評価する。歌詞認識とは分離する | [Cubase Extracting MIDI from Audio](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/sample_editor_variaudio/sample_editor_variaudio_midi_extract_from_audio_t.html), [Logic Pro Create MIDI from Flex Pitch Data](https://support.apple.com/guide/logicpro/create-midi-from-audio-recordings-lgcpe2fd1b83/mac) |
 | ボーカルカット / Stem 分離 | 両製品は vocal、drums、bass、その他などを推定分離する Stem Separation を持つ | **部分**: ローカル Mid/Side 中央定位軽減、3 preset、A/B、PCM 16-bit WAV 書き出しはある。中央にない vocal や reverb は残り、中央の楽器も減る。ML stem 分離ではない | P0 | まず現方式の境界・5分上限・codec padding・cancel/recovery を完成させる。ML stem 分離は品質、モデル配布、端末負荷、権利を別評価して P1 で判断する | [Cubase Stem Separation](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/audio_functions/audio_functions_stem_separation_r.html), [Logic Pro Stem Splitter](https://support.apple.com/guide/logicpro/extract-vocal-instrumental-stems-stem-lgcp61bae908/mac) |
 | Mixer、routing、bus/send | MixConsole/Mixer は insert、send、group/aux、output、VCA、side-chain、複数 routing、automation を扱う | **部分**: per-track volume/pan/mute/solo、meter、5種のinsert、Master gain/limiterに加え、stereo Bus、各non-Masterのmain output、pre/post-fader send / return、循環拒否、edge-aware solo、live/WAV共通DAGをproduction Mixerから扱える。VCA、side-chain、hardware I/O、send automationはない | P1 | schema v4 routingの回帰を維持し、次はautomation lane UI、side-chain、VCAを独立して追加する。外部I/Oはdevice設計後に扱う | [Cubase MixConsole](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/mixconsole/mixconsole_c.html), [Logic Pro mixing overview](https://support.apple.com/guide/logicpro/mixing-overview-lgcpbc219818/mac), [Logic Pro channel strip types](https://support.apple.com/guide/logicpro/channel-strip-types-lgcpbc2192ea/10.7/mac/11.0) |
 | Automation / modulation | Track/region automation、write/read mode、parameter curve を持ち、mix や plug-in parameter を時間変化させられる | **部分**: schema v4にvolume / pan target、point、hold / linear補間があり、共通resolverでlive / offline schedulingする。production lane UIとwrite/read操作、insert/send/tempo automationはない | P0 | volume/panのlane editorとwrite/readを接続し、保存・Undo・loop・live/offline parityを維持してからinsert/send/tempoへ広げる | [Cubase Automation](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/automation/automation_c.html), [Logic Pro automation overview](https://support.apple.com/guide/logicpro/automation-overview-lgcpb1a1ea03/mac) |
@@ -52,7 +52,7 @@
 ### P0: 完了済み基盤と次の境界
 
 1. **完了済み**: ボーカルカットの入力時間・codec padding・cancel/recovery・書き出し回帰を実装する。ML stem分離は別のP1製品判断とする。
-2. **部分完了**: ハミング/単音音声ファイルを解析し、確認後に Melody MIDI へ変換する。無音、雑音、和音、多すぎるノート、上限超過のnegative-case gateとマイク直録りは未完了である。
+2. **部分完了**: ハミング/単音音声をマイク直録りまたはfileから解析し、確認後に Melody MIDI へ変換する。入力権限・上限・cancel・device lossのgateは実装済みで、波形/pitch segment手修正とpolyphonic transcriptionは未完了である。
 3. **部分完了**: Track管理のinstrument / drum / file由来audio / stereo Bus追加、non-master整理、roleと名前を分離した改名・削除保護、内蔵synth音色選択を実装する。上限・全出力経路のrelease gateとFolder / Stackは未完了である。
 4. **完了済み基盤**: Project schema v4としてTrack role、AudioAsset / Automation metadata、Tempo/Signature Map、audio routing、v1→v2→v3→v4 migration、native metadata境界を導入する。
 5. **完了済み基盤**: application-owned audio binary repositoryを作り、schema v4を使うAudio Clip配置・再生・非破壊編集を実装する。
@@ -82,7 +82,7 @@
 
 ```mermaid
 flowchart LR
-  B1[1. ボーカルカット完了] --> B2[2. ファイル入力の<br/>ハミング→メロディ]
+  B1[1. ボーカルカット完了] --> B2[2. マイク / ファイル入力の<br/>ハミング→メロディ]
   B2 --> B3[3. Track管理 + 音色<br/>部分完了]
   B3 --> B4[4. schema v3 metadata<br/>Track role / Audio Asset / Automation / Tempo Map]
   B4 --> B5[5. Audio Clip<br/>配置 + 再生 + 非破壊編集]
@@ -98,9 +98,10 @@ flowchart LR
 - 完了境界: 対応 container の構造検証、exact 5分と codec padding の扱い、memory preflight、処理中 cancel、dialog 再開、A/B、PCM 16-bit stereo WAV。
 - 非対象: vocal/drums/bass/other の ML 分離。
 
-### Batch 2: ファイル入力のハミング → メロディ
+### Batch 2: マイク / ファイル入力のハミング → メロディ
 
 - 単音のハミング・鼻歌・口笛を対象にし、polyphonic material は明示的に非対応とする。
+- マイクは権限要求、3秒countdown、最大60秒のraw PCM capture、明示stop / cancel、device failure、file fallbackを持ち、録音を永続化しない。
 - file decode → pitch/onset 推定 → confidence による除外 → tempo/grid quantize → preview → NoteEvent 確定を分離する。
 - 初回は既存 Melody MIDI Clip への挿入で成立させ、Batch 3のinstrument追加導入後は新規instrument TrackのMIDI Clipも選べるようにする。
 - 確定までは Project/history/autosave を変更せず、確定を Undo 1回にまとめる。

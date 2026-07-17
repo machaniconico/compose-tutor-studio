@@ -85,6 +85,9 @@ thiserror = "=2.0.18"
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.186"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
@@ -149,7 +152,7 @@ function secureTauriConfig(version) {
         dangerousDisableAssetCspModification: false,
         headers: {
           'X-Content-Type-Options': 'nosniff',
-          'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+          'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
         },
       },
     },
@@ -168,7 +171,12 @@ function secureTauriConfig(version) {
         'icons/icon.ico',
       ],
       windows: { minimumWebview2Version: '105.0.1343.25' },
-      macOS: { minimumSystemVersion: '12.4', hardenedRuntime: true },
+      macOS: {
+        minimumSystemVersion: '12.4',
+        hardenedRuntime: true,
+        entitlements: 'Entitlements.plist',
+        infoPlist: 'Info.plist',
+      },
       linux: { appimage: { bundleMediaFramework: true } },
     },
   };
@@ -209,6 +217,14 @@ async function createReleaseSource(version = '1.2.3') {
       path.join(root, 'pnpm-workspace.yaml'),
     ),
     copyFile(new URL('../../../pnpm-lock.yaml', import.meta.url), path.join(root, 'pnpm-lock.yaml')),
+    copyFile(
+      new URL('../src-tauri/Info.plist', import.meta.url),
+      path.join(root, 'apps/desktop/src-tauri/Info.plist'),
+    ),
+    copyFile(
+      new URL('../src-tauri/Entitlements.plist', import.meta.url),
+      path.join(root, 'apps/desktop/src-tauri/Entitlements.plist'),
+    ),
   ]);
   await writeFile(
     path.join(root, 'apps/studio/index.html'),
@@ -245,6 +261,60 @@ async function createReleaseSource(version = '1.2.3') {
 test('validates the actual repository security policy and production sources', async () => {
   await validateDesktopSecurityPolicy();
   await validateNoHiddenNetworkCalls();
+});
+
+test('pins microphone authority and native permission disclosures fail closed', async () => {
+  const headerRoot = await createReleaseSource();
+  const headerTauriPath = path.join(headerRoot, 'apps/desktop/src-tauri/tauri.conf.json');
+  const headerTauri = JSON.parse(await readFile(headerTauriPath, 'utf8'));
+  headerTauri.app.security.headers['Permissions-Policy'] =
+    'camera=(), microphone=(*), geolocation=(), payment=(), usb=()';
+  await writeFile(headerTauriPath, JSON.stringify(headerTauri));
+  await assert.rejects(
+    validateDesktopSecurityPolicy({ rootDir: headerRoot }),
+    /Tauri production headers.*allowlist/,
+  );
+
+  const infoRoot = await createReleaseSource();
+  await writeFile(
+    path.join(infoRoot, 'apps/desktop/src-tauri/Info.plist'),
+    '<?xml version="1.0"?><plist><dict></dict></plist>\n',
+  );
+  await assert.rejects(
+    validateDesktopSecurityPolicy({ rootDir: infoRoot }),
+    /Info\.plist does not match the reviewed production build input/,
+  );
+
+  const entitlementRoot = await createReleaseSource();
+  await rm(path.join(entitlementRoot, 'apps/desktop/src-tauri/Entitlements.plist'));
+  await assert.rejects(
+    validateDesktopSecurityPolicy({ rootDir: entitlementRoot }),
+    /Entitlements\.plist is missing/,
+  );
+
+  const bundleRoot = await createReleaseSource();
+  const bundleTauriPath = path.join(bundleRoot, 'apps/desktop/src-tauri/tauri.conf.json');
+  const bundleTauri = JSON.parse(await readFile(bundleTauriPath, 'utf8'));
+  bundleTauri.bundle.macOS.entitlements = 'Unreviewed.entitlements';
+  await writeFile(bundleTauriPath, JSON.stringify(bundleTauri));
+  await assert.rejects(
+    validateDesktopSecurityPolicy({ rootDir: bundleRoot }),
+    /Tauri production bundle identity.*allowlist/,
+  );
+
+  const cargoRoot = await createReleaseSource();
+  const cargoPath = path.join(cargoRoot, 'apps/desktop/src-tauri/Cargo.toml');
+  await writeFile(
+    cargoPath,
+    (await readFile(cargoPath, 'utf8')).replace(
+      'webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }',
+      'webkit2gtk = { version = "=2.0.2" }',
+    ),
+  );
+  await assert.rejects(
+    validateNoHiddenNetworkCalls({ rootDir: cargoRoot }),
+    /Cargo production manifest identity.*allowlist/,
+  );
 });
 
 test('accepts only an exact stable tag with matching source versions', async () => {
