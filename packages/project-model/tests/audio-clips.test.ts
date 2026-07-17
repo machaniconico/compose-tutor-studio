@@ -170,6 +170,75 @@ describe('createAudioTrackClip', () => {
     expect(validateProject(result.project).ok).toBe(true);
   });
 
+  it('adopts an explicit source window and derives its natural length from that window', () => {
+    const project = variableTempoProject();
+    const result = createAudioTrackClip(project, readyAsset(), {
+      startBeat: 3,
+      sourceStartFrame: 24_000,
+      sourceFrameCount: 48_000,
+      fadeInFrames: 12_000,
+      fadeOutFrames: 12_000,
+      idFactory: sequenceFactory('source-window'),
+    }, t1);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(findClip(result.project, result.clipId)?.clip).toMatchObject({
+      startBeat: 3,
+      // The selected second crosses beat 4 after 0.5 s, then advances 0.5 beat at 60 BPM.
+      lengthBeats: 1.5,
+      sourceStartFrame: 24_000,
+      sourceFrameCount: 48_000,
+      fadeInFrames: 12_000,
+      fadeOutFrames: 12_000,
+    });
+    expect(validateProject(result.project).ok).toBe(true);
+  });
+
+  it('defaults an omitted source count to the ready asset remainder', () => {
+    const result = createAudioTrackClip(createEmptyProject({ clock: t0 }), readyAsset(), {
+      sourceStartFrame: 24_000,
+      idFactory: sequenceFactory('source-remainder'),
+    }, t1);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(findClip(result.project, result.clipId)?.clip).toMatchObject({
+      sourceStartFrame: 24_000,
+      sourceFrameCount: 72_000,
+      lengthBeats: 3,
+    });
+  });
+
+  it('rejects empty, fractional and out-of-asset source windows atomically', () => {
+    const project = createEmptyProject({ clock: t0 });
+    const before = structuredClone(project);
+    const invalidRanges = [
+      { sourceStartFrame: -1 },
+      { sourceStartFrame: 0.5 },
+      { sourceStartFrame: 96_000 },
+      { sourceFrameCount: 0 },
+      { sourceFrameCount: 1.5 },
+      { sourceStartFrame: 48_000, sourceFrameCount: 48_001 },
+    ] as const;
+
+    for (const range of invalidRanges) {
+      expectFailure(
+        createAudioTrackClip(project, readyAsset(), range),
+        'invalid-source-range',
+      );
+    }
+    expectFailure(
+      createAudioTrackClip(project, readyAsset(), {
+        sourceFrameCount: 24_000,
+        fadeInFrames: 12_001,
+        fadeOutFrames: 12_000,
+      }),
+      'invalid-fades',
+    );
+    expect(project).toEqual(before);
+  });
+
   it('extends the project to the next active-signature bar boundary', () => {
     const project = createEmptyProject({ lengthBars: 2, clock: t0 });
     project.lengthBeats = 7;
@@ -373,6 +442,42 @@ describe('appendAudioTrackClip', () => {
       sourceFrameCount: 96_000,
     });
     expect(validateProject(result.project).ok).toBe(true);
+  });
+
+  it('appends only the requested source window and rejects an overflowing window atomically', () => {
+    const fixture = audioFixture({ project: variableTempoProject() });
+    const before = structuredClone(fixture.project);
+    const asset = readyAsset({
+      id: 'asset-source-window-take',
+      checksumSha256: 'e'.repeat(64),
+    });
+
+    const result = appendAudioTrackClip(fixture.project, fixture.track.id, asset, {
+      startBeat: 3,
+      sourceStartFrame: 24_000,
+      sourceFrameCount: 48_000,
+      idFactory: sequenceFactory('append-source-window'),
+    }, t1);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(fixture.project).toEqual(before);
+    expect(findClip(result.project, result.clipId)?.clip).toMatchObject({
+      startBeat: 3,
+      lengthBeats: 1.5,
+      sourceStartFrame: 24_000,
+      sourceFrameCount: 48_000,
+    });
+    expectFailure(
+      appendAudioTrackClip(
+        fixture.project,
+        fixture.track.id,
+        readyAsset({ id: 'asset-invalid-source-window-take' }),
+        { sourceStartFrame: 95_000, sourceFrameCount: 1_001 },
+      ),
+      'invalid-source-range',
+    );
+    expect(fixture.project).toEqual(before);
   });
 
   it('extends the project to a bar boundary while keeping the existing Track and routing graph', () => {

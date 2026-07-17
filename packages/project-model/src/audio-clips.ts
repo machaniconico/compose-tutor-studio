@@ -93,6 +93,8 @@ export type SplitAudioClipResult =
 
 export type CreateAudioTrackClipOptions = Readonly<{
   startBeat?: number;
+  sourceStartFrame?: number;
+  sourceFrameCount?: number;
   trackName?: string;
   loop?: boolean;
   gainDb?: number;
@@ -103,6 +105,8 @@ export type CreateAudioTrackClipOptions = Readonly<{
 
 export type AppendAudioTrackClipOptions = Readonly<{
   startBeat?: number;
+  sourceStartFrame?: number;
+  sourceFrameCount?: number;
   loop?: boolean;
   gainDb?: number;
   fadeInFrames?: number;
@@ -142,6 +146,15 @@ type ProjectExtensionResult =
 
 type AllocatedId =
   | Readonly<{ ok: true; id: string }>
+  | AudioClipMutationFailure;
+
+type InitialSourceRange = Readonly<{
+  sourceStartFrame: number;
+  sourceFrameCount: number;
+}>;
+
+type InitialSourceRangeResult =
+  | Readonly<{ ok: true; range: InitialSourceRange }>
   | AudioClipMutationFailure;
 
 const defaultIdFactory: AudioClipIdFactory = (kind) => makeId(kind);
@@ -267,6 +280,35 @@ function allocateId(
 
 function roundedComputedBeat(value: number): number {
   return Math.round(value * BEAT_ROUNDING_FACTOR) / BEAT_ROUNDING_FACTOR;
+}
+
+function initialSourceRange(
+  asset: ReadyAudioAsset,
+  options: Readonly<{
+    sourceStartFrame?: number;
+    sourceFrameCount?: number;
+  }>,
+): InitialSourceRangeResult {
+  const sourceStartFrame = options.sourceStartFrame ?? 0;
+  const sourceFrameCount = options.sourceFrameCount
+    ?? asset.frameCount - sourceStartFrame;
+  if (
+    !Number.isSafeInteger(sourceStartFrame)
+    || sourceStartFrame < 0
+    || sourceStartFrame >= asset.frameCount
+    || !Number.isSafeInteger(sourceFrameCount)
+    || sourceFrameCount <= 0
+    || sourceFrameCount > asset.frameCount - sourceStartFrame
+  ) {
+    return failure(
+      'invalid-source-range',
+      'Audio Clip source frames must select a non-empty range within the ready asset.',
+    );
+  }
+  return {
+    ok: true,
+    range: { sourceStartFrame, sourceFrameCount },
+  };
 }
 
 function naturalWindowLengthBeats(
@@ -450,8 +492,8 @@ function clampFadesAfterRightTrim(
 
 /**
  * Atomically adopt one verified asset and create its Audio Track / Clip.
- * The initial beat window is the asset duration projected through the tempo
- * map at rate 1.0; later edits keep this timeline window independent.
+ * The initial beat window is the selected source duration projected through
+ * the tempo map at rate 1.0; later edits keep this timeline window independent.
  */
 export function createAudioTrackClip(
   project: Project,
@@ -502,6 +544,8 @@ export function createAudioTrackClip(
     if (!Number.isFinite(startBeat) || startBeat < 0) {
       return failure('invalid-position', 'Audio Clip startBeat must be a non-negative finite number.');
     }
+    const sourceRange = initialSourceRange(asset, options);
+    if (!sourceRange.ok) return sourceRange;
     const gainDb = options.gainDb ?? 0;
     if (!Number.isFinite(gainDb) || gainDb < -96 || gainDb > 24) {
       return failure('invalid-gain', 'Audio Clip gain must be between -96 dB and 24 dB.');
@@ -513,7 +557,7 @@ export function createAudioTrackClip(
       || fadeInFrames < 0
       || !Number.isSafeInteger(fadeOutFrames)
       || fadeOutFrames < 0
-      || fadeInFrames + fadeOutFrames > asset.frameCount
+      || fadeInFrames + fadeOutFrames > sourceRange.range.sourceFrameCount
     ) {
       return failure(
         'invalid-fades',
@@ -530,7 +574,7 @@ export function createAudioTrackClip(
     const lengthBeats = naturalWindowLengthBeats(
       project,
       startBeat,
-      asset.frameCount,
+      sourceRange.range.sourceFrameCount,
       asset.sampleRate,
     );
     const extension = extendProjectToInclude(project, startBeat + lengthBeats);
@@ -544,8 +588,8 @@ export function createAudioTrackClip(
       lengthBeats,
       loop: options.loop ?? false,
       audioAssetId: asset.id,
-      sourceStartFrame: 0,
-      sourceFrameCount: asset.frameCount,
+      sourceStartFrame: sourceRange.range.sourceStartFrame,
+      sourceFrameCount: sourceRange.range.sourceFrameCount,
       fadeInFrames,
       fadeOutFrames,
       gainDb,
@@ -597,9 +641,9 @@ export function createAudioTrackClip(
 }
 
 /**
- * Atomically adopt one verified asset and append its natural-rate Clip to an
- * existing Audio Track. The target Track keeps its mixer/effect configuration,
- * and no Track or routing node is created.
+ * Atomically adopt one verified asset and append its selected natural-rate
+ * source window to an existing Audio Track. The target Track keeps its
+ * mixer/effect configuration, and no Track or routing node is created.
  */
 export function appendAudioTrackClip(
   project: Project,
@@ -654,6 +698,8 @@ export function appendAudioTrackClip(
     if (!Number.isFinite(startBeat) || startBeat < 0) {
       return failure('invalid-position', 'Audio Clip startBeat must be a non-negative finite number.');
     }
+    const sourceRange = initialSourceRange(asset, options);
+    if (!sourceRange.ok) return sourceRange;
     const gainDb = options.gainDb ?? 0;
     if (!Number.isFinite(gainDb) || gainDb < -96 || gainDb > 24) {
       return failure('invalid-gain', 'Audio Clip gain must be between -96 dB and 24 dB.');
@@ -665,7 +711,7 @@ export function appendAudioTrackClip(
       || fadeInFrames < 0
       || !Number.isSafeInteger(fadeOutFrames)
       || fadeOutFrames < 0
-      || fadeInFrames + fadeOutFrames > asset.frameCount
+      || fadeInFrames + fadeOutFrames > sourceRange.range.sourceFrameCount
     ) {
       return failure(
         'invalid-fades',
@@ -678,7 +724,7 @@ export function appendAudioTrackClip(
     const lengthBeats = naturalWindowLengthBeats(
       project,
       startBeat,
-      asset.frameCount,
+      sourceRange.range.sourceFrameCount,
       asset.sampleRate,
     );
     const extension = extendProjectToInclude(project, startBeat + lengthBeats);
@@ -692,8 +738,8 @@ export function appendAudioTrackClip(
       lengthBeats,
       loop: options.loop ?? false,
       audioAssetId: asset.id,
-      sourceStartFrame: 0,
-      sourceFrameCount: asset.frameCount,
+      sourceStartFrame: sourceRange.range.sourceStartFrame,
+      sourceFrameCount: sourceRange.range.sourceFrameCount,
       fadeInFrames,
       fadeOutFrames,
       gainDb,
