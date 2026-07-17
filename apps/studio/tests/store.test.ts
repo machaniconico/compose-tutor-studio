@@ -85,6 +85,32 @@ describe('store metadata actions', () => {
   });
 });
 
+describe('microphone recording lifecycle fence', () => {
+  it('owns one exact token and blocks project switching and native close until released', async () => {
+    const originalProject = useStore.getState().project;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    expect(operationId).not.toBeNull();
+    if (operationId === null) throw new Error('recording token missing');
+    expect(useStore.getState().audioRecordingOperationId).toBe(operationId);
+    expect(useStore.getState().tryBeginAudioRecordingOperation()).toBeNull();
+
+    await expect(useStore.getState().createNewProject('切替不可')).resolves.toBe(false);
+    expect(useStore.getState().project).toBe(originalProject);
+    expect(useStore.getState().tryBeginNativeClose()).toBe(false);
+    expect(useStore.getState().persistenceNotice?.message).toContain('マイク録音');
+
+    useStore.getState().finishAudioRecordingOperation(operationId + 1);
+    expect(useStore.getState().audioRecordingOperationId).toBe(operationId);
+    useStore.getState().finishAudioRecordingOperation(operationId);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(useStore.getState().persistenceNotice).toBeNull();
+
+    expect(useStore.getState().tryBeginNativeClose()).toBe(true);
+    useStore.getState().cancelNativeClose();
+    expect(useStore.getState().projectOperationBusy).toBe(false);
+  });
+});
+
 describe('chord actions', () => {
   it('adds and removes chords', () => {
     const initialCount = useStore.getState().project.chordTrack.length;
@@ -364,6 +390,19 @@ describe('undo / redo', () => {
     expect(after.project.updatedAt).toBe(before.project.updatedAt);
     expect(after.past).toEqual([]);
     expect(after.saveState.revision).toBe(before.saveState.revision);
+  });
+
+  it('rejects a claimed verified asset addition when no asset was appended', () => {
+    const before = useStore.getState();
+
+    expect(useStore.getState().applyVerifiedAudioAssetAddition(
+      (project) => project,
+      'missing-verified-asset',
+    )).toBe(false);
+
+    expect(useStore.getState().project).toBe(before.project);
+    expect(useStore.getState().past).toBe(before.past);
+    expect(useStore.getState().saveState.revision).toBe(before.saveState.revision);
   });
 
   it('undoes and redoes a project mutation', () => {

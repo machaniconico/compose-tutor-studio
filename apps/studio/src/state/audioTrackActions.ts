@@ -43,6 +43,15 @@ import {
   type SourceAudioDescriptor,
 } from '../audio/sourceAudio';
 import {
+  MAX_MICROPHONE_CAPTURE_CHANNELS,
+  MAX_MICROPHONE_CAPTURE_PCM_BYTES,
+  MAX_MICROPHONE_CAPTURE_SAMPLE_RATE,
+  MAX_MICROPHONE_CAPTURE_SECONDS,
+  MICROPHONE_CAPTURE_RESERVATION_BYTES,
+  type MicrophonePcmCapture,
+} from '../audio/microphoneCapture';
+import { reserveMicrophoneCaptureResources } from '../audio/microphoneCaptureReservation';
+import {
   AudioAssetRepositoryError,
   MAX_AUDIO_ASSET_BYTES,
   storeAudioAssetBytes,
@@ -102,6 +111,25 @@ export type ImportStudioAudioTrackInput = Readonly<{
   onProgress?: (progress: CanonicalAudioAssetProgress) => void;
 }>;
 
+export type RecordStudioAudioTrackInput = Readonly<{
+  /** Opaque ownership acquired before microphone permission/count-in starts. */
+  recordingHandle: StudioAudioTrackRecordingHandle;
+  capture: MicrophonePcmCapture;
+  trackName?: string;
+  fileName?: string;
+  signal?: AbortSignal;
+  onProgress?: (progress: CanonicalAudioAssetProgress) => void;
+}>;
+
+export type RecordStudioAudioTrackDependencies = Readonly<{
+  repository?: AudioAssetRepository;
+  createAudioBuffer?: (capture: MicrophonePcmCapture) => AudioBuffer;
+  canonicalize?: ImportStudioAudioTrackDependencies['canonicalize'];
+  createAssetId?: () => string;
+}>;
+
+export type RecordStudioAudioTrackResult = ImportStudioAudioTrackResult;
+
 export type ImportStudioAudioTrackDependencies = Readonly<{
   repository?: AudioAssetRepository;
   inspectSource?: (
@@ -148,8 +176,10 @@ type AudioTrackImportLeaseWork = {
 
 type AudioTrackImportLease = {
   finished: boolean;
+  released: boolean;
   work: Set<AudioTrackImportLeaseWork>;
   resourceReservation: HeavyAudioResourceReservation | null;
+  releaseCallbacks: Set<() => void>;
 };
 
 let activeAudioTrackImportLease: AudioTrackImportLease | null = null;
@@ -158,8 +188,10 @@ function tryAcquireAudioTrackImportLease(): AudioTrackImportLease | null {
   if (activeAudioTrackImportLease) return null;
   const lease: AudioTrackImportLease = {
     finished: false,
+    released: false,
     work: new Set(),
     resourceReservation: null,
+    releaseCallbacks: new Set(),
   };
   activeAudioTrackImportLease = lease;
   return lease;
@@ -174,6 +206,10 @@ function releaseAudioTrackImportLeaseIfSettled(lease: AudioTrackImportLease): vo
     lease.resourceReservation?.release();
     lease.resourceReservation = null;
     activeAudioTrackImportLease = null;
+    lease.released = true;
+    const callbacks = [...lease.releaseCallbacks];
+    lease.releaseCallbacks.clear();
+    for (const callback of callbacks) callback();
   }
 }
 
@@ -200,6 +236,122 @@ function finishAudioTrackImportLease(lease: AudioTrackImportLease): void {
   releaseAudioTrackImportLeaseIfSettled(lease);
 }
 
+function onAudioTrackImportLeaseReleased(
+  lease: AudioTrackImportLease,
+  callback: () => void,
+): void {
+  if (lease.released) {
+    callback();
+    return;
+  }
+  lease.releaseCallbacks.add(callback);
+}
+
+const studioAudioTrackRecordingHandleBrand: unique symbol = Symbol(
+  'studio-audio-track-recording-handle',
+);
+
+/** Opaque proof that capture and finalization own one continuous app-wide lease. */
+export type StudioAudioTrackRecordingHandle = Readonly<{
+  operationId: number;
+  [studioAudioTrackRecordingHandleBrand]: true;
+}>;
+
+type StudioAudioTrackRecordingOwnership = {
+  lease: AudioTrackImportLease;
+  snapshot: Project;
+  operationId: number;
+  startBeat: number;
+  playbackStopped: boolean;
+  finalizing: boolean;
+  finished: boolean;
+};
+
+const studioAudioTrackRecordingOwnership = new WeakMap<
+  StudioAudioTrackRecordingHandle,
+  StudioAudioTrackRecordingOwnership
+>();
+
+export type BeginStudioAudioTrackRecordingResult =
+  | Readonly<{
+      ok: true;
+      handle: StudioAudioTrackRecordingHandle;
+      startBeat: number;
+      playbackStopped: boolean;
+    }>
+  | Readonly<{
+      ok: false;
+      code: 'decode-busy' | 'project-busy' | 'resource-limit-exceeded';
+    }>;
+
+function finishStudioAudioTrackRecordingOwnership(
+  handle: StudioAudioTrackRecordingHandle,
+  ownership: StudioAudioTrackRecordingOwnership,
+): void {
+  if (ownership.finished) return;
+  ownership.finished = true;
+  studioAudioTrackRecordingOwnership.delete(handle);
+  onAudioTrackImportLeaseReleased(ownership.lease, () => {
+    useStore.getState().finishAudioRecordingOperation(ownership.operationId);
+  });
+  finishAudioTrackImportLease(ownership.lease);
+}
+
+/**
+ * Acquire every recording fence synchronously before asking for microphone
+ * permission. The returned snapshot remains the only valid CAS base.
+ */
+export function beginStudioAudioTrackRecording(): BeginStudioAudioTrackRecordingResult {
+  const lease = tryAcquireAudioTrackImportLease();
+  if (!lease) return { ok: false, code: 'decode-busy' };
+
+  const state = useStore.getState();
+  const operationId = state.tryBeginAudioRecordingOperation();
+  if (operationId === null) {
+    finishAudioTrackImportLease(lease);
+    return { ok: false, code: 'project-busy' };
+  }
+
+  const snapshot = state.project;
+  const startBeat = state.transport.positionBeat;
+  const playbackStopped = state.transport.phase !== 'stopped';
+  try {
+    if (playbackStopped) state.stop();
+    lease.resourceReservation = reserveMicrophoneCaptureResources();
+  } catch (error) {
+    state.finishAudioRecordingOperation(operationId);
+    finishAudioTrackImportLease(lease);
+    if (error instanceof AudioResourceReservationError) {
+      return { ok: false, code: 'resource-limit-exceeded' };
+    }
+    return { ok: false, code: 'project-busy' };
+  }
+
+  const handle: StudioAudioTrackRecordingHandle = Object.freeze({
+    operationId,
+    [studioAudioTrackRecordingHandleBrand]: true as const,
+  });
+  studioAudioTrackRecordingOwnership.set(handle, {
+    lease,
+    snapshot,
+    operationId,
+    startBeat,
+    playbackStopped,
+    finalizing: false,
+    finished: false,
+  });
+  return { ok: true, handle, startBeat, playbackStopped };
+}
+
+/** Release a take that never transferred into finalization. Idempotent. */
+export function discardStudioAudioTrackRecording(
+  handle: StudioAudioTrackRecordingHandle,
+): void {
+  const ownership = studioAudioTrackRecordingOwnership.get(handle);
+  if (!ownership || ownership.finalizing) return;
+  finishStudioAudioTrackRecordingOwnership(handle, ownership);
+}
+
 export const MAX_STUDIO_AUDIO_DECODE_BYTES = 256 * 1024 * 1024;
 export const MAX_STUDIO_AUDIO_IMPORT_PEAK_BYTES = MAX_HEAVY_AUDIO_RESOURCE_BYTES;
 const CANONICAL_SAMPLE_RATE = 48_000;
@@ -223,6 +375,21 @@ export type StudioAudioImportResourcePlan = Readonly<{
   canonicalPcm16WavBytes: number;
   requiresCanonicalResample: boolean;
   decodePeakBytes: number;
+  canonicalPeakBytes: number;
+  persistPeakBytes: number;
+  peakBytes: number;
+}>;
+
+export type StudioAudioRecordingResourcePlan = Readonly<{
+  captureChunkFloat32Bytes: number;
+  capturedFloat32Bytes: number;
+  audioBufferFloat32Bytes: number;
+  captureRuntimeOverheadBytes: number;
+  canonicalFrameCount: number;
+  canonicalFloat32Bytes: number;
+  canonicalPcm16WavBytes: number;
+  requiresCanonicalResample: boolean;
+  conversionPeakBytes: number;
   canonicalPeakBytes: number;
   persistPeakBytes: number;
   peakBytes: number;
@@ -488,6 +655,126 @@ export function planStudioAudioImportResources(
   };
 }
 
+/**
+ * Pure peak-memory planner for an in-memory microphone take through canonical
+ * WAV persistence. The source capture remains retained while a real
+ * AudioBuffer copy, optional resample buffer, and repository copies exist.
+ */
+export function planStudioAudioRecordingResources(
+  capture: Pick<
+    MicrophonePcmCapture,
+    'numberOfChannels' | 'length' | 'sampleRate' | 'durationSeconds'
+  >,
+): StudioAudioRecordingResourcePlan {
+  if (
+    !Number.isSafeInteger(capture.numberOfChannels)
+    || capture.numberOfChannels < 1
+    || capture.numberOfChannels > MAX_MICROPHONE_CAPTURE_CHANNELS
+  ) {
+    throw new CanonicalAudioAssetError('channel-limit-exceeded');
+  }
+  if (
+    !Number.isSafeInteger(capture.length)
+    || capture.length <= 0
+    || !Number.isSafeInteger(capture.sampleRate)
+    || capture.sampleRate < 8_000
+    || capture.sampleRate > MAX_MICROPHONE_CAPTURE_SAMPLE_RATE
+    || !Number.isFinite(capture.durationSeconds)
+    || capture.durationSeconds <= 0
+    || capture.durationSeconds > MAX_MICROPHONE_CAPTURE_SECONDS
+    || Math.abs(capture.durationSeconds - capture.length / capture.sampleRate)
+      > Math.max(1 / capture.sampleRate, 1e-6)
+  ) {
+    throw resourceLimitExceeded();
+  }
+
+  const capturedFloat32Bytes = checkedResourceProduct(
+    capture.length,
+    capture.numberOfChannels,
+    FLOAT32_BYTES_PER_SAMPLE,
+  );
+  if (capturedFloat32Bytes > MAX_MICROPHONE_CAPTURE_PCM_BYTES) {
+    throw resourceLimitExceeded();
+  }
+  const canonicalFrameCount = Math.max(
+    1,
+    Math.round((capture.length * CANONICAL_SAMPLE_RATE) / capture.sampleRate),
+  );
+  if (!Number.isSafeInteger(canonicalFrameCount)) throw resourceLimitExceeded();
+  const canonicalFloat32Bytes = checkedResourceProduct(
+    canonicalFrameCount,
+    capture.numberOfChannels,
+    FLOAT32_BYTES_PER_SAMPLE,
+  );
+  const canonicalPcm16WavBytes = checkedResourceSum(
+    CANONICAL_WAV_HEADER_BYTES,
+    checkedResourceProduct(
+      canonicalFrameCount,
+      capture.numberOfChannels,
+      PCM16_BYTES_PER_SAMPLE,
+    ),
+  );
+  const requiresCanonicalResample = capture.sampleRate !== CANONICAL_SAMPLE_RATE;
+  // The worklet chunks have been dereferenced when the result resolves, but
+  // JavaScript cannot prove they were physically collected before the next
+  // AudioBuffer allocation. Keep one exact chunk-set copy plus the capture
+  // runtime envelope counted through the handoff.
+  const captureChunkFloat32Bytes = capturedFloat32Bytes;
+  const captureRuntimeOverheadBytes =
+    MICROPHONE_CAPTURE_RESERVATION_BYTES - 2 * MAX_MICROPHONE_CAPTURE_PCM_BYTES;
+  const audioBufferFloat32Bytes = capturedFloat32Bytes;
+  const conversionPeakBytes = checkedResourceSum(
+    captureChunkFloat32Bytes,
+    capturedFloat32Bytes,
+    audioBufferFloat32Bytes,
+    captureRuntimeOverheadBytes,
+  );
+  const canonicalPeakBytes = checkedResourceSum(
+    captureChunkFloat32Bytes,
+    capturedFloat32Bytes,
+    audioBufferFloat32Bytes,
+    requiresCanonicalResample ? canonicalFloat32Bytes : 0,
+    canonicalPcm16WavBytes,
+    captureRuntimeOverheadBytes,
+  );
+  const persistPeakBytes = checkedResourceSum(
+    captureChunkFloat32Bytes,
+    capturedFloat32Bytes,
+    audioBufferFloat32Bytes,
+    requiresCanonicalResample ? canonicalFloat32Bytes : 0,
+    checkedResourceProduct(
+      STUDIO_AUDIO_PERSIST_WAV_COPY_FACTOR,
+      canonicalPcm16WavBytes,
+    ),
+    captureRuntimeOverheadBytes,
+  );
+  const peakBytes = Math.max(
+    conversionPeakBytes,
+    canonicalPeakBytes,
+    persistPeakBytes,
+  );
+  if (
+    canonicalPcm16WavBytes > MAX_AUDIO_ASSET_BYTES
+    || peakBytes > MAX_STUDIO_AUDIO_IMPORT_PEAK_BYTES
+  ) {
+    throw resourceLimitExceeded();
+  }
+  return {
+    captureChunkFloat32Bytes,
+    capturedFloat32Bytes,
+    audioBufferFloat32Bytes,
+    captureRuntimeOverheadBytes,
+    canonicalFrameCount,
+    canonicalFloat32Bytes,
+    canonicalPcm16WavBytes,
+    requiresCanonicalResample,
+    conversionPeakBytes,
+    canonicalPeakBytes,
+    persistPeakBytes,
+    peakBytes,
+  };
+}
+
 /** Reject hostile compressed-audio expansion before decodeAudioData allocates PCM. */
 export function preflightStudioAudioDecode(
   descriptor: SourceAudioDescriptor,
@@ -537,6 +824,27 @@ async function decodeSourceAudio(
 function normalizedAssetName(fileName: string): string {
   const trimmed = fileName.trim();
   return trimmed.length > 0 ? trimmed : 'audio.wav';
+}
+
+function createRecordingAudioBuffer(capture: MicrophonePcmCapture): AudioBuffer {
+  try {
+    const buffer = new AudioBuffer({
+      length: capture.length,
+      numberOfChannels: capture.numberOfChannels,
+      sampleRate: capture.sampleRate,
+    });
+    for (let channel = 0; channel < capture.numberOfChannels; channel += 1) {
+      const source = capture.getChannelData(channel);
+      if (source.length !== capture.length) {
+        throw new CanonicalAudioAssetError('invalid-audio');
+      }
+      buffer.getChannelData(channel).set(source);
+    }
+    return buffer;
+  } catch (error) {
+    if (error instanceof CanonicalAudioAssetError) throw error;
+    throw new CanonicalAudioAssetError('render-failed');
+  }
 }
 
 function mutationFailureCode(
@@ -611,11 +919,107 @@ function importErrorCode(error: unknown, signal: AbortSignal): StudioAudioAction
     return 'canonicalize-failed';
   }
   if (error instanceof AudioAssetRepositoryError) {
-    return error.code === 'too-large' ? 'resource-limit-exceeded' : 'asset-store-failed';
+    // The canonical planner already proved the output is within the asset
+    // byte cap. A repository "too large" here is a storage/quota failure.
+    return 'asset-store-failed';
   }
   if (error instanceof AudioResourceReservationError) return 'resource-limit-exceeded';
   if (error instanceof Error && error.message === 'decode-failed') return 'decode-failed';
   return 'decode-failed';
+}
+
+function recordingErrorCode(error: unknown, signal: AbortSignal): StudioAudioActionErrorCode {
+  if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+    return 'cancelled';
+  }
+  if (error instanceof CanonicalAudioAssetError) {
+    if (error.code === 'cancelled') return 'cancelled';
+    if (error.code === 'channel-limit-exceeded') return 'channel-limit-exceeded';
+    if (error.code === 'resource-limit-exceeded') return 'resource-limit-exceeded';
+    return 'canonicalize-failed';
+  }
+  if (error instanceof AudioAssetRepositoryError) {
+    return 'asset-store-failed';
+  }
+  if (error instanceof AudioResourceReservationError) return 'resource-limit-exceeded';
+  return 'canonicalize-failed';
+}
+
+type AdoptCanonicalAudioTrackInput = Readonly<{
+  snapshot: Project;
+  recordingOperationId?: number;
+  playbackStopped?: boolean;
+  canonical: CanonicalAudioAssetResult;
+  receipt: AudioAssetStoreReceipt;
+  fileName: string;
+  trackName?: string;
+  startBeat?: number;
+  createAssetId?: () => string;
+}>;
+
+function adoptCanonicalAudioTrack(
+  input: AdoptCanonicalAudioTrackInput,
+): ImportStudioAudioTrackResult {
+  const latest = useStore.getState();
+  if (
+    latest.projectOperationBusy
+    || latest.project !== input.snapshot
+    || (
+      input.recordingOperationId !== undefined
+      && latest.audioRecordingOperationId !== input.recordingOperationId
+    )
+  ) {
+    return importFailed('commit-rejected');
+  }
+  let assetId: string;
+  try {
+    assetId = (input.createAssetId ?? (() => uid('audio-asset')))();
+  } catch {
+    return importFailed('id-factory-failed');
+  }
+  const asset: ReadyAudioAsset = {
+    id: assetId,
+    availability: 'ready',
+    checksumSha256: input.receipt.checksumSha256,
+    originalName: normalizedAssetName(input.fileName),
+    mediaType: 'audio/wav',
+    byteLength: input.receipt.byteLength,
+    sampleRate: input.canonical.sampleRate,
+    channelCount: input.canonical.channelCount,
+    frameCount: input.canonical.frameCount,
+  };
+  const mutation = createAudioTrackClip(input.snapshot, asset, {
+    ...(input.trackName !== undefined ? { trackName: input.trackName } : {}),
+    ...(input.startBeat !== undefined ? { startBeat: input.startBeat } : {}),
+  });
+  if (!mutation.ok) return importFailed(mutation.error.code);
+
+  const wasActive = latest.transport.phase !== 'stopped';
+  const committed = latest.applyVerifiedAudioAssetAddition(
+    (current) => (current === input.snapshot ? mutation.project : current),
+    mutation.audioAssetId,
+  );
+  if (!committed || useStore.getState().project === input.snapshot) {
+    return importFailed('commit-rejected');
+  }
+  const adoptedState = useStore.getState();
+  const track = adoptedState.project.tracks.find((candidate) => candidate.id === mutation.trackId);
+  if (!track) return importFailed('commit-rejected');
+  adoptedState.selectTrack(mutation.trackId);
+  adoptedState.selectClip(mutation.clipId);
+  adoptedState.selectChord(null);
+  adoptedState.selectNotes([]);
+  adoptedState.setActiveView('arranger');
+  return {
+    ok: true,
+    changed: true,
+    trackId: mutation.trackId,
+    trackName: track.name,
+    clipId: mutation.clipId,
+    audioAssetId: mutation.audioAssetId,
+    deduplicated: input.receipt.deduplicated,
+    playbackStopped: input.playbackStopped ?? playbackWasStopped(wasActive, true),
+  };
 }
 
 /**
@@ -706,59 +1110,15 @@ async function importStudioAudioTrackWithLease(
     return importFailed(importErrorCode(error, signal));
   }
 
-  const latest = useStore.getState();
-  if (latest.projectOperationBusy || latest.project !== snapshot) {
-    return importFailed('commit-rejected');
-  }
-  let assetId: string;
-  try {
-    assetId = (dependencies.createAssetId ?? (() => uid('audio-asset')))();
-  } catch {
-    return importFailed('id-factory-failed');
-  }
-  const asset: ReadyAudioAsset = {
-    id: assetId,
-    availability: 'ready',
-    checksumSha256: receipt.checksumSha256,
-    originalName: normalizedAssetName(input.fileName),
-    mediaType: 'audio/wav',
-    byteLength: receipt.byteLength,
-    sampleRate: canonical.sampleRate,
-    channelCount: canonical.channelCount,
-    frameCount: canonical.frameCount,
-  };
-  const mutation = createAudioTrackClip(snapshot, asset, {
+  return adoptCanonicalAudioTrack({
+    snapshot,
+    canonical,
+    receipt,
+    fileName: input.fileName,
     ...(input.trackName !== undefined ? { trackName: input.trackName } : {}),
     ...(input.startBeat !== undefined ? { startBeat: input.startBeat } : {}),
+    ...(dependencies.createAssetId ? { createAssetId: dependencies.createAssetId } : {}),
   });
-  if (!mutation.ok) return importFailed(mutation.error.code);
-
-  const wasActive = latest.transport.phase !== 'stopped';
-  const committed = latest.applyProjectChange((current) =>
-    current === snapshot ? mutation.project : current,
-  );
-  if (!committed || useStore.getState().project === snapshot) {
-    return importFailed('commit-rejected');
-  }
-  const adoptedState = useStore.getState();
-  const track = adoptedState.project.tracks.find((candidate) => candidate.id === mutation.trackId);
-  if (!track) return importFailed('commit-rejected');
-  adoptedState.selectTrack(mutation.trackId);
-  adoptedState.selectClip(mutation.clipId);
-  adoptedState.selectChord(null);
-  adoptedState.selectNotes([]);
-  adoptedState.setActiveView('arranger');
-  await adoptedState.refreshAudioAssetIssues();
-  return {
-    ok: true,
-    changed: true,
-    trackId: mutation.trackId,
-    trackName: track.name,
-    clipId: mutation.clipId,
-    audioAssetId: mutation.audioAssetId,
-    deduplicated: receipt.deduplicated,
-    playbackStopped: playbackWasStopped(wasActive, true),
-  };
 }
 
 /**
@@ -775,6 +1135,91 @@ export async function importStudioAudioTrack(
     return await importStudioAudioTrackWithLease(input, dependencies, lease);
   } finally {
     finishAudioTrackImportLease(lease);
+  }
+}
+
+async function recordStudioAudioTrackWithLease(
+  input: RecordStudioAudioTrackInput,
+  dependencies: RecordStudioAudioTrackDependencies,
+  ownership: StudioAudioTrackRecordingOwnership,
+): Promise<RecordStudioAudioTrackResult> {
+  const startingState = useStore.getState();
+  const { lease, snapshot, operationId, startBeat, playbackStopped } = ownership;
+  if (
+    startingState.projectOperationBusy
+    || startingState.project !== snapshot
+    || startingState.audioRecordingOperationId !== operationId
+  ) {
+    return importFailed('commit-rejected');
+  }
+  const signal = input.signal ?? new AbortController().signal;
+  const canonicalize = dependencies.canonicalize ?? canonicalizeAudioAsset;
+  const repository = dependencies.repository ?? studioRuntime.audioAssets;
+  const createAudioBuffer = dependencies.createAudioBuffer ?? createRecordingAudioBuffer;
+
+  let canonical: CanonicalAudioAssetResult;
+  let receipt: AudioAssetStoreReceipt;
+  try {
+    throwIfCancelled(signal);
+    const plan = planStudioAudioRecordingResources(input.capture);
+    const audioAssetCache = getAudioAssetPlaybackCache();
+    audioAssetCache.clearUnused();
+    const reservationBytes = checkedHeavyAudioResourceTotal([
+      plan.peakBytes,
+      audioAssetCache.retainedDecodedBytes,
+    ]);
+    if (lease.resourceReservation) lease.resourceReservation.resize(reservationBytes);
+    else lease.resourceReservation = reserveHeavyAudioResources(reservationBytes);
+
+    const source = createAudioBuffer(input.capture);
+    throwIfCancelled(signal);
+    canonical = await canonicalize(source, {
+      signal,
+      ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+      onResampleJob: (job) => trackAudioTrackImportWork(lease, job.settled),
+    });
+    throwIfCancelled(signal);
+    receipt = await storeAudioAssetBytes(repository, canonical.bytes);
+    // Cancellation or a concurrent project fence may leave only a valid,
+    // unreferenced content-addressed blob. Never adopt metadata before bytes.
+    throwIfCancelled(signal);
+  } catch (error) {
+    return importFailed(recordingErrorCode(error, signal));
+  }
+
+  return adoptCanonicalAudioTrack({
+    snapshot,
+    recordingOperationId: operationId,
+    playbackStopped,
+    canonical,
+    receipt,
+    fileName: input.fileName ?? 'microphone-recording.wav',
+    ...(input.trackName !== undefined ? { trackName: input.trackName } : {}),
+    startBeat,
+    ...(dependencies.createAssetId ? { createAssetId: dependencies.createAssetId } : {}),
+  });
+}
+
+/**
+ * Convert one bounded in-memory microphone take directly to canonical WAV,
+ * persist it, then create its Audio Track/Clip in one project history step.
+ */
+export async function recordStudioAudioTrack(
+  input: RecordStudioAudioTrackInput,
+  dependencies: RecordStudioAudioTrackDependencies = {},
+): Promise<RecordStudioAudioTrackResult> {
+  const ownership = studioAudioTrackRecordingOwnership.get(input.recordingHandle);
+  if (
+    !ownership
+    || ownership.finished
+    || ownership.finalizing
+    || ownership.lease !== activeAudioTrackImportLease
+  ) return importFailed('commit-rejected');
+  ownership.finalizing = true;
+  try {
+    return await recordStudioAudioTrackWithLease(input, dependencies, ownership);
+  } finally {
+    finishStudioAudioTrackRecordingOwnership(input.recordingHandle, ownership);
   }
 }
 

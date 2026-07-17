@@ -104,6 +104,8 @@ export type EditorState = {
 const HISTORY_CAP = 100;
 const SAVE_DEBOUNCE_MS = 2000;
 const SAVE_MAX_WAIT_MS = 30_000;
+const RECORDING_CLOSE_BLOCKED_NOTICE =
+  'マイク録音または音声素材の保存中なので、まだ終了できません。録音を終了して保存するか、録音を破棄してからもう一度お試しください。';
 
 /** null is proven empty; undefined deliberately requests head repair. */
 function expectedHeadForLoaded(loaded: LoadedProject | null): string | null | undefined {
@@ -186,6 +188,8 @@ export type StoreState = {
   persistenceReady: boolean;
   /** True while a project-level load/create/import/delete transition owns persistence. */
   projectOperationBusy: boolean;
+  /** Runtime-only token protecting an in-flight microphone take and its asset commit. */
+  audioRecordingOperationId: number | null;
   localDataErase: LocalDataEraseState;
   persistenceNotice: PersistenceNotice | null;
   savedProjects: readonly ProjectSummary[];
@@ -198,6 +202,11 @@ export type StoreState = {
 
   /** Generic escape hatch: apply an immutable project change (bumps updatedAt, pushes history, saves). */
   applyProjectChange: (fn: (p: Project) => Project) => boolean;
+  /** Adopt exactly one already-stored ReadyAudioAsset without re-reading it. */
+  applyVerifiedAudioAssetAddition: (
+    fn: (p: Project) => Project,
+    verifiedAudioAssetId: string,
+  ) => boolean;
 
   // project metadata actions
   setBpm: (bpm: number) => void;
@@ -270,6 +279,10 @@ export type StoreState = {
   setPosition: (beat: number) => void;
   toggleLoop: () => void;
   toggleMetronome: () => void;
+
+  // microphone recording lifecycle (runtime-only)
+  tryBeginAudioRecordingOperation: () => number | null;
+  finishAudioRecordingOperation: (operationId: number) => void;
 
   // history actions
   undo: () => void;
@@ -716,6 +729,7 @@ export function createStudioStore(
   let initializationPromise: Promise<void> | null = null;
   let initializationFailed = false;
   let nativeCloseFenced = false;
+  let nextAudioRecordingOperationId = 1;
   let erasePromise: Promise<boolean> | null = null;
   const pendingDeleteIds = new Map<string, string>();
 
@@ -803,7 +817,8 @@ export function createStudioStore(
   const runProjectOperation = async (
     operation: () => Promise<boolean>,
   ): Promise<boolean> => {
-    if (get().projectOperationBusy) return false;
+    const current = get();
+    if (current.projectOperationBusy || current.audioRecordingOperationId !== null) return false;
     set({ projectOperationBusy: true });
     try {
       return await operation();
@@ -880,7 +895,10 @@ export function createStudioStore(
     const stateAtCall = get();
     // A project switch/delete may be reconciling a durable head. Never race
     // that reversible cancellation path with the coordinator's permanent seal.
-    if (stateAtCall.projectOperationBusy && stateAtCall.localDataErase.phase === 'idle') {
+    if (
+      (stateAtCall.projectOperationBusy || stateAtCall.audioRecordingOperationId !== null)
+      && stateAtCall.localDataErase.phase === 'idle'
+    ) {
       return Promise.resolve(false);
     }
 
@@ -1417,10 +1435,20 @@ export function createStudioStore(
   };
 
   /** Apply an immutable project change: bump updatedAt, push history, save. */
-  const commitProject = (next: Project): boolean => {
+  const commitProject = (
+    next: Project,
+    verifiedAddedAudioAssetId?: string,
+  ): boolean => {
     if (get().projectOperationBusy) return false;
     const current = get().project;
-    if (next === current) return true;
+    if (next === current) return verifiedAddedAudioAssetId === undefined;
+    const verifiedAddition = verifiedAddedAudioAssetId === undefined
+      ? false
+      : next.audioAssets.length === current.audioAssets.length + 1
+        && current.audioAssets.every((asset, index) => next.audioAssets[index] === asset)
+        && next.audioAssets.at(-1)?.id === verifiedAddedAudioAssetId
+        && next.audioAssets.at(-1)?.availability === 'ready';
+    if (verifiedAddedAudioAssetId !== undefined && !verifiedAddition) return false;
     const stamped: Project = { ...next, updatedAt: nowIso() };
     const encoded = encodeProjectJson(stamped);
     if (!encoded.ok) {
@@ -1454,7 +1482,7 @@ export function createStudioStore(
     if (stamped.key !== current.key || stamped.scale !== current.scale) {
       publishScaleSnapStateIfEnabled();
     }
-    if (stamped.audioAssets !== current.audioAssets) {
+    if (stamped.audioAssets !== current.audioAssets && !verifiedAddition) {
       void refreshAudioAssetIssuesNow(stamped);
     }
     return true;
@@ -1474,6 +1502,7 @@ export function createStudioStore(
     ),
     persistenceReady: false,
     projectOperationBusy: false,
+    audioRecordingOperationId: null,
     localDataErase: { phase: 'idle', eraseId: null, message: null },
     persistenceNotice: null,
     savedProjects: [],
@@ -1482,6 +1511,8 @@ export function createStudioStore(
     future: [],
 
     applyProjectChange: (fn) => commitProject(fn(get().project)),
+    applyVerifiedAudioAssetAddition: (fn, verifiedAudioAssetId) =>
+      commitProject(fn(get().project), verifiedAudioAssetId),
 
     // --- project metadata ---
     setBpm: (bpm) => {
@@ -1879,6 +1910,36 @@ export function createStudioStore(
     toggleMetronome: () =>
       set((s) => ({ transport: { ...s.transport, metronome: !s.transport.metronome } })),
 
+    // --- microphone recording lifecycle ---
+    tryBeginAudioRecordingOperation: () => {
+      const state = get();
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+        || state.localDataErase.phase !== 'idle'
+      ) {
+        return null;
+      }
+      const operationId = nextAudioRecordingOperationId;
+      nextAudioRecordingOperationId =
+        nextAudioRecordingOperationId === Number.MAX_SAFE_INTEGER
+          ? 1
+          : nextAudioRecordingOperationId + 1;
+      set({ audioRecordingOperationId: operationId });
+      return operationId;
+    },
+    finishAudioRecordingOperation: (operationId) => {
+      if (get().audioRecordingOperationId !== operationId) return;
+      set((state) => ({
+        audioRecordingOperationId: null,
+        persistenceNotice:
+          state.persistenceNotice?.kind === 'warning'
+          && state.persistenceNotice.message === RECORDING_CLOSE_BLOCKED_NOTICE
+            ? null
+            : state.persistenceNotice,
+      }));
+    },
+
     // --- history ---
     undo: () => {
       if (get().projectOperationBusy) return;
@@ -2020,8 +2081,17 @@ export function createStudioStore(
       if (
         nativeCloseFenced ||
         state.projectOperationBusy ||
+        state.audioRecordingOperationId !== null ||
         state.localDataErase.phase !== 'idle'
       ) {
+        if (state.audioRecordingOperationId !== null) {
+          set({
+            persistenceNotice: {
+              kind: 'warning',
+              message: RECORDING_CLOSE_BLOCKED_NOTICE,
+            },
+          });
+        }
         return false;
       }
       nativeCloseFenced = true;

@@ -359,7 +359,8 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 ### 7.8 Batch 6 remaining gates
 
 - 実装済みのvolume / pan live/offline scheduling回帰を維持しつつ、Automationのlane edit / write / read UIを追加して保存・Undo・keyboard操作を検証する
-- 単一入力録音とdevice loss / disk full / close / cancelを安全にした後、cycle take / compingへ進む
+- 6a初回自動gateは最大60秒のmono/stereo capture、monitor初期OFF / opt-in、raw PCM→48 kHz PCM16 WAV→asset-first保存→新規Track / ClipのUndo 1回採用を検証する。未使用decoded cacheの開始前破棄、active cacheとGC未実施chunkを含む384 MiB planner、高sample-rate超過のallocation前拒否、capture開始からcancel後に残るresample work settlementまでのimport / record single-flight lease、permission cancel後のlate stream破棄、同一tick二重開始拒否、permission / device-ended / cancel / stale開始snapshot / playhead / revoked token / project switch / close拒否も自動検査する
+- 3OS実deviceでpermission、device loss、disk full、monitor feedback、close、再起動再生を確認する。record arm、device選択、shared AudioContext同期、latency補正、長時間streamingを閉じた後、cycle take / compingへ進む
 
 ## 8. 手動QAチェックリスト
 
@@ -374,6 +375,7 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - カラオケ作成で3 presetを比較し、A/Bの位置がずれず、cancel後に結果が現れず、mono / near-mono / 5分超過 / 128 MiB超過が具体的な案内になる
 - カラオケ作成前から品質限界と権利注意が読め、処理中もNetwork requestがなく、閉じた後に音声再生や一時URLが残らない
 - Track追加で楽器 / ドラム / オーディオ / stereo Busと4音色を迷わず選べ、Audioのlocal正規化・JSON非同梱、Busが複数Trackをまとめるreturnであることを理解できる。Mixerの「経路」でmain output、pre/post-fader send、送り量、有効状態をkeyboard / screen readerで操作でき、循環拒否の理由がalertになる。Masterの操作不可、学習role Trackは改名可・削除不可、一般Trackは名前にかかわらず削除可能という案内と、topology変更後もplayheadを保持する案内を確認できる
+- transportとTrack追加の両方からマイク録音を開始し、monitor初期OFF、ヘッドホン警告、3秒countdown、level、stop / discard、最大60秒、固定playhead配置を確認する。permission拒否、device切断、保存容量不足、録音中closeで既存曲が変わらず、成功後はUndo / Redoと再起動再生が一致する
 
 ### 8.1 Native release candidate（macOS / Windows / Linux共通）
 

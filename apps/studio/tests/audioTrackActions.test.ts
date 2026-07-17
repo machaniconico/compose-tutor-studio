@@ -1,19 +1,26 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project } from '@cts/project-model';
+import type { Project, ReadyAudioAsset } from '@cts/project-model';
 import {
+  AudioAssetRepositoryError,
   MemoryAudioAssetRepository,
+  type AudioAssetRepository,
 } from '../src/platform/audioAssetRepository';
 import {
   canonicalizeAudioAsset,
   type CanonicalAudioAssetResult,
   type CanonicalAudioResampleJob,
 } from '../src/audio/canonicalAudioAsset';
+import { getAudioAssetPlaybackCache } from '../src/audio/audioAssetResolver';
 import {
   MAX_HEAVY_AUDIO_RESOURCE_BYTES,
   getReservedHeavyAudioResourceBytes,
   reserveHeavyAudioResources,
 } from '../src/audio/audioResourceReservation';
 import type { SourceAudioDescriptor } from '../src/audio/sourceAudio';
+import {
+  MICROPHONE_CAPTURE_RESERVATION_BYTES,
+  type MicrophonePcmCapture,
+} from '../src/audio/microphoneCapture';
 import { installLocalStorage } from './localStorageStub';
 
 let useStore: typeof import('../src/state/store')['useStore'];
@@ -53,6 +60,25 @@ function audioBufferShape(length: number, sampleRate: number, channels = 1): Aud
   } as AudioBuffer;
 }
 
+function microphoneCaptureShape(
+  length = 96_000,
+  sampleRate = 48_000,
+  channels = 1,
+): MicrophonePcmCapture {
+  const channelData = Array.from(
+    { length: channels },
+    (_, channel) => new Float32Array(length).fill(channel === 0 ? 0.25 : -0.25),
+  );
+  return {
+    numberOfChannels: channels,
+    length,
+    sampleRate,
+    durationSeconds: length / sampleRate,
+    stopReason: 'manual',
+    getChannelData: (channel) => channelData[channel]!,
+  };
+}
+
 function input(signal?: AbortSignal) {
   return {
     fileName: 'reference take.wav',
@@ -82,6 +108,13 @@ async function importFixture(repository = new MemoryAudioAssetRepository()) {
   expect(result.ok).toBe(true);
   if (!result.ok) throw new Error(result.code);
   return { result, repository };
+}
+
+function beginRecordingHandle() {
+  const result = actions.beginStudioAudioTrackRecording();
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.code);
+  return result.handle;
 }
 
 beforeAll(async () => {
@@ -388,6 +421,12 @@ describe('Studio Audio Track import', () => {
     await expect(first).resolves.toEqual({ ok: false, code: 'cancelled' });
     expect(getReservedHeavyAudioResourceBytes()).toBeGreaterThan(0);
 
+    expect(actions.beginStudioAudioTrackRecording()).toEqual({
+      ok: false,
+      code: 'decode-busy',
+    });
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+
     const secondDecode = vi.fn(async () => ({}) as AudioBuffer);
     await expect(actions.importStudioAudioTrack(input(), {
       repository: new MemoryAudioAssetRepository(),
@@ -401,6 +440,11 @@ describe('Studio Audio Track import', () => {
     await resampleJob.settled;
     await Promise.resolve();
     expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+
+    const recordingAfterSettlement = actions.beginStudioAudioTrackRecording();
+    expect(recordingAfterSettlement.ok).toBe(true);
+    if (!recordingAfterSettlement.ok) throw new Error(recordingAfterSettlement.code);
+    actions.discardStudioAudioTrackRecording(recordingAfterSettlement.handle);
 
     const thirdDecode = vi.fn(async () => ({}) as AudioBuffer);
     await expect(actions.importStudioAudioTrack(input(), {
@@ -649,6 +693,373 @@ describe('Studio Audio Track import', () => {
     expect(decodeSource).not.toHaveBeenCalled();
     expect(sourceBlob.slice).not.toHaveBeenCalled();
     expect(fingerprint(useStore.getState().project)).toBe(projectBefore);
+  });
+});
+
+describe('Studio Audio Track microphone recording', () => {
+  it('persists canonical bytes and adopts a playhead-positioned track in one Undo step', async () => {
+    const repository = new MemoryAudioAssetRepository();
+    useStore.getState().setPosition(6);
+    const recordingHandle = beginRecordingHandle();
+    const historyBefore = useStore.getState().past.length;
+    const revisionBefore = useStore.getState().saveState.revision;
+
+    const result = await actions.recordStudioAudioTrack({
+      recordingHandle,
+      capture: microphoneCaptureShape(),
+      trackName: 'Lead Take',
+      fileName: 'Lead Take.wav',
+    }, {
+      repository,
+      createAudioBuffer: () => audioBufferShape(96_000, 48_000),
+      canonicalize: async () => canonicalResult(),
+      createAssetId: () => 'asset-recorded-take',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      trackName: 'Lead Take',
+      audioAssetId: 'asset-recorded-take',
+    });
+    if (!result.ok) throw new Error(result.code);
+    const state = useStore.getState();
+    const track = state.project.tracks.find((candidate) => candidate.id === result.trackId);
+    const asset = state.project.audioAssets.find((candidate) => candidate.id === result.audioAssetId);
+    expect(track?.clips[0]).toMatchObject({ type: 'audio', startBeat: 6 });
+    expect(asset).toMatchObject({ originalName: 'Lead Take.wav', frameCount: 96_000 });
+    expect(state.past).toHaveLength(historyBefore + 1);
+    expect(state.saveState.revision).toBe(revisionBefore + 1);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+    if (!asset || asset.availability !== 'ready') throw new Error('recorded asset missing');
+    await expect(repository.read(asset)).resolves.toEqual(bytes);
+
+    state.undo();
+    expect(useStore.getState().project.tracks.some((candidate) => candidate.id === result.trackId))
+      .toBe(false);
+    useStore.getState().redo();
+    expect(useStore.getState().project.tracks.some((candidate) => candidate.id === result.trackId))
+      .toBe(true);
+  });
+
+  it('counts stale capture chunks and rejects a 192 kHz stereo worst case before AudioBuffer allocation', () => {
+    const worstCase = microphoneCaptureShape(60 * 192_000, 192_000, 2);
+    expect(() => actions.planStudioAudioRecordingResources(worstCase))
+      .toThrowError(expect.objectContaining({ code: 'resource-limit-exceeded' }));
+
+    const supported = microphoneCaptureShape(60 * 48_000, 48_000, 2);
+    const plan = actions.planStudioAudioRecordingResources(supported);
+    expect(plan).toMatchObject({
+      captureChunkFloat32Bytes: 23_040_000,
+      capturedFloat32Bytes: 23_040_000,
+      audioBufferFloat32Bytes: 23_040_000,
+      captureRuntimeOverheadBytes: 16 * 1024 * 1024,
+      canonicalFrameCount: 2_880_000,
+      canonicalFloat32Bytes: 23_040_000,
+      canonicalPcm16WavBytes: 11_520_044,
+      requiresCanonicalResample: false,
+    });
+    expect(plan.peakBytes).toBeLessThan(actions.MAX_STUDIO_AUDIO_IMPORT_PEAK_BYTES);
+  });
+
+  it('keeps the project unchanged on cancellation and releases a transferred reservation', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const recordingHandle = beginRecordingHandle();
+    const before = useStore.getState();
+    const result = await actions.recordStudioAudioTrack({
+      recordingHandle,
+      capture: microphoneCaptureShape(),
+      signal: controller.signal,
+      trackName: 'Cancelled Take',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer: () => {
+        throw new Error('must not allocate');
+      },
+      canonicalize: async () => canonicalResult(),
+    });
+
+    expect(result).toEqual({ ok: false, code: 'cancelled' });
+    expect(useStore.getState().project).toBe(before.project);
+    expect(useStore.getState().past).toHaveLength(before.past.length);
+    expect(useStore.getState().saveState.revision).toBe(before.saveState.revision);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('rejects a stale finalization without overwriting an intervening edit', async () => {
+    let release!: (result: CanonicalAudioAssetResult) => void;
+    const canonical = new Promise<CanonicalAudioAssetResult>((resolve) => { release = resolve; });
+    const recordingHandle = beginRecordingHandle();
+    const pending = actions.recordStudioAudioTrack({
+      recordingHandle,
+      capture: microphoneCaptureShape(),
+      trackName: 'Stale Take',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer: () => audioBufferShape(96_000, 48_000),
+      canonicalize: () => canonical,
+      createAssetId: () => 'asset-stale-recording',
+    });
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      title: '録音中の別編集',
+    }))).toBe(true);
+    release(canonicalResult());
+
+    await expect(pending).resolves.toEqual({ ok: false, code: 'commit-rejected' });
+    expect(useStore.getState().project.title).toBe('録音中の別編集');
+    expect(useStore.getState().project.tracks.some((track) => track.type === 'audio')).toBe(false);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('uses the project snapshot from capture start as the only commit base', async () => {
+    const recordingHandle = beginRecordingHandle();
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      title: '録音開始後の外部編集',
+    }))).toBe(true);
+    const createAudioBuffer = vi.fn(() => audioBufferShape(96_000, 48_000));
+
+    await expect(actions.recordStudioAudioTrack({
+      recordingHandle,
+      capture: microphoneCaptureShape(),
+      trackName: 'Snapshot Take',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer,
+      canonicalize: async () => canonicalResult(),
+    })).resolves.toEqual({ ok: false, code: 'commit-rejected' });
+
+    expect(createAudioBuffer).not.toHaveBeenCalled();
+    expect(useStore.getState().project.title).toBe('録音開始後の外部編集');
+    expect(useStore.getState().project.tracks.some((track) => track.type === 'audio')).toBe(false);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('reports storage exhaustion without adopting partial recording metadata', async () => {
+    const repository: AudioAssetRepository = {
+      kind: 'memory',
+      store: async () => { throw new AudioAssetRepositoryError('too-large'); },
+      read: async () => { throw new AudioAssetRepositoryError('missing'); },
+      verify: async () => { throw new AudioAssetRepositoryError('missing'); },
+    };
+    const before = useStore.getState();
+    const recordingHandle = beginRecordingHandle();
+    const result = await actions.recordStudioAudioTrack({
+      recordingHandle,
+      capture: microphoneCaptureShape(),
+      trackName: 'No Space Take',
+    }, {
+      repository,
+      createAudioBuffer: () => audioBufferShape(96_000, 48_000),
+      canonicalize: async () => canonicalResult(),
+    });
+
+    expect(result).toEqual({ ok: false, code: 'asset-store-failed' });
+    expect(useStore.getState().project).toBe(before.project);
+    expect(useStore.getState().past).toHaveLength(before.past.length);
+    expect(useStore.getState().saveState.revision).toBe(before.saveState.revision);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('owns the shared import lease for the entire capture phase', async () => {
+    const recordingHandle = beginRecordingHandle();
+    const decodeSource = vi.fn(async () => ({}) as AudioBuffer);
+
+    await expect(actions.importStudioAudioTrack(input(), {
+      repository: new MemoryAudioAssetRepository(),
+      decodeSource,
+      canonicalize: async () => canonicalResult(),
+    })).resolves.toEqual({ ok: false, code: 'decode-busy' });
+    expect(decodeSource).not.toHaveBeenCalled();
+
+    actions.discardStudioAudioTrackRecording(recordingHandle);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('fails before microphone permission when the capture-phase memory cannot be reserved', () => {
+    const competing = reserveHeavyAudioResources(
+      MAX_HEAVY_AUDIO_RESOURCE_BYTES - MICROPHONE_CAPTURE_RESERVATION_BYTES + 1,
+    );
+    try {
+      expect(actions.beginStudioAudioTrackRecording()).toEqual({
+        ok: false,
+        code: 'resource-limit-exceeded',
+      });
+      expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    } finally {
+      competing.release();
+    }
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('counts an active decoded playback cache lease in the capture-phase reservation', async () => {
+    const cache = getAudioAssetPlaybackCache();
+    cache.clearUnused();
+    const asset: ReadyAudioAsset = {
+      id: 'active-cache-recording-boundary',
+      availability: 'ready',
+      checksumSha256: 'e'.repeat(64),
+      originalName: 'active-cache.wav',
+      mediaType: 'audio/wav',
+      byteLength: 4,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 48_000,
+    };
+    const decodedLease = await cache.acquireDecoded({
+      assets: [{ asset, bytes: new Uint8Array(4) }],
+      estimatedDecodedBytes: 48_000 * Float32Array.BYTES_PER_ELEMENT,
+    }, {
+      sampleRate: 48_000,
+      decodeAudioData: vi.fn(async () => audioBufferShape(48_000, 48_000)),
+    } as unknown as BaseAudioContext);
+    const retained = cache.retainedDecodedBytes;
+    expect(retained).toBeGreaterThan(0);
+    const competing = reserveHeavyAudioResources(
+      MAX_HEAVY_AUDIO_RESOURCE_BYTES
+        - MICROPHONE_CAPTURE_RESERVATION_BYTES
+        - retained
+        + 1,
+    );
+    try {
+      expect(actions.beginStudioAudioTrackRecording()).toEqual({
+        ok: false,
+        code: 'resource-limit-exceeded',
+      });
+      expect(cache.retainedDecodedBytes).toBe(retained);
+    } finally {
+      competing.release();
+      decodedLease.release();
+      cache.clearUnused();
+    }
+    expect(cache.retainedDecodedBytes).toBe(0);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('evicts an unleased decoded cache entry before reserving microphone capture', async () => {
+    const cache = getAudioAssetPlaybackCache();
+    cache.clearUnused();
+    const asset: ReadyAudioAsset = {
+      id: 'unused-cache-recording-boundary',
+      availability: 'ready',
+      checksumSha256: 'd'.repeat(64),
+      originalName: 'unused-cache.wav',
+      mediaType: 'audio/wav',
+      byteLength: 4,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 48_000,
+    };
+    const decodedLease = await cache.acquireDecoded({
+      assets: [{ asset, bytes: new Uint8Array(4) }],
+      estimatedDecodedBytes: 48_000 * Float32Array.BYTES_PER_ELEMENT,
+    }, {
+      sampleRate: 48_000,
+      decodeAudioData: vi.fn(async () => audioBufferShape(48_000, 48_000)),
+    } as unknown as BaseAudioContext);
+    decodedLease.release();
+    expect(cache.retainedDecodedBytes).toBeGreaterThan(0);
+    const competing = reserveHeavyAudioResources(
+      MAX_HEAVY_AUDIO_RESOURCE_BYTES - MICROPHONE_CAPTURE_RESERVATION_BYTES,
+    );
+    try {
+      const recording = actions.beginStudioAudioTrackRecording();
+      expect(recording.ok).toBe(true);
+      expect(cache.retainedDecodedBytes).toBe(0);
+      if (recording.ok) actions.discardStudioAudioTrackRecording(recording.handle);
+    } finally {
+      competing.release();
+      cache.clearUnused();
+    }
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('rejects adoption if the exact recording token is revoked during finalization', async () => {
+    let release!: (result: CanonicalAudioAssetResult) => void;
+    const canonical = new Promise<CanonicalAudioAssetResult>((resolve) => { release = resolve; });
+    const recordingHandle = beginRecordingHandle();
+    const projectBefore = useStore.getState().project;
+    const pending = actions.recordStudioAudioTrack({
+      recordingHandle,
+      capture: microphoneCaptureShape(),
+      trackName: 'Revoked Take',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer: () => audioBufferShape(96_000, 48_000),
+      canonicalize: () => canonical,
+    });
+
+    useStore.getState().finishAudioRecordingOperation(recordingHandle.operationId);
+    release(canonicalResult());
+
+    await expect(pending).resolves.toEqual({ ok: false, code: 'commit-rejected' });
+    expect(useStore.getState().project).toBe(projectBefore);
+    expect(useStore.getState().past).toHaveLength(0);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('keeps close, import, and another recording fenced until aborted resampling settles', async () => {
+    let releaseRender: ((value: AudioBuffer) => void) | undefined;
+    let resampleJob: CanonicalAudioResampleJob | undefined;
+    const rendering = new Promise<AudioBuffer>((resolve) => {
+      releaseRender = resolve;
+    });
+    const startRendering = vi.fn(() => rendering);
+    const createOfflineContext = vi.fn(() => ({
+      destination: {},
+      createBufferSource: () => ({
+        buffer: null,
+        connect: vi.fn(),
+        start: vi.fn(),
+      }),
+      startRendering,
+    }) as unknown as OfflineAudioContext);
+    const controller = new AbortController();
+    const recordingHandle = beginRecordingHandle();
+    const pending = actions.recordStudioAudioTrack({
+      recordingHandle,
+      capture: microphoneCaptureShape(88_200, 44_100),
+      signal: controller.signal,
+      trackName: 'Cancelled Resample',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer: () => audioBufferShape(88_200, 44_100),
+      canonicalize: (source, options) => canonicalizeAudioAsset(source, {
+        ...options,
+        createOfflineContext,
+        onResampleJob: (job) => {
+          resampleJob = job;
+          options.onResampleJob?.(job);
+        },
+      }),
+    });
+
+    await vi.waitFor(() => expect(startRendering).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).resolves.toEqual({ ok: false, code: 'cancelled' });
+    expect(useStore.getState().audioRecordingOperationId).toBe(recordingHandle.operationId);
+    expect(actions.beginStudioAudioTrackRecording()).toEqual({ ok: false, code: 'decode-busy' });
+    await expect(actions.importStudioAudioTrack(input(), {
+      repository: new MemoryAudioAssetRepository(),
+      decodeSource: async () => ({}) as AudioBuffer,
+      canonicalize: async () => canonicalResult(),
+    })).resolves.toEqual({ ok: false, code: 'decode-busy' });
+    expect(useStore.getState().tryBeginNativeClose()).toBe(false);
+    expect(useStore.getState().persistenceNotice?.message).toContain('マイク録音');
+
+    if (!releaseRender || !resampleJob) throw new Error('resample job was not started');
+    releaseRender(audioBufferShape(96_000, 48_000));
+    await resampleJob.settled;
+    await Promise.resolve();
+
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(useStore.getState().persistenceNotice).toBeNull();
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+    const retry = actions.beginStudioAudioTrackRecording();
+    expect(retry.ok).toBe(true);
+    if (retry.ok) actions.discardStudioAudioTrackRecording(retry.handle);
   });
 });
 

@@ -281,6 +281,12 @@ live drainの所有権はProject schemaではなく`PlaybackController`のtransi
 
 確定時にProjectのcompiled tempo mapでsecondsをclip-local beatへ写し、fresh ID、pitch、startBeat、durationBeats、confidence由来velocityを持つ`NoteEvent`へ変換する。固定tempo Projectもbeat 0だけのmapとして同じ経路を通る。clip終端、event数、MIDI範囲を検査し、対象MIDI Clipのnotesを1回だけ置換する。成功した`NoteEvent`だけが通常のProject / history / autosave / SQLite / `.ctsproj.json`へ保存され、source fileや解析中間値は保存しない。
 
+### 2.6.1 Transient Audio Track recording
+
+Audio Track録音のpermission、countdown、入力level、monitor opt-in、開始時Project snapshotとplayheadを束ねる所有handle、Abort generation、raw Float32 PCM、encode進捗はruntime-onlyであり、Project codec / SQLite / `.ctsproj.json`へ保存しない。初回のproduction境界は既定の単一input、1〜2 channel、最大60秒、dry録音、monitor初期OFFである。録音中のinput hot switch、record arm、latency補正、take laneはProject fieldとして先行追加しない。
+
+capture開始前に同じ所有handleがProject切替 / close token、Audio Track import / recordingのsingle-flight lease、開始時Project snapshot / playheadを同期取得する。capture開始時に未使用のdecoded playback cacheを破棄し、残るactive cacheを含めてcaptureからcanonicalize / persistとcancel後に残るresample workのsettlementまで同じ384 MiB予約を同期resizeして所有する。permission待ちcancel後のlate streamはmicrophone内部tokenが停止・破棄まで所有し、PCM graphを作らない。GC未実施のworklet chunk 1組、連続source PCM、capture runtime overhead、real AudioBuffer copy、optional 48 kHz resample、PCM16 WAV、repository copyのphase peakをallocation前に検査する。高sample-rate / stereoで合算上限を超えるtakeはAudioBuffer作成前に拒否する。canonical WAV bytesとchecksum receiptを保存してからだけ、開始時Project snapshot / playheadとexact tokenへのCASで`ReadyAudioAsset`、新規Audio Track、全range Audio ClipをUndo 1回として採用する。permission / device loss / cancel / store失敗 / stale snapshot / revoked tokenではProjectとhistoryを変更しない。保存済みbytesだけが孤児になる場合は許容し、欠損bytesを参照するmetadataは作らない。
+
 ### 2.7 Track管理とpreset（schema v4）
 
 - productionで新規生成するTrackはinstrument / drum / bus、またはimport済みassetを持つaudioで、roleは`general`とする。instrument / drumは開始0・長さ`Project.lengthBeats`の空MIDI / Drum Clipを1つ、audioはcanonical asset全rangeのAudio Clipを1つ持つ。BusはClip / instrumentを持たない。先頭Masterがあればその直前、Masterがないlegacy Projectでは末尾へ置き、全新規TrackへMaster直結outputを同じtransactionで作る

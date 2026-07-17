@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  AudioResourceReservationError,
-  reserveHeavyAudioResources,
-  type HeavyAudioResourceReservation,
-} from '../../audio/audioResourceReservation';
+import type { HeavyAudioResourceReservation } from '../../audio/audioResourceReservation';
 import {
   MAX_MICROPHONE_CAPTURE_SECONDS,
-  MICROPHONE_CAPTURE_RESERVATION_BYTES,
   MicrophoneCaptureError,
   startMicrophoneCapture,
   type MicrophoneCaptureSession,
   type MicrophonePcmCapture,
 } from '../../audio/microphoneCapture';
+import { reserveMicrophoneCaptureResources } from '../../audio/microphoneCaptureReservation';
 import { Dialog } from '../common/Dialog';
+import { microphoneCaptureFailureMessage } from '../common/microphoneCaptureFailureMessage';
 
 type RecordingPhase =
   | 'idle'
@@ -28,41 +25,7 @@ type HummingRecordingDialogProps = Readonly<{
   onChooseFile: () => void;
 }>;
 
-export function microphoneCaptureFailureMessage(error: unknown): string {
-  if (error instanceof AudioResourceReservationError) {
-    return '別の音声処理が使用中です。処理が終わってから、もう一度録音してください。';
-  }
-  if (error instanceof MicrophoneCaptureError) {
-    switch (error.code) {
-      case 'permission-denied':
-        return 'マイクの使用が許可されませんでした。OSまたはブラウザの設定でこのアプリのマイクを許可してください。';
-      case 'device-not-found':
-        return '使用できるマイクが見つかりません。マイクを接続してから再試行してください。';
-      case 'device-busy':
-      case 'busy':
-        return 'マイクがほかの録音処理で使用中です。ほかの録音を終了してから再試行してください。';
-      case 'device-ended':
-        return '録音中にマイクが切断されました。接続を確認してから再試行してください。';
-      case 'insecure-context':
-        return 'この接続ではマイクを安全に使用できません。デスクトップ版またはHTTPS版を使用してください。';
-      case 'unsupported':
-        return 'この環境は直接録音に対応していません。録音済みの音声ファイルを選んでください。';
-      case 'too-short':
-        return '録音が短すぎます。0.5秒以上、声を伸ばして録音してください。';
-      case 'sample-rate-out-of-range':
-      case 'channel-limit-exceeded':
-        return 'このマイクの音声形式には対応していません。モノラルまたはステレオの別のマイクをお試しください。';
-      case 'resource-limit-exceeded':
-        return 'この端末では録音用のメモリを安全に確保できませんでした。ほかの音声処理を終了してください。';
-      case 'cancelled':
-        return '';
-      case 'worklet-failed':
-      case 'capture-failed':
-        break;
-    }
-  }
-  return 'マイク録音を完了できませんでした。接続を確認するか、録音済みファイルを使用してください。';
-}
+export { microphoneCaptureFailureMessage } from '../common/microphoneCaptureFailureMessage';
 
 function formatElapsed(seconds: number): string {
   const bounded = Math.max(0, Math.min(MAX_MICROPHONE_CAPTURE_SECONDS, Math.floor(seconds)));
@@ -115,7 +78,10 @@ export function HummingRecordingDialog({
   };
 
   const beginRecording = async (): Promise<void> => {
-    if (phase !== 'idle' && phase !== 'error') return;
+    if (
+      reservationRef.current !== null
+      || (phase !== 'idle' && phase !== 'error')
+    ) return;
     const generation = ++generationRef.current;
     cancelRequestedRef.current = false;
     setError(null);
@@ -123,9 +89,7 @@ export function HummingRecordingDialog({
     setLevel(0);
     setPhase('requesting');
     try {
-      reservationRef.current = reserveHeavyAudioResources(
-        MICROPHONE_CAPTURE_RESERVATION_BYTES,
-      );
+      reservationRef.current = reserveMicrophoneCaptureResources();
       const controller = new AbortController();
       abortRef.current = controller;
       const session = await startMicrophoneCapture({
@@ -144,7 +108,10 @@ export function HummingRecordingDialog({
       });
       if (!mountedRef.current || generation !== generationRef.current) {
         session.cancel();
-        void session.result.catch(() => undefined);
+        void session.result.then(
+          () => releaseReservation(),
+          () => releaseReservation(),
+        );
         return;
       }
       abortRef.current = null;
@@ -156,6 +123,7 @@ export function HummingRecordingDialog({
           if (!mountedRef.current || generation !== generationRef.current) return;
           sessionRef.current = null;
           onClose();
+          if (cancelRequestedRef.current) return;
           onCaptured(capture);
         },
         (caught: unknown) => finishWithError(caught, generation),
@@ -213,9 +181,12 @@ export function HummingRecordingDialog({
     return () => {
       mountedRef.current = false;
       generationRef.current += 1;
+      const captureCleanupPending = abortRef.current !== null || sessionRef.current !== null;
       abortRef.current?.abort();
       sessionRef.current?.cancel();
-      releaseReservation();
+      // The pending capture callback releases memory only after platform
+      // cleanup has stopped the worklet, stream, and AudioContext.
+      if (!captureCleanupPending) releaseReservation();
     };
   }, []);
 
@@ -270,7 +241,7 @@ export function HummingRecordingDialog({
         {phase === 'countdown' ? (
           <>
             <p className="humming-recording__countdown" role="status" aria-live="assertive">
-              {countdown}
+              録音開始まで{countdown}秒
             </p>
             <p>カウントのあとに歌い始めてください。</p>
             <button ref={waitCancelButtonRef} type="button" onClick={cancelRecording}>

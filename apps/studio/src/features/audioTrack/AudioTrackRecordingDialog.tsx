@@ -1,0 +1,438 @@
+import { useEffect, useRef, useState } from 'react';
+import {
+  MAX_MICROPHONE_CAPTURE_SECONDS,
+  MicrophoneCaptureError,
+  startMicrophoneCapture,
+  type MicrophoneCaptureSession,
+  type MicrophonePcmCapture,
+} from '../../audio/microphoneCapture';
+import {
+  beginStudioAudioTrackRecording,
+  discardStudioAudioTrackRecording,
+  recordStudioAudioTrack,
+  studioAudioActionErrorMessage,
+  type StudioAudioTrackRecordingHandle,
+} from '../../state/audioTrackActions';
+import { pushToast } from '../../state/tutorialBridge';
+import { Dialog } from '../common/Dialog';
+import { microphoneCaptureFailureMessage } from '../common/microphoneCaptureFailureMessage';
+
+type RecordingPhase =
+  | 'idle'
+  | 'requesting'
+  | 'countdown'
+  | 'recording'
+  | 'stopping'
+  | 'processing'
+  | 'error';
+
+type AudioTrackRecordingDialogProps = Readonly<{
+  trackName: string;
+  onClose: () => void;
+  onCreated: (trackId: string) => void;
+  onBack?: () => void;
+}>;
+
+function formatElapsed(seconds: number): string {
+  const bounded = Math.max(0, Math.min(MAX_MICROPHONE_CAPTURE_SECONDS, Math.floor(seconds)));
+  const minutes = Math.floor(bounded / 60);
+  return `${minutes}:${String(bounded % 60).padStart(2, '0')}`;
+}
+
+function recordingBeginFailureMessage(
+  code: 'decode-busy' | 'project-busy' | 'resource-limit-exceeded',
+): string {
+  switch (code) {
+    case 'decode-busy':
+      return '別の音声の読み込み・録音処理が続いています。完了してからもう一度お試しください。';
+    case 'resource-limit-exceeded':
+      return '録音用のメモリを安全に確保できませんでした。ほかの音声処理を終了してから再試行してください。';
+    case 'project-busy':
+      return 'プロジェクトを切り替え中、または別の録音が進行中です。完了してから再試行してください。';
+  }
+}
+
+/** Record one dry, bounded microphone take and create a new Audio Track at the playhead. */
+export function AudioTrackRecordingDialog({
+  trackName,
+  onClose,
+  onCreated,
+  onBack,
+}: AudioTrackRecordingDialogProps) {
+  const [phase, setPhase] = useState<RecordingPhase>('idle');
+  const [monitorInput, setMonitorInput] = useState(false);
+  const [countdown, setCountdown] = useState(3);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [level, setLevel] = useState(0);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const generationRef = useRef(0);
+  const recordingHandleRef = useRef<StudioAudioTrackRecordingHandle | null>(null);
+  const playbackStoppedRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const sessionRef = useRef<MicrophoneCaptureSession | null>(null);
+  const cancelRequestedRef = useRef(false);
+  const finalizingRef = useRef(false);
+  const startButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const stopButtonRef = useRef<HTMLButtonElement>(null);
+  const processingStatusRef = useRef<HTMLParagraphElement>(null);
+
+  const discardRecordingOwnership = (): void => {
+    const handle = recordingHandleRef.current;
+    if (!handle) return;
+    recordingHandleRef.current = null;
+    discardStudioAudioTrackRecording(handle);
+  };
+
+  const finishCaptureError = (caught: unknown, generation: number): void => {
+    discardRecordingOwnership();
+    if (!mountedRef.current || generation !== generationRef.current) return;
+    abortRef.current = null;
+    sessionRef.current = null;
+    if (
+      cancelRequestedRef.current
+      && caught instanceof MicrophoneCaptureError
+      && caught.code === 'cancelled'
+    ) {
+      onClose();
+      return;
+    }
+    setError(microphoneCaptureFailureMessage(caught));
+    setStatus('録音は保存していません。プロジェクトは変更されていません。');
+    setLevel(0);
+    setPhase('error');
+  };
+
+  const finalizeCapture = async (
+    capture: MicrophonePcmCapture,
+    generation: number,
+  ): Promise<void> => {
+    if (!mountedRef.current || generation !== generationRef.current) {
+      discardRecordingOwnership();
+      return;
+    }
+    finalizingRef.current = true;
+    sessionRef.current = null;
+    setPhase('processing');
+    setProgress(0);
+    setStatus('録音を48 kHzのWAVへ変換しています…');
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const recordingHandle = recordingHandleRef.current;
+    recordingHandleRef.current = null;
+
+    try {
+      if (!recordingHandle) {
+        throw new Error('recording ownership was lost');
+      }
+      const result = await recordStudioAudioTrack({
+        recordingHandle,
+        capture,
+        signal: controller.signal,
+        trackName,
+        fileName: `${trackName.trim() || 'マイク録音'}.wav`,
+        onProgress: (next) => {
+          if (!mountedRef.current || generation !== generationRef.current) return;
+          setProgress(Math.round(Math.max(0, Math.min(1, next.fraction)) * 100));
+          setStatus(
+            next.phase === 'resampling'
+              ? '録音を48 kHzへ変換しています…'
+              : 'プロジェクト用WAVを作成しています…',
+          );
+        },
+      });
+      if (!mountedRef.current || generation !== generationRef.current) return;
+      if (!result.ok) {
+        if (result.code === 'cancelled' && cancelRequestedRef.current) {
+          onClose();
+          return;
+        }
+        setProgress(null);
+        setError(`${studioAudioActionErrorMessage(result.code)} プロジェクトは変更されていません。`);
+        setStatus('録音をオーディオトラックへ保存できませんでした。');
+        setPhase('error');
+        return;
+      }
+      const stopped = playbackStoppedRef.current
+        ? ' 再生を停止した位置へ配置しました。'
+        : '';
+      const deduplicated = result.deduplicated
+        ? ' 同じ音声素材は重複保存していません。'
+        : '';
+      pushToast(`「${result.trackName}」へ録音を保存しました。${stopped}${deduplicated}`, 'success');
+      onCreated(result.trackId);
+    } catch (caught) {
+      if (!mountedRef.current || generation !== generationRef.current) return;
+      setProgress(null);
+      setError(
+        controller.signal.aborted
+          ? null
+          : `${microphoneCaptureFailureMessage(caught)} プロジェクトは変更されていません。`,
+      );
+      setStatus(
+        controller.signal.aborted
+          ? '録音の保存を中止しました。プロジェクトは変更されていません。'
+          : '録音をオーディオトラックへ保存できませんでした。',
+      );
+      if (controller.signal.aborted && cancelRequestedRef.current) onClose();
+      else setPhase('error');
+    } finally {
+      finalizingRef.current = false;
+      abortRef.current = null;
+    }
+  };
+
+  const beginRecording = async (): Promise<void> => {
+    if (
+      recordingHandleRef.current !== null
+      || (phase !== 'idle' && phase !== 'error')
+    ) return;
+    const ownership = beginStudioAudioTrackRecording();
+    if (!ownership.ok) {
+      setError(recordingBeginFailureMessage(ownership.code));
+      setStatus('録音は開始していません。');
+      setPhase('error');
+      return;
+    }
+    recordingHandleRef.current = ownership.handle;
+    playbackStoppedRef.current = ownership.playbackStopped;
+    const generation = ++generationRef.current;
+    cancelRequestedRef.current = false;
+    setError(null);
+    setStatus(null);
+    setProgress(null);
+    setElapsedSeconds(0);
+    setLevel(0);
+    setPhase('requesting');
+
+    try {
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const session = await startMicrophoneCapture({
+        signal: controller.signal,
+        countdownSeconds: 3,
+        maxDurationSeconds: MAX_MICROPHONE_CAPTURE_SECONDS,
+        monitorInput,
+        onCountdown: (secondsRemaining) => {
+          if (!mountedRef.current || generation !== generationRef.current) return;
+          setCountdown(secondsRemaining);
+          setPhase('countdown');
+        },
+        onLevel: (nextLevel) => {
+          if (!mountedRef.current || generation !== generationRef.current) return;
+          setLevel(nextLevel);
+        },
+      });
+      if (!mountedRef.current || generation !== generationRef.current) {
+        session.cancel();
+        void session.result.then(
+          () => discardRecordingOwnership(),
+          () => discardRecordingOwnership(),
+        );
+        return;
+      }
+      abortRef.current = null;
+      sessionRef.current = session;
+      setPhase('recording');
+      void session.result.then(
+        (capture) => {
+          if (cancelRequestedRef.current) {
+            discardRecordingOwnership();
+            if (mountedRef.current && generation === generationRef.current) {
+              sessionRef.current = null;
+              onClose();
+            }
+            return;
+          }
+          return finalizeCapture(capture, generation);
+        },
+        (caught: unknown) => finishCaptureError(caught, generation),
+      );
+    } catch (caught) {
+      finishCaptureError(caught, generation);
+    }
+  };
+
+  const cancelRecording = (): void => {
+    if (phase === 'idle' || phase === 'error') {
+      onClose();
+      return;
+    }
+    cancelRequestedRef.current = true;
+    setPhase(phase === 'processing' ? 'processing' : 'stopping');
+    if (phase === 'processing') setStatus('保存処理を安全に中止しています…');
+    abortRef.current?.abort();
+    sessionRef.current?.cancel();
+  };
+
+  const stopRecording = (): void => {
+    if (phase !== 'recording' || !sessionRef.current) return;
+    setPhase('stopping');
+    void sessionRef.current.stop().catch(() => undefined);
+  };
+
+  useEffect(() => {
+    if (phase !== 'recording') return;
+    const updateElapsed = (): void => {
+      const session = sessionRef.current;
+      if (session) setElapsedSeconds(session.elapsedSeconds());
+    };
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 100);
+    return () => window.clearInterval(interval);
+  }, [phase]);
+
+  useEffect(() => {
+    if (!['requesting', 'countdown', 'recording', 'processing', 'error'].includes(phase)) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (phase === 'recording') stopButtonRef.current?.focus();
+      else if (phase === 'processing') processingStatusRef.current?.focus();
+      else if (phase === 'error') startButtonRef.current?.focus();
+      else cancelButtonRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+      const captureCleanupPending = abortRef.current !== null || sessionRef.current !== null;
+      abortRef.current?.abort();
+      sessionRef.current?.cancel();
+      // Permission/capture owns browser resources until its promise settles.
+      // Its existing success/error callback releases the opaque lease after
+      // the worklet, stream, and AudioContext have actually been cleaned up.
+      if (!finalizingRef.current && !captureCleanupPending) {
+        discardRecordingOwnership();
+      }
+    };
+  }, []);
+
+  const closeLocked = !['idle', 'error'].includes(phase);
+
+  return (
+    <Dialog
+      title="マイクをオーディオトラックへ録音"
+      className="dialog--audio-track-recording"
+      onClose={cancelRecording}
+      closeDisabled={closeLocked}
+      busy={phase === 'requesting' || phase === 'stopping' || phase === 'processing'}
+    >
+      <div className="audio-track-recording">
+        <p className="audio-track-recording__lead">
+          最大60秒の音声を端末内だけで録音し、現在の再生位置へ新しいオーディオトラックとして保存します。
+        </p>
+
+        {phase === 'idle' || phase === 'error' ? (
+          <>
+            <label className="audio-track-recording__monitor">
+              <input
+                type="checkbox"
+                checked={monitorInput}
+                onChange={(event) => setMonitorInput(event.target.checked)}
+              />
+              <span>
+                <strong>録音中に入力を聴く</strong>
+                <small>初期値はOFFです。ONにする場合は、ハウリングを防ぐためヘッドホンを使用してください。</small>
+              </span>
+            </label>
+            <p>開始後に3秒のカウントが入ります。録音音声はエフェクトを通さないドライ音です。</p>
+            {status ? <p className="audio-track-recording__status" role="status">{status}</p> : null}
+            {error ? <p className="track-management__error" role="alert">{error}</p> : null}
+            <div className="audio-track-recording__actions">
+              <button
+                ref={startButtonRef}
+                type="button"
+                className="track-management__primary"
+                data-modal-initial-focus
+                onClick={() => void beginRecording()}
+              >
+                {phase === 'error' ? 'マイクを再試行' : '録音を開始'}
+              </button>
+              {onBack ? <button type="button" onClick={onBack}>録音方法へ戻る</button> : null}
+              <button type="button" onClick={onClose}>キャンセル</button>
+            </div>
+          </>
+        ) : null}
+
+        {phase === 'requesting' ? (
+          <>
+            <p role="status" aria-live="polite">マイクの使用許可を待っています…</p>
+            <button ref={cancelButtonRef} type="button" onClick={cancelRecording}>キャンセル</button>
+          </>
+        ) : null}
+
+        {phase === 'countdown' ? (
+          <>
+            <p className="audio-track-recording__countdown" role="status" aria-live="assertive">
+              録音開始まで{countdown}秒
+            </p>
+            <p>カウントのあとに録音を開始します。</p>
+            <button ref={cancelButtonRef} type="button" onClick={cancelRecording}>キャンセル</button>
+          </>
+        ) : null}
+
+        {phase === 'recording' || phase === 'stopping' ? (
+          <>
+            <p className="audio-track-recording__state" role="status" aria-live="polite">
+              <span aria-hidden="true" className="audio-track-recording__indicator" />
+              {phase === 'recording' ? '録音中' : '録音を終了しています…'}
+            </p>
+            <p className="audio-track-recording__time" role="timer" aria-label="録音時間">
+              {formatElapsed(elapsedSeconds)} / 1:00
+            </p>
+            <div
+              className="audio-track-recording__meter"
+              role="meter"
+              aria-label="マイク入力レベル"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(level * 100)}
+            >
+              <span style={{ transform: `scaleX(${level})` }} />
+            </div>
+            <p className="audio-track-recording__hint">
+              メーターが動かない場合はマイクの入力先と音量を確認してください。
+            </p>
+            <div className="audio-track-recording__actions">
+              <button
+                ref={stopButtonRef}
+                type="button"
+                className="track-management__primary"
+                disabled={phase !== 'recording'}
+                onClick={stopRecording}
+              >
+                録音を終了して保存
+              </button>
+              <button type="button" disabled={phase === 'stopping'} onClick={cancelRecording}>
+                録音を破棄
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        {phase === 'processing' ? (
+          <>
+            <p
+              ref={processingStatusRef}
+              className="audio-track-recording__status"
+              role="status"
+              aria-live="polite"
+              tabIndex={-1}
+            >
+              {status ?? '録音を保存しています…'}{progress !== null ? ` ${progress}%` : ''}
+            </p>
+            <button ref={cancelButtonRef} type="button" onClick={cancelRecording}>
+              保存を中止して破棄
+            </button>
+          </>
+        ) : null}
+      </div>
+    </Dialog>
+  );
+}

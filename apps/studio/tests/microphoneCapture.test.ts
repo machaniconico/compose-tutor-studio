@@ -264,6 +264,30 @@ describe('microphone capture support and ownership', () => {
     session.cancel();
     await expect(session.result).rejects.toMatchObject({ code: 'cancelled' });
   });
+
+  it('keeps live monitoring off by default and passes through explicit opt-in', async () => {
+    const mutedHarness = createHarness();
+    const muted = await beginCapture(mutedHarness);
+    expect(mutedHarness.createGraph).toHaveBeenCalledWith(
+      mutedHarness.context,
+      mutedHarness.stream,
+      expect.any(Object),
+      { monitorInput: false },
+    );
+    muted.cancel();
+    await expect(muted.result).rejects.toMatchObject({ code: 'cancelled' });
+
+    const monitoredHarness = createHarness();
+    const monitored = await beginCapture(monitoredHarness, { monitorInput: true });
+    expect(monitoredHarness.createGraph).toHaveBeenCalledWith(
+      monitoredHarness.context,
+      monitoredHarness.stream,
+      expect.any(Object),
+      { monitorInput: true },
+    );
+    monitored.cancel();
+    await expect(monitored.result).rejects.toMatchObject({ code: 'cancelled' });
+  });
 });
 
 describe('microphone capture completion', () => {

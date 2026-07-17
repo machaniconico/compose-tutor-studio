@@ -7,9 +7,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hookState = vi.hoisted(() => ({
   index: 0,
+  refIndex: 0,
   overrides: new Map<number, unknown>(),
   effects: [] as Array<() => void | (() => void)>,
   refs: [] as Array<{ current: unknown }>,
+}));
+
+const microphoneMocks = vi.hoisted(() => ({ start: vi.fn() }));
+const reservationMocks = vi.hoisted(() => ({
+  release: vi.fn(),
+  reserve: vi.fn(),
 }));
 
 const storeState = vi.hoisted(() => ({
@@ -25,8 +32,9 @@ vi.mock('react', async (importOriginal) => {
     }),
     useMemo: vi.fn((factory: () => unknown) => factory()),
     useRef: vi.fn((initialValue: unknown) => {
-      const ref = { current: initialValue };
-      hookState.refs.push(ref);
+      const index = hookState.refIndex++;
+      const ref = hookState.refs[index] ?? { current: initialValue };
+      hookState.refs[index] = ref;
       return ref;
     }),
     useState: vi.fn((initialValue: unknown) => {
@@ -40,6 +48,15 @@ vi.mock('react', async (importOriginal) => {
     }),
   };
 });
+
+vi.mock('../src/audio/microphoneCapture', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/audio/microphoneCapture')>();
+  return { ...actual, startMicrophoneCapture: microphoneMocks.start };
+});
+
+vi.mock('../src/audio/microphoneCaptureReservation', () => ({
+  reserveMicrophoneCaptureResources: reservationMocks.reserve,
+}));
 
 vi.mock('../src/state/store', () => {
   const useStore = Object.assign(
@@ -69,6 +86,7 @@ import { createDefaultProject } from '../src/state/defaultProject';
 
 type ElementProps = {
   children?: ReactNode;
+  onClick?: () => void;
   role?: string;
   tabIndex?: number;
   'aria-label'?: string;
@@ -102,24 +120,48 @@ function textContent(node: ReactNode): string {
   return textContent(node.props.children);
 }
 
-function renderDialog(overrides: ReadonlyMap<number, unknown> = new Map()) {
-  hookState.index = 0;
-  hookState.overrides = new Map(overrides);
-  hookState.effects = [];
-  hookState.refs = [];
-  return HummingRecordingDialog({
+function renderDialog(
+  overrides: ReadonlyMap<number, unknown> = new Map(),
+  refs: Array<{ current: unknown }> = [],
+  callbacks: Readonly<{
+    onClose: () => void;
+    onCaptured: (capture: unknown) => void;
+    onChooseFile: () => void;
+  }> = {
     onClose: vi.fn(),
     onCaptured: vi.fn(),
     onChooseFile: vi.fn(),
+  },
+) {
+  hookState.index = 0;
+  hookState.refIndex = 0;
+  hookState.overrides = new Map(overrides);
+  hookState.effects = [];
+  hookState.refs = refs;
+  return HummingRecordingDialog({
+    onClose: callbacks.onClose,
+    onCaptured: callbacks.onCaptured,
+    onChooseFile: callbacks.onChooseFile,
   });
 }
 
 beforeEach(() => {
   hookState.index = 0;
+  hookState.refIndex = 0;
   hookState.overrides = new Map();
   hookState.effects = [];
   hookState.refs = [];
   storeState.project = createDefaultProject('録音テスト');
+  vi.clearAllMocks();
+  microphoneMocks.start.mockReset();
+  reservationMocks.reserve.mockReset();
+  reservationMocks.release.mockReset();
+  reservationMocks.reserve.mockReturnValue({
+    bytes: 1,
+    released: false,
+    resize: vi.fn(),
+    release: reservationMocks.release,
+  });
 });
 
 describe('microphone capture failure copy', () => {
@@ -225,6 +267,56 @@ describe('HummingRecordingDialog accessibility and recovery', () => {
     expect(meter?.props['aria-valuemax']).toBe(100);
     expect(meter?.props['aria-valuenow']).toBe(42);
     expect(meter?.props.tabIndex).toBeUndefined();
+  });
+
+  it('does not analyze a successful late result after the user chose discard', async () => {
+    let resolveCapture!: (capture: unknown) => void;
+    const result = new Promise<unknown>((resolve) => {
+      resolveCapture = resolve;
+    });
+    const cancel = vi.fn();
+    microphoneMocks.start.mockResolvedValue({
+      startedAt: 0,
+      maxDurationSeconds: 60,
+      result,
+      elapsedSeconds: () => 1,
+      stop: vi.fn(),
+      cancel,
+    });
+    const refs: Array<{ current: unknown }> = [];
+    const callbacks = {
+      onClose: vi.fn(),
+      onCaptured: vi.fn(),
+      onChooseFile: vi.fn(),
+    };
+    const idle = renderDialog(new Map(), refs, callbacks);
+    const start = findElement(idle, (element) => textContent(element) === '録音を開始');
+    if (!start || typeof start.props.onClick !== 'function') throw new Error('start button missing');
+    start.props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const recording = renderDialog(new Map([[0, 'recording']]), refs, callbacks);
+    const discard = findElement(recording, (element) => textContent(element) === '録音を破棄');
+    if (!discard || typeof discard.props.onClick !== 'function') {
+      throw new Error('discard button missing');
+    }
+    discard.props.onClick();
+    resolveCapture({
+      numberOfChannels: 1,
+      length: 48_000,
+      sampleRate: 48_000,
+      durationSeconds: 1,
+      stopReason: 'manual',
+      getChannelData: () => new Float32Array(48_000),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(reservationMocks.release).toHaveBeenCalledOnce();
+    expect(callbacks.onClose).toHaveBeenCalledOnce();
+    expect(callbacks.onCaptured).not.toHaveBeenCalled();
   });
 });
 

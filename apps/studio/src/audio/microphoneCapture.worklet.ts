@@ -123,6 +123,19 @@ class MicrophoneCaptureProcessor extends AudioWorkletProcessor {
       return false;
     }
 
+    // The browser graph keeps this output muted unless the user explicitly
+    // enables input monitoring. Down-mix to one bounded monitor channel while
+    // retaining every source channel independently for the recorded PCM.
+    const monitor = outputs[0]?.[0];
+    if (monitor) {
+      const monitoredFrames = Math.min(frameCount, monitor.length);
+      for (let frame = 0; frame < monitoredFrames; frame += 1) {
+        let sample = 0;
+        for (const channel of input) sample += channel[frame] ?? 0;
+        monitor[frame] = sample / input.length;
+      }
+    }
+
     let sourceOffset = 0;
     while (sourceOffset < frameCount) {
       const copyFrames = Math.min(
@@ -151,3 +164,5 @@ class MicrophoneCaptureProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor(PROCESSOR_NAME, MicrophoneCaptureProcessor);
+
+export {};

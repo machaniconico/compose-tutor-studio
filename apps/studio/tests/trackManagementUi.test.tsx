@@ -6,6 +6,7 @@ import { installLocalStorage } from './localStorageStub';
 let useStore: typeof import('../src/state/store')['useStore'];
 let TrackInspector: typeof import('../src/features/tracklist/TrackInspector')['TrackInspector'];
 let AddTrackDialog: typeof import('../src/features/tracklist/AddTrackDialog')['AddTrackDialog'];
+let AudioTrackRecordingDialog: typeof import('../src/features/audioTrack/AudioTrackRecordingDialog')['AudioTrackRecordingDialog'];
 let ExportMenuContent: typeof import('../src/features/export/ExportMenuContent')['ExportMenuContent'];
 let addStudioTrack: typeof import('../src/state/trackActions')['addStudioTrack'];
 
@@ -14,6 +15,7 @@ beforeAll(async () => {
   ({ useStore } = await import('../src/state/store'));
   ({ TrackInspector } = await import('../src/features/tracklist/TrackInspector'));
   ({ AddTrackDialog } = await import('../src/features/tracklist/AddTrackDialog'));
+  ({ AudioTrackRecordingDialog } = await import('../src/features/audioTrack/AudioTrackRecordingDialog'));
   ({ ExportMenuContent } = await import('../src/features/export/ExportMenuContent'));
   ({ addStudioTrack } = await import('../src/state/trackActions'));
 });
@@ -34,6 +36,7 @@ describe('track management UI', () => {
     expect(html).toContain('楽器トラック');
     expect(html).toContain('ドラムトラック');
     expect(html).toContain('オーディオトラック');
+    expect(html).toContain('マイク録音');
     expect(html).toContain('WAV、MP3、M4A、AAC');
     expect(html).toContain('48 kHz・PCM16');
     expect(html).toContain('プロジェクトJSONには音声本体を含まない');
@@ -47,6 +50,28 @@ describe('track management UI', () => {
     expect(html).toContain('data-modal-initial-focus="true"');
     expect(html).not.toContain('maxLength=');
     expect(html).not.toContain('maxlength=');
+  });
+
+  it('explains bounded dry recording and keeps input monitoring explicitly off by default', () => {
+    const html = renderToStaticMarkup(
+      <AudioTrackRecordingDialog
+        trackName="Lead Take"
+        onClose={() => undefined}
+        onCreated={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('マイクをオーディオトラックへ録音');
+    expect(html).toContain('最大60秒');
+    expect(html).toContain('端末内だけで録音');
+    expect(html).toContain('現在の再生位置');
+    expect(html).toContain('録音中に入力を聴く');
+    expect(html).toContain('初期値はOFF');
+    expect(html).toContain('ヘッドホン');
+    expect(html).toContain('ドライ音');
+    expect(html).toContain('type="checkbox"');
+    expect(html).not.toContain('type="checkbox" checked');
+    expect(html).toContain('録音を開始');
   });
 
   it('warns that project JSON needs the same local Audio Track asset store', () => {

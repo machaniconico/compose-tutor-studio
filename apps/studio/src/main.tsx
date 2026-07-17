@@ -52,6 +52,14 @@ async function continueNormalStartup(): Promise<void> {
         finishClose: (requestId) =>
           nativeAppLifecycleGateway.finishClose({ kind: 'normal', requestId }),
         onBlocked: (stage) => {
+          if (
+            stage === 'edit-fence'
+            && useStore.getState().audioRecordingOperationId !== null
+          ) {
+            // tryBeginNativeClose already published the recording-specific
+            // recovery action. Do not replace it with a generic save warning.
+            return;
+          }
           if (stage === 'window-close') {
             useStore.getState().markNativeCloseHandoffUnknown();
             const message =

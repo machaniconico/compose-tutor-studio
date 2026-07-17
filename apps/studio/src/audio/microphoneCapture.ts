@@ -65,6 +65,11 @@ type CaptureGraph = Readonly<{
   disconnect: () => void;
 }>;
 
+export type MicrophoneCaptureGraphOptions = Readonly<{
+  /** Route the live input to the output device. Keep false unless the user opts in. */
+  monitorInput: boolean;
+}>;
+
 export type MicrophoneCapturePlatform = Readonly<{
   secureContext: boolean;
   mediaDevices: Pick<MediaDevices, 'getUserMedia'> | null;
@@ -76,6 +81,7 @@ export type MicrophoneCapturePlatform = Readonly<{
     context: AudioContext,
     stream: MediaStream,
     handlers: CaptureGraphHandlers,
+    options: MicrophoneCaptureGraphOptions,
   ) => CaptureGraph;
   now: () => number;
   setTimer: (callback: () => void, milliseconds: number) => ReturnType<typeof setTimeout>;
@@ -88,6 +94,8 @@ export type StartMicrophoneCaptureOptions = Readonly<{
   maxDurationSeconds?: number;
   onCountdown?: (secondsRemaining: number) => void;
   onLevel?: (peak: number) => void;
+  /** Live input monitoring. Disabled by default to avoid speaker feedback. */
+  monitorInput?: boolean;
   /** Deterministic test seam. Production callers must omit this. */
   platform?: MicrophoneCapturePlatform;
 }>;
@@ -147,6 +155,7 @@ function createBrowserGraph(
   context: AudioContext,
   stream: MediaStream,
   handlers: CaptureGraphHandlers,
+  options: MicrophoneCaptureGraphOptions,
 ): CaptureGraph {
   const source = context.createMediaStreamSource(stream);
   const worklet = new AudioWorkletNode(context, PROCESSOR_NAME, {
@@ -158,8 +167,8 @@ function createBrowserGraph(
       maxChannels: MAX_MICROPHONE_CAPTURE_CHANNELS,
     },
   });
-  const silentOutput = context.createGain();
-  silentOutput.gain.value = 0;
+  const monitorOutput = context.createGain();
+  monitorOutput.gain.value = options.monitorInput ? 1 : 0;
 
   const onMessage = (event: MessageEvent<unknown>): void => {
     if (typeof event.data !== 'object' || event.data === null || !('type' in event.data)) {
@@ -192,8 +201,8 @@ function createBrowserGraph(
   worklet.port.start();
   worklet.addEventListener('processorerror', onProcessorError);
   source.connect(worklet);
-  worklet.connect(silentOutput);
-  silentOutput.connect(context.destination);
+  worklet.connect(monitorOutput);
+  monitorOutput.connect(context.destination);
 
   let disconnected = false;
   return {
@@ -206,7 +215,7 @@ function createBrowserGraph(
       worklet.port.removeEventListener('message', onMessage);
       worklet.removeEventListener('processorerror', onProcessorError);
       worklet.port.close();
-      for (const node of [source, worklet, silentOutput]) {
+      for (const node of [source, worklet, monitorOutput]) {
         try {
           node.disconnect();
         } catch {
@@ -640,7 +649,7 @@ export async function startMicrophoneCapture(
           ),
         );
       },
-    });
+    }, { monitorInput: options.monitorInput === true });
     for (const track of tracks) track.addEventListener('ended', onTrackEnded);
     options.signal?.addEventListener('abort', onSignalAbort, { once: true });
     automaticTimer = platform.setTimer(

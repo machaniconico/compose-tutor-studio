@@ -16,6 +16,7 @@ import { exportEmergencyProjectBackup } from '../export/emergencyProjectBackup';
 import { SaveControl } from './SaveControl';
 import { studioRuntime } from '../../platform/runtime';
 import { pushToast } from '../../state/tutorialBridge';
+import { AudioTrackRecordingDialog } from '../audioTrack/AudioTrackRecordingDialog';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -133,8 +134,11 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const canRedo = useStore((s) => s.future.length > 0);
   const saveState = useStore((s) => s.saveState);
   const saveToLocalStorage = useStore((s) => s.saveToLocalStorage);
+  const projectOperationBusy = useStore((s) => s.projectOperationBusy);
+  const audioRecordingOperationId = useStore((s) => s.audioRecordingOperationId);
   const emergencyExportLock = useRef(false);
   const [emergencyExportBusy, setEmergencyExportBusy] = useState(false);
+  const [recordingOpen, setRecordingOpen] = useState(false);
 
   // Connect the store to the audio engine once. The bridge confirms the
   // asynchronous starting -> playing transition; this component only sends
@@ -184,8 +188,9 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   };
 
   return (
-    <header className="transport-bar">
-      <div className="transport-bar__row">
+    <>
+      <header className="transport-bar">
+        <div className="transport-bar__row">
         <ProjectMenu />
 
         <button
@@ -199,6 +204,17 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
         </button>
 
         <PlaybackLifecycleControl transport={transport} onPlay={play} onStop={stop} />
+
+        <button
+          type="button"
+          className="transport-bar__record"
+          aria-haspopup="dialog"
+          disabled={projectOperationBusy || audioRecordingOperationId !== null}
+          onClick={() => setRecordingOpen(true)}
+        >
+          <span aria-hidden="true" />
+          録音
+        </button>
 
         <button
           type="button"
@@ -296,7 +312,15 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
 
         <ExportMenu />
         <VocalCutTool />
-      </div>
-    </header>
+        </div>
+      </header>
+      {recordingOpen ? (
+        <AudioTrackRecordingDialog
+          trackName="マイク録音"
+          onClose={() => setRecordingOpen(false)}
+          onCreated={() => setRecordingOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }

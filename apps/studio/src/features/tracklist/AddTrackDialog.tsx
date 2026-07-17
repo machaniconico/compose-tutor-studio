@@ -26,6 +26,7 @@ import {
   type AddStudioTrackKind,
 } from '../../state/trackActions';
 import { STUDIO_SYNTH_PRESETS } from './trackPresentation';
+import { AudioTrackRecordingDialog } from '../audioTrack/AudioTrackRecordingDialog';
 
 type AddTrackDialogProps = Readonly<{
   onClose: () => void;
@@ -69,6 +70,7 @@ export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [recordingOpen, setRecordingOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -196,13 +198,23 @@ export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
     void importAudio(file.name, file, file.size);
   };
 
+  const hasValidName = (): boolean => {
+    if (name.trim().length > 0 && Array.from(name.trim()).length <= 128) return true;
+    setError('名前は空白以外の128文字以内で入力してください。');
+    return false;
+  };
+
+  const openRecording = (): void => {
+    if (busyRef.current || !hasValidName()) return;
+    setError(null);
+    setStatus(null);
+    setRecordingOpen(true);
+  };
+
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     if (busyRef.current) return;
-    if (name.trim().length === 0 || Array.from(name.trim()).length > 128) {
-      setError('名前は空白以外の128文字以内で入力してください。');
-      return;
-    }
+    if (!hasValidName()) return;
     if (kind === 'audio') {
       if (isNative) void chooseNativeAudio();
       else fileInputRef.current?.click();
@@ -233,6 +245,20 @@ export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
     abortRef.current?.abort();
     onClose();
   };
+
+  if (recordingOpen) {
+    return (
+      <AudioTrackRecordingDialog
+        trackName={name.trim()}
+        onClose={onClose}
+        onBack={() => setRecordingOpen(false)}
+        onCreated={(trackId) => {
+          onClose();
+          onCreated(trackId);
+        }}
+      />
+    );
+  }
 
   return (
     <Dialog
@@ -283,7 +309,7 @@ export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
             />
             <span>
               <strong>オーディオトラック</strong>
-              <small>WAV、MP3、M4A、AACを48 kHz・PCM16へ変換して端末内へ保存します。プロジェクトJSONには音声本体を含まないため、JSON単体では別端末へ移せません。</small>
+              <small>マイク録音、またはWAV、MP3、M4A、AACの読み込みから作れます。音声は48 kHz・PCM16へ変換して端末内へ保存します。プロジェクトJSONには音声本体を含まないため、JSON単体では別端末へ移せません。</small>
             </span>
           </label>
           <label>
@@ -341,7 +367,7 @@ export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
 
         {kind === 'audio' ? (
           <div className="track-add__audio-help">
-            <p>元ファイルは変更せず、48 kHz・PCM16のWAVへ変換して、この端末の素材保存領域へ保存します。</p>
+            <p>マイクから最大60秒録音するか、録音済みファイルを読み込めます。どちらも48 kHz・PCM16のWAVへ変換して、この端末の素材保存領域へ保存します。</p>
             <p>プロジェクトJSONには音声本体を含まないため、JSON単体を別端末へ移しても再生できません。</p>
             <p>追加後はアレンジャーで移動、左右トリム、ゲイン、フェード、ループ、分割ができます。</p>
           </div>
@@ -380,11 +406,16 @@ export function AddTrackDialog({ onClose, onCreated }: AddTrackDialogProps) {
           <button type="button" onClick={requestClose}>
             {busy ? '読み込みを中止して閉じる' : 'キャンセル'}
           </button>
+          {kind === 'audio' ? (
+            <button type="button" disabled={busy} onClick={openRecording}>
+              マイクで録音
+            </button>
+          ) : null}
           <button type="submit" className="track-management__primary" disabled={busy}>
             {busy
               ? '処理中…'
               : kind === 'audio'
-                ? '音声を選んで追加'
+                ? 'ファイルから追加'
                 : '追加'}
           </button>
         </div>

@@ -105,7 +105,7 @@ test('records synthetic microphone humming and applies two editable notes atomic
   await expect(dialog.getByRole('button', { name: '録音を開始' })).toBeFocused();
   await dialog.getByRole('button', { name: '録音を開始' }).click();
   await expect(dialog.getByText('カウントのあとに歌い始めてください。')).toBeVisible();
-  await expect(dialog.getByText('3', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('録音開始まで3秒', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('status')).toContainText('録音中', { timeout: 6_000 });
   await expect(dialog.getByRole('meter', { name: 'マイク入力レベル' })).toBeVisible();
 

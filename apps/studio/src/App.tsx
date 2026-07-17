@@ -239,8 +239,12 @@ export function App() {
         flushAsync: () => useStore.getState().flushPendingSave(),
         flushSynchronously: () => useStore.getState().flushPendingSaveSynchronously(),
         hasUnsavedChanges: () => {
-          const state = useStore.getState().saveState;
-          return state.phase === 'pending' || state.phase === 'error';
+          const state = useStore.getState();
+          return (
+            state.audioRecordingOperationId !== null
+            || state.saveState.phase === 'pending'
+            || state.saveState.phase === 'error'
+          );
         },
       }),
     [],
