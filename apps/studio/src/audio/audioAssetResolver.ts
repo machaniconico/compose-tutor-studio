@@ -745,16 +745,35 @@ async function decodeAsset(
 }
 
 function assertDecodedMetadata(asset: ReadyAudioAsset, buffer: AudioBuffer): void {
-  const expectedDuration = asset.frameCount / asset.sampleRate;
-  const tolerance = Math.max(
-    1 / asset.sampleRate,
-    Number.isFinite(buffer.sampleRate) && buffer.sampleRate > 0 ? 1 / buffer.sampleRate : 0,
-    1e-5,
+  const expectedDecodedFrames =
+    asset.frameCount * buffer.sampleRate / asset.sampleRate;
+  // Chromium may truncate a mathematically integral resample by one frame
+  // (for example 24,000 @ 48 kHz becomes 22,049 @ 44.1 kHz). Compare in the
+  // decoder's frame domain so a floating-point seconds conversion cannot turn
+  // that valid one-frame boundary into an asset-integrity failure.
+  const frameTolerance = 1 + Number.EPSILON * Math.max(
+    1,
+    buffer.length,
+    expectedDecodedFrames,
+  );
+  const decodedDuration = buffer.length / buffer.sampleRate;
+  const durationRoundingTolerance = Number.EPSILON * 4 * Math.max(
+    1,
+    Math.abs(buffer.duration),
+    Math.abs(decodedDuration),
   );
   if (
     buffer.numberOfChannels !== asset.channelCount ||
+    !Number.isFinite(buffer.sampleRate) ||
+    buffer.sampleRate <= 0 ||
+    !Number.isSafeInteger(buffer.length) ||
+    buffer.length <= 0 ||
     !Number.isFinite(buffer.duration) ||
-    Math.abs(buffer.duration - expectedDuration) > tolerance
+    buffer.duration <= 0 ||
+    !Number.isFinite(decodedDuration) ||
+    Math.abs(buffer.duration - decodedDuration) > durationRoundingTolerance ||
+    !Number.isFinite(expectedDecodedFrames) ||
+    Math.abs(buffer.length - expectedDecodedFrames) > frameTolerance
   ) {
     throw new AudioAssetPlaybackError(
       'asset-changed',

@@ -496,7 +496,58 @@ describe('decoded audio asset leases', () => {
     lease.release();
   });
 
-  it('rejects channel or duration mismatches as changed asset metadata', async () => {
+  it.each([22_049, 22_051])(
+    'accepts a 48 kHz decode differing by one 44.1 kHz frame (%i frames)',
+    async (decodedFrames) => {
+      const { asset, bytes } = await fixture();
+      const halfSecondAsset = { ...asset, frameCount: 24_000 };
+      const cache = new AudioAssetPlaybackCache();
+      const prepared = await cache.preflight(
+        projectWithAsset(halfSecondAsset),
+        { resolve: async () => bytes },
+      );
+      const context = {
+        sampleRate: 44_100,
+        decodeAudioData: vi.fn(async () => decodedBuffer({
+          sampleRate: 44_100,
+          length: decodedFrames,
+          duration: decodedFrames / 44_100,
+        })),
+      } as unknown as BaseAudioContext;
+
+      const lease = await cache.acquireDecoded(prepared, context);
+      expect(lease.buffersByAssetId.get('asset-1')?.length).toBe(decodedFrames);
+      lease.release();
+    },
+  );
+
+  it.each([22_048, 22_052])(
+    'rejects a 48 kHz decode differing by two 44.1 kHz frames (%i frames)',
+    async (decodedFrames) => {
+      const { asset, bytes } = await fixture();
+      const halfSecondAsset = { ...asset, frameCount: 24_000 };
+      const cache = new AudioAssetPlaybackCache();
+      const prepared = await cache.preflight(
+        projectWithAsset(halfSecondAsset),
+        { resolve: async () => bytes },
+      );
+      const context = {
+        sampleRate: 44_100,
+        decodeAudioData: vi.fn(async () => decodedBuffer({
+          sampleRate: 44_100,
+          length: decodedFrames,
+          duration: decodedFrames / 44_100,
+        })),
+      } as unknown as BaseAudioContext;
+
+      await expect(cache.acquireDecoded(prepared, context)).rejects.toMatchObject({
+        code: 'asset-changed',
+        assetId: 'asset-1',
+      });
+    },
+  );
+
+  it('rejects a channel mismatch as changed asset metadata', async () => {
     const { project, bytes } = await fixture();
     const cache = new AudioAssetPlaybackCache();
     const prepared = await cache.preflight(project, { resolve: async () => bytes });
@@ -504,9 +555,36 @@ describe('decoded audio asset leases', () => {
       sampleRate: 48_000,
       decodeAudioData: vi.fn(async () => decodedBuffer({
         sampleRate: 48_000,
+        length: 48_000,
         numberOfChannels: 2,
-        duration: 0.5,
+        duration: 1,
       })),
+    } as unknown as BaseAudioContext;
+
+    await expect(cache.acquireDecoded(prepared, context)).rejects.toMatchObject({
+      code: 'asset-changed',
+      assetId: 'asset-1',
+    });
+  });
+
+  it.each([
+    { label: 'zero sample rate', buffer: { sampleRate: 0, length: 48_000, duration: 1 } },
+    { label: 'zero frame length', buffer: { sampleRate: 48_000, length: 0, duration: 1 } },
+    {
+      label: 'non-finite duration',
+      buffer: { sampleRate: 48_000, length: 48_000, duration: Number.NaN },
+    },
+    {
+      label: 'inconsistent duration',
+      buffer: { sampleRate: 48_000, length: 48_000, duration: 0.5 },
+    },
+  ])('rejects $label in decoded metadata', async ({ buffer }) => {
+    const { project, bytes } = await fixture();
+    const cache = new AudioAssetPlaybackCache();
+    const prepared = await cache.preflight(project, { resolve: async () => bytes });
+    const context = {
+      sampleRate: 48_000,
+      decodeAudioData: vi.fn(async () => decodedBuffer(buffer)),
     } as unknown as BaseAudioContext;
 
     await expect(cache.acquireDecoded(prepared, context)).rejects.toMatchObject({
