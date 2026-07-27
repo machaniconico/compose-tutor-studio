@@ -204,6 +204,7 @@ test('edits independent volume and pan automation with accessible responsive con
   const panel = page.locator('#editor-tabpanel-automation');
   await expect(panel).toBeVisible();
   await expect(panel.getByRole('heading', { name: /のオートメーション$/ })).toBeVisible();
+  const notice = panel.locator('.automation-lane__notice');
 
   const target = panel.getByRole('group', { name: 'オートメーション対象' });
   const volumeTarget = target.getByRole('button', { name: '音量', exact: true });
@@ -225,7 +226,7 @@ test('edits independent volume and pan automation with accessible responsive con
 
   await addAtPlayhead.click();
   await expect(points).toHaveCount(1);
-  await expect(panel.getByRole('status')).toContainText('既存の点を選択しました');
+  await expect(notice).toContainText('既存の点を選択しました');
 
   const timeline = panel.getByRole('group', {
     name: 'トラック音量オートメーションレーン',
@@ -237,7 +238,7 @@ test('edits independent volume and pan automation with accessible responsive con
   const inspector = panel.getByRole('group', { name: '選択中の点' });
   await expect(inspector).toBeVisible();
   await inspector.getByLabel('次の点まで').selectOption('hold');
-  await expect(panel.getByRole('status')).toContainText('補間');
+  await expect(notice).toContainText('補間');
   const beatInput = inspector.getByLabel('拍', { exact: true });
   await beatInput.fill('2');
   await beatInput.press('Enter');
@@ -518,7 +519,8 @@ test('value-only edits preserve a high-precision off-grid beat', async ({
   const point = panel.locator(
     '[data-automation-point-id="automation-off-grid-point"]',
   );
-  await point.click();
+  await point.focus();
+  await point.press('Enter');
   const inspector = panel.getByRole('group', { name: '選択中の点' });
   const beat = inspector.getByLabel('拍', { exact: true });
   const value = inspector.getByLabel('音量（%）', { exact: true });
