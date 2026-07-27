@@ -484,9 +484,9 @@ const productionViteConfigSha256 =
 const productionBuildScriptSha256 =
   'fa2a85733d26d47475bce20bea09227d2d3e1691ac0acc8770f4c977afd0e3be';
 const productionPnpmWorkspaceSha256 =
-  'ee8721472a25e9a96ce99ed400cdf4db51f97f6c4a092ae3f0b5ff3dc02aa45b';
+  'e4e2e1627c84ee9d6115222d07c5d3e9dd15c6412196602942cdb7131bdb6b6d';
 const productionPnpmLockSha256 =
-  '6f2b5ce87aee0531c88150ead63bd21c556572201e74b91178043fd255171a85';
+  '3fb7ac10607b7a777db9f94fffd5d3eebeaba88ecabbfe6a68b8bdacb42934e8';
 const productionInfoPlistSha256 =
   '33fe001fcd59ffb037152843f269503897cf1fad46b22a569dd2e78f96380dbf';
 const productionEntitlementsSha256 =
