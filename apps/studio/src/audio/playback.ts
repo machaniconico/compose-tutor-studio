@@ -786,6 +786,14 @@ export function initAudioBridge(): () => void {
 }
 
 /**
+ * Dispose active or naturally draining runtime audio before an exclusive
+ * non-transport operation reuses the shared Master graph.
+ */
+export function stopRuntimePlaybackAudio(): void {
+  bridge.controller?.stop();
+}
+
+/**
  * Start one transport generation whose playback and microphone capture share
  * an exact future AudioContext frame.
  *

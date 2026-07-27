@@ -146,6 +146,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify deterministic recording latency measurement
+        run: pnpm --dir apps/studio exec vitest run tests/recordingLatencyMeasurement.test.ts
+
       - name: Typecheck native test harness
         run: pnpm desktop:typecheck:native
 

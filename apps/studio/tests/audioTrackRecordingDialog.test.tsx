@@ -19,12 +19,16 @@ const actionMocks = vi.hoisted(() => ({
   begin: vi.fn(),
   bind: vi.fn(),
   discard: vi.fn(),
+  beginCalibration: vi.fn(),
+  commitCalibration: vi.fn(),
+  discardCalibration: vi.fn(),
   record: vi.fn(),
   pushToast: vi.fn(),
 }));
 
 const microphoneMocks = vi.hoisted(() => ({
   start: vi.fn(),
+  startCalibration: vi.fn(),
 }));
 
 const audioMocks = vi.hoisted(() => ({
@@ -78,6 +82,14 @@ vi.mock('../src/audio/microphoneCapture', async (importOriginal) => {
   return { ...actual, startMicrophoneCapture: microphoneMocks.start };
 });
 
+vi.mock('../src/audio/recordingLatencyCalibration', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/audio/recordingLatencyCalibration')>();
+  return {
+    ...actual,
+    startRecordingLatencyCalibration: microphoneMocks.startCalibration,
+  };
+});
+
 vi.mock('../src/audio/engine', () => ({
   getAudioEngine: () => ({ ensureContext: audioMocks.ensureContext }),
 }));
@@ -98,8 +110,11 @@ vi.mock('../src/audio/microphoneInputDevices', async (importOriginal) => {
 
 vi.mock('../src/state/audioTrackActions', () => ({
   beginStudioAudioTrackRecording: actionMocks.begin,
+  beginStudioRecordingLatencyCalibration: actionMocks.beginCalibration,
   bindStudioAudioTrackRecordingToPlayback: actionMocks.bind,
+  commitStudioRecordingLatencyCalibration: actionMocks.commitCalibration,
   discardStudioAudioTrackRecording: actionMocks.discard,
+  discardStudioRecordingLatencyCalibration: actionMocks.discardCalibration,
   recordStudioAudioTrack: actionMocks.record,
   studioAudioActionErrorMessage: (code: string) => `action:${code}`,
 }));
@@ -107,11 +122,14 @@ vi.mock('../src/state/audioTrackActions', () => ({
 vi.mock('../src/state/tutorialBridge', () => ({ pushToast: actionMocks.pushToast }));
 
 import { MicrophoneCaptureError } from '../src/audio/microphoneCapture';
+import { RecordingLatencyCalibrationError } from '../src/audio/recordingLatencyCalibration';
 import { AudioTrackRecordingDialog } from '../src/features/audioTrack/AudioTrackRecordingDialog';
+import { useStore } from '../src/state/store';
 
 type ElementProps = {
   children?: ReactNode;
   onClick?: () => void;
+  disabled?: boolean;
   closeDisabled?: boolean;
   busy?: boolean;
   role?: string;
@@ -184,6 +202,14 @@ beforeEach(() => {
   });
   actionMocks.record.mockResolvedValue({ ok: false, code: 'cancelled' });
   actionMocks.bind.mockReturnValue(true);
+  actionMocks.beginCalibration.mockReturnValue({
+    ok: true,
+    handle: { operationId: 51 },
+    inputDeviceId: 'usb-loopback',
+    playbackStopped: false,
+  });
+  actionMocks.commitCalibration.mockReturnValue(true);
+  microphoneMocks.startCalibration.mockReturnValue(new Promise(() => undefined));
   audioMocks.ensureContext.mockResolvedValue({
     context: audioMocks.context,
     contextGeneration: 7,
@@ -206,6 +232,12 @@ beforeEach(() => {
   inputDeviceMocks.subscribe.mockImplementation((onChange: () => void) => {
     inputDeviceMocks.onDeviceChange = onChange;
     return inputDeviceMocks.unsubscribe;
+  });
+  useStore.setState({
+    audioRecordingOperationId: null,
+    recordingLatencyCalibration: null,
+    recordingLatencyCompensationMode: 'estimated',
+    preferredMicrophoneInputDeviceId: null,
   });
 });
 
@@ -332,7 +364,252 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     const tree = renderDialog();
     expect(textContent(tree)).toContain('自動（推定）');
     expect(textContent(tree)).toContain('実測校正ではありません');
+    expect(textContent(tree)).toContain('実測校正…');
+    expect(textContent(tree)).toContain('入力デバイスを明示選択してください');
     expect(textContent(tree)).toContain('正の値で録音を早め、負の値で遅らせます');
+    expect(button(tree, '実測校正…').props.disabled).toBe(true);
+  });
+
+  it('shows cable, low-volume, no-speaker and output-change guidance before calibration', () => {
+    const tree = renderDialog('idle', [], new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'instructions'],
+    ]));
+
+    expect(textContent(tree)).toContain('出力から「前回選択した入力');
+    expect(textContent(tree)).toContain('へ戻る時間');
+    expect(textContent(tree)).toContain('ケーブルを接続');
+    expect(textContent(tree)).toContain('音量を低め');
+    expect(textContent(tree)).toContain('開放スピーカーとマイクでは実行しない');
+    expect(textContent(tree)).toContain('Direct Monitor / LoopbackをOFF');
+    expect(textContent(tree)).toContain('出力先、入力先、ドライバー設定を変えた場合は再校正');
+    expect(textContent(tree)).toContain('プロジェクトも変更しません');
+  });
+
+  it('starts calibration for the frozen selected input without enabling monitoring', async () => {
+    actionMocks.beginCalibration.mockReturnValue({
+      ok: true,
+      handle: { operationId: 51 },
+      inputDeviceId: 'usb-loopback',
+      playbackStopped: false,
+    });
+    const tree = renderDialog('idle', [], new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'instructions'],
+    ]));
+
+    button(tree, '3秒後に実測').props.onClick?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(actionMocks.beginCalibration).toHaveBeenCalledOnce();
+    expect(microphoneMocks.startCalibration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+        inputDeviceId: 'usb-loopback',
+        onCountdown: expect.any(Function),
+        onPreparing: expect.any(Function),
+        onLevel: expect.any(Function),
+      }),
+    );
+    expect(microphoneMocks.startCalibration.mock.calls[0]?.[0]).not.toHaveProperty(
+      'monitorInput',
+    );
+  });
+
+  it('commits a successful calibration once and keeps its runtime profile out of recording assets', async () => {
+    microphoneMocks.startCalibration.mockResolvedValue({
+      latencyFrames: 4_800,
+      roundTripLatencySeconds: 0.1,
+      confidence: 0.93,
+      sampleRate: 48_000,
+      contextGeneration: 7,
+    });
+    const refs: Array<{ current: unknown }> = [];
+    const tree = renderDialog('idle', refs, new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'instructions'],
+    ]));
+
+    button(tree, '3秒後に実測').props.onClick?.();
+    await vi.waitFor(() => {
+      expect(actionMocks.commitCalibration).toHaveBeenCalledWith(
+        { operationId: 51 },
+        expect.objectContaining({
+          latencyFrames: 4_800,
+          sampleRate: 48_000,
+          contextGeneration: 7,
+        }),
+      );
+    });
+    expect(actionMocks.record).not.toHaveBeenCalled();
+    expect(actionMocks.discardCalibration).not.toHaveBeenCalled();
+  });
+
+  it('discards failed calibration ownership without replacing the previous profile', async () => {
+    microphoneMocks.startCalibration.mockRejectedValue(
+      new RecordingLatencyCalibrationError('silence'),
+    );
+    const tree = renderDialog('idle', [], new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'instructions'],
+    ]));
+
+    button(tree, '3秒後に実測').props.onClick?.();
+    await vi.waitFor(() => {
+      expect(actionMocks.discardCalibration).toHaveBeenCalledWith({ operationId: 51 });
+    });
+    expect(actionMocks.commitCalibration).not.toHaveBeenCalled();
+    expect(actionMocks.record).not.toHaveBeenCalled();
+  });
+
+  it('does not commit a late calibration success after the user cancels', async () => {
+    let resolveCalibration!: (value: {
+      latencyFrames: number;
+      roundTripLatencySeconds: number;
+      confidence: number;
+      sampleRate: number;
+      contextGeneration: number;
+    }) => void;
+    microphoneMocks.startCalibration.mockReturnValue(new Promise((resolve) => {
+      resolveCalibration = resolve;
+    }));
+    const refs: Array<{ current: unknown }> = [];
+    const instructions = renderDialog('idle', refs, new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'instructions'],
+    ]));
+    button(instructions, '3秒後に実測').props.onClick?.();
+    await vi.waitFor(() => expect(microphoneMocks.startCalibration).toHaveBeenCalledOnce());
+
+    const running = renderDialog('idle', refs, new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'running'],
+    ]));
+    button(running, '校正を中止').props.onClick?.();
+    resolveCalibration({
+      latencyFrames: 4_800,
+      roundTripLatencySeconds: 0.1,
+      confidence: 0.93,
+      sampleRate: 48_000,
+      contextGeneration: 7,
+    });
+
+    await vi.waitFor(() => {
+      expect(actionMocks.discardCalibration).toHaveBeenCalledWith({ operationId: 51 });
+    });
+    expect(actionMocks.commitCalibration).not.toHaveBeenCalled();
+  });
+
+  it('preserves a prior profile on user cancel but clears it on devicechange', async () => {
+    const priorProfile = Object.freeze({
+      inputDeviceId: 'usb-loopback',
+      latencyFrames: 2_400,
+      sampleRate: 48_000,
+      contextGeneration: 7,
+      confidence: 0.95,
+    });
+    useStore.setState({
+      recordingLatencyCalibration: priorProfile,
+      recordingLatencyCompensationMode: 'calibrated',
+      preferredMicrophoneInputDeviceId: 'usb-loopback',
+    });
+    microphoneMocks.startCalibration.mockImplementation(({ signal }: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => reject(new RecordingLatencyCalibrationError('cancelled')),
+          { once: true },
+        );
+      })
+    );
+    const userCancelRefs: Array<{ current: unknown }> = [];
+    const userInstructions = renderDialog('idle', userCancelRefs, new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'instructions'],
+    ]));
+    button(userInstructions, '3秒後に実測').props.onClick?.();
+    await vi.waitFor(() => expect(microphoneMocks.startCalibration).toHaveBeenCalledOnce());
+    const userRunning = renderDialog('idle', userCancelRefs, new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'running'],
+    ]));
+    button(userRunning, '校正を中止').props.onClick?.();
+    await vi.waitFor(() => expect(actionMocks.discardCalibration).toHaveBeenCalledOnce());
+    expect(useStore.getState().recordingLatencyCalibration).toBe(priorProfile);
+
+    actionMocks.discardCalibration.mockClear();
+    microphoneMocks.startCalibration.mockClear();
+    const routeChangeRefs: Array<{ current: unknown }> = [];
+    const routeInstructions = renderDialog('idle', routeChangeRefs, new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'instructions'],
+    ]));
+    button(routeInstructions, '3秒後に実測').props.onClick?.();
+    await vi.waitFor(() => expect(microphoneMocks.startCalibration).toHaveBeenCalledOnce());
+    renderDialog('idle', routeChangeRefs, new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [13, 'running'],
+    ]));
+    const deviceEffect = hookState.effects[3];
+    if (!deviceEffect) throw new Error('device effect missing');
+    const cleanup = deviceEffect();
+    inputDeviceMocks.onDeviceChange?.();
+
+    await vi.waitFor(() => expect(actionMocks.discardCalibration).toHaveBeenCalledOnce());
+    expect(useStore.getState().recordingLatencyCalibration).toBeNull();
+    expect(useStore.getState().recordingLatencyCompensationMode).toBe('estimated');
+    if (typeof cleanup === 'function') cleanup();
+  });
+
+  it.each(['instructions', 'running', 'success', 'error'] as const)(
+    'moves focus into the %s calibration step',
+    (view) => {
+      const focus = vi.fn();
+      const refs: Array<{ current: unknown }> = [];
+      renderDialog('idle', refs, new Map<number, unknown>([
+        [10, 'usb-loopback'],
+        [13, view],
+      ]));
+      for (const ref of hookState.refs) ref.current = { focus };
+      vi.stubGlobal('window', {
+        requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+          callback(0);
+          return 1;
+        }),
+        cancelAnimationFrame: vi.fn(),
+      });
+      try {
+        hookState.effects[1]?.();
+        expect(focus).toHaveBeenCalledOnce();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it('restores focus to recording settings after the calibration view closes', () => {
+    const startFocus = vi.fn();
+    const calibrationFocus = vi.fn();
+    const refs: Array<{ current: unknown }> = [];
+    renderDialog('idle', refs);
+    if (!refs[8] || !refs[17]) throw new Error('focus refs missing');
+    refs[8].current = { focus: startFocus };
+    refs[17].current = { focus: calibrationFocus };
+    vi.stubGlobal('window', {
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+    });
+    try {
+      hookState.effects[1]?.();
+      expect(startFocus).toHaveBeenCalledOnce();
+      expect(calibrationFocus).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('keeps only the newest devicechange refresh and unsubscribes on cleanup', async () => {
@@ -342,7 +619,7 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
       .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve; }))
       .mockReturnValueOnce(new Promise((resolve) => { resolveChanged = resolve; }));
     renderDialog();
-    const deviceEffect = hookState.effects[2];
+    const deviceEffect = hookState.effects[3];
     if (!deviceEffect) throw new Error('device effect missing');
     const cleanup = deviceEffect();
     inputDeviceMocks.onDeviceChange?.();
@@ -363,6 +640,36 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     if (typeof cleanup !== 'function') throw new Error('device cleanup missing');
     cleanup();
     expect(inputDeviceMocks.unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('synchronizes a cleared app-wide calibration while the device effect is inactive', () => {
+    useStore.setState({
+      recordingLatencyCalibration: Object.freeze({
+        inputDeviceId: 'usb-loopback',
+        latencyFrames: 2_400,
+        sampleRate: 48_000,
+        contextGeneration: 7,
+        confidence: 0.95,
+      }),
+      recordingLatencyCompensationMode: 'calibrated',
+      preferredMicrophoneInputDeviceId: 'usb-loopback',
+    });
+    renderDialog('requesting', [], new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [11, 'calibrated'],
+    ]));
+    expect(hookState.effects[3]?.()).toBeUndefined();
+    const synchronizeEffect = hookState.effects[4];
+    if (!synchronizeEffect) throw new Error('latency synchronization effect missing');
+    const cleanup = synchronizeEffect();
+
+    expect(useStore.getState().clearRecordingLatencyCalibration()).toBe(true);
+    expect(hookState.stateSetters[11]).toHaveBeenLastCalledWith('estimated');
+
+    if (typeof cleanup !== 'function') {
+      throw new Error('latency synchronization cleanup missing');
+    }
+    cleanup();
   });
 
   it('keeps a disappeared explicit input selected and asks for a deliberate recovery', () => {
@@ -454,6 +761,72 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     expect(tree.props.closeDisabled).toBe(true);
   });
 
+  it('reports the latency mode frozen by the take instead of a stale local selection', async () => {
+    useStore.setState({
+      recordingLatencyCalibration: Object.freeze({
+        inputDeviceId: 'usb-loopback',
+        latencyFrames: 2_400,
+        sampleRate: 48_000,
+        contextGeneration: 7,
+        confidence: 0.95,
+      }),
+      recordingLatencyCompensationMode: 'calibrated',
+      preferredMicrophoneInputDeviceId: 'usb-loopback',
+    });
+    let resolveCapture!: (capture: unknown) => void;
+    const result = new Promise<unknown>((resolve) => {
+      resolveCapture = resolve;
+    });
+    microphoneMocks.start.mockResolvedValue({
+      startedAt: 0,
+      maxDurationSeconds: 60,
+      result,
+      elapsedSeconds: () => 1,
+      stop: vi.fn(async () => undefined),
+      cancel: vi.fn(),
+    });
+    actionMocks.record.mockResolvedValue({
+      ok: true,
+      changed: true,
+      trackId: 'recorded-track',
+      trackName: 'Lead Take',
+      clipId: 'recorded-clip',
+      audioAssetId: 'recorded-asset',
+      deduplicated: false,
+      playbackStopped: true,
+    });
+    const refs: Array<{ current: unknown }> = [];
+    const tree = renderDialog('idle', refs, new Map<number, unknown>([
+      [10, 'usb-loopback'],
+      [11, 'estimated'],
+    ]));
+
+    button(tree, '録音を開始').props.onClick?.();
+    await vi.waitFor(() => expect(refs[5]?.current).toBeTruthy());
+    resolveCapture({
+      numberOfChannels: 1,
+      length: 48_000,
+      sampleRate: 48_000,
+      durationSeconds: 1,
+      stopReason: 'manual',
+      contextGeneration: 7,
+      firstContextFrame: 0,
+      endContextFrameExclusive: 48_000,
+      inputLatencySeconds: null,
+      getChannelData: () => new Float32Array(48_000),
+    });
+
+    await vi.waitFor(() => expect(actionMocks.pushToast).toHaveBeenCalledOnce());
+    expect(actionMocks.pushToast).toHaveBeenCalledWith(
+      expect.stringContaining('実測レイテンシ補正を適用しました。'),
+      'success',
+    );
+    expect(actionMocks.pushToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('推定レイテンシ補正を適用しました。'),
+      expect.anything(),
+    );
+  });
+
   it('never saves a successful late result after the user chose discard', async () => {
     let resolveCapture!: (capture: unknown) => void;
     const result = new Promise<unknown>((resolve) => {
@@ -503,8 +876,8 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
 
     const focus = vi.fn();
     const refs: Array<{ current: unknown }> = [];
-    refs[10] = { current: { focus } };
     renderDialog('recording', refs);
+    for (const ref of hookState.refs) ref.current = { focus };
     vi.stubGlobal('window', {
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
@@ -513,7 +886,7 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
       cancelAnimationFrame: vi.fn(),
     });
     try {
-      hookState.effects[1]?.();
+      hookState.effects[2]?.();
       expect(focus).toHaveBeenCalledOnce();
     } finally {
       vi.unstubAllGlobals();

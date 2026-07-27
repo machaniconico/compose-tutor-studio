@@ -17,6 +17,9 @@ import { useStore } from './state/store';
 import { startLesson } from './state/tutorialBridge';
 import { isAnyDialogOpen } from './features/common/dialogState';
 import { registerPersistenceLifecycle } from './state/persistenceLifecycle';
+import {
+  registerRecordingLatencyCalibrationInvalidation,
+} from './state/recordingLatencyCalibrationLifecycle';
 
 /** True when focus is in a text-entry field, where shortcuts must not fire. */
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -230,6 +233,10 @@ export function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // A measured profile is bound to the physical device route, not a Project or
+  // dialog. Keep invalidation alive even while the recording dialog is closed.
+  useEffect(() => registerRecordingLatencyCalibrationInvalidation(), []);
 
   // Flush the latest immutable edit snapshot before the browser backgrounds or
   // discards the page. The store makes duplicate lifecycle events idempotent.

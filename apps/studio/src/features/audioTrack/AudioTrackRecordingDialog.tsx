@@ -8,6 +8,10 @@ import {
 } from '../../audio/microphoneCapture';
 import { getAudioEngine } from '../../audio/engine';
 import {
+  RecordingLatencyCalibrationError,
+  startRecordingLatencyCalibration,
+} from '../../audio/recordingLatencyCalibration';
+import {
   startSynchronizedRecordingPlayback,
   stopSynchronizedRecordingPlayback,
 } from '../../audio/playback';
@@ -19,12 +23,16 @@ import {
 } from '../../audio/microphoneInputDevices';
 import {
   beginStudioAudioTrackRecording,
+  beginStudioRecordingLatencyCalibration,
   bindStudioAudioTrackRecordingToPlayback,
+  commitStudioRecordingLatencyCalibration,
   discardStudioAudioTrackRecording,
+  discardStudioRecordingLatencyCalibration,
   recordStudioAudioTrack,
   studioAudioActionErrorMessage,
   type StudioAudioActionErrorCode,
   type StudioAudioTrackRecordingHandle,
+  type StudioRecordingLatencyCalibrationHandle,
 } from '../../state/audioTrackActions';
 import {
   MAX_RECORDING_LATENCY_ADJUSTMENT_MS,
@@ -45,6 +53,15 @@ type RecordingPhase =
   | 'stopping'
   | 'processing'
   | 'error';
+
+type CalibrationView =
+  | 'closed'
+  | 'instructions'
+  | 'running'
+  | 'success'
+  | 'error';
+
+const CALIBRATION_INPUT_ROUTE_CHANGED = Symbol('calibration-input-route-changed');
 
 type AudioTrackRecordingDialogProps = Readonly<{
   trackName: string;
@@ -100,6 +117,51 @@ function recordingBeginFailureMessage(
   }
 }
 
+function recordingLatencyCalibrationFailureMessage(error: unknown): string {
+  if (!(error instanceof RecordingLatencyCalibrationError)) {
+    return '録音レイテンシを実測できませんでした。接続を確認して再試行してください。';
+  }
+  switch (error.code) {
+    case 'permission-denied':
+      return 'マイクの使用が許可されませんでした。OSの設定でこのアプリのマイクを許可してください。';
+    case 'device-not-found':
+      return '校正に使う入力が見つかりません。ケーブルと入力デバイスを確認してください。';
+    case 'device-busy':
+    case 'busy':
+      return '入力デバイスが使用中です。ほかの録音を終了してから再試行してください。';
+    case 'device-ended':
+      return '校正中に入力デバイスが切断されました。接続を確認してください。';
+    case 'insecure-context':
+    case 'unsupported':
+      return 'この環境では実測校正を安全に実行できません。推定補正または手動補正を使用してください。';
+    case 'silence':
+      return '戻ってきたテスト信号を検出できません。出力から選択中の入力へケーブルを接続し、音量を少し上げてください。';
+    case 'clipped':
+      return '戻り信号が大きすぎて歪んでいます。出力または入力ゲインを下げてください。';
+    case 'ambiguous':
+    case 'low-confidence':
+      return '戻り信号を一つに特定できません。スピーカーを使わず、ケーブル接続と周囲の音を確認してください。';
+    case 'out-of-range':
+      return '往復レイテンシが測定範囲（500 ms）を超えました。接続先とドライバー設定を確認してください。';
+    case 'context-changed':
+    case 'synchronization-failed':
+    case 'probe-scheduling-failed':
+    case 'stale-operation':
+      return '校正中にオーディオ時計またはデバイスが変わりました。接続を固定して再試行してください。';
+    case 'cancelled':
+      return '';
+    case 'audio-context-failed':
+    case 'capture-failed':
+    case 'invalid-sample-rate':
+    case 'invalid-probe':
+    case 'invalid-pcm':
+    case 'non-finite-pcm':
+    case 'empty-channel':
+    case 'channel-length-mismatch':
+      return 'テスト信号を安全に解析できませんでした。オーディオ設定を確認して再試行してください。';
+  }
+}
+
 /** Record one dry, bounded take to a frozen new or existing Audio Track target. */
 export function AudioTrackRecordingDialog({
   trackName,
@@ -130,6 +192,10 @@ export function AudioTrackRecordingDialog({
   const [latencyAdjustmentText, setLatencyAdjustmentText] = useState(
     String(useStore.getState().recordingLatencyAdjustmentMs),
   );
+  const [calibrationView, setCalibrationView] = useState<CalibrationView>('closed');
+  const [calibrationCountdown, setCalibrationCountdown] = useState(3);
+  const [calibrationStatus, setCalibrationStatus] = useState<string | null>(null);
+  const [calibrationError, setCalibrationError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
   const recordingHandleRef = useRef<StudioAudioTrackRecordingHandle | null>(null);
@@ -144,6 +210,13 @@ export function AudioTrackRecordingDialog({
   const processingStatusRef = useRef<HTMLParagraphElement>(null);
   const inputDeviceRefreshGenerationRef = useRef(0);
   const captureStopRequestedRef = useRef(false);
+  const calibrationHandleRef =
+    useRef<StudioRecordingLatencyCalibrationHandle | null>(null);
+  const calibrationAbortRef = useRef<AbortController | null>(null);
+  const calibrationGenerationRef = useRef(0);
+  const calibrationStepFocusRef = useRef<HTMLButtonElement>(null);
+  const activeTakeLatencyModeRef =
+    useRef<RecordingLatencyCompensationMode | null>(null);
 
   const discardRecordingOwnership = (): void => {
     const handle = recordingHandleRef.current;
@@ -158,8 +231,16 @@ export function AudioTrackRecordingDialog({
     if (requestId !== null) stopSynchronizedRecordingPlayback(requestId);
   };
 
+  const discardCalibrationOwnership = (): void => {
+    const handle = calibrationHandleRef.current;
+    if (!handle) return;
+    calibrationHandleRef.current = null;
+    discardStudioRecordingLatencyCalibration(handle);
+  };
+
   const finishCaptureError = (caught: unknown, generation: number): void => {
     captureStopRequestedRef.current = true;
+    activeTakeLatencyModeRef.current = null;
     stopPairedPlayback();
     discardRecordingOwnership();
     if (!mountedRef.current || generation !== generationRef.current) return;
@@ -197,6 +278,8 @@ export function AudioTrackRecordingDialog({
     abortRef.current = controller;
     const recordingHandle = recordingHandleRef.current;
     recordingHandleRef.current = null;
+    const appliedLatencyCompensationMode =
+      activeTakeLatencyModeRef.current ?? latencyCompensationMode;
 
     try {
       if (!recordingHandle) {
@@ -233,11 +316,13 @@ export function AudioTrackRecordingDialog({
       const deduplicated = result.deduplicated
         ? ' 同じ音声素材は重複保存していません。'
         : '';
-      const compensation = latencyCompensationMode === 'estimated'
-        ? ' 推定レイテンシ補正を適用しました。'
-        : Number(latencyAdjustmentText) === 0
-          ? ''
-          : ' 手動の録音位置補正を適用しました。';
+      const compensation = appliedLatencyCompensationMode === 'calibrated'
+        ? ' 実測レイテンシ補正を適用しました。'
+        : appliedLatencyCompensationMode === 'estimated'
+          ? ' 推定レイテンシ補正を適用しました。'
+          : Number(latencyAdjustmentText) === 0
+            ? ''
+            : ' 手動の録音位置補正を適用しました。';
       pushToast(
         `「${result.trackName}」へ録音を保存し、伴奏と同期した位置へ配置しました。${compensation}${deduplicated}`,
         'success',
@@ -259,8 +344,105 @@ export function AudioTrackRecordingDialog({
       if (controller.signal.aborted && cancelRequestedRef.current) onClose();
       else setPhase('error');
     } finally {
+      activeTakeLatencyModeRef.current = null;
       finalizingRef.current = false;
       abortRef.current = null;
+    }
+  };
+
+  const beginLatencyCalibration = async (): Promise<void> => {
+    if (calibrationHandleRef.current !== null || calibrationView === 'running') return;
+    const ownership = beginStudioRecordingLatencyCalibration();
+    if (!ownership.ok) {
+      setCalibrationError(recordingBeginFailureMessage(ownership.code));
+      setCalibrationStatus('校正は開始していません。前回の設定は変更していません。');
+      setCalibrationView('error');
+      return;
+    }
+    calibrationHandleRef.current = ownership.handle;
+    const generation = ++calibrationGenerationRef.current;
+    const controller = new AbortController();
+    calibrationAbortRef.current = controller;
+    setCalibrationError(null);
+    setCalibrationStatus('マイクの使用許可を待っています…');
+    setCalibrationCountdown(3);
+    setCalibrationView('running');
+
+    try {
+      const result = await startRecordingLatencyCalibration({
+        signal: controller.signal,
+        inputDeviceId: ownership.inputDeviceId,
+        onCountdown: (secondsRemaining) => {
+          if (!mountedRef.current || generation !== calibrationGenerationRef.current) return;
+          setCalibrationCountdown(secondsRemaining);
+          setCalibrationStatus(`テスト信号まで${secondsRemaining}秒…`);
+        },
+        onPreparing: () => {
+          if (!mountedRef.current || generation !== calibrationGenerationRef.current) return;
+          setCalibrationCountdown(0);
+          setCalibrationStatus('低レベルのテスト信号を送り、往復時間を測っています…');
+        },
+        onLevel: (nextLevel) => {
+          if (!mountedRef.current || generation !== calibrationGenerationRef.current) return;
+          setLevel(nextLevel);
+        },
+      });
+      if (controller.signal.aborted) {
+        throw new RecordingLatencyCalibrationError('cancelled');
+      }
+      if (!mountedRef.current || generation !== calibrationGenerationRef.current) {
+        discardCalibrationOwnership();
+        return;
+      }
+      const handle = calibrationHandleRef.current;
+      calibrationHandleRef.current = null;
+      if (!handle || !commitStudioRecordingLatencyCalibration(handle, result)) {
+        throw new RecordingLatencyCalibrationError('stale-operation');
+      }
+      calibrationAbortRef.current = null;
+      setLatencyCompensationMode('calibrated');
+      setCalibrationStatus(
+        `往復 ${result.roundTripLatencySeconds * 1_000 < 10
+          ? (result.roundTripLatencySeconds * 1_000).toFixed(2)
+          : (result.roundTripLatencySeconds * 1_000).toFixed(1)} ms`
+        + `（${result.latencyFrames} samples）を録音位置補正へ適用しました。`,
+      );
+      setCalibrationError(null);
+      setCalibrationView('success');
+    } catch (caught) {
+      discardCalibrationOwnership();
+      calibrationAbortRef.current = null;
+      const inputRouteChanged =
+        controller.signal.reason === CALIBRATION_INPUT_ROUTE_CHANGED;
+      if (inputRouteChanged) {
+        useStore.getState().clearRecordingLatencyCalibration();
+      }
+      if (!mountedRef.current || generation !== calibrationGenerationRef.current) return;
+      if (inputRouteChanged) {
+        setLatencyCompensationMode(
+          useStore.getState().recordingLatencyCompensationMode,
+        );
+        setCalibrationStatus(
+          '入力デバイス構成が変わったため校正を中止し、以前の実測値も破棄しました。',
+        );
+        setCalibrationError(null);
+        setCalibrationView('instructions');
+        return;
+      }
+      if (
+        controller.signal.aborted
+        || (caught instanceof RecordingLatencyCalibrationError && caught.code === 'cancelled')
+      ) {
+        setCalibrationStatus('校正を中止しました。前回の設定は変更していません。');
+        setCalibrationError(null);
+        setCalibrationView('instructions');
+        return;
+      }
+      setCalibrationError(recordingLatencyCalibrationFailureMessage(caught));
+      setCalibrationStatus('実測値は変更していません。接続を確認して再試行できます。');
+      setCalibrationView('error');
+    } finally {
+      setLevel(0);
     }
   };
 
@@ -269,6 +451,7 @@ export function AudioTrackRecordingDialog({
       recordingHandleRef.current !== null
       || (phase !== 'idle' && phase !== 'error')
     ) return;
+    activeTakeLatencyModeRef.current = null;
     const frozenLatencyAdjustmentMs = Number(latencyAdjustmentText);
     if (
       !Number.isSafeInteger(frozenLatencyAdjustmentMs)
@@ -282,6 +465,8 @@ export function AudioTrackRecordingDialog({
       return;
     }
     const frozenInputDeviceId = selectedInputDeviceId;
+    const frozenLatencyCompensationMode =
+      useStore.getState().recordingLatencyCompensationMode;
     const ownership = beginStudioAudioTrackRecording({
       target: targetTrackId === undefined
         ? { kind: 'new-track', trackName }
@@ -294,6 +479,7 @@ export function AudioTrackRecordingDialog({
       return;
     }
     recordingHandleRef.current = ownership.handle;
+    activeTakeLatencyModeRef.current = frozenLatencyCompensationMode;
     const projectSnapshot = useStore.getState().project;
     const engineActivation = getAudioEngine().ensureContext();
     void engineActivation.catch(() => undefined);
@@ -313,6 +499,30 @@ export function AudioTrackRecordingDialog({
       const activated = await awaitAudioActivationOrCancel(engineActivation, controller.signal);
       if (!mountedRef.current || generation !== generationRef.current) {
         throw new MicrophoneCaptureError('cancelled');
+      }
+      const latencyState = useStore.getState();
+      const calibration = latencyState.recordingLatencyCalibration;
+      if (
+        latencyState.recordingLatencyCompensationMode === 'calibrated'
+        && (
+          calibration === null
+          || calibration.inputDeviceId !== frozenInputDeviceId
+          || calibration.contextGeneration !== activated.contextGeneration
+          || calibration.sampleRate !== activated.context.sampleRate
+        )
+      ) {
+        abortRef.current = null;
+        activeTakeLatencyModeRef.current = null;
+        discardRecordingOwnership();
+        useStore.getState().clearRecordingLatencyCalibration();
+        setLatencyCompensationMode('estimated');
+        setError(
+          '実測校正が現在の入力またはオーディオ時計と一致しません。'
+          + '録音前にもう一度「実測校正」を行ってください。',
+        );
+        setStatus('録音は開始していません。推定補正へ戻しました。');
+        setPhase('error');
+        return;
       }
       const session = await startMicrophoneCapture({
         signal: controller.signal,
@@ -385,6 +595,7 @@ export function AudioTrackRecordingDialog({
           captureStopRequestedRef.current = true;
           stopPairedPlayback();
           if (cancelRequestedRef.current) {
+            activeTakeLatencyModeRef.current = null;
             discardRecordingOwnership();
             if (mountedRef.current && generation === generationRef.current) {
               sessionRef.current = null;
@@ -428,6 +639,18 @@ export function AudioTrackRecordingDialog({
     stopPairedPlayback();
   };
 
+  const closeOrCancelLatencyCalibration = (): void => {
+    if (calibrationView === 'running') {
+      setCalibrationStatus('校正を安全に中止しています…');
+      calibrationAbortRef.current?.abort();
+      return;
+    }
+    setCalibrationError(null);
+    setCalibrationStatus(null);
+    setCalibrationView('closed');
+    setLatencyCompensationMode(useStore.getState().recordingLatencyCompensationMode);
+  };
+
   const stopRecording = (): void => {
     if (phase !== 'recording' || !sessionRef.current) return;
     captureStopRequestedRef.current = true;
@@ -446,6 +669,14 @@ export function AudioTrackRecordingDialog({
     const interval = window.setInterval(updateElapsed, 100);
     return () => window.clearInterval(interval);
   }, [phase]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (calibrationView === 'closed') startButtonRef.current?.focus();
+      else calibrationStepFocusRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [calibrationView]);
 
   useEffect(() => {
     if (!['requesting', 'countdown', 'preparing', 'recording', 'processing', 'error'].includes(phase)) return;
@@ -486,6 +717,13 @@ export function AudioTrackRecordingDialog({
     let unsubscribe = (): void => undefined;
     try {
       unsubscribe = subscribeToMicrophoneInputDeviceChanges(() => {
+        if (calibrationView === 'running') {
+          calibrationAbortRef.current?.abort(CALIBRATION_INPUT_ROUTE_CHANGED);
+        } else if (useStore.getState().clearRecordingLatencyCalibration()) {
+          setLatencyCompensationMode(
+            useStore.getState().recordingLatencyCompensationMode,
+          );
+        }
         void refresh();
       });
     } catch {
@@ -496,7 +734,24 @@ export function AudioTrackRecordingDialog({
       inputDeviceRefreshGenerationRef.current += 1;
       unsubscribe();
     };
-  }, [phase]);
+  }, [calibrationView, phase]);
+
+  useEffect(() => {
+    const synchronizeLatencyMode = (): void => {
+      setLatencyCompensationMode(
+        useStore.getState().recordingLatencyCompensationMode,
+      );
+    };
+    synchronizeLatencyMode();
+    return useStore.subscribe((state, previous) => {
+      if (
+        state.recordingLatencyCompensationMode
+        !== previous.recordingLatencyCompensationMode
+      ) {
+        setLatencyCompensationMode(state.recordingLatencyCompensationMode);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -520,7 +775,9 @@ export function AudioTrackRecordingDialog({
       generationRef.current += 1;
       const captureCleanupPending = abortRef.current !== null || sessionRef.current !== null;
       abortRef.current?.abort();
+      calibrationAbortRef.current?.abort();
       sessionRef.current?.cancel();
+      activeTakeLatencyModeRef.current = null;
       stopPairedPlayback();
       // Permission/capture owns browser resources until its promise settles.
       // Its existing success/error callback releases the opaque lease after
@@ -544,6 +801,120 @@ export function AudioTrackRecordingDialog({
   const recordingTarget = targetTrackId === undefined
     ? '新しいオーディオトラック'
     : `既存トラック「${trackName}」`;
+  const activeCalibration = useStore.getState().recordingLatencyCalibration;
+  const selectedInputLabel = selectedInputDeviceId === null
+    ? 'システム既定の入力'
+    : inputDevices.find((device) => device.deviceId === selectedInputDeviceId)?.label
+      ?? unavailableSelectedDeviceLabel;
+
+  if (calibrationView !== 'closed') {
+    return (
+      <Dialog
+        title="録音レイテンシを実測校正"
+        className="dialog--audio-track-recording"
+        onClose={closeOrCancelLatencyCalibration}
+        closeDisabled={calibrationView === 'running'}
+        busy={calibrationView === 'running'}
+      >
+        <div className="audio-track-recording audio-track-recording__calibration">
+          {calibrationView === 'instructions' || calibrationView === 'error' ? (
+            <>
+              <p className="audio-track-recording__lead">
+                現在の出力から「{selectedInputLabel}」へ戻る時間を、短いテスト信号で実測します。
+                音声や測定用PCMは保存せず、プロジェクトも変更しません。
+              </p>
+              <ol className="audio-track-recording__calibration-steps">
+                <li>スピーカーをOFFにし、オーディオ出力から選択中の入力へケーブルを接続します。</li>
+                <li>出力と入力の音量を低めにします。大きな音やハウリングを避けるため、開放スピーカーとマイクでは実行しないでください。</li>
+                <li>オーディオinterface本体とdriver mixerのDirect Monitor / LoopbackをOFFにし、戻り入力を同じ出力へ送り返さないでください。</li>
+                <li>「3秒後に実測」を押し、接続と音量を変えずに完了を待ちます。</li>
+              </ol>
+              <p className="audio-track-recording__calibration-note">
+                出力先、入力先、ドライバー設定を変えた場合は再校正してください。
+                ブラウザはシステム出力名を確実に取得できないため、自動判定はできません。
+              </p>
+              {calibrationError ? (
+                <p className="track-management__error" role="alert">{calibrationError}</p>
+              ) : null}
+              {calibrationStatus ? (
+                <p className="audio-track-recording__status" role="status">
+                  {calibrationStatus}
+                </p>
+              ) : null}
+              <div className="audio-track-recording__actions">
+                <button
+                  ref={calibrationStepFocusRef}
+                  type="button"
+                  className="track-management__primary"
+                  data-modal-initial-focus
+                  disabled={selectedDeviceMissing || selectedInputDeviceId === null}
+                  onClick={() => void beginLatencyCalibration()}
+                >
+                  3秒後に実測
+                </button>
+                <button type="button" onClick={closeOrCancelLatencyCalibration}>
+                  録音設定へ戻る
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {calibrationView === 'running' ? (
+            <>
+              <p className="audio-track-recording__countdown" role="status" aria-live="assertive">
+                {calibrationCountdown > 0 ? `${calibrationCountdown}` : '測定中'}
+              </p>
+              <p className="audio-track-recording__status" role="status" aria-live="polite">
+                {calibrationStatus ?? '校正を準備しています…'}
+              </p>
+              <div
+                className="audio-track-recording__meter"
+                role="meter"
+                aria-label="校正入力レベル"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(level * 100)}
+              >
+                <span style={{ transform: `scaleX(${level})` }} />
+              </div>
+              <p className="audio-track-recording__calibration-note">
+                テスト中は入力モニターを強制的にOFFにしています。
+              </p>
+              <button
+                ref={calibrationStepFocusRef}
+                type="button"
+                onClick={closeOrCancelLatencyCalibration}
+              >
+                校正を中止
+              </button>
+            </>
+          ) : null}
+
+          {calibrationView === 'success' ? (
+            <>
+              <p className="audio-track-recording__calibration-success" role="status">
+                実測校正が完了しました
+              </p>
+              <p>{calibrationStatus}</p>
+              <p className="audio-track-recording__calibration-note">
+                次の録音から実測値に手動オフセットを加えて配置します。
+                出力先または入力先を変えたら再校正してください。
+              </p>
+              <button
+                ref={calibrationStepFocusRef}
+                type="button"
+                className="track-management__primary"
+                data-modal-initial-focus
+                onClick={closeOrCancelLatencyCalibration}
+              >
+                録音設定へ戻る
+              </button>
+            </>
+          ) : null}
+        </div>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog
@@ -570,6 +941,9 @@ export function AudioTrackRecordingDialog({
                   const nextDeviceId = event.target.value || null;
                   if (useStore.getState().setPreferredMicrophoneInputDeviceId(nextDeviceId)) {
                     setSelectedInputDeviceId(nextDeviceId);
+                    setLatencyCompensationMode(
+                      useStore.getState().recordingLatencyCompensationMode,
+                    );
                   }
                 }}
               >
@@ -607,12 +981,44 @@ export function AudioTrackRecordingDialog({
                   }
                 }}
               >
+                {activeCalibration?.inputDeviceId === selectedInputDeviceId ? (
+                  <option value="calibrated">
+                    実測（{(activeCalibration.latencyFrames / activeCalibration.sampleRate * 1_000).toFixed(1)} ms）
+                  </option>
+                ) : null}
                 <option value="estimated">自動（推定）</option>
                 <option value="off">自動補正なし（手動のみ）</option>
               </select>
               <small id="audio-track-recording-latency-help">
-                自動はブラウザと入力・出力デバイスの申告値による推定です。実測校正ではありません。
+                {latencyCompensationMode === 'calibrated'
+                  ? '実測値は現在の入力とオーディオ時計専用です。出力先を変えた場合は再校正してください。'
+                  : '自動はブラウザと入力・出力デバイスの申告値による推定です。実測校正ではありません。'}
               </small>
+              <button
+                type="button"
+                className="audio-track-recording__calibration-open"
+                disabled={selectedDeviceMissing || selectedInputDeviceId === null}
+                aria-describedby={
+                  selectedInputDeviceId === null
+                    ? 'audio-track-recording-calibration-input-help'
+                    : undefined
+                }
+                onClick={() => {
+                  setCalibrationError(null);
+                  setCalibrationStatus(null);
+                  setCalibrationView('instructions');
+                }}
+              >
+                {activeCalibration?.inputDeviceId === selectedInputDeviceId
+                  ? '実測校正をやり直す…'
+                  : '実測校正…'}
+              </button>
+              {selectedInputDeviceId === null ? (
+                <small id="audio-track-recording-calibration-input-help">
+                  実測校正では接続先を固定するため、入力デバイスを明示選択してください。
+                  通常録音はシステム既定のまま利用できます。
+                </small>
+              ) : null}
               <label htmlFor="audio-track-recording-latency-adjustment">
                 手動オフセット（ms）
               </label>

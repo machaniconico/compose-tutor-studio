@@ -452,6 +452,87 @@ describe('runtime Audio Track Record Arm', () => {
     expect(useStore.getState().setRecordingLatencyCompensationMode('estimated')).toBe(true);
     expect(useStore.getState().setRecordingLatencyAdjustmentMs(0)).toBe(true);
   });
+
+  it('adopts loopback calibration only for the exact operation and input, then invalidates it on input change', () => {
+    const before = useStore.getState();
+    expect(before.clearRecordingLatencyCalibration()).toBe(true);
+    expect(before.setPreferredMicrophoneInputDeviceId('usb-loopback')).toBe(true);
+    expect(useStore.getState().setRecordingLatencyCompensationMode('calibrated')).toBe(false);
+    const projectBefore = useStore.getState().project;
+    const pastBefore = useStore.getState().past;
+    const saveBefore = useStore.getState().saveState;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+
+    const calibration = {
+      inputDeviceId: 'usb-loopback',
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      latencyFrames: 5_760,
+      confidence: 0.91,
+    } as const;
+    expect(useStore.getState().commitRecordingLatencyCalibration(
+      operationId + 1,
+      calibration,
+    )).toBe(false);
+    expect(useStore.getState().commitRecordingLatencyCalibration(operationId, {
+      ...calibration,
+      inputDeviceId: 'different-input',
+    })).toBe(false);
+    expect(useStore.getState().commitRecordingLatencyCalibration(operationId, {
+      ...calibration,
+      inputDeviceId: null as unknown as string,
+    })).toBe(false);
+    expect(useStore.getState().commitRecordingLatencyCalibration(operationId, {
+      ...calibration,
+      latencyFrames: 24_001,
+    })).toBe(false);
+    expect(useStore.getState().commitRecordingLatencyCalibration(operationId, {
+      ...calibration,
+      confidence: 0.49,
+    })).toBe(false);
+    expect(useStore.getState().commitRecordingLatencyCalibration(
+      operationId,
+      calibration,
+    )).toBe(true);
+
+    const calibrated = useStore.getState();
+    expect(calibrated.recordingLatencyCompensationMode).toBe('calibrated');
+    expect(calibrated.recordingLatencyCalibration).toEqual(calibration);
+    expect(calibrated.project).toBe(projectBefore);
+    expect(calibrated.past).toBe(pastBefore);
+    expect(calibrated.saveState).toBe(saveBefore);
+
+    calibrated.finishAudioRecordingOperation(operationId);
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('built-in')).toBe(true);
+    expect(useStore.getState().recordingLatencyCalibration).toBeNull();
+    expect(useStore.getState().recordingLatencyCompensationMode).toBe('estimated');
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId(null)).toBe(true);
+  });
+
+  it('invalidates future calibration during an active take without mutating Project state', () => {
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-loopback')).toBe(true);
+    const projectBefore = useStore.getState().project;
+    const pastBefore = useStore.getState().past;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    expect(useStore.getState().commitRecordingLatencyCalibration(operationId, {
+      inputDeviceId: 'usb-loopback',
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      latencyFrames: 2_400,
+      confidence: 0.94,
+    })).toBe(true);
+
+    expect(useStore.getState().clearRecordingLatencyCalibration()).toBe(true);
+    expect(useStore.getState().recordingLatencyCalibration).toBeNull();
+    expect(useStore.getState().recordingLatencyCompensationMode).toBe('estimated');
+    expect(useStore.getState().project).toBe(projectBefore);
+    expect(useStore.getState().past).toBe(pastBefore);
+
+    useStore.getState().finishAudioRecordingOperation(operationId);
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId(null)).toBe(true);
+  });
 });
 
 describe('chord actions', () => {

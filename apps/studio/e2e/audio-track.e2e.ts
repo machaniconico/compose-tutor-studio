@@ -246,6 +246,20 @@ test('selects an exact input and records into one armed Audio Track with one-ste
   await expect(recordingDialog.getByLabel('自動補正')).toHaveValue('estimated');
   await expect(recordingDialog).toContainText('実測校正ではありません');
   await recordingDialog.getByLabel('入力デバイス').selectOption('usb-vocal-microphone');
+  await recordingDialog.getByRole('button', { name: '実測校正…', exact: true }).click();
+  const calibrationDialog = page.getByRole('dialog', { name: '録音レイテンシを実測校正' });
+  await expect(calibrationDialog).toContainText('ケーブルを接続');
+  await expect(calibrationDialog).toContainText('開放スピーカーとマイクでは実行しない');
+  await expect(calibrationDialog).toContainText('Direct Monitor / LoopbackをOFF');
+  await expect(calibrationDialog).toContainText('プロジェクトも変更しません');
+  await expect(
+    calibrationDialog.getByRole('button', { name: '3秒後に実測' }),
+  ).toBeFocused();
+  await calibrationDialog.getByRole('button', { name: '録音設定へ戻る' }).click();
+  await expect(recordingDialog).toBeVisible();
+  await expect(
+    recordingDialog.getByRole('button', { name: '録音を開始' }),
+  ).toBeFocused();
   await recordingDialog.getByRole('button', { name: '録音を開始' }).click();
   await expect(recordingDialog.getByText('録音開始まで3秒', { exact: true })).toBeVisible();
   await expect(recordingDialog.getByRole('status')).toContainText(
