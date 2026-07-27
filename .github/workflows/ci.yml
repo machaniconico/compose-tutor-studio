@@ -44,7 +44,14 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit JavaScript dependencies
-        run: pnpm audit --audit-level high
+        # brace-expansion's patched v5 API is incompatible with the minimatch
+        # v3/v5/v9 chain used only by WDIO tooling. Remove this dev-only
+        # exception when upstream v1/v2 backports are published:
+        # https://github.com/juliangruber/brace-expansion/pull/134
+        # https://github.com/juliangruber/brace-expansion/pull/135
+        run: |
+          pnpm audit --prod --audit-level high
+          pnpm audit --dev --audit-level high --ignore GHSA-mh99-v99m-4gvg
 
       - name: Typecheck
         run: pnpm typecheck

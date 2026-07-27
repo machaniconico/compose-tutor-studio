@@ -4,6 +4,8 @@ packages:
 
 overrides:
   "@wdio/native-utils": "2.5.0"
+  "fast-xml-parser@": "5.10.1"
+  "postcss@": "8.5.18"
   esbuild: "0.28.1"
   serialize-javascript: "7.0.7"
 
