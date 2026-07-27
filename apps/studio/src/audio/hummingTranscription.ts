@@ -13,6 +13,8 @@ export const MAX_HUMMING_CHANNELS = 32;
 export const MAX_HUMMING_PCM_BYTES = 256 * 1024 * 1024;
 export const MIN_HUMMING_FREQUENCY_HZ = 50;
 export const MAX_HUMMING_FREQUENCY_HZ = 1_000;
+export const MAX_HUMMING_WAVEFORM_BINS = 512;
+export const MAX_HUMMING_PUBLIC_PITCH_FRAMES = 3_000;
 
 const ANALYSIS_SAMPLE_RATE = 8_000;
 const ANALYSIS_WINDOW_SECONDS = 0.05;
@@ -60,6 +62,28 @@ export type HummingMelodyNote = Readonly<{
   durationSeconds: number;
   midi: number;
   confidence: number;
+}>;
+
+export type HummingWaveformBin = Readonly<{
+  startSeconds: number;
+  endSeconds: number;
+  min: number;
+  max: number;
+}>;
+
+export type HummingPitchFrame = Readonly<{
+  startSeconds: number;
+  endSeconds: number;
+  /** Fractional MIDI pitch for a voiced frame; null represents an unvoiced frame. */
+  midi: number | null;
+  confidence: number;
+}>;
+
+export type HummingTranscriptionResult = Readonly<{
+  durationSeconds: number;
+  waveform: readonly HummingWaveformBin[];
+  pitchFrames: readonly HummingPitchFrame[];
+  notes: readonly HummingMelodyNote[];
 }>;
 
 export type HummingTranscriptionProgress = Readonly<{
@@ -376,6 +400,39 @@ async function createAnalysisSignal(
   return output;
 }
 
+function createWaveformBins(
+  samples: Float64Array,
+  durationSeconds: number,
+): readonly HummingWaveformBin[] {
+  if (samples.length === 0) return [];
+  const binCount = Math.min(MAX_HUMMING_WAVEFORM_BINS, samples.length);
+  const bins: HummingWaveformBin[] = [];
+  for (let binIndex = 0; binIndex < binCount; binIndex += 1) {
+    const startFrame = Math.floor((binIndex * samples.length) / binCount);
+    const endFrame = Math.max(
+      startFrame + 1,
+      Math.floor(((binIndex + 1) * samples.length) / binCount),
+    );
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (let frame = startFrame; frame < endFrame; frame += 1) {
+      const sample = samples[frame] ?? 0;
+      min = Math.min(min, sample);
+      max = Math.max(max, sample);
+    }
+    bins.push({
+      startSeconds: (startFrame / samples.length) * durationSeconds,
+      endSeconds:
+        binIndex === binCount - 1
+          ? durationSeconds
+          : (endFrame / samples.length) * durationSeconds,
+      min,
+      max,
+    });
+  }
+  return bins;
+}
+
 function rangeRms(samples: Float64Array, start: number, end: number): number {
   let power = 0;
   for (let index = start; index < end; index += 1) {
@@ -584,6 +641,41 @@ function median(values: readonly number[]): number {
   return sorted[Math.floor(sorted.length / 2)] ?? 0;
 }
 
+function createPublicPitchFrames(
+  frames: readonly PitchFrame[],
+): readonly HummingPitchFrame[] {
+  if (frames.length === 0) return [];
+  const outputCount = Math.min(MAX_HUMMING_PUBLIC_PITCH_FRAMES, frames.length);
+  const result: HummingPitchFrame[] = [];
+  for (let outputIndex = 0; outputIndex < outputCount; outputIndex += 1) {
+    const startIndex = Math.floor((outputIndex * frames.length) / outputCount);
+    const endIndex = Math.max(
+      startIndex + 1,
+      Math.floor(((outputIndex + 1) * frames.length) / outputCount),
+    );
+    const first = frames[startIndex];
+    const last = frames[endIndex - 1];
+    if (!first || !last) continue;
+    const voicedMidi: number[] = [];
+    let confidence = 0;
+    for (let frameIndex = startIndex; frameIndex < endIndex; frameIndex += 1) {
+      const frame = frames[frameIndex];
+      if (!frame) continue;
+      confidence += frame.confidence;
+      if (frame.midiFloat !== null) voicedMidi.push(frame.midiFloat);
+    }
+    result.push({
+      startSeconds: first.startSeconds,
+      endSeconds: last.endSeconds,
+      midi: voicedMidi.length > 0 ? median(voicedMidi) : null,
+      // Averaging across the whole represented range also communicates how
+      // much of a compacted frame was actually voiced.
+      confidence: clampUnit(confidence / (endIndex - startIndex)),
+    });
+  }
+  return result;
+}
+
 function smoothVoicedMidi(frames: readonly PitchFrame[]): readonly (number | null)[] {
   return frames.map((frame, index) => {
     if (frame.midiFloat === null) return null;
@@ -700,14 +792,14 @@ function framesToNotes(frames: readonly PitchFrame[]): readonly HummingMelodyNot
 }
 
 /**
- * Convert a decoded, monophonic humming recording into quantized MIDI notes.
- * The asynchronous chunks keep long recordings from monopolizing the UI
- * thread; all scheduling choices leave the returned notes unchanged.
+ * Analyze decoded monophonic humming once and return only bounded scalar
+ * projections. Source PCM, the 8 kHz analysis signal, and AudioBuffer-like
+ * objects never escape this call.
  */
-export async function transcribeHummingToMelody(
+export async function transcribeHummingToMelodyResult(
   buffer: HummingAudioBufferShape,
   options: HummingTranscriptionOptions = {},
-): Promise<readonly HummingMelodyNote[]> {
+): Promise<HummingTranscriptionResult> {
   const yieldControl = options.yieldControl ?? yieldToEventLoop;
   const chunkSamples = validatedChunkSamples(options.chunkSamples);
   try {
@@ -748,7 +840,13 @@ export async function transcribeHummingToMelody(
       options.onProgress,
     );
     throwIfCancelled(options.signal);
-    return framesToNotes(pitchFrames);
+    const notes = framesToNotes(pitchFrames);
+    return {
+      durationSeconds: input.durationSeconds,
+      waveform: createWaveformBins(analysisSignal, input.durationSeconds),
+      pitchFrames: createPublicPitchFrames(pitchFrames),
+      notes,
+    };
   } catch (error) {
     if (error instanceof HummingTranscriptionError) throw error;
     if (
@@ -759,4 +857,16 @@ export async function transcribeHummingToMelody(
     }
     throw error;
   }
+}
+
+/**
+ * Backward-compatible note-only projection of the rich transcription result.
+ * The asynchronous chunks keep long recordings from monopolizing the UI
+ * thread; all scheduling choices leave the returned notes unchanged.
+ */
+export async function transcribeHummingToMelody(
+  buffer: HummingAudioBufferShape,
+  options: HummingTranscriptionOptions = {},
+): Promise<readonly HummingMelodyNote[]> {
+  return (await transcribeHummingToMelodyResult(buffer, options)).notes;
 }
