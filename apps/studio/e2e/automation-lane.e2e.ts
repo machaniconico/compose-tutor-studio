@@ -232,12 +232,14 @@ test('edits independent volume and pan automation with accessible responsive con
     name: 'トラック音量オートメーションレーン',
   });
   await expect(timeline).toBeVisible();
-  const timelineViewport = panel.locator('.automation-lane__timeline-scroll');
-  const timelineViewportBox = await requiredBox(timelineViewport);
-  await page.mouse.click(
-    timelineViewportBox.x + Math.min(360, timelineViewportBox.width - 24),
-    timelineViewportBox.y + Math.min(70, timelineViewportBox.height - 24),
-  );
+  await timeline.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    element.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      clientX: rect.left + Math.min(360, Math.max(24, rect.width - 24)),
+      clientY: rect.top + Math.min(70, Math.max(24, rect.height - 24)),
+    }));
+  });
   await expect(points).toHaveCount(2);
 
   await points.nth(1).focus();
