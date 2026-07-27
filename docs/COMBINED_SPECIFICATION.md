@@ -682,15 +682,16 @@ channel 9の1候補は、全noteが次の条件をすべて満たす場合だけ
 - マイク導線は利用者の明示操作から権限要求、3秒カウント、録音、停止、解析の順に進める。再生中なら録音dialogを開く前にtransportを停止し、monitor出力は常に無音、0.5秒未満は拒否、60秒でexact frame停止する。許可拒否、deviceなし・使用中・切断、非対応環境を区別し、録音済みfileを常にfallbackとして残す
 - raw PCMはAudioWorkletからbounded chunkで受け取り、録音中はchunk列、最終連続PCM、runtime overheadのworst-case peakとしてshared audio resource ledgerへ208 MiBを予約する。録音PCM、入力level、権限待ち、countdownはtransientで、録音終了後の解析予約へ所有権を渡し、Projectや永続storageへ保存しない
 - source parser、browser presentation時間、format / sample rate別codec padding、decoder再同期上限をdecode前に検査する。presentation / containerは60秒＋許容padding以内とし、ADTS AACのbrowser過大推定だけは完全走査したframe列を優先する。decode後に残る許容paddingだけをzero-copyで60秒へ切り詰める
-- 全source sampleの有限性とPCM 256 MiB上限を解析用配列の確保前に検査する。逆相channelを極性整合してmixし、8極low-passで8 kHz化前のaliasingを抑え、50〜1,000 Hzの正規化自己相関、RMS / periodicity gate、中央値、semitone hysteresis、無声区間分割から`startSeconds / durationSeconds / midi / confidence`を得る
+- 全source sampleの有限性とPCM 256 MiB上限を解析用配列の確保前に検査する。逆相channelを極性整合してmixし、8極low-passで8 kHz化前のaliasingを抑え、50〜1,000 Hzの正規化自己相関、RMS / periodicity gate、中央値、semitone hysteresis、無声区間分割から`startSeconds / durationSeconds / midi / confidence`を得る。同じ解析passから最大512 binのwaveform min/maxと最大3,000件のpitch frameだけを表示用に返し、raw PCMやAudioBufferは保持しない
 - validation、極性整合、mix、pitch解析はbounded chunkごとにevent loopへyieldし、AbortSignalとgenerationで古い結果を破棄する。検出数が0または512超ならProjectを変更せず具体的に案内する
 
 ### 13.2 確認とProject反映
 
-- 検出後に音符数、音名、MIDI noteを表示し、誤検出は確定前にpitch修正または候補除外できる。反映先MIDI Clipと1/16、1/8、1/4、補正なしを選ぶ
+- 検出後にbounded waveform、pitch trace、半音guide、stable IDを持つ音符segmentを同じ時間軸へ表示する。選択segmentは確定前にpitch、開始、終了、位置を修正でき、分割、次segmentとの結合、候補除外、候補編集専用Undo / Redo / resetを行える。反映先MIDI Clipと1/16、1/8、1/4、補正なしを選ぶ
+- segmentは開始時刻順の重ならないhalf-open区間とし、gapを許可する。長さは60 ms以上、MIDIは整数0〜127、confidenceは0〜1、最大512件に制限し、不正操作は候補全体を変更せず理由を表示する
 - 秒位置は確定時点のcompiled tempo mapでclip-local quarter-note beatへ変換する。beat 0だけの固定mapも同じ経路で従来の固定BPM計算と一致する。量子化で同時刻へ畳み込まれた単音候補はconfidenceが高い1件だけを残し、clip終端でdurationをclampする
 - 「メロディクリップへ反映」の明示操作まではProject / history / revision / autosaveを変更しない。確定は対象clipの既存notesを置換する1回のProject changeとし、Undo 1回で全体を戻す。成功後は対象Track / ClipとPiano Rollを選択する
-- 入力は単音のマイク録音または録音済みfileを対象とする。polyphonic transcription、歌詞認識、波形 / pitch segment編集は未対応としてUIとgap matrixに明示する
+- 入力は単音のマイク録音または録音済みfileを対象とする。表示と編集はMIDI化前のtransient候補だけに作用し、元音声を破壊編集しない。polyphonic transcription、歌詞認識、formant補正、AudioWarp / VariAudio / Flex Pitch相当の音声修復は未対応としてUIとgap matrixに明示する
 
 ---
 
@@ -1079,7 +1080,9 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Assistant内に「鼻歌からメロディ」を置き、主操作を「マイクで鼻歌を録音」、fallbackを「録音済みファイルを選ぶ」とする。「端末内」「単音限定」「録音は保存しない」「fileは32 MB・両入力60秒」を開始前から表示する
 - 録音dialogは説明と明示的な開始buttonを初期focusにし、許可待ち→3秒countdown→録音中→終了処理をstatusで示す。録音中は経過時間、入力level meter、終了して解析、破棄をkeyboardで操作でき、暗黙dismissは無効にする。許可拒否やdevice失敗後は再試行とfile fallbackを同じdialogに残す
 - file確認、decode、sample検証、channel極性整合、mix、pitch解析を総合progressと`aria-live`で通知し、解析中はcancelを表示する
-- 成功時は音符候補をscroll可能な一覧で表示し、音名、編集可能なMIDI note、候補除外、反映先clip、リズム補正をkeyboardだけで操作できる
+- 成功時はbounded waveform概要とpitch laneを同じ時間軸で表示し、pitch traceと半音guideは装飾、stable IDを持つ音符segmentはnative buttonとする。低confidenceは色に加えて破線で区別し、時間軸だけを内部横scrollさせて320 px幅でもdocumentを横overflowさせない
+- segment群はroving tab stopを1件だけ持つ。Home / EndとPageUp / PageDownで候補選択、上下で半音移動、左右で50 ms移動、Alt+左右で10 ms微調整、Shift+左右で終端変更、Delete / Backspaceで除外する。Cmd/Ctrl+ZとCmd/Ctrl+Shift+Zは候補編集専用Undo / Redoとし、ProjectのUndoへ伝播させない
+- 選択segmentの音名、MIDI、confidence、開始、終了をlabel付きcontrolで示し、半音変更、分割、次との結合、除外、候補編集のUndo / Redo / resetをkeyboardだけで操作できる。不正な境界や最小長はinline alert、成功操作は専用のpolite live statusで通知する
 - 反映buttonの直前に既存notesを置き換えることとUndo対応を明示する。解析成功時は候補結果へfocusを移し、確定後はPiano Rollへ移動して反映件数をlive statusとtoastで通知する
 
 ### 2.11 Audio Track録音
@@ -1387,9 +1390,9 @@ drum Clipの表示小節数はdomain値を変更せず、Clip開始位置からc
 1. マイク入力はユーザーgestureから`getUserMedia({ video: false })`を要求し、echo cancellation / noise suppression / auto gainを無効希望として渡す。AudioWorkletは最大2 channelのraw PCMをbounded chunkでtransferし、monitor graphをgain 0でdestinationへ接続してfeedbackを作らない。exact 60秒frame cap、0.5秒最小長、single-flight capture lease、track-ended、Abort、flush timeoutの全経路でtrack / graph / AudioContextを解放する
 2. Web / Windowsは同一originのaudio-only要求だけをPermissions Policyで許可する。macOS bundleは`NSMicrophoneUsageDescription`とaudio-input entitlementを持ち、Linux WebKitGTKは`UserMediaPermissionRequest`のaudio-onlyだけをallowしてvideo / mixed requestをdenyする。camera権限、native command、network接続権限は追加しない
 3. file入力はVocal-cutと同じstrict source parser / native basename+bytes gatewayを使い、32 MiB、60秒、mono / stereo、256 MiB working memoryへ狭めてpreflightする。マイク録音はchunk列と最終連続PCMの同時保持を含む208 MiB capture reservationを保持し、終了後に実PCM量から解析reservationへ切り替える。両経路とも384 MiB shared audio resource ledgerを迂回しない
-4. decodeまたは録音後PCMを非破壊で検証し、極性整合mix、anti-alias low-pass、8 kHz resample、50〜1,000 Hz pitch frame解析をchunked async pipelineで実行する。全sampleの有限性とPCM byte上限は解析signal確保前に検査する
-5. pitch frameを無声区間、中央値、semitone hysteresisで単音note候補へまとめる。強い第2倍音はfundamental energyと倍周期scoreを併用してoctave候補を補正する
-6. 候補修正、除外、target Clip、quantizeはReact local stateに保持する。確定時だけseconds→beats mappingとproject validationを行い、`replaceClipNotes`の単一changeで全notesを採用する
+4. decodeまたは録音後PCMを非破壊で検証し、極性整合mix、anti-alias low-pass、8 kHz resample、50〜1,000 Hz pitch frame解析をchunked async pipelineで実行する。全sampleの有限性とPCM byte上限は解析signal確保前に検査する。同じ8 kHz signalから最大512件のwaveform min/max、既存frame列から最大3,000件の時刻 / fractional MIDI / confidenceだけを投影し、PCMとAudioBufferをresultへ含めない
+5. pitch frameを無声区間、中央値、semitone hysteresisで単音note候補へまとめる。強い第2倍音はfundamental energyと倍周期scoreを併用してoctave候補を補正する。候補はtransient stable ID、開始 / 終了、MIDI、confidenceへ正規化し、60 ms最小長、非重複、512件上限をpure editing domainで検証する
+6. 候補のpitch / position / boundary修正、split / merge / 除外とbounded Undo / Redo、target Clip、quantizeはReact local stateに保持する。source変更、cancel、失敗、unmountでは候補historyと表示投影を破棄する。確定時だけcurrent draftをseconds→beats mappingとproject validationへ渡し、`replaceClipNotes`の単一changeで全notesを採用する
 
 decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否ではProject fingerprintを変えない。schema v4ではcompiled tempo mapの共通seconds↔beat resolverを使い、beat 0だけの固定mapも同じ経路で従来と同じ結果にする。
 
@@ -2447,13 +2450,14 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 | vocal-cut bass preservation | cutoff以下の中央低域を高域の中央声より多く残し、3 presetのstrength / cutoffが仕様値と一致するか |
 | vocal-cut safety | exact stereo / 5分 / memoryをallocation前に検査し、non-finiteとnear-monoを拒否するか。WAV `fmt`、MP3 Xing/Info・frame length、ADTS frame length、M4A `mdhd` / `stts` / `stsz` / `stsc` / sample rateを短く見せても、decoder再同期候補 / sample table由来のdecode時間上限を実ChromiumのAudioBufferより短くしないか。Info偽装10分MP3とouter-frame内の連続chainをdecode前に拒否し、孤立したMP3 payload headerは過大計上しないか。正規exact 5分WAV / MP3 / ffmpeg M4A / macOS AudioToolbox M4Aをbounded padding込みで受理し、browser durationが過大なADTS AACもframe列で受理してdecode後paddingだけをzero-copyで300秒へtrimするか。peak 1以下は持ち上げず、超過時だけ減衰するか |
 | vocal-cut chunk/cancel | processingとWAV encodeがchunkごとに進捗を単調更新し、cancel後に古いgenerationが結果やdownloadを公開しないか |
-| humming pitch core | 50 / 1,000 Hz境界、2音＋無声、vibrato、強い第2倍音、逆相stereo、192 kHz downsampleのaliasingを合成fixtureで検査し、同入力 / 異chunkで結果が一致するか |
+| humming pitch core | 50 / 1,000 Hz境界、2音＋無声、vibrato、強い第2倍音、逆相stereo、192 kHz downsampleのaliasingを合成fixtureで検査し、同入力 / 異chunkでnote、最大512 waveform bin、最大3,000 pitch frameが一致するか |
 | humming safety | 60秒UI上限、256 MiB PCM / working上限、NaN / Inf、32ch core上限、mono / stereo UI上限、巨大chunk、cancelをallocation / commit前に拒否するか |
+| humming candidate editor | stable ID、60 ms最小長、0〜127 MIDI、非重複、512 segment上限を守り、pitch / move / boundary / split / merge / removeの不正操作がdraftをatomicに保持するか。候補Undo / Redo / resetがboundedでProject historyへ触れないか |
 | microphone capture | secure context / AudioWorklet / device有無、権限拒否、single-flight、permission pending cancel後のlate stream停止、device切断、manual / exact 60秒停止、0.5秒未満、2ch / sample rate / memory上限、invalid chunk、flush timeoutでresourceを一度だけ解放するか。入力ID省略時はhost既定、明示時は`deviceId.exact`になり、take中に変更されないか |
 | microphone input inventory | `enumerateDevices()`からaudioinputだけを抽出し、duplicate IDは先頭だけ、空labelは`マイク N`、空IDはdialogのシステム既定optionへ統合されるか。unsupported / enumerate失敗でも既定入力を残し、`devicechange`再取得、stale generation破棄、選択device消失表示、unsubscribe exactly onceを検査する |
 | recording latency calibration DSP | 固定PRBSの複数burstを0、1、500 ms境界と既知の整数frameだけshiftしたmono/stereo・複数sample rate fixtureで正規化相関し、exact `latencyFrames`と有限0〜1 confidenceを返すか。silence、clipping、500 ms窓外、同率 / 近接peak、burst間不一致、閾値直下confidence、NaN / Infを決定的にfail closedにするか |
 | recording latency calibration lifecycle | exact input ID / Context generation / sample rateを開始・解析前・公開前に照合し、context変化、cancel、capture failureで新profileを公開せず前回値を保持するか。成功profileがProject / history / revision / autosave / Asset / SQLite / `.ctsproj.json`へ現れず、dialogを閉じた時と通常録音中を含むapp lifetimeの`devicechange`でfuture profileを破棄するか。bind前はtakeをfail closed、bind後はcurrent take token / frozen配置を保ち、以前の入力へ戻しても旧profileを再利用しないか。transport stopped後にnatural drainが残るfixtureでsession dispose / Master restoreがprobe scheduleより先に完了するか |
-| humming E2E | local mono WAVと合成MediaStreamの直接録音をAssistantから解析し、候補修正 / 除外、target / quantize確認後に2音をUndo 1回のProject changeとしてPiano Rollへ反映するか。権限拒否時にfile fallbackが残り、失敗 / cancelではProjectが不変か |
+| humming E2E | local mono WAVと合成MediaStreamの直接録音をAssistantから解析し、waveform / pitch segment表示、keyboardでのpitch / timing修正、split / merge / 除外、候補Undo / Redo、target / quantize確認後に現draftをUndo 1回のProject changeとしてPiano Rollへ反映するか。320 px幅でdocument横overflowがなく、権限拒否時にfile fallbackが残り、source変更 / 失敗 / cancelではtransient previewを破棄してProjectが不変か |
 
 ## 6. パフォーマンステスト
 

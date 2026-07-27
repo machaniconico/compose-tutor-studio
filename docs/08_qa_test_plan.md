@@ -147,13 +147,14 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 | vocal-cut bass preservation | cutoff以下の中央低域を高域の中央声より多く残し、3 presetのstrength / cutoffが仕様値と一致するか |
 | vocal-cut safety | exact stereo / 5分 / memoryをallocation前に検査し、non-finiteとnear-monoを拒否するか。WAV `fmt`、MP3 Xing/Info・frame length、ADTS frame length、M4A `mdhd` / `stts` / `stsz` / `stsc` / sample rateを短く見せても、decoder再同期候補 / sample table由来のdecode時間上限を実ChromiumのAudioBufferより短くしないか。Info偽装10分MP3とouter-frame内の連続chainをdecode前に拒否し、孤立したMP3 payload headerは過大計上しないか。正規exact 5分WAV / MP3 / ffmpeg M4A / macOS AudioToolbox M4Aをbounded padding込みで受理し、browser durationが過大なADTS AACもframe列で受理してdecode後paddingだけをzero-copyで300秒へtrimするか。peak 1以下は持ち上げず、超過時だけ減衰するか |
 | vocal-cut chunk/cancel | processingとWAV encodeがchunkごとに進捗を単調更新し、cancel後に古いgenerationが結果やdownloadを公開しないか |
-| humming pitch core | 50 / 1,000 Hz境界、2音＋無声、vibrato、強い第2倍音、逆相stereo、192 kHz downsampleのaliasingを合成fixtureで検査し、同入力 / 異chunkで結果が一致するか |
+| humming pitch core | 50 / 1,000 Hz境界、2音＋無声、vibrato、強い第2倍音、逆相stereo、192 kHz downsampleのaliasingを合成fixtureで検査し、同入力 / 異chunkでnote、最大512 waveform bin、最大3,000 pitch frameが一致するか |
 | humming safety | 60秒UI上限、256 MiB PCM / working上限、NaN / Inf、32ch core上限、mono / stereo UI上限、巨大chunk、cancelをallocation / commit前に拒否するか |
+| humming candidate editor | stable ID、60 ms最小長、0〜127 MIDI、非重複、512 segment上限を守り、pitch / move / boundary / split / merge / removeの不正操作がdraftをatomicに保持するか。候補Undo / Redo / resetがboundedでProject historyへ触れないか |
 | microphone capture | secure context / AudioWorklet / device有無、権限拒否、single-flight、permission pending cancel後のlate stream停止、device切断、manual / exact 60秒停止、0.5秒未満、2ch / sample rate / memory上限、invalid chunk、flush timeoutでresourceを一度だけ解放するか。入力ID省略時はhost既定、明示時は`deviceId.exact`になり、take中に変更されないか |
 | microphone input inventory | `enumerateDevices()`からaudioinputだけを抽出し、duplicate IDは先頭だけ、空labelは`マイク N`、空IDはdialogのシステム既定optionへ統合されるか。unsupported / enumerate失敗でも既定入力を残し、`devicechange`再取得、stale generation破棄、選択device消失表示、unsubscribe exactly onceを検査する |
 | recording latency calibration DSP | 固定PRBSの複数burstを0、1、500 ms境界と既知の整数frameだけshiftしたmono/stereo・複数sample rate fixtureで正規化相関し、exact `latencyFrames`と有限0〜1 confidenceを返すか。silence、clipping、500 ms窓外、同率 / 近接peak、burst間不一致、閾値直下confidence、NaN / Infを決定的にfail closedにするか |
 | recording latency calibration lifecycle | exact input ID / Context generation / sample rateを開始・解析前・公開前に照合し、context変化、cancel、capture failureで新profileを公開せず前回値を保持するか。成功profileがProject / history / revision / autosave / Asset / SQLite / `.ctsproj.json`へ現れず、dialogを閉じた時と通常録音中を含むapp lifetimeの`devicechange`でfuture profileを破棄するか。bind前はtakeをfail closed、bind後はcurrent take token / frozen配置を保ち、以前の入力へ戻しても旧profileを再利用しないか。transport stopped後にnatural drainが残るfixtureでsession dispose / Master restoreがprobe scheduleより先に完了するか |
-| humming E2E | local mono WAVと合成MediaStreamの直接録音をAssistantから解析し、候補修正 / 除外、target / quantize確認後に2音をUndo 1回のProject changeとしてPiano Rollへ反映するか。権限拒否時にfile fallbackが残り、失敗 / cancelではProjectが不変か |
+| humming E2E | local mono WAVと合成MediaStreamの直接録音をAssistantから解析し、waveform / pitch segment表示、keyboardでのpitch / timing修正、split / merge / 除外、候補Undo / Redo、target / quantize確認後に現draftをUndo 1回のProject changeとしてPiano Rollへ反映するか。320 px幅でdocument横overflowがなく、権限拒否時にfile fallbackが残り、source変更 / 失敗 / cancelではtransient previewを破棄してProjectが不変か |
 
 ## 6. パフォーマンステスト
 
