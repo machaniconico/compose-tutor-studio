@@ -231,10 +231,17 @@ test('edits independent volume and pan automation with accessible responsive con
   const timeline = panel.getByRole('group', {
     name: 'トラック音量オートメーションレーン',
   });
-  await timeline.click({ position: { x: 360, y: 70 } });
+  await expect(timeline).toBeVisible();
+  const timelineViewport = panel.locator('.automation-lane__timeline-scroll');
+  const timelineViewportBox = await requiredBox(timelineViewport);
+  await page.mouse.click(
+    timelineViewportBox.x + Math.min(360, timelineViewportBox.width - 24),
+    timelineViewportBox.y + Math.min(70, timelineViewportBox.height - 24),
+  );
   await expect(points).toHaveCount(2);
 
-  await points.nth(1).click();
+  await points.nth(1).focus();
+  await points.nth(1).press('Enter');
   const inspector = panel.getByRole('group', { name: '選択中の点' });
   await expect(inspector).toBeVisible();
   await inspector.getByLabel('次の点まで').selectOption('hold');
@@ -287,7 +294,8 @@ test('edits independent volume and pan automation with accessible responsive con
     'aria-label',
     /パン 1点目、拍 0、値 中央/,
   );
-  await panel.locator('[data-automation-point-id]').first().click();
+  await panel.locator('[data-automation-point-id]').first().focus();
+  await panel.locator('[data-automation-point-id]').first().press('Enter');
   const panInput = panel
     .getByRole('group', { name: '選択中の点' })
     .getByLabel('パン（-100〜100）', { exact: true });
@@ -453,7 +461,8 @@ test('edits independent volume and pan automation with accessible responsive con
   expect(await pointLabels(points)).toEqual(labelsBeforeClear);
 
   // Keep the inspector deletion path covered independently of keyboard delete.
-  await firstPoint.click();
+  await firstPoint.focus();
+  await firstPoint.press('Enter');
   await panel.getByRole('button', { name: 'この点を削除' }).click();
   await expect(points).toHaveCount(1);
   await expect(dragPoint).toBeFocused();
