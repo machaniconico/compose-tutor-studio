@@ -131,6 +131,10 @@ beforeEach(async () => {
   await useStore.getState().flushPendingSave();
   installLocalStorage();
   expect(await useStore.getState().createNewProject('オーディオ操作検証')).toBe(true);
+  expect(useStore.getState().clearRecordingLatencyCalibration()).toBe(true);
+  expect(useStore.getState().setPreferredMicrophoneInputDeviceId(null)).toBe(true);
+  expect(useStore.getState().setRecordingLatencyCompensationMode('estimated')).toBe(true);
+  expect(useStore.getState().setRecordingLatencyAdjustmentMs(0)).toBe(true);
 });
 
 describe('Studio Audio Track import', () => {
@@ -701,6 +705,218 @@ describe('Studio Audio Track import', () => {
 });
 
 describe('Studio Audio Track microphone recording', () => {
+  it('requires an explicit input before acquiring a loopback calibration fence', () => {
+    const projectBefore = useStore.getState().project;
+
+    expect(actions.beginStudioRecordingLatencyCalibration()).toEqual({
+      ok: false,
+      code: 'input-device-required',
+    });
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(useStore.getState().project).toBe(projectBefore);
+  });
+
+  it('disposes hidden natural-drain audio before calibrating a stopped transport', () => {
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-loopback')).toBe(true);
+    expect(useStore.getState().transport.phase).toBe('stopped');
+    const stopRuntimeAudio = vi.fn();
+
+    const ownership = actions.beginStudioRecordingLatencyCalibration({
+      stopRuntimePlaybackAudio: stopRuntimeAudio,
+    });
+
+    expect(stopRuntimeAudio).toHaveBeenCalledOnce();
+    expect(ownership.ok).toBe(true);
+    if (!ownership.ok) throw new Error(ownership.code);
+    actions.discardStudioRecordingLatencyCalibration(ownership.handle);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+  });
+
+  it('commits loopback evidence under the recording fence without changing the Project', () => {
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-loopback')).toBe(true);
+    const before = useStore.getState();
+    const projectBefore = fingerprint(before.project);
+    const pastBefore = before.past;
+    const saveBefore = before.saveState;
+    const ownership = actions.beginStudioRecordingLatencyCalibration();
+    expect(ownership).toMatchObject({
+      ok: true,
+      inputDeviceId: 'usb-loopback',
+      playbackStopped: false,
+    });
+    if (!ownership.ok) throw new Error(ownership.code);
+    expect(useStore.getState().audioRecordingOperationId).toBe(ownership.handle.operationId);
+
+    expect(actions.commitStudioRecordingLatencyCalibration(ownership.handle, {
+      latencyFrames: 4_800,
+      sampleRate: 48_000,
+      contextGeneration: 7,
+      confidence: 0.94,
+    })).toBe(true);
+
+    const after = useStore.getState();
+    expect(after.audioRecordingOperationId).toBeNull();
+    expect(after.recordingLatencyCompensationMode).toBe('calibrated');
+    expect(after.recordingLatencyCalibration).toEqual({
+      inputDeviceId: 'usb-loopback',
+      latencyFrames: 4_800,
+      sampleRate: 48_000,
+      contextGeneration: 7,
+      confidence: 0.94,
+    });
+    expect(fingerprint(after.project)).toBe(projectBefore);
+    expect(after.past).toBe(pastBefore);
+    expect(after.saveState).toBe(saveBefore);
+
+    const cancelled = actions.beginStudioRecordingLatencyCalibration();
+    if (!cancelled.ok) throw new Error(cancelled.code);
+    actions.discardStudioRecordingLatencyCalibration(cancelled.handle);
+    expect(useStore.getState().recordingLatencyCalibration).toEqual(
+      after.recordingLatencyCalibration,
+    );
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+  });
+
+  it('uses calibrated round-trip latency instead of double-counting host estimates', async () => {
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-loopback')).toBe(true);
+    const calibration = actions.beginStudioRecordingLatencyCalibration();
+    if (!calibration.ok) throw new Error(calibration.code);
+    expect(actions.commitStudioRecordingLatencyCalibration(calibration.handle, {
+      latencyFrames: 4_800,
+      sampleRate: 48_000,
+      contextGeneration: 7,
+      confidence: 0.9,
+    })).toBe(true);
+    expect(useStore.getState().setRecordingLatencyAdjustmentMs(20)).toBe(true);
+    useStore.getState().setPosition(4);
+    const ownership = actions.beginStudioAudioTrackRecording();
+    if (!ownership.ok) throw new Error(ownership.code);
+    const snapshot = useStore.getState().project;
+    const requestId = useStore.getState().startAudioRecordingPlayback(
+      ownership.handle.operationId,
+      ownership.startBeat,
+    );
+    if (requestId === null) throw new Error('recording playback request missing');
+    useStore.getState().confirmPlaybackStarted(requestId);
+    const context = {
+      sampleRate: 48_000,
+      baseLatency: 0.2,
+      outputLatency: 0.2,
+    } as AudioContext;
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, {
+      context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: 4,
+      tempo: {},
+      requestId,
+      projectSnapshot: snapshot,
+    } as Parameters<typeof actions.bindStudioAudioTrackRecordingToPlayback>[1])).toBe(true);
+
+    const result = await actions.recordStudioAudioTrack({
+      recordingHandle: ownership.handle,
+      capture: {
+        ...microphoneCaptureShape(),
+        contextGeneration: 7,
+        firstContextFrame: 96_000,
+        endContextFrameExclusive: 192_000,
+        inputLatencySeconds: 0.3,
+      },
+      trackName: 'Calibrated Take',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer: () => audioBufferShape(96_000, 48_000),
+      canonicalize: async () => canonicalResult(),
+      createAssetId: () => 'asset-calibrated-recording',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    const clip = useStore.getState().project.tracks
+      .flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === result.clipId);
+    expect(clip).toMatchObject({
+      type: 'audio',
+      startBeat: 3.76,
+      sourceStartFrame: 0,
+      sourceFrameCount: 96_000,
+    });
+  });
+
+  it('fails closed when calibrated evidence belongs to another context generation', () => {
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-loopback')).toBe(true);
+    const calibration = actions.beginStudioRecordingLatencyCalibration();
+    if (!calibration.ok) throw new Error(calibration.code);
+    expect(actions.commitStudioRecordingLatencyCalibration(calibration.handle, {
+      latencyFrames: 4_800,
+      sampleRate: 48_000,
+      contextGeneration: 7,
+      confidence: 0.9,
+    })).toBe(true);
+    useStore.getState().setPosition(4);
+    const ownership = actions.beginStudioAudioTrackRecording();
+    if (!ownership.ok) throw new Error(ownership.code);
+    const snapshot = useStore.getState().project;
+    const requestId = useStore.getState().startAudioRecordingPlayback(
+      ownership.handle.operationId,
+      ownership.startBeat,
+    );
+    if (requestId === null) throw new Error('recording playback request missing');
+    useStore.getState().confirmPlaybackStarted(requestId);
+
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, {
+      context: { sampleRate: 48_000, baseLatency: 0, outputLatency: 0 } as AudioContext,
+      contextGeneration: 8,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: 4,
+      tempo: {},
+      requestId,
+      projectSnapshot: snapshot,
+    } as Parameters<typeof actions.bindStudioAudioTrackRecordingToPlayback>[1])).toBe(false);
+    actions.discardStudioAudioTrackRecording(ownership.handle);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+  });
+
+  it('fails closed when devicechange invalidates the frozen calibration before clock bind', () => {
+    expect(useStore.getState().setPreferredMicrophoneInputDeviceId('usb-loopback')).toBe(true);
+    const calibration = actions.beginStudioRecordingLatencyCalibration();
+    if (!calibration.ok) throw new Error(calibration.code);
+    expect(actions.commitStudioRecordingLatencyCalibration(calibration.handle, {
+      latencyFrames: 4_800,
+      sampleRate: 48_000,
+      contextGeneration: 7,
+      confidence: 0.9,
+    })).toBe(true);
+    useStore.getState().setPosition(4);
+    const ownership = actions.beginStudioAudioTrackRecording();
+    if (!ownership.ok) throw new Error(ownership.code);
+    const snapshot = useStore.getState().project;
+    const requestId = useStore.getState().startAudioRecordingPlayback(
+      ownership.handle.operationId,
+      ownership.startBeat,
+    );
+    if (requestId === null) throw new Error('recording playback request missing');
+    useStore.getState().confirmPlaybackStarted(requestId);
+
+    expect(useStore.getState().clearRecordingLatencyCalibration()).toBe(true);
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, {
+      context: { sampleRate: 48_000, baseLatency: 0, outputLatency: 0 } as AudioContext,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: 4,
+      tempo: {},
+      requestId,
+      projectSnapshot: snapshot,
+    } as Parameters<typeof actions.bindStudioAudioTrackRecordingToPlayback>[1])).toBe(false);
+
+    actions.discardStudioAudioTrackRecording(ownership.handle);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(useStore.getState().recordingLatencyCompensationMode).toBe('estimated');
+  });
+
   it('binds one shared clock and applies estimated plus manual latency to placement', async () => {
     useStore.getState().setPosition(4);
     expect(useStore.getState().setRecordingLatencyAdjustmentMs(20)).toBe(true);

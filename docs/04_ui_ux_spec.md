@@ -188,7 +188,9 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Audio Trackだけに`R`の録音待機buttonを表示し、Track ListとInspectorの両方で同じ単一選択を`aria-pressed`、文字、形で示す。computed nameは`${Track名} 録音待機`とし、色だけに依存しない。Project操作または録音中は切替をdisabledにする
 - transportの録音buttonには、通常レイアウトで待機中のTrack名または`新規Track`を可視表示し、accessible name / titleでも録音先を伝える。最小高のcompact layoutでは編集領域を守るため補助表示だけを省略し、`R`の状態とaccessible name / titleは維持する。録音待機なしでは新規Audio Track、待機中ではその既存Trackへ新しいClipを追加する
 - 録音dialogは開始前に録音先と入力deviceを表示する。入力は`システム既定`を常に選べ、列挙済みdeviceのlabelが空なら`マイク N`を使う。`devicechange`後に選択済み入力が見つからなければalertと選び直しを表示し、一覧取得不可でもシステム既定による再試行を残す
-- 録音開始後は録音先と入力deviceを固定し、終了または破棄まで変更controlを表示しない。3秒後に伴奏と録音を同じaudio clockで開始し、録音中は色だけでなく「録音中・伴奏再生中」と表示する。開始前に`自動（推定） / 自動なし`と-500〜+500 msの手動offsetを選べるようにし、正値=早め、負値=遅め、自動値は実測校正ではないことを常時説明する。transport loop、再生中の任意punch、device hot switchを対応済みと示唆しない
+- 録音開始後は録音先と入力deviceを固定し、終了または破棄まで変更controlを表示しない。3秒後に伴奏と録音を同じaudio clockで開始し、録音中は色だけでなく「録音中・伴奏再生中」と表示する。開始前に`実測 / 自動（推定） / 自動なし`と-500〜+500 msの手動offsetを選べるようにし、正値=早め、負値=遅め、推定値は実測校正ではないことを常時説明する。実測optionは現在の明示入力に一致する成功profileがある時だけ表示し、不一致時は黙って録音を続けず再校正を案内する。transport loop、再生中の任意punch、device hot switchを対応済みと示唆しない
+- 実測校正は通常録音とは別wizardで、明示選択した入力IDがある時だけ開ける。`システム既定`ではbuttonをdisabledにし、通常録音は既定入力のまま使えることと、校正には接続先の明示選択が必要な理由を表示する。wizardはスピーカーをOFFにしてinterface出力から選択入力へ物理cableを接続すること、入出力levelを低くすること、開放スピーカーとマイクでは実行しないこと、app monitorに加えてinterface / driver mixerのDirect Monitor・hardware Loopback・同一outputへのreturnもOFFにすること、出力 / driver / buffer変更後は再校正することを開始前に示す
+- 校正中は3秒countdown、測定状態、入力level、取消をstatus / meterで示し暗黙dismissを無効にする。instructions / running / success / errorの各表示切替では、消えるbuttonにfocusを残さず新stepのprimary actionへ移す。成功時はmsとsample数を表示し、Projectや測定PCMを保存しない。通常のcancel / silence / clipping / ambiguity / low confidenceでは以前のprofileを維持する。入力選択または`devicechange`では進行中の校正を中止して旧profileも破棄し、推定へ戻ったことを明示する
 
 ## 3. ナビゲーション
 

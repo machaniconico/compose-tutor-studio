@@ -63,10 +63,27 @@ export type EditorView = 'pianoRoll' | 'drums' | 'arranger';
 
 export type TransportPhase = 'stopped' | 'starting' | 'playing';
 
-export type RecordingLatencyCompensationMode = 'estimated' | 'off';
+export type RecordingLatencyCompensationMode = 'calibrated' | 'estimated' | 'off';
 
 export const MIN_RECORDING_LATENCY_ADJUSTMENT_MS = -500;
 export const MAX_RECORDING_LATENCY_ADJUSTMENT_MS = 500;
+export const MAX_RECORDING_LATENCY_CALIBRATION_SECONDS = 0.5;
+export const MIN_RECORDING_LATENCY_CALIBRATION_CONFIDENCE = 0.5;
+
+/**
+ * Runtime-only evidence from one physical output-to-input loopback.
+ *
+ * The profile is deliberately scoped to an exact input and AudioContext
+ * generation. The browser does not expose a reliable system-output identity,
+ * so the UI also tells users to recalibrate after changing the output route.
+ */
+export type RecordingLatencyCalibration = Readonly<{
+  inputDeviceId: string;
+  contextGeneration: number;
+  sampleRate: number;
+  latencyFrames: number;
+  confidence: number;
+}>;
 
 export type AudioIssue =
   | 'start-failed'
@@ -208,6 +225,8 @@ export type StoreState = {
   preferredMicrophoneInputDeviceId: string | null;
   /** Runtime-only recording placement policy. Never serialized into the Project. */
   recordingLatencyCompensationMode: RecordingLatencyCompensationMode;
+  /** Runtime-only physical loopback evidence. Never serialized into the Project. */
+  recordingLatencyCalibration: RecordingLatencyCalibration | null;
   /** Positive values move a recorded take earlier; negative values move it later. */
   recordingLatencyAdjustmentMs: number;
   localDataErase: LocalDataEraseState;
@@ -320,6 +339,13 @@ export type StoreState = {
   /** Select a host microphone input, or null for the host default. */
   setPreferredMicrophoneInputDeviceId: (deviceId: string | null) => boolean;
   setRecordingLatencyCompensationMode: (mode: RecordingLatencyCompensationMode) => boolean;
+  /** Adopt calibration only for the exact operation and currently selected input. */
+  commitRecordingLatencyCalibration: (
+    operationId: number,
+    calibration: RecordingLatencyCalibration,
+  ) => boolean;
+  /** Invalidate stale loopback evidence without touching Project/history. */
+  clearRecordingLatencyCalibration: () => boolean;
   setRecordingLatencyAdjustmentMs: (milliseconds: number) => boolean;
   tryBeginAudioRecordingOperation: () => number | null;
   finishAudioRecordingOperation: (operationId: number) => void;
@@ -1715,6 +1741,7 @@ export function createStudioStore(
     armedAudioTrackId: null,
     preferredMicrophoneInputDeviceId: null,
     recordingLatencyCompensationMode: 'estimated',
+    recordingLatencyCalibration: null,
     recordingLatencyAdjustmentMs: 0,
     localDataErase: { phase: 'idle', eraseId: null, message: null },
     persistenceNotice: null,
@@ -2217,7 +2244,14 @@ export function createStudioStore(
       }
       if (deviceId !== null && deviceId.length === 0) return false;
       if (state.preferredMicrophoneInputDeviceId !== deviceId) {
-        set({ preferredMicrophoneInputDeviceId: deviceId });
+        set({
+          preferredMicrophoneInputDeviceId: deviceId,
+          recordingLatencyCalibration: null,
+          recordingLatencyCompensationMode:
+            state.recordingLatencyCompensationMode === 'calibrated'
+              ? 'estimated'
+              : state.recordingLatencyCompensationMode,
+        });
       }
       return true;
     },
@@ -2227,12 +2261,56 @@ export function createStudioStore(
         state.projectOperationBusy
         || state.audioRecordingOperationId !== null
         || state.localDataErase.phase !== 'idle'
-        || (mode !== 'estimated' && mode !== 'off')
+        || (mode !== 'calibrated' && mode !== 'estimated' && mode !== 'off')
+        || (mode === 'calibrated' && state.recordingLatencyCalibration === null)
       ) {
         return false;
       }
       if (state.recordingLatencyCompensationMode !== mode) {
         set({ recordingLatencyCompensationMode: mode });
+      }
+      return true;
+    },
+    commitRecordingLatencyCalibration: (operationId, calibration) => {
+      const state = get();
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== operationId
+        || state.localDataErase.phase !== 'idle'
+        || typeof calibration.inputDeviceId !== 'string'
+        || calibration.inputDeviceId.length === 0
+        || calibration.inputDeviceId !== state.preferredMicrophoneInputDeviceId
+        || !Number.isSafeInteger(calibration.contextGeneration)
+        || calibration.contextGeneration <= 0
+        || !Number.isSafeInteger(calibration.sampleRate)
+        || calibration.sampleRate < 8_000
+        || calibration.sampleRate > 192_000
+        || !Number.isSafeInteger(calibration.latencyFrames)
+        || calibration.latencyFrames < 0
+        || calibration.latencyFrames
+          > calibration.sampleRate * MAX_RECORDING_LATENCY_CALIBRATION_SECONDS
+        || !Number.isFinite(calibration.confidence)
+        || calibration.confidence < MIN_RECORDING_LATENCY_CALIBRATION_CONFIDENCE
+        || calibration.confidence > 1
+      ) {
+        return false;
+      }
+      set({
+        recordingLatencyCalibration: Object.freeze({ ...calibration }),
+        recordingLatencyCompensationMode: 'calibrated',
+      });
+      return true;
+    },
+    clearRecordingLatencyCalibration: () => {
+      const state = get();
+      if (state.recordingLatencyCalibration !== null) {
+        set({
+          recordingLatencyCalibration: null,
+          recordingLatencyCompensationMode:
+            state.recordingLatencyCompensationMode === 'calibrated'
+              ? 'estimated'
+              : state.recordingLatencyCompensationMode,
+        });
       }
       return true;
     },

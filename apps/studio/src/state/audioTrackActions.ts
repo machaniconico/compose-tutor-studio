@@ -30,7 +30,10 @@ import {
 } from '../audio/canonicalAudioAsset';
 import { getAudioAssetPlaybackCache } from '../audio/audioAssetResolver';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from '../audio/masterBus';
-import type { SynchronizedRecordingPlaybackClock } from '../audio/playback';
+import {
+  stopRuntimePlaybackAudio,
+  type SynchronizedRecordingPlaybackClock,
+} from '../audio/playback';
 import { planSynchronizedRecordingPlacement } from '../audio/recordingAlignment';
 import {
   AudioResourceReservationError,
@@ -72,8 +75,10 @@ import { studioRuntime } from '../platform/runtime';
 import { uid } from './ids';
 import {
   MAX_RECORDING_LATENCY_ADJUSTMENT_MS,
+  MAX_RECORDING_LATENCY_CALIBRATION_SECONDS,
   MIN_RECORDING_LATENCY_ADJUSTMENT_MS,
   useStore,
+  type RecordingLatencyCalibration,
   type RecordingLatencyCompensationMode,
 } from './store';
 
@@ -81,6 +86,7 @@ export type StudioAudioActionErrorCode =
   | AudioClipMutationErrorCode
   | 'cancelled'
   | 'project-busy'
+  | 'input-device-required'
   | 'source-invalid'
   | 'source-too-large'
   | 'decode-busy'
@@ -291,6 +297,11 @@ type StudioAudioTrackRecordingOwnership = {
   startBeat: number;
   target: StudioAudioTrackRecordingTarget;
   playbackStopped: boolean;
+  latencyPolicy: Readonly<{
+    compensationMode: RecordingLatencyCompensationMode;
+    calibration: RecordingLatencyCalibration | null;
+    manualAdjustmentMs: number;
+  }>;
   synchronization: StudioAudioTrackRecordingSynchronization | null;
   finalizing: boolean;
   finished: boolean;
@@ -305,12 +316,62 @@ type StudioAudioTrackRecordingSynchronization = Readonly<{
   compensationMode: RecordingLatencyCompensationMode;
   manualAdjustmentMs: number;
   estimatedPlaybackLatencySeconds: number;
+  calibratedRoundTripLatencySeconds: number | null;
 }>;
 
 const studioAudioTrackRecordingOwnership = new WeakMap<
   StudioAudioTrackRecordingHandle,
   StudioAudioTrackRecordingOwnership
 >();
+
+const studioRecordingLatencyCalibrationHandleBrand: unique symbol = Symbol(
+  'studio-recording-latency-calibration-handle',
+);
+
+/** Opaque ownership for a project-fenced physical loopback measurement. */
+export type StudioRecordingLatencyCalibrationHandle = Readonly<{
+  operationId: number;
+  [studioRecordingLatencyCalibrationHandleBrand]: true;
+}>;
+
+type StudioRecordingLatencyCalibrationOwnership = {
+  lease: AudioTrackImportLease;
+  snapshot: Project;
+  operationId: number;
+  inputDeviceId: string;
+  finished: boolean;
+};
+
+const studioRecordingLatencyCalibrationOwnership = new WeakMap<
+  StudioRecordingLatencyCalibrationHandle,
+  StudioRecordingLatencyCalibrationOwnership
+>();
+
+export type BeginStudioRecordingLatencyCalibrationResult =
+  | Readonly<{
+      ok: true;
+      handle: StudioRecordingLatencyCalibrationHandle;
+      inputDeviceId: string;
+      playbackStopped: boolean;
+    }>
+  | Readonly<{
+      ok: false;
+      code:
+        | 'decode-busy'
+        | 'project-busy'
+        | 'input-device-required'
+        | 'resource-limit-exceeded';
+    }>;
+
+export type BeginStudioRecordingLatencyCalibrationDependencies = Readonly<{
+  /** Synchronously dispose active and naturally draining shared-Master graphs. */
+  stopRuntimePlaybackAudio: () => void;
+}>;
+
+const defaultRecordingLatencyCalibrationDependencies:
+  BeginStudioRecordingLatencyCalibrationDependencies = {
+    stopRuntimePlaybackAudio,
+  };
 
 export type BeginStudioAudioTrackRecordingResult =
   | Readonly<{
@@ -370,6 +431,118 @@ function finishStudioAudioTrackRecordingOwnership(
     useStore.getState().finishAudioRecordingOperation(ownership.operationId);
   });
   finishAudioTrackImportLease(ownership.lease);
+}
+
+function finishStudioRecordingLatencyCalibrationOwnership(
+  handle: StudioRecordingLatencyCalibrationHandle,
+  ownership: StudioRecordingLatencyCalibrationOwnership,
+): void {
+  if (ownership.finished) return;
+  ownership.finished = true;
+  studioRecordingLatencyCalibrationOwnership.delete(handle);
+  onAudioTrackImportLeaseReleased(ownership.lease, () => {
+    useStore.getState().finishAudioRecordingOperation(ownership.operationId);
+  });
+  finishAudioTrackImportLease(ownership.lease);
+}
+
+/**
+ * Fence project/import/close work before requesting a loopback input. Unlike a
+ * take, calibration does not depend on song length, Track capacity or looping.
+ */
+export function beginStudioRecordingLatencyCalibration(
+  dependencies: BeginStudioRecordingLatencyCalibrationDependencies =
+    defaultRecordingLatencyCalibrationDependencies,
+): BeginStudioRecordingLatencyCalibrationResult {
+  const state = useStore.getState();
+  const inputDeviceId = state.preferredMicrophoneInputDeviceId;
+  if (inputDeviceId === null) {
+    return { ok: false, code: 'input-device-required' };
+  }
+  const lease = tryAcquireAudioTrackImportLease();
+  if (!lease) return { ok: false, code: 'decode-busy' };
+
+  const operationId = state.tryBeginAudioRecordingOperation();
+  if (operationId === null) {
+    finishAudioTrackImportLease(lease);
+    return { ok: false, code: 'project-busy' };
+  }
+
+  const playbackStopped = state.transport.phase !== 'stopped';
+  try {
+    if (playbackStopped) state.stop();
+    // Natural tails can still own and automate Master after transport reaches
+    // stopped. Dispose them before calibration normalizes that shared gain.
+    dependencies.stopRuntimePlaybackAudio();
+    lease.resourceReservation = reserveMicrophoneCaptureResources();
+  } catch (error) {
+    state.finishAudioRecordingOperation(operationId);
+    finishAudioTrackImportLease(lease);
+    if (error instanceof AudioResourceReservationError) {
+      return { ok: false, code: 'resource-limit-exceeded' };
+    }
+    return { ok: false, code: 'project-busy' };
+  }
+
+  const handle: StudioRecordingLatencyCalibrationHandle = Object.freeze({
+    operationId,
+    [studioRecordingLatencyCalibrationHandleBrand]: true as const,
+  });
+  studioRecordingLatencyCalibrationOwnership.set(handle, {
+    lease,
+    snapshot: state.project,
+    operationId,
+    inputDeviceId,
+    finished: false,
+  });
+  return { ok: true, handle, inputDeviceId, playbackStopped };
+}
+
+/** Preserve the previous calibration while releasing every failed/cancelled fence. */
+export function discardStudioRecordingLatencyCalibration(
+  handle: StudioRecordingLatencyCalibrationHandle,
+): void {
+  const ownership = studioRecordingLatencyCalibrationOwnership.get(handle);
+  if (!ownership) return;
+  finishStudioRecordingLatencyCalibrationOwnership(handle, ownership);
+}
+
+/**
+ * Adopt one measured profile against the exact project/input/operation snapshot.
+ * The capture PCM and probe are intentionally discarded and never become assets.
+ */
+export function commitStudioRecordingLatencyCalibration(
+  handle: StudioRecordingLatencyCalibrationHandle,
+  measurement: Readonly<{
+    latencyFrames: number;
+    sampleRate: number;
+    contextGeneration: number;
+    confidence: number;
+  }>,
+): boolean {
+  const ownership = studioRecordingLatencyCalibrationOwnership.get(handle);
+  if (!ownership || ownership.finished || ownership.lease !== activeAudioTrackImportLease) {
+    return false;
+  }
+  const state = useStore.getState();
+  let committed = false;
+  if (
+    state.project === ownership.snapshot
+    && state.audioRecordingOperationId === ownership.operationId
+  ) {
+    committed = state.commitRecordingLatencyCalibration(
+      ownership.operationId,
+      {
+        inputDeviceId: ownership.inputDeviceId,
+        contextGeneration: measurement.contextGeneration,
+        sampleRate: measurement.sampleRate,
+        latencyFrames: measurement.latencyFrames,
+        confidence: measurement.confidence,
+      },
+    );
+  }
+  finishStudioRecordingLatencyCalibrationOwnership(handle, ownership);
+  return committed;
 }
 
 /**
@@ -447,6 +620,11 @@ export function beginStudioAudioTrackRecording(
     startBeat,
     target,
     playbackStopped,
+    latencyPolicy: Object.freeze({
+      compensationMode: state.recordingLatencyCompensationMode,
+      calibration: state.recordingLatencyCalibration,
+      manualAdjustmentMs: state.recordingLatencyAdjustmentMs,
+    }),
     synchronization: null,
     finalizing: false,
     finished: false,
@@ -517,13 +695,37 @@ export function bindStudioAudioTrackRecordingToPlayback(
   ) {
     return false;
   }
-  const compensationMode = state.recordingLatencyCompensationMode;
-  const manualAdjustmentMs = state.recordingLatencyAdjustmentMs;
+  const {
+    compensationMode,
+    calibration,
+    manualAdjustmentMs,
+  } = ownership.latencyPolicy;
   if (
-    (compensationMode !== 'estimated' && compensationMode !== 'off')
+    state.recordingLatencyCompensationMode !== compensationMode
+    || state.recordingLatencyCalibration !== calibration
+    || state.recordingLatencyAdjustmentMs !== manualAdjustmentMs
+    ||
+    (
+      compensationMode !== 'calibrated'
+      && compensationMode !== 'estimated'
+      && compensationMode !== 'off'
+    )
     || !Number.isSafeInteger(manualAdjustmentMs)
     || manualAdjustmentMs < MIN_RECORDING_LATENCY_ADJUSTMENT_MS
     || manualAdjustmentMs > MAX_RECORDING_LATENCY_ADJUSTMENT_MS
+    || (
+      compensationMode === 'calibrated'
+      && (
+        calibration === null
+        || calibration.inputDeviceId !== state.preferredMicrophoneInputDeviceId
+        || calibration.contextGeneration !== clock.contextGeneration
+        || calibration.sampleRate !== clock.sampleRate
+        || !Number.isSafeInteger(calibration.latencyFrames)
+        || calibration.latencyFrames < 0
+        || calibration.latencyFrames
+          > calibration.sampleRate * MAX_RECORDING_LATENCY_CALIBRATION_SECONDS
+      )
+    )
   ) {
     return false;
   }
@@ -538,6 +740,10 @@ export function bindStudioAudioTrackRecordingToPlayback(
     estimatedPlaybackLatencySeconds: estimateStudioRecordingPlaybackLatencySeconds(
       clock.context,
     ),
+    calibratedRoundTripLatencySeconds:
+      compensationMode === 'calibrated' && calibration !== null
+        ? calibration.latencyFrames / calibration.sampleRate
+        : null,
   });
   return true;
 }
@@ -1448,9 +1654,12 @@ async function recordStudioAudioTrackWithLease(
       captureSampleRate: input.capture.sampleRate,
       canonicalFrameCount: canonical.frameCount,
       canonicalSampleRate: canonical.sampleRate,
-      automaticEstimatedLatencySeconds: synchronization.compensationMode === 'estimated'
-        ? synchronization.estimatedPlaybackLatencySeconds + inputLatencySeconds
-        : 0,
+      automaticEstimatedLatencySeconds:
+        synchronization.compensationMode === 'calibrated'
+          ? synchronization.calibratedRoundTripLatencySeconds ?? Number.NaN
+          : synchronization.compensationMode === 'estimated'
+            ? synchronization.estimatedPlaybackLatencySeconds + inputLatencySeconds
+            : 0,
       manualOffsetMilliseconds: synchronization.manualAdjustmentMs,
     });
     if (!planned.ok) return importFailed('recording-alignment-failed');
@@ -1581,6 +1790,8 @@ export function studioAudioActionErrorMessage(code: StudioAudioActionErrorCode):
       return '音声の読み込みを中止しました。プロジェクトは変更されていません。';
     case 'project-busy':
       return 'プロジェクトを切り替え中です。完了してからもう一度お試しください。';
+    case 'input-device-required':
+      return '実測校正には入力デバイスの明示選択が必要です。入力一覧から接続先を選んでください。';
     case 'source-invalid':
       return 'この音声ファイルを安全に読み込めません。WAV、MP3、M4A、AACを選び直してください。';
     case 'source-too-large':

@@ -4238,6 +4238,38 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
   line-height: 1.45;
 }
 
+.audio-track-recording__calibration-open {
+  grid-column: 1 / -1;
+  min-height: 44px;
+  justify-self: start;
+}
+
+.audio-track-recording__calibration-steps {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-4) + 14px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-2);
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.audio-track-recording__calibration-note {
+  padding: var(--sp-3);
+  border-left: 3px solid var(--warning, #d2a33c);
+  background: color-mix(in srgb, var(--warning, #d2a33c) 8%, var(--bg-panel-2));
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.audio-track-recording__calibration-success {
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 700;
+}
+
 .audio-track-recording__monitor {
   min-height: 56px;
   display: flex;
