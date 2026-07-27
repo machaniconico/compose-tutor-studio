@@ -36,7 +36,7 @@ test('converts a local monophonic humming file into editable melody notes', asyn
   await expect(page.getByRole('button', { name: /^A4。開始/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^C5。開始/ })).toHaveCount(1);
 
-  await page.getByRole('button', { name: '元に戻す' }).click();
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
   await expect(page.getByRole('button', { name: /^A4。開始/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^C5。開始/ })).toHaveCount(0);
   await expect(section.getByRole('button', { name: 'メロディクリップへ反映' })).toBeEnabled();
@@ -58,6 +58,7 @@ test('edits and removes candidates before one atomic apply', async ({ page }) =>
   });
 
   await section.getByLabel('1音目のMIDIノート').fill('69');
+  await section.locator('button[data-humming-segment-id]').nth(1).focus();
   await section.getByRole('button', { name: '2音目を候補から外す' }).focus();
   await page.keyboard.press('Enter');
   await expect(
@@ -70,7 +71,7 @@ test('edits and removes candidates before one atomic apply', async ({ page }) =>
   await expect(page.getByRole('button', { name: /^A4。開始/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^C5。開始/ })).toHaveCount(0);
 
-  await page.getByRole('button', { name: '元に戻す' }).click();
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
   await expect(page.getByRole('button', { name: /^A4。開始/ })).toHaveCount(0);
 });
 
@@ -152,7 +153,7 @@ test('cancels a pending decode without changing the project', async ({ page }) =
   await dismissOnboarding(page);
   await page.getByRole('tab', { name: 'アシスタント', exact: true }).click();
   const section = page.getByRole('region', { name: '鼻歌からメロディ' });
-  const undo = page.getByRole('button', { name: '元に戻す' });
+  const undo = page.getByRole('button', { name: '元に戻す', exact: true });
   await expect(undo).toBeDisabled();
 
   await page.evaluate(() => {
@@ -238,7 +239,7 @@ test('cancels browser metadata loading immediately', async ({ page }) => {
   await section.getByRole('button', { name: '解析を中止' }).dispatchEvent('click');
   await expect(section.getByRole('status', { name: '鼻歌変換の状態' })).toContainText('中止', { timeout: 1_000 });
   await expect(section.getByRole('button', { name: '録音済みファイルを選ぶ' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '元に戻す', exact: true })).toBeDisabled();
 
   await page.evaluate(() => (
     window as typeof window & { __restoreAudioConstructor?: () => void }
