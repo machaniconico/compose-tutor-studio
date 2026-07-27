@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_HUMMING_CHANNELS,
   MAX_HUMMING_PCM_BYTES,
+  MAX_HUMMING_PUBLIC_PITCH_FRAMES,
   MAX_HUMMING_SAMPLE_RATE,
   MAX_HUMMING_TRANSCRIPTION_SECONDS,
+  MAX_HUMMING_WAVEFORM_BINS,
   transcribeHummingToMelody,
+  transcribeHummingToMelodyResult,
   type HummingAudioBufferShape,
+  type HummingTranscriptionResult,
 } from '../src/audio/hummingTranscription';
 
 const SAMPLE_RATE = 8_000;
@@ -69,7 +73,137 @@ function audioBufferShape(
   };
 }
 
+function expectBoundedPreview(result: HummingTranscriptionResult): void {
+  expect(Number.isFinite(result.durationSeconds)).toBe(true);
+  expect(result.durationSeconds).toBeGreaterThan(0);
+  expect(result.waveform.length).toBeLessThanOrEqual(MAX_HUMMING_WAVEFORM_BINS);
+  expect(result.pitchFrames.length).toBeLessThanOrEqual(
+    MAX_HUMMING_PUBLIC_PITCH_FRAMES,
+  );
+
+  let previousWaveformStart = Number.NEGATIVE_INFINITY;
+  let previousWaveformEnd = 0;
+  for (const bin of result.waveform) {
+    expect(Number.isFinite(bin.startSeconds)).toBe(true);
+    expect(Number.isFinite(bin.endSeconds)).toBe(true);
+    expect(Number.isFinite(bin.min)).toBe(true);
+    expect(Number.isFinite(bin.max)).toBe(true);
+    expect(bin.startSeconds).toBeGreaterThanOrEqual(0);
+    expect(bin.startSeconds).toBeGreaterThanOrEqual(previousWaveformStart);
+    expect(bin.startSeconds).toBeGreaterThanOrEqual(previousWaveformEnd);
+    expect(bin.endSeconds).toBeGreaterThan(bin.startSeconds);
+    expect(bin.endSeconds).toBeLessThanOrEqual(result.durationSeconds);
+    expect(bin.min).toBeLessThanOrEqual(bin.max);
+    previousWaveformStart = bin.startSeconds;
+    previousWaveformEnd = bin.endSeconds;
+  }
+
+  let previousPitchStart = Number.NEGATIVE_INFINITY;
+  let previousPitchEnd = 0;
+  for (const frame of result.pitchFrames) {
+    expect(Number.isFinite(frame.startSeconds)).toBe(true);
+    expect(Number.isFinite(frame.endSeconds)).toBe(true);
+    expect(Number.isFinite(frame.confidence)).toBe(true);
+    expect(frame.startSeconds).toBeGreaterThanOrEqual(0);
+    expect(frame.startSeconds).toBeGreaterThanOrEqual(previousPitchStart);
+    expect(frame.startSeconds).toBeGreaterThanOrEqual(previousPitchEnd);
+    expect(frame.endSeconds).toBeGreaterThan(frame.startSeconds);
+    expect(frame.endSeconds).toBeLessThanOrEqual(result.durationSeconds);
+    expect(frame.confidence).toBeGreaterThanOrEqual(0);
+    expect(frame.confidence).toBeLessThanOrEqual(1);
+    if (frame.midi !== null) {
+      expect(Number.isFinite(frame.midi)).toBe(true);
+      expect(frame.midi).toBeGreaterThanOrEqual(0);
+      expect(frame.midi).toBeLessThanOrEqual(127);
+    }
+    previousPitchStart = frame.startSeconds;
+    previousPitchEnd = frame.endSeconds;
+  }
+}
+
 describe('humming transcription', () => {
+  it('returns bounded waveform and pitch projections without exposing source PCM', async () => {
+    const source = sine(440, 1);
+    const result = await transcribeHummingToMelodyResult(audioBufferShape([source]), {
+      yieldControl: immediateYield,
+    });
+
+    expect(Object.keys(result).sort()).toEqual([
+      'durationSeconds',
+      'notes',
+      'pitchFrames',
+      'waveform',
+    ]);
+    expect(result.durationSeconds).toBe(1);
+    expect(result.waveform).toHaveLength(MAX_HUMMING_WAVEFORM_BINS);
+    expect(result.waveform[0]?.startSeconds).toBe(0);
+    expect(result.waveform.at(-1)?.endSeconds).toBe(1);
+    expect(result.waveform.some((bin) => bin.min < 0 && bin.max > 0)).toBe(true);
+    for (let index = 0; index < result.waveform.length; index += 1) {
+      const bin = result.waveform[index];
+      const next = result.waveform[index + 1];
+      expect(bin).toBeDefined();
+      expect(Number.isFinite(bin?.min)).toBe(true);
+      expect(Number.isFinite(bin?.max)).toBe(true);
+      expect(bin?.min).toBeLessThanOrEqual(bin?.max ?? Number.NEGATIVE_INFINITY);
+      expect(bin?.startSeconds).toBeLessThan(bin?.endSeconds ?? 0);
+      if (bin && next) expect(bin.endSeconds).toBe(next.startSeconds);
+    }
+
+    expect(result.pitchFrames.length).toBeGreaterThan(0);
+    expect(result.pitchFrames.length).toBeLessThanOrEqual(MAX_HUMMING_PUBLIC_PITCH_FRAMES);
+    expect(result.pitchFrames[0]?.startSeconds).toBe(0);
+    expect(result.pitchFrames.at(-1)?.endSeconds).toBe(1);
+    expect(
+      result.pitchFrames
+        .filter((frame) => frame.midi !== null)
+        .every((frame) => Math.abs((frame.midi ?? 0) - 69) < 0.1),
+    ).toBe(true);
+    expect(result.notes.map((note) => note.midi)).toEqual([69]);
+
+    const snapshot = JSON.stringify(result);
+    source.fill(0);
+    expect(JSON.stringify(result)).toBe(snapshot);
+    expect(snapshot).not.toContain('getChannelData');
+  });
+
+  it('compacts public pitch frames to a fixed bound while covering the full source time', async () => {
+    const durationSeconds = 61;
+    const result = await transcribeHummingToMelodyResult(
+      audioBufferShape([new Float32Array(SAMPLE_RATE * durationSeconds)]),
+      { yieldControl: immediateYield },
+    );
+
+    expect(result.pitchFrames).toHaveLength(MAX_HUMMING_PUBLIC_PITCH_FRAMES);
+    expect(result.pitchFrames[0]?.startSeconds).toBe(0);
+    expect(result.pitchFrames.at(-1)?.endSeconds).toBe(durationSeconds);
+    expect(result.pitchFrames.every((frame) => frame.midi === null)).toBe(true);
+    expect(result.waveform).toHaveLength(MAX_HUMMING_WAVEFORM_BINS);
+  });
+
+  it('keeps an exact 60-second preview finite, monotonic, and within public bounds', async () => {
+    const durationSeconds = 60;
+    const result = await transcribeHummingToMelodyResult(
+      audioBufferShape([new Float32Array(SAMPLE_RATE * durationSeconds)]),
+      { yieldControl: immediateYield },
+    );
+
+    expect(result.durationSeconds).toBe(durationSeconds);
+    expectBoundedPreview(result);
+  });
+
+  it('keeps the note-only API compatible with the rich result', async () => {
+    const source = audioBufferShape([sine(329.628, 0.8)]);
+    const rich = await transcribeHummingToMelodyResult(source, {
+      yieldControl: immediateYield,
+    });
+    const notes = await transcribeHummingToMelody(source, {
+      yieldControl: immediateYield,
+    });
+
+    expect(notes).toEqual(rich.notes);
+  });
+
   it('transcribes a clean A4 into one quantized MIDI note', async () => {
     const notes = await transcribeHummingToMelody(audioBufferShape([sine(440, 1)]), {
       yieldControl: immediateYield,
@@ -83,11 +217,17 @@ describe('humming transcription', () => {
   });
 
   it('returns no notes for silence', async () => {
-    const notes = await transcribeHummingToMelody(
+    const result = await transcribeHummingToMelodyResult(
       audioBufferShape([new Float32Array(SAMPLE_RATE)]),
       { yieldControl: immediateYield },
     );
-    expect(notes).toEqual([]);
+    expect(result.notes).toEqual([]);
+    expect(result.waveform.every((bin) => bin.min === 0 && bin.max === 0)).toBe(true);
+    expect(
+      result.pitchFrames.every(
+        (frame) => frame.midi === null && frame.confidence === 0,
+      ),
+    ).toBe(true);
   });
 
   it('covers the declared 50–1000 Hz pitch range', async () => {
@@ -118,9 +258,10 @@ describe('humming transcription', () => {
       new Float32Array(Math.round(SAMPLE_RATE * 0.08)),
       sine(523.251, 0.6),
     );
-    const notes = await transcribeHummingToMelody(audioBufferShape([recording]), {
+    const result = await transcribeHummingToMelodyResult(audioBufferShape([recording]), {
       yieldControl: immediateYield,
     });
+    const notes = result.notes;
 
     expect(notes.map((note) => note.midi)).toEqual([69, 72]);
     const first = notes[0];
@@ -128,6 +269,12 @@ describe('humming transcription', () => {
     expect(first && second ? first.startSeconds + first.durationSeconds : Infinity).toBeLessThan(
       second?.startSeconds ?? 0,
     );
+    expectBoundedPreview(result);
+    const voicedMidi = result.pitchFrames.flatMap((frame) =>
+      frame.midi === null ? [] : [frame.midi]
+    );
+    expect(voicedMidi.some((midi) => Math.abs(midi - 69) < 0.2)).toBe(true);
+    expect(voicedMidi.some((midi) => Math.abs(midi - 72) < 0.2)).toBe(true);
   });
 
   it('merges normal vibrato into one stable semitone', async () => {
@@ -197,11 +344,11 @@ describe('humming transcription', () => {
 
   it('is deterministic for the same source regardless of chunk size', async () => {
     const source = audioBufferShape([sine(261.626, 0.5)]);
-    const smallChunks = await transcribeHummingToMelody(source, {
+    const smallChunks = await transcribeHummingToMelodyResult(source, {
       chunkSamples: 127,
       yieldControl: immediateYield,
     });
-    const largeChunks = await transcribeHummingToMelody(source, {
+    const largeChunks = await transcribeHummingToMelodyResult(source, {
       chunkSamples: 100_000,
       yieldControl: immediateYield,
     });

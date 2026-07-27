@@ -180,7 +180,9 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Assistant内に「鼻歌からメロディ」を置き、主操作を「マイクで鼻歌を録音」、fallbackを「録音済みファイルを選ぶ」とする。「端末内」「単音限定」「録音は保存しない」「fileは32 MB・両入力60秒」を開始前から表示する
 - 録音dialogは説明と明示的な開始buttonを初期focusにし、許可待ち→3秒countdown→録音中→終了処理をstatusで示す。録音中は経過時間、入力level meter、終了して解析、破棄をkeyboardで操作でき、暗黙dismissは無効にする。許可拒否やdevice失敗後は再試行とfile fallbackを同じdialogに残す
 - file確認、decode、sample検証、channel極性整合、mix、pitch解析を総合progressと`aria-live`で通知し、解析中はcancelを表示する
-- 成功時は音符候補をscroll可能な一覧で表示し、音名、編集可能なMIDI note、候補除外、反映先clip、リズム補正をkeyboardだけで操作できる
+- 成功時はbounded waveform概要とpitch laneを同じ時間軸で表示し、pitch traceと半音guideは装飾、stable IDを持つ音符segmentはnative buttonとする。低confidenceは色に加えて破線で区別し、時間軸だけを内部横scrollさせて320 px幅でもdocumentを横overflowさせない
+- segment群はroving tab stopを1件だけ持つ。Home / EndとPageUp / PageDownで候補選択、上下で半音移動、左右で50 ms移動、Alt+左右で10 ms微調整、Shift+左右で終端変更、Delete / Backspaceで除外する。Cmd/Ctrl+ZとCmd/Ctrl+Shift+Zは候補編集専用Undo / Redoとし、ProjectのUndoへ伝播させない
+- 選択segmentの音名、MIDI、confidence、開始、終了をlabel付きcontrolで示し、半音変更、分割、次との結合、除外、候補編集のUndo / Redo / resetをkeyboardだけで操作できる。不正な境界や最小長はinline alert、成功操作は専用のpolite live statusで通知する
 - 反映buttonの直前に既存notesを置き換えることとUndo対応を明示する。解析成功時は候補結果へfocusを移し、確定後はPiano Rollへ移動して反映件数をlive statusとtoastで通知する
 
 ### 2.11 Audio Track録音

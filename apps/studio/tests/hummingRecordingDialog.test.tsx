@@ -330,12 +330,33 @@ describe('humming result apply boundary', () => {
       [8, {
         fileName: 'take.wav',
         durationSeconds: 1,
-        notes: [{
-          startSeconds: 0,
-          durationSeconds: 1,
-          midi: 60,
-          confidence: 1,
-        }],
+        waveform: [],
+        pitchFrames: [],
+      }],
+      [9, {
+        initial: {
+          sourceDurationSeconds: 1,
+          segments: [{
+            id: 'segment-1',
+            startSeconds: 0,
+            endSeconds: 1,
+            midi: 60,
+            confidence: 1,
+          }],
+        },
+        current: {
+          sourceDurationSeconds: 1,
+          segments: [{
+            id: 'segment-1',
+            startSeconds: 0,
+            endSeconds: 1,
+            midi: 60,
+            confidence: 1,
+          }],
+        },
+        undoStack: [],
+        redoStack: [],
+        limit: 100,
       }],
     ]);
 

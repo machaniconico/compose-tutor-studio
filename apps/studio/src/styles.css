@@ -4055,31 +4055,271 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
   gap: var(--sp-1);
 }
 
-.assistant__humming-notes {
+.humming-pitch-editor {
   display: grid;
   min-width: 0;
-  gap: var(--sp-1);
-  max-height: 180px;
-  margin: 0;
-  padding: 0 var(--sp-1) 0 var(--sp-5);
-  overflow: auto;
+  gap: var(--sp-2);
 }
 
-.assistant__humming-notes li {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr) 64px auto;
+.humming-pitch-editor h3,
+.humming-pitch-editor h4,
+.humming-pitch-editor p,
+.humming-pitch-editor dl,
+.humming-pitch-editor details {
+  margin: 0;
+}
+
+.humming-pitch-editor__header,
+.humming-pitch-editor__history,
+.humming-pitch-editor__pitch-controls,
+.humming-pitch-editor__segment-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-1);
   align-items: center;
 }
 
-.assistant__humming-notes li > span {
+.humming-pitch-editor__header {
+  justify-content: space-between;
+}
+
+.humming-pitch-editor__header h3,
+.humming-pitch-editor__inspector h4 {
+  font-size: 0.875rem;
+}
+
+.humming-pitch-editor__history > button,
+.humming-pitch-editor__pitch-controls > button,
+.humming-pitch-editor__segment-actions > button {
+  min-height: 36px;
+}
+
+.humming-pitch-editor__summary,
+.humming-pitch-editor__keyboard-help {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.humming-pitch-editor__timeline-scroll {
   min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
+  scrollbar-gutter: stable;
+}
+
+.humming-pitch-editor__timeline {
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg-panel-2) 72%, transparent) 0 30%,
+      transparent 30% 100%
+    );
+}
+
+.humming-pitch-editor__waveform,
+.humming-pitch-editor__pitch-curve {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.humming-pitch-editor__waveform line {
+  stroke: color-mix(in srgb, var(--text-faint) 68%, transparent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.humming-pitch-editor__semitone-guide {
+  stroke: color-mix(in srgb, var(--border) 52%, transparent);
+  stroke-width: 0.75;
+  vector-effect: non-scaling-stroke;
+}
+
+.humming-pitch-editor__pitch-trace {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 62%, var(--text));
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.humming-pitch-editor__segment {
+  z-index: 2;
+  display: grid;
+  place-content: center;
+  min-width: 44px;
+  max-width: 100%;
+  padding: 2px var(--sp-1);
+  border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-panel));
+  color: var(--text);
+  line-height: 1.1;
+  overflow: hidden;
+  transform: translateY(-50%);
+}
+
+.humming-pitch-editor__segment.is-confidence-medium {
+  border-style: double;
+}
+
+.humming-pitch-editor__segment.is-confidence-low {
+  border-style: dashed;
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--accent) 18%, var(--bg-panel)) 0 5px,
+      color-mix(in srgb, var(--bg-panel-2) 94%, transparent) 5px 10px
+    );
+}
+
+.humming-pitch-editor__segment.is-selected {
+  box-shadow:
+    inset 0 0 0 2px var(--bg-panel),
+    inset 0 0 0 4px var(--accent);
+}
+
+.humming-pitch-editor__segment:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--accent));
+  outline-offset: -3px;
+}
+
+.humming-pitch-editor__segment-note,
+.humming-pitch-editor__segment-confidence {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.humming-pitch-editor__segment-note {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.humming-pitch-editor__segment-confidence {
+  font-size: 0.625rem;
+}
+
+.humming-pitch-editor__empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-3);
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.humming-pitch-editor__inspector {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+.humming-pitch-editor__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-1) var(--sp-2);
+  font-size: 0.75rem;
+}
+
+.humming-pitch-editor__facts > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-1);
+}
+
+.humming-pitch-editor__facts dt {
+  color: var(--text-dim);
+}
+
+.humming-pitch-editor__facts dd {
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
-.assistant__humming-notes input {
+.humming-pitch-editor__pitch-controls {
+  display: grid;
+  grid-template-columns: auto minmax(72px, 1fr) auto;
+}
+
+.humming-pitch-editor__time-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.humming-pitch-editor__pitch-controls label,
+.humming-pitch-editor__time-controls label {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-1);
+  font-size: 0.75rem;
+}
+
+.humming-pitch-editor__pitch-controls input,
+.humming-pitch-editor__time-controls input {
   width: 100%;
+  min-width: 0;
+}
+
+.humming-pitch-editor__segment-actions > button {
+  flex: 1 1 8rem;
+}
+
+.humming-pitch-editor__error {
+  color: var(--danger, #d85f68);
+}
+
+.humming-pitch-editor__split-hint {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.humming-pitch-editor__keyboard-help summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.humming-pitch-editor__keyboard-help p {
+  padding-top: var(--sp-1);
+}
+
+@media (max-width: 560px) {
+  .humming-pitch-editor__facts,
+  .humming-pitch-editor__time-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .humming-pitch-editor__pitch-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .humming-pitch-editor__history {
+    width: 100%;
+  }
+
+  .humming-pitch-editor__history > button {
+    flex: 1 1 7rem;
+  }
+}
+
+@media (any-pointer: coarse) {
+  .humming-pitch-editor__history > button,
+  .humming-pitch-editor__pitch-controls > button,
+  .humming-pitch-editor__segment-actions > button {
+    min-height: 44px;
+  }
 }
 
 .dialog--humming-recording {
