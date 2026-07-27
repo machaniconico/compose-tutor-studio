@@ -124,12 +124,12 @@ test('records synthetic microphone humming and applies two editable notes atomic
   await dialog.getByRole('button', { name: '録音を終了して解析' }).click();
 
   await expect(dialog).toBeHidden();
-  await expect(section.getByRole('status')).toContainText('2個の音符候補', {
+  await expect(section.getByRole('status', { name: '鼻歌変換の状態' })).toContainText('2個の音符候補', {
     timeout: 15_000,
   });
   await expect(section.getByText(/音を検出 — マイク録音/)).toBeVisible();
   await section.getByRole('button', { name: 'メロディクリップへ反映' }).click();
-  await expect(section.getByRole('status')).toContainText('2個の音符を反映');
+  await expect(section.getByRole('status', { name: '鼻歌変換の状態' })).toContainText('2個の音符を反映');
 
   await expect(page.getByRole('tab', { name: 'ピアノロール' })).toHaveAttribute(
     'aria-selected',
@@ -164,7 +164,7 @@ test('recovers from denied microphone permission through the file fallback', asy
   });
 
   await expect(dialog).toBeHidden();
-  await expect(section.getByRole('status')).toContainText('2個の音符候補', {
+  await expect(section.getByRole('status', { name: '鼻歌変換の状態' })).toContainText('2個の音符候補', {
     timeout: 15_000,
   });
   await expect(section.getByText(/permission-fallback\.wav/)).toBeVisible();

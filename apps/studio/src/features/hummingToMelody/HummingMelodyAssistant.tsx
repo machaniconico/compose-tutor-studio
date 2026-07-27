@@ -11,7 +11,6 @@ import {
   findLearningTrack,
   secondsToBeatAt,
 } from '@cts/project-model';
-import { midiToNoteName } from '@cts/theory-engine';
 import {
   SOURCE_AUDIO_ACCEPT,
   SourceAudioFileError,
@@ -29,9 +28,10 @@ import {
 } from '../../audio/sourceAudioDecode';
 import {
   HummingTranscriptionError,
-  transcribeHummingToMelody,
-  type HummingMelodyNote,
+  transcribeHummingToMelodyResult,
+  type HummingPitchFrame,
   type HummingTranscriptionProgress,
+  type HummingWaveformBin,
 } from '../../audio/hummingTranscription';
 import {
   AudioResourceReservationError,
@@ -61,6 +61,25 @@ import {
   hummingMelodyToNoteEvents,
   type HummingQuantize,
 } from './hummingToNotes';
+import {
+  HummingCandidateEditError,
+  commitHummingCandidateEdit,
+  createHummingCandidateHistory,
+  createHummingPitchDraft,
+  hummingDraftToMelodyNotes,
+  mergeHummingSegmentWithNext,
+  moveHummingSegment,
+  moveHummingSegmentBoundary,
+  redoHummingCandidateEdit,
+  removeHummingSegment,
+  resetHummingCandidateHistory,
+  setHummingSegmentPitch,
+  splitHummingSegment,
+  undoHummingCandidateEdit,
+  type HummingCandidateHistory,
+  type HummingPitchDraft,
+} from './hummingCandidateEditing';
+import { HummingPitchEditor } from './HummingPitchEditor';
 import { HummingRecordingDialog } from './HummingRecordingDialog';
 
 const MAX_HUMMING_SOURCE_SECONDS = 60;
@@ -73,7 +92,8 @@ type Phase = 'idle' | 'opening' | 'decoding' | 'analyzing';
 type Detection = Readonly<{
   fileName: string;
   durationSeconds: number;
-  notes: readonly HummingMelodyNote[];
+  waveform: readonly HummingWaveformBin[];
+  pitchFrames: readonly HummingPitchFrame[];
 }>;
 
 type AppliedSnapshot = Readonly<{
@@ -82,7 +102,6 @@ type AppliedSnapshot = Readonly<{
 }>;
 
 type SourcePreflight = Readonly<{
-  durationSeconds: number;
   estimatedWorkingBytes: number;
 }>;
 
@@ -206,6 +225,34 @@ function failureMessage(error: unknown): string {
   return '音声を解析できませんでした。伴奏のない短い鼻歌音源でお試しください。';
 }
 
+function candidateEditFailureMessage(error: unknown): string {
+  if (!(error instanceof HummingCandidateEditError)) {
+    return '音符候補を変更できませんでした。値を確認してください。';
+  }
+  if (error.code === 'duration-too-short') {
+    return '音符候補は0.06秒以上の長さにしてください。';
+  }
+  if (error.code === 'segments-overlap') {
+    return '隣の音符候補と重ならない位置にしてください。';
+  }
+  if (error.code === 'out-of-bounds') {
+    return '音源の長さに収まる位置を指定してください。';
+  }
+  if (error.code === 'no-next-segment') {
+    return '後ろに結合できる音符候補がありません。';
+  }
+  if (error.code === 'segment-limit-exceeded') {
+    return '音符候補は512個まで編集できます。';
+  }
+  if (error.code === 'segment-not-found') {
+    return '選択した音符候補は既にありません。別の候補を選んでください。';
+  }
+  if (error.code === 'invalid-pitch') {
+    return 'MIDIノートは0から127の整数で指定してください。';
+  }
+  return '開始・終了位置には有効な秒数を指定してください。';
+}
+
 function createDecodeContext(): AudioContext {
   try {
     return new AudioContext({ sampleRate: 44_100 });
@@ -262,14 +309,7 @@ function preflightSource(
   ) {
     throw new HummingAssistantError('resource-limit-exceeded');
   }
-  return {
-    durationSeconds: Math.min(
-      presentationDurationSeconds,
-      descriptor.containerDurationSeconds,
-      MAX_HUMMING_SOURCE_SECONDS,
-    ),
-    estimatedWorkingBytes,
-  };
+  return { estimatedWorkingBytes };
 }
 
 function preflightCapturedPcm(buffer: AudioBufferShape): SourcePreflight {
@@ -304,7 +344,7 @@ function preflightCapturedPcm(buffer: AudioBufferShape): SourcePreflight {
   if (estimatedWorkingBytes > MAX_HUMMING_WORKING_BYTES) {
     throw new HummingAssistantError('resource-limit-exceeded');
   }
-  return { durationSeconds, estimatedWorkingBytes };
+  return { estimatedWorkingBytes };
 }
 
 function trimDecodedPadding(
@@ -366,14 +406,17 @@ export function HummingMelodyAssistant() {
   const [status, setStatus] = useState('マイクで録音するか、録音済みの鼻歌ファイルを選んでください。');
   const [error, setError] = useState<string | null>(null);
   const [detection, setDetection] = useState<Detection | null>(null);
+  const [candidateHistory, setCandidateHistory] =
+    useState<HummingCandidateHistory | null>(null);
   const [applied, setApplied] = useState(false);
   const [appliedSnapshot, setAppliedSnapshot] = useState<AppliedSnapshot | null>(null);
   const [recordingOpen, setRecordingOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sourceButtonRef = useRef<HTMLButtonElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
-  const removeButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const generationRef = useRef(0);
+  const candidateIdRef = useRef(0);
+  const candidateHistoryRef = useRef(candidateHistory);
   const abortRef = useRef<AbortController | null>(null);
   const applyingRef = useRef(false);
   const appliedRef = useRef(false);
@@ -381,12 +424,22 @@ export function HummingMelodyAssistant() {
   const mountedRef = useRef(true);
   const isNative = studioRuntime.kind === 'native';
   const busy = phase !== 'idle' || decodePending || recordingOpen;
+  const currentDraft = candidateHistory?.current ?? null;
 
   const invalidateAppliedResult = (message: string): void => {
     appliedRef.current = false;
     setApplied(false);
     setAppliedSnapshot(null);
     setStatus(message);
+  };
+
+  const clearCandidateResult = (): void => {
+    setDetection(null);
+    candidateHistoryRef.current = null;
+    setCandidateHistory(null);
+    appliedRef.current = false;
+    setApplied(false);
+    setAppliedSnapshot(null);
   };
 
   const watchDecodeJob = (job: SourceAudioDecodeJob): void => {
@@ -444,29 +497,53 @@ export function HummingMelodyAssistant() {
     return () => window.clearTimeout(timeout);
   }, [decodePending]);
 
+  useEffect(() => {
+    const input = fileInputRef.current;
+    if (!input) return;
+    const handleCancel = (): void => {
+      setStatus('音声ファイルの選択をキャンセルしました。');
+    };
+    input.addEventListener('cancel', handleCancel);
+    return () => input.removeEventListener('cancel', handleCancel);
+  }, []);
+
   const analyzeBuffer = async (
     generation: number,
     controller: AbortController,
     fileName: string,
-    durationSeconds: number,
     buffer: AudioBufferShape,
   ): Promise<boolean> => {
     setPhase('analyzing');
     setProgress(0);
     setStatus('声の高さと音の区切りを解析しています…');
-    const notes = await transcribeHummingToMelody(buffer, {
+    const result = await transcribeHummingToMelodyResult(buffer, {
       signal: controller.signal,
       onProgress: (next) => {
         if (generation !== generationRef.current) return;
         setProgress(progressPercent(next));
       },
     });
-    if (notes.length === 0) throw new HummingAssistantError('no-notes');
-    if (notes.length > 512) throw new HummingAssistantError('too-many-notes');
+    if (result.notes.length === 0) throw new HummingAssistantError('no-notes');
+    if (result.notes.length > 512) throw new HummingAssistantError('too-many-notes');
     if (generation !== generationRef.current || controller.signal.aborted) return false;
-    setDetection({ fileName, durationSeconds, notes });
+    let segmentIndex = 0;
+    const draft = createHummingPitchDraft(result.notes, {
+      sourceDurationSeconds: result.durationSeconds,
+      createId: () => `humming-segment-${generation}-${segmentIndex++}`,
+    });
+    candidateIdRef.current = segmentIndex;
+    setDetection({
+      fileName,
+      durationSeconds: result.durationSeconds,
+      waveform: result.waveform,
+      pitchFrames: result.pitchFrames,
+    });
+    const history = createHummingCandidateHistory(draft);
+    candidateHistoryRef.current = history;
+    setCandidateHistory(history);
     setProgress(100);
-    setStatus(`${notes.length}個の音符候補を検出しました。対象を確認して反映してください。`);
+    setStatus(`${result.notes.length}個の音符候補を検出しました。対象を確認して反映してください。`);
+    window.requestAnimationFrame(() => resultRef.current?.focus());
     return true;
   };
 
@@ -482,10 +559,7 @@ export function HummingMelodyAssistant() {
     setPhase('opening');
     setProgress(null);
     setError(null);
-    setDetection(null);
-    appliedRef.current = false;
-    setApplied(false);
-    setAppliedSnapshot(null);
+    clearCandidateResult();
     setStatus('音声ファイルを確認しています…');
     let url: string | null = null;
     let context: AudioContext | null = null;
@@ -545,7 +619,6 @@ export function HummingMelodyAssistant() {
         generation,
         controller,
         fileName,
-        sourcePreflight.durationSeconds,
         bounded,
       );
     } catch (caught) {
@@ -583,10 +656,7 @@ export function HummingMelodyAssistant() {
     setPhase('analyzing');
     setProgress(0);
     setError(null);
-    setDetection(null);
-    appliedRef.current = false;
-    setApplied(false);
-    setAppliedSnapshot(null);
+    clearCandidateResult();
     setStatus('マイク録音を端末内で解析しています…');
     let resourceReservation: HeavyAudioResourceReservation | null = null;
     try {
@@ -594,16 +664,12 @@ export function HummingMelodyAssistant() {
       resourceReservation = reserveHeavyAudioResources(
         capturePreflight.estimatedWorkingBytes,
       );
-      const detected = await analyzeBuffer(
+      await analyzeBuffer(
         generation,
         controller,
         'マイク録音',
-        capturePreflight.durationSeconds,
         capture,
       );
-      if (detected) {
-        window.requestAnimationFrame(() => resultRef.current?.focus());
-      }
     } catch (caught) {
       if (generation !== generationRef.current) return;
       const cancelled =
@@ -626,6 +692,7 @@ export function HummingMelodyAssistant() {
   const chooseNativeSource = async (): Promise<void> => {
     if (phase !== 'idle' || decodePending) return;
     const pickerGeneration = ++generationRef.current;
+    clearCandidateResult();
     setPhase('opening');
     setError(null);
     setStatus('音声ファイルを選んでいます…');
@@ -677,19 +744,64 @@ export function HummingMelodyAssistant() {
     if (phase !== 'idle' || decodePending || recordingOpen) return;
     const state = useStore.getState();
     if (state.transport.phase !== 'stopped') state.stop();
+    clearCandidateResult();
     setError(null);
+    setStatus('マイク録音を準備しています…');
     setRecordingOpen(true);
   };
 
   const chooseFileFromRecording = (): void => {
     setRecordingOpen(false);
     if (isNative) void chooseNativeSource();
-    else fileInputRef.current?.click();
+    else {
+      setStatus('音声ファイルを選んでいます…');
+      fileInputRef.current?.click();
+    }
+  };
+
+  const commitCandidateDraft = (
+    message: string,
+    edit: (draft: HummingPitchDraft) => HummingPitchDraft,
+  ): string | null => {
+    const history = candidateHistoryRef.current;
+    if (!history) return '音符候補を解析し直してください。';
+    try {
+      const nextDraft = edit(history.current);
+      const nextHistory = commitHummingCandidateEdit(history, nextDraft);
+      if (nextHistory !== history) {
+        candidateHistoryRef.current = nextHistory;
+        setCandidateHistory(nextHistory);
+        invalidateAppliedResult(message);
+      }
+      return null;
+    } catch (caught) {
+      return candidateEditFailureMessage(caught);
+    }
+  };
+
+  const changeCandidateHistory = (
+    message: string,
+    change: (history: HummingCandidateHistory) => HummingCandidateHistory,
+  ): string | null => {
+    const history = candidateHistoryRef.current;
+    if (!history) return '音符候補を解析し直してください。';
+    try {
+      const nextHistory = change(history);
+      if (nextHistory !== history) {
+        candidateHistoryRef.current = nextHistory;
+        setCandidateHistory(nextHistory);
+        invalidateAppliedResult(message);
+      }
+      return null;
+    } catch (caught) {
+      return candidateEditFailureMessage(caught);
+    }
   };
 
   const applyDetection = (): void => {
     if (
       !detection ||
+      !candidateHistory ||
       busy ||
       !targetClipId ||
       applyingRef.current ||
@@ -705,15 +817,18 @@ export function HummingMelodyAssistant() {
       }
       const musicalTime = compileMusicalTime(current.project);
       const clipStartSeconds = beatToSecondsAt(musicalTime, clip.startBeat);
-      const events = hummingMelodyToNoteEvents(detection.notes, {
-        bpm: current.project.bpm,
-        secondsToBeat: (seconds) => (
-          secondsToBeatAt(musicalTime, clipStartSeconds + seconds) - clip.startBeat
-        ),
-        clipLengthBeats: clip.lengthBeats,
-        quantize,
-        createId: () => uid('note'),
-      });
+      const events = hummingMelodyToNoteEvents(
+        hummingDraftToMelodyNotes(candidateHistory.current),
+        {
+          bpm: current.project.bpm,
+          secondsToBeat: (seconds) => (
+            secondsToBeatAt(musicalTime, clipStartSeconds + seconds) - clip.startBeat
+          ),
+          clipLengthBeats: clip.lengthBeats,
+          quantize,
+          createId: () => uid('note'),
+        },
+      );
       if (events.length === 0 || !replaceClipNotes(clip.id, events)) {
         throw new HummingAssistantError('apply-failed');
       }
@@ -757,7 +872,12 @@ export function HummingMelodyAssistant() {
           disabled={busy}
           onClick={() => {
             if (isNative) void chooseNativeSource();
-            else fileInputRef.current?.click();
+            else {
+              clearCandidateResult();
+              setError(null);
+              setStatus('音声ファイルを選んでいます…');
+              fileInputRef.current?.click();
+            }
           }}
         >
           {decodePending ? '読み込み終了待ち…' : phase !== 'idle' ? '解析中…' : '録音済みファイルを選ぶ'}
@@ -790,12 +910,17 @@ export function HummingMelodyAssistant() {
           {progress}%
         </progress>
       ) : null}
-      <p className="assistant__humming-status" role="status" aria-live="polite">
+      <p
+        className="assistant__humming-status"
+        role="status"
+        aria-label="鼻歌変換の状態"
+        aria-live="polite"
+      >
         {status}
       </p>
       {error ? <p role="alert" className="assistant__humming-error">{error}</p> : null}
 
-      {detection ? (
+      {detection && currentDraft && candidateHistory ? (
         <div
           ref={resultRef}
           className="assistant__humming-result"
@@ -804,75 +929,93 @@ export function HummingMelodyAssistant() {
           tabIndex={-1}
         >
           <p>
-            <strong>{detection.notes.length}音</strong>を検出 — {detection.fileName}（{Math.round(detection.durationSeconds)}秒）
+            <strong>{currentDraft.segments.length}音</strong>を検出 — {detection.fileName}（{Math.round(detection.durationSeconds)}秒）
           </p>
-          <ol className="assistant__humming-notes" aria-label="検出した音符候補">
-            {detection.notes.map((note, index) => (
-              <li key={`${note.startSeconds}:${index}`}>
-                <span>{index + 1}. {midiToNoteName(note.midi)}</span>
-                <label>
-                  <span className="visually-hidden">{index + 1}音目のMIDIノート</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={127}
-                    step={1}
-                    value={note.midi}
-                    disabled={busy}
-                    onChange={(event) => {
-                      const midi = Math.max(0, Math.min(127, Math.round(Number(event.currentTarget.value))));
-                      if (!Number.isFinite(midi)) return;
-                      invalidateAppliedResult(`${index + 1}音目の高さを変更しました。内容を確認して反映してください。`);
-                      setDetection((current) =>
-                        current
-                          ? {
-                              ...current,
-                              notes: current.notes.map((candidate, candidateIndex) =>
-                                candidateIndex === index ? { ...candidate, midi } : candidate,
-                              ),
-                            }
-                          : null,
-                      );
-                    }}
-                  />
-                </label>
-                <button
-                  ref={(node) => {
-                    removeButtonRefs.current[index] = node;
-                  }}
-                  type="button"
-                  disabled={busy}
-                  aria-label={`${index + 1}音目を候補から外す`}
-                  onClick={() => {
-                    const remainingCount = detection.notes.length - 1;
-                    invalidateAppliedResult(
-                      remainingCount > 0
-                        ? `${remainingCount}個の音符候補にしました。内容を確認して反映してください。`
-                        : '音符候補が0個になりました。別の鼻歌を選ぶか、解析し直してください。',
-                    );
-                    setDetection((current) =>
-                      current
-                        ? {
-                            ...current,
-                            notes: current.notes.filter((_, candidateIndex) => candidateIndex !== index),
-                          }
-                        : null,
-                    );
-                    window.requestAnimationFrame(() => {
-                      if (remainingCount > 0) {
-                        const focusIndex = Math.min(index, remainingCount - 1);
-                        removeButtonRefs.current[focusIndex]?.focus();
-                      } else {
-                        sourceButtonRef.current?.focus();
-                      }
-                    });
-                  }}
-                >
-                  外す
-                </button>
-              </li>
-            ))}
-          </ol>
+          <HummingPitchEditor
+            draft={currentDraft}
+            waveform={detection.waveform}
+            pitchFrames={detection.pitchFrames}
+            disabled={busy}
+            canUndo={candidateHistory.undoStack.length > 0}
+            canRedo={candidateHistory.redoStack.length > 0}
+            onPitchChange={(id, midi) =>
+              commitCandidateDraft(
+                '音符候補の高さを変更しました。内容を確認して反映してください。',
+                (draft) => setHummingSegmentPitch(draft, id, midi),
+              )}
+            onMove={(id, deltaSeconds) =>
+              commitCandidateDraft(
+                '音符候補の位置を変更しました。内容を確認して反映してください。',
+                (draft) => moveHummingSegment(draft, id, deltaSeconds),
+              )}
+            onResizeStart={(id, deltaSeconds) =>
+              commitCandidateDraft(
+                '音符候補の開始位置を変更しました。内容を確認して反映してください。',
+                (draft) => {
+                  const segment = draft.segments.find((candidate) => candidate.id === id);
+                  if (!segment) throw new HummingCandidateEditError('segment-not-found');
+                  return moveHummingSegmentBoundary(
+                    draft,
+                    id,
+                    'start',
+                    segment.startSeconds + deltaSeconds,
+                  );
+                },
+              )}
+            onResizeEnd={(id, deltaSeconds) =>
+              commitCandidateDraft(
+                '音符候補の終了位置を変更しました。内容を確認して反映してください。',
+                (draft) => {
+                  const segment = draft.segments.find((candidate) => candidate.id === id);
+                  if (!segment) throw new HummingCandidateEditError('segment-not-found');
+                  return moveHummingSegmentBoundary(
+                    draft,
+                    id,
+                    'end',
+                    segment.endSeconds + deltaSeconds,
+                  );
+                },
+              )}
+            onRemove={(id) =>
+              commitCandidateDraft(
+                currentDraft.segments.length > 1
+                  ? `${currentDraft.segments.length - 1}個の音符候補にしました。内容を確認して反映してください。`
+                  : '音符候補が0個になりました。別の鼻歌を選ぶか、解析し直してください。',
+                (draft) => removeHummingSegment(draft, id),
+              )}
+            onSplit={(id, splitSeconds) =>
+              commitCandidateDraft(
+                '音符候補を2つに分割しました。内容を確認して反映してください。',
+                (draft) =>
+                  splitHummingSegment(
+                    draft,
+                    id,
+                    splitSeconds,
+                    () =>
+                      `humming-segment-${generationRef.current}-${candidateIdRef.current++}`,
+                  ),
+              )}
+            onMergeNext={(id) =>
+              commitCandidateDraft(
+                '隣り合う音符候補を結合しました。内容を確認して反映してください。',
+                (draft) => mergeHummingSegmentWithNext(draft, id),
+              )}
+            onUndo={() =>
+              changeCandidateHistory(
+                '候補編集を元に戻しました。内容を確認して反映してください。',
+                undoHummingCandidateEdit,
+              )}
+            onRedo={() =>
+              changeCandidateHistory(
+                '候補編集をやり直しました。内容を確認して反映してください。',
+                redoHummingCandidateEdit,
+              )}
+            onReset={() =>
+              changeCandidateHistory(
+                '音符候補を解析直後の状態へ戻しました。',
+                resetHummingCandidateHistory,
+              )}
+          />
           {targetClips.length > 0 ? (
             <label>
               反映先
@@ -914,7 +1057,7 @@ export function HummingMelodyAssistant() {
           <button
             type="button"
             className="assistant__generate"
-            disabled={!targetClipId || busy || applied || detection.notes.length === 0}
+            disabled={!targetClipId || busy || applied || currentDraft.segments.length === 0}
             onClick={applyDetection}
           >
             {applied ? 'メロディクリップへ反映済み' : 'メロディクリップへ反映'}
@@ -923,7 +1066,10 @@ export function HummingMelodyAssistant() {
       ) : null}
       {recordingOpen ? (
         <HummingRecordingDialog
-          onClose={() => setRecordingOpen(false)}
+          onClose={() => {
+            setRecordingOpen(false);
+            setStatus('マイク録音をキャンセルしました。');
+          }}
           onCaptured={(capture) => void processCapture(capture)}
           onChooseFile={chooseFileFromRecording}
         />
