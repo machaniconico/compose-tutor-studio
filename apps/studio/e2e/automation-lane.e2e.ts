@@ -28,7 +28,10 @@ async function saveProject(page: Page): Promise<void> {
 async function requiredBox(
   locator: Locator,
 ): Promise<Readonly<{ x: number; y: number; width: number; height: number }>> {
-  await locator.scrollIntoViewIfNeeded();
+  await locator.evaluate((element) => {
+    element.scrollIntoView({ block: 'center', inline: 'center' });
+  });
+  await locator.hover();
   const box = await locator.boundingBox();
   expect(box).not.toBeNull();
   if (box === null) throw new Error('Expected a visible automation control');
@@ -391,7 +394,11 @@ test('edits independent volume and pan automation with accessible responsive con
   // Dragging onto the other point's exact beat is rejected atomically and the
   // preview rolls back without dirtying the saved Project.
   const collisionStart = await requiredBox(dragPoint);
-  const collisionTarget = await requiredBox(firstPoint);
+  const collisionTarget = await firstPoint.boundingBox();
+  expect(collisionTarget).not.toBeNull();
+  if (collisionTarget === null) {
+    throw new Error('Expected a visible collision target');
+  }
   const labelsBeforeCollision = await pointLabels(points);
   await page.mouse.move(
     collisionStart.x + collisionStart.width / 2,
