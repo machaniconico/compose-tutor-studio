@@ -97,6 +97,7 @@ Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/R
 - Track/Clip/Note/Chord/Event型
 - バージョン移行
 - バリデーション
+- AutomationLaneのimmutable add / update / remove / clear mutation
 
 ### 4.4 audio
 
@@ -222,11 +223,21 @@ Track管理はschema v4 aggregate codecを正本にし、Undo/Redo、SQLite auto
 - `lengthBeats`、`tempoMap`、`timeSignatureMap`を時間の正本にし、`bpm` / `timeSignature` / `lengthBars`は旧consumer用mirrorとして検証する。project-modelはcompiled immutable indexからbeat↔seconds、bar↔beatを変換する。
 - v2→v3は保存順で最初の正規化済みChord / Chords / コード、Bass、Melody instrument Trackだけを学習roleへ移す。TypeScriptとRustはECMAScript `String#trim`相当（BOMを含みNEXT LINEを含まない）を共有する。legacy audio参照は決定的な`unresolved` AudioAssetへ保持し、raw object全体の既存IDと衝突しないmigration IDを使う。
 - AutomationLaneはnon-Master Trackのvolume / panだけを対象にし、point前はTrack scalar、point間はhold / linearで評価する。lookahead windowはhalf-openを保つが、曲末の最終windowだけexact end pointを含め、release / insert tailへ終値を維持する。beat-linearなlinear区間はtempo change beatごとに補間値commandへ分割し、seconds-linearなWeb Audio `linearRampToValueAtTime`と同じ曲線にする。同じbeatのlane point / tempo change / window endは1 commandへ決定的にまとめ、loop境界だけは前cycleの終値と次cycleのhold resetをこの順で残す。ライブとoffline WAVは同じcommand plannerとProject snapshotのtempo change列を使い、Master targetはTypeScript / Rust両境界で拒否する。
+- production lane editorはProject point列を正本のまま保持し、viewport内と選択pointだけを決定的に最大400 native controlへ投影する。curve segmentはhold / linear / jump別の最大3 SVG pathへ集約し、transportの30 Hz playhead購読は専用leaf componentへ隔離する。pointer previewはこのbounded controlだけを動かし、Project curveとhistoryはpointerupまで変更しない。
 - `compileAudioRouting`は全non-Masterのexact 1 outputとsendをstable DAGへ正規化する。output/send合わせて1,024 edge、sourceごと16 sendを上限とし、無効・gain 0のsendもcycle検査へ含める。live / WAVは同じcompiled planからTrack graphを未接続で全確保した後にedgeを接続し、途中失敗時は全nodeをrollbackする。channel基礎node、insert、live meter、route edge、Master meterを合計するstatic node preflightは4,096を上限とし、起動 / WAVでは最初のAudioNode前、再生中のeffect変更では既存channelを1つも更新する前に再検査する。上限超過またはlive insert再構築失敗では採用済みProjectをUndo可能なまま残し、旧session全体を破棄してresource-limitを表示する。互換性のためsource main pathはvoice→audibility gate→pre tap→fader→insert→pan→post tapを維持し、pre-sendはfader / insert前、post-sendはpan後から取る。Bus soloは関係する上流・下流edgeだけを開き、上流sourceの無関係なMaster直通edgeを開かない。
 - `ready` AudioAssetはchecksumとdecode前metadata、Audio Clipはasset IDとframe単位のsource range / fade / gainを持つ。AutomationLaneはTrack volume / pan target、point、hold / linear補間を持ち、同じcommand resolverをlive schedulerとoffline WAVへ接続する。
 - TypeScript codecとRust native persistence境界はcanonical schema v4 JSONを同じrequired-field / unknown-field / routing DAG条件で受理・migrationする。binaryはJSONへ埋め込まず、checksum / byte lengthで別のcontent-addressed repositoryを参照する。
 
-schema v4 aggregateとAudio Asset repositoryは正本を分離する。Project JSONは編集意味、routing、content identityを保持し、repositoryはimmutable binaryを保持する。Audio Clipのproduction配置・再生・trim / gain / fade / loop / split / duplicate / deleteは実装済みである。Automationはlive/offline schedulingまで実装済みだが、productionのlane editorとwrite/read UIは後続である。
+schema v4 aggregateとAudio Asset repositoryは正本を分離する。Project JSONは編集意味、routing、content identityを保持し、repositoryはimmutable binaryを保持する。Audio Clipのproduction配置・再生・trim / gain / fade / loop / split / duplicate / deleteは実装済みである。Automationはvolume / panのproduction lane editorからlive/offline schedulingまで接続済みである。read / bypassとwrite / touch / latch、Master、insert / send / tempo automation、modulationは後続である。
+
+#### 5.8.1 Automation lane editing transaction
+
+1. UIは`selectedTrackId`とvolume / pan target、snap済みbeat、value、outbound interpolationだけをcommand引数にする。Inspectorの入力途中とlane上のpointer previewはcomponent local stateに留め、Enter / blur / pointerupなどの確定境界までProjectへ書かない。
+2. project-modelのpublic mutationはsource Projectをcanonical codecで先に検査し、non-Master target、曲内beat、target別value範囲、`hold | linear`、同一lane内のbeat衝突、lane / point上限をno-throwのtyped resultで検査する。最初のpointでtarget laneを遅延作成し、全Project entityと衝突しないlane / point IDを同じ予約集合から発行する。更新後はbeat昇順へ並べ、最後のpoint削除またはclearでは空laneを除去する。
+3. 候補Project全体もcanonical codecを通過した場合だけStudio actionが開始時のProject参照へcompare-and-swapする。成功したadd / update / remove / clearは各1 Project change、Undo 1回、save revision 1回で、semantic no-opは元Project参照を返し、stale snapshot、busy operation、invalid source / candidateではProject、history、revision、selection、transportを変更しない。
+4. 採用されたlane編集はsession snapshotを無効化するため、active playbackを1回停止して有限なplayheadを保つ。次のplayback requestが新Projectからautomation commandを再構築する。no-opと拒否ではsessionへ触れない。
+5. snapは入力正規化でありschema fieldを追加しない。保存されるのは既存schema v4のtarget、point ID、beat、value、interpolationだけで、SQLite autosaveと`.ctsproj.json`の既存exact roundtripを使う。live lookahead、transport loop、可変tempo分割、offline WAVは既存の共通resolverをそのまま使うため、Editor固有のcurve evaluatorを別の音声正本にしない。
+6. 現行runtimeはlaneが存在すれば常時読み出す。read / bypass stateとwrite / touch / latch captureは先行するhidden fieldを持たず、Master、insert / send / tempo parameter、MIDI CC / LFO modulationもこのtransactionの対象外とする。
 
 ### 5.9 Audio Track import / content-addressed transaction（Batch 5）
 

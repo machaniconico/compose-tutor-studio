@@ -13,6 +13,7 @@
 │               │                                  │ /Theory   │
 ├───────────────┼──────────────────────────────────┤ Panel     │
 │ Browser       │ Editor: Piano Roll / Drum / Clip  │           │
+│               │         / Automation              │           │
 └───────────────┴──────────────────────────────────┴───────────┘
 ```
 
@@ -116,6 +117,20 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 6 lane×1小節のstep matrixは`grid` / `row` / `rowheader` / `gridcell`で行列関係を公開し、編集buttonは常に有効cell 1件だけをTab順へ入れる
 - 矢印キーで前後step / lane、Home / Endで表示中小節の先頭 / 末尾へ移り、Enter / Spaceで強→中→弱→オフを切り替える。partial最終小節では無効cellへ移動しない
 - 小節切替buttonは`aria-pressed`を持ち、gridと各cellの読み上げ名に現在小節を含める。同じlane / stepでも小節1と小節2を区別できるようにする
+
+#### 2.3.4 Automation Lane Editor
+
+- Editorの4つ目のARIA tabを「オートメーション」とし、選択中のTrackを編集対象にする。Track未選択では選択案内、Master選択では非対応理由、point 0件ではTrack scalarが全区間に使われることと最初の追加方法を表示し、暗黙にTrackやlaneを作らない
+- non-Master Trackでは音量 / パンのtargetとbeat snapを選べる。lane上の位置または現在の再生位置へpointを追加し、音量laneとパンlaneは独立して保存する。snapは入力位置の確定時だけに使い、Projectへ別設定として保存しない
+- laneの折れ線は、最初のpoint前が現在のTrack scalar、各pointの「値を保つ / なめらかに変化」がそのpointから次のpointへの出力方向、最終point後が最終値保持であることを形と説明文の両方で示す。hold区間は段差、linear区間は斜線で描き、色だけに依存しない
+- pointは最低44×44 CSS pxのnative buttonとし、parameter名、順番、beat、値、次のpointまでの変化方法をaccessible nameに含める。選択pointだけをroving tab stopにし、削除後は次、前、lane追加操作の順でfocusを回復する
+- 選択pointのInspectorではbeat、値、次までの変化方法をlabel付きnative controlで編集し、Delete / Backspaceによる1件削除と確認付きのlane全消去を提供する。同一beat、曲外、値範囲外、stale selectionはProjectを変更せずinline alertで具体的な修正を案内し、成功はpolite statusで通知する
+- local draftまたはpointer previewは確定前にProject / history / revisionを変えない。Enter / blur / pointerupなど1 gestureの確定をProject変更1回、Undo 1回にまとめ、no-opでは履歴・保存通知を増やさない
+- Inspectorはfieldごとのdirty状態を持ち、無編集blurではcommandを発行しない。値だけの確定はbeatをpatchせず、beat snapはbeat fieldの確定時だけに適用する。表示用の丸め値を未変更fieldへ書き戻さず、off-grid / 高精度beatを保持する
+- lane編集でactive playbackが停止した場合は、再生位置を保持して次回再生から新しいcurveを使うことを通知する。保存・再読込、Undo / Redo、transport loop、可変tempo、offline WAVで同じlaneを使う
+- 最大20,000 pointの正当なlaneでもnative point controlはviewportと選択pointを合わせて最大400件、curveは意味を保った最大3本のSVG pathへまとめる。30 Hzの再生位置購読はplayheadだけへ隔離し、lane全体を再renderしない。keyboardでviewport外を選択した場合もそのpointをrenderしてfocus / scrollを回復する
+- 320px幅ではdocument全体を横overflowさせず、時間軸だけをlane内部で横scrollさせる。target、snap、追加、Inspector、削除、全消去は折り返して読める状態を保ち、hover、focus-visible、selected、disabled、errorを色以外でも区別する
+- 現行のlaneは常時再生へ適用される。read / bypass、write / touch / latch記録、Master、insert / send / tempo automation、MIDI CC / LFO modulationを利用可能に見せるcontrolや状態名は表示しない
 
 ### 2.4 Chord Palette
 

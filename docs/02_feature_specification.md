@@ -14,6 +14,7 @@
 | Clip Launcher | ループ試作 | Partial | MVPは簡易クリップ一覧。v1で非線形再生 |
 | Arranger | セクション配置 | Yes | Intro/A/B/Chorus/Bridge/Outro ラベル |
 | Mixer | 音量/パン/ミュート/ソロ/routing | Yes | 各トラックの基本操作、stereo Bus、main output、pre/post-fader sendを扱う |
+| Automation | Track音量/パンの時間変化 | Yes | 選択中のnon-Master Trackについて、beat snap付きlane editorでpointの追加・編集・削除・全消去とhold / linear補間を保存する |
 | Effects | 基本エフェクト | Partial | Filter/Delay/Reverbを最小実装 |
 | Tutorial | 操作・状態連動チュートリアル | Yes | 確定操作イベントと採用済みProject/UI状態を再照合して進行 |
 | Exercise | 理論演習 | Yes | コード判定、スケール判定、メロディ添削 |
@@ -306,7 +307,13 @@ Masterの`pan` / `mute` / `solo`は将来互換用の予約フィールドであ
 
 ライブのTrack出力とWAV PCMは同じstable routing DAGとMaster gainをlimiter直前で一度だけ適用する。Bus soloは関係する上流・下流edgeだけを開き、上流sourceの無関係なMaster直通edgeを漏らさない。ライブ専用のメトロノームもMaster faderを通し、ライブのMaster meterはpost-fader信号を表示する。WAVにはメトロノームclickとUI meter / analyserを含めない。Trackのmute / solo、各Track volume、Master volumeは、再生開始時およびoffline renderではsample 0から確定値を使い、再生中に値を変更した場合だけ10msで平滑化する。
 
-schema v4のAutomationLaneはnon-Master Trackのvolume / panだけを対象にし、Track scalarを最初のpointまでのbase valueとしてhold / linear補間をライブとWAVへ同じbeat→time変換で適用する。曲末ちょうどのhold pointもrelease / effect tailへ引き継ぐ。AutomationLaneは再生session snapshotであり、lane編集、またはlaneが1件以上ある状態でのmixer / effect編集はactive playbackを停止して次のplayで再構築する。改名・ノート編集などmixerに無関係なProject変更では、予約済みAudioParam automationをcancelしない。Master automationは保存境界で拒否する。
+schema v4のAutomationLaneはnon-Master Trackのvolume / panだけを対象にし、Track scalarを最初のpointまでのbase valueとしてhold / linear補間をライブとWAVへ同じbeat→time変換で適用する。各pointの`interpolation`はそのpointから次のpointまでの出力方向の意味を持ち、`hold`は現在値を保ち、`linear`は次の値までbeat上で直線変化する。最終pointの値は曲末後のrelease / effect tailまで保持する。
+
+Editorの「オートメーション」tabは選択中のnon-Master Trackへ結び付き、音量またはパン、beat snapを選んでlane上または現在の再生位置へpointを追加できる。選択pointはbeat、値、次のpointまでの変化方法を編集し、1件削除または確認後のlane全消去を行える。Inspectorは実際に変更したfieldだけをpatchし、beat snapはbeat自体を確定した時だけ適用するため、無編集blurと値だけの編集ではimport済みoff-grid beatの精度を変えない。音量は0〜2、パンは-1〜1、beatは0〜曲末で、同じlaneの同beat重複を採用しない。laneがなければ最初の追加時に作り、最後のpoint削除または全消去ではlane自体を除去する。追加・確定編集・削除・全消去はそれぞれ1 gestureをProject変更1回、Undo 1回、自動保存revision 1回として採用し、no-opまたは拒否では履歴を増やさない。保存・再読込後もvolume / panの独立laneとpoint ID、beat、value、interpolationを保つ。
+
+AutomationLaneは再生session snapshotであり、lane編集はactive playbackを停止して有限なplayheadを保持し、次のplayで再構築する。laneが1件以上ある状態でのmixer / effect編集も同じ扱いである。改名・ノート編集などmixerに無関係なProject変更では、予約済みAudioParam automationをcancelしない。transport loopと可変tempoでも既存の共通resolverを使うため、ライブ再生とoffline WAVは同じ曲線になる。
+
+現行Editorはautomationを常時読み出して適用し、利用者が一時的に無効化するread / bypass modeを持たない。再生操作から値を書き込むwrite / touch / latch、Master、insert / send / tempo parameter、MIDI CCやLFOなどのmodulationは未実装であり、対応済みと表示しない。
 
 ### 8.2 学習連動
 
