@@ -59,7 +59,12 @@ import { fenceRendererStorageWrites } from '../platform/rendererStorageFence';
 import { nativeLifecycleGate } from '../platform/nativeLifecycleGate';
 import { settleNativeCloseHandoff } from '../platform/nativeCloseHandoff';
 
-export type EditorView = 'pianoRoll' | 'drums' | 'arranger' | 'automation';
+export type EditorView =
+  | 'pianoRoll'
+  | 'drums'
+  | 'arranger'
+  | 'automation'
+  | 'tempoMap';
 
 export type TransportPhase = 'stopped' | 'starting' | 'playing';
 

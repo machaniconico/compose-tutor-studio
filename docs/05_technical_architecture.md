@@ -239,6 +239,15 @@ schema v4 aggregateとAudio Asset repositoryは正本を分離する。Project J
 5. snapは入力正規化でありschema fieldを追加しない。保存されるのは既存schema v4のtarget、point ID、beat、value、interpolationだけで、SQLite autosaveと`.ctsproj.json`の既存exact roundtripを使う。live lookahead、transport loop、可変tempo分割、offline WAVは既存の共通resolverをそのまま使うため、Editor固有のcurve evaluatorを別の音声正本にしない。
 6. 現行runtimeはlaneが存在すれば常時読み出す。read / bypass stateとwrite / touch / latch captureは先行するhidden fieldを持たず、Master、insert / send / tempo parameter、MIDI CC / LFO modulationもこのtransactionの対象外とする。
 
+#### 5.8.2 Tempo / 拍子map editing transaction
+
+1. UIは選択event IDと、tempoの`beat / bpm`または拍子の`beat / numerator / denominator`だけをlocal draftからcommandへ渡す。beat 0 anchorの位置・削除controlは無効にし、値だけを更新できる。
+2. project-modelのpublic mutationはsource Projectをcanonical codecで先に検査し、有限な曲内beat、BPM 20〜300、拍子1〜32 / 分母2・4・8・16、map上限、global ID、厳密昇順、同beat衝突をno-throwのtyped resultで検査する。新規追加と移動先は`0 <= beat < lengthBeats`、拍子eventの追加・移動はさらに直前segmentの小節境界に限定する。canonical sourceで既に`beat === lengthBeats`にあるeventだけは、同じbeatでの値更新 / no-op、曲内への移動、削除を互換操作として許す。
+3. 拍子候補は後続eventを含む全segmentと`lengthBeats`終端をcompileし、全てが小節境界になる場合だけ`lengthBars`を再導出する。終端exactの拍子eventは長さ0の最終segmentとしてcanonical validatorと同じく許容し、他のmap eventを更新・削除した候補も再計算できるようにする。先頭eventの値を変えた候補では`bpm` / `timeSignature` mirrorも同じimmutable candidate内で更新する。
+4. candidate全体がcanonical codecを通過した時だけStudio actionが開始時Project参照へcompare-and-swapする。成功したadd / update / move / deleteは各1 Project change、Undo 1回、save revision 1回で、semantic no-op、stale snapshot、busy operation、invalid source / candidateではProject、history、revision、selection、transportを変更しない。
+5. 採用されたmap変更は再生session snapshotを停止し、有限なplayheadを保持する。次のplayback / metronome / WAV / MIDI / timelineは既存のcompiled musical-time indexを再構築するため、Editor固有の変換器を作らない。schema versionと保存形式はv4のままである。
+6. 連続tempo ramp、音声からのtempo追従、AutomationLaneのtempo targetは別の品質gateとし、このtransactionに予約fieldを先行追加しない。
+
 ### 5.9 Audio Track import / content-addressed transaction（Batch 5）
 
 1. Web / native gatewayから得たWAV / MP3 / M4A / AAC bytesを共通source parserへ通し、入力128 MiB、decode後1〜2 channel、canonical WAV 128 MiB、decode Float32 PCM 256 MiBをallocation前に検査する。descriptor未確定のWeb入力はBlob全読込inspect前に`2 × source + retained decoded cache`を予約し、descriptor取得後にplanner peakへ原子的にresizeする。decode用AudioContextが要求48 kHzを無視した時は実sample rateで再preflightする。さらにdecode peakを`2 × source + decoded Float32`、canonical peakを`source + decoded Float32 + 必要時のresample Float32 + PCM16 WAV`、persist peakを`source + decoded Float32 + 8 × PCM16 WAV`としてsafe integer加算し、最大384 MiBを越える入力をdecode前に拒否する。8倍の保存envelopeはWeb dedupeの明示5copyとnative IPC body clone / read-backを保守的に覆う。

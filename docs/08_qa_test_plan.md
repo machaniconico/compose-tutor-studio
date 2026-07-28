@@ -116,6 +116,23 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 - pointへkeyboardで到達・編集でき、削除後のfocusが回復する。320px幅ではdocument全体に横overflowがなく、lane時間軸だけが内部scrollする
 - read / bypass、write / touch / latch、Master、insert / send / tempo automation、modulationを実装済みと示すcontrolがない
 
+### E2E-005: Tempo / 拍子mapを編集する
+
+1. Editorの「テンポ / 拍子」tabを開き、beat 0のtempo / 拍子anchorが位置固定・削除不可で値編集可能なことを確認する
+2. 再生位置とtimelineからtempo eventを追加し、BPMと位置を編集する
+3. 小節境界へ拍子eventを追加し、分子 / 分母を変更する。小節途中、同beat、曲末整合を壊す候補を入力する
+4. 有効なeventを削除し、Undo / Redo、保存・再読込を行う
+5. active playback中にmapを変更し、320px viewportでtimelineを横scrollする
+
+期待結果:
+
+- 採用された各add / edit / move / deleteはUndo / save revision各1回、拒否 / no-opはProject / history / transportを変えない
+- tempo / 拍子mapは厳密昇順かつID一意で、`bpm` / `timeSignature` / `lengthBars` mirrorが正本と一致する。schemaVersionは4のままである
+- 拍子eventとProject終端は小節境界を保ち、invalid候補は日本語のinline alertで理由を説明する
+- active playbackはplayheadを保持して停止し、Undo / Redo、保存・再読込後も両mapとmirrorがexactに一致する
+- tab / event / Inspectorをkeyboardで操作でき、320pxではdocument横overflowがなくtimelineだけが内部scrollする
+- 連続tempo ramp、audio follow / Smart Tempo、tempo automationを実装済みと示すcontrolがない
+
 ## 5. 音声テスト
 
 | テスト | 内容 |
@@ -397,6 +414,15 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - 実測校正componentは通常録音と別wizardで、exact入力を選び、interfaceの出力→入力をケーブル接続する案内、スピーカー / マイクの空中loopback禁止、monitor強制OFF、固定低出力、PRBS複数burst、500 ms上限、cancelを確認する。成功だけがprofileをatomic置換し、失敗 / cancelは前回profileを保持する。出力identityを取得できない制約と、出力device / driver / buffer変更後の再校正案内も検査する
 - 録音配置は推定 / 実測 / 無補正の3modeを比較する。実測modeではexact一致profileのframe値がinput / base / output / limiter推定全体を置換し、手動offsetだけが後段で加算されること、不一致profileで推定へfallbackしないこと、可変tempo / beat 0 trimが同じであることをsample frame fixtureで検査する
 - 3OS実deviceでpermission、システム既定 / 明示device選択、`devicechange` / device loss、Record Arm先への追記、disk full、monitor feedback、close、再起動再生を確認する。shared AudioContextの伴奏同期と推定 / 実測 / 手動latency補正を有線・Bluetoothを分けて聴感 / 波形比較し、host申告値がない環境も確認する。実測はinterfaceの物理cable loopbackを使い、interface / driver mixerのDirect Monitor、hardware Loopback、同一outputへのreturnをOFFにして電気的feedbackがないこと、Project Master fader 0 / 1 / 2でも固定probe levelと測定値が一致することを確認する。OSごとに既知frame shiftとの誤差、silence / clip / ambiguity拒否、再校正案内を記録する。長時間streamingを閉じた後、cycle take / compingへ進む
+
+### 7.10 Production Tempo / 拍子map editor regression gate
+
+- domain public APIで両mapのadd / update / move / delete、beat 0保護、BPM / 拍子範囲、strict order、同beat、曲末未満の新規追加 / 移動先、map上限、global ID、throwing ID factory、source / candidate codecを検査する。canonical sourceに既存の`beat === lengthBeats` eventがあるfixtureでは、位置据え置きのsemantic no-op / 値更新、曲内への移動、削除を許し、曲内eventの終端への移動は拒否する。failure / semantic no-opは元Project参照、成功はsource immutableとする
+- 拍子変更は先行segmentの小節境界、全後続event、`lengthBeats`終端を検査し、終端exact eventの長さ0最終segmentを許容した上で成功時だけ`lengthBars`を再導出する。終端eventを残した他eventのadd / update / removeも回帰し、先頭値変更時の`bpm` / `timeSignature` mirrorを同一候補で更新する
+- Studio actionはexact Project CAS、busy / stale拒否、1 command = 1 history / revision、Undo / Redo exact、active playback停止とplayhead保持を検査する。拒否 / no-opはtransportと保存状態も変えない
+- 5つのEditor tab / panel関係、両lane、anchor-only、再生位置追加、選択 / Inspector、keyboard移動、削除後focus、inline alert / polite statusをcomponent / E2Eで検査する
+- 保存・再読込後のID / map / mirrorをexact比較し、live / WAV / MIDI / metronome / Arranger / Piano Roll / Drum / Chordの既存variable-map回帰を維持する
+- 4,096 tempo / 1,024拍子上限fixtureはboundedに拒否または表示し、320pxでdocument横overflowなし・timeline内部横scrollを実ブラウザで検査する。連続ramp / audio follow / tempo automationが未実装である境界も表示と仕様で一致させる
 
 ## 8. 手動QAチェックリスト
 

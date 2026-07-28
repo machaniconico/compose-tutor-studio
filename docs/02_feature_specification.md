@@ -290,6 +290,15 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - raw PCMを48 kHz PCM16 WAVへ正規化し、bytesとchecksum receiptをrepositoryへ確定してからだけProjectへ採用する。既存TrackではそのTrackのvolume / pan / effects / routingを保ったままAsset metadataと補正済みsource rangeのClipを追記し、新規TrackではTrack / routing / Clipを作る。どちらも開始時snapshotへのexact CAS、Undo 1回、revision 1回として扱う
 - permission / device loss / context世代変更 / clock不連続 / arm失敗 / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProject / history / selectionを変更しない。transport loopはtake / compがない間は開始前に拒否する。入力hot switch、長時間streaming、再生中の任意punch、cycle take / lane / compは未実装である
 
+### 7.8 Tempo / 拍子map Editor
+
+- Editorの「テンポ / 拍子」tabは既存schema v4の`tempoMap`と`timeSignatureMap`を同じmusical timeline上で編集する。tempoは20〜300 BPM、拍子は分子1〜32・分母2 / 4 / 8 / 16で、beat 0の先頭eventは位置固定かつ削除不可だが値は編集できる
+- tempo eventは曲末未満の任意beat、拍子eventは曲末未満かつ直前segmentから見た小節境界だけへ新規追加・移動できる。同じmapの同beat重複、範囲外、後続拍子eventまたは曲末を小節途中にする候補をatomicに拒否する。canonical schema v4で既に`beat === lengthBeats`にある終端eventは互換入力として、位置を据え置いた値編集 / no-op、曲内への移動、削除だけを許し、新規追加または曲内eventの終端への移動は許さない
+- mapはbeat昇順とProject全体のglobal ID一意性を保つ。先頭tempo / 拍子の編集時は`bpm` / `timeSignature` mirrorを同じcommandで更新し、拍子map変更時は`lengthBeats`を正本として`lengthBars` mirrorを再計算する。schema versionは増やさない
+- add / update / move / deleteはsourceとcandidateのcanonical codecを通過した時だけ開始時Project参照へcompare-and-swapする。採用された1操作はProject変更・Undo・save revision各1回、no-op / stale / busy / invalid候補はProject、history、selection、transportを変えない
+- active playback中の採用はsession snapshotを停止して有限なplayheadを保持する。次の再生、metronome、live / WAV / MIDI、Arranger / Piano Roll / Drum / Chord timelineは保存済みmapを既存の共通musical-time compilerから読む
+- 320px幅ではdocument全体を横overflowさせず時間軸だけを内部scrollする。eventはnative controlで選択・keyboard操作でき、anchor保護、入力error、成功、再生停止を日本語のalert / statusで伝える。連続tempo ramp、audio follow / Smart Tempo、tempo automationはこのincrementに含めない
+
 ## 8. Mixer
 
 ### 8.1 MVP仕様
