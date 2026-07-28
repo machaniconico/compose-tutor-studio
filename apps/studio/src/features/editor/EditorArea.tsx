@@ -4,6 +4,7 @@ import { PianoRoll } from '../pianoRoll/PianoRoll';
 import { DrumGrid } from '../drums/DrumGrid';
 import { Arranger } from '../arranger/Arranger';
 import { AutomationLaneEditor } from '../automation/AutomationLaneEditor';
+import { TempoMapEditor } from '../tempoMap/TempoMapEditor';
 import { handleTabKeyDown } from '../common/tabs';
 
 function isUnmodifiedCharacterKey(event: React.KeyboardEvent, key: string): boolean {
@@ -22,6 +23,7 @@ const TABS: { view: EditorView; label: string }[] = [
   { view: 'drums', label: 'ドラム' },
   { view: 'arranger', label: 'アレンジ' },
   { view: 'automation', label: 'オートメーション' },
+  { view: 'tempoMap', label: 'テンポ / 拍子' },
 ];
 
 const TAB_ORDER = TABS.map(({ view }) => view);
@@ -29,7 +31,7 @@ const editorTabId = (view: EditorView): string => `editor-tab-${view}`;
 const editorTabPanelId = (view: EditorView): string =>
   `editor-tabpanel-${view}`;
 
-/** Tabbed editor host switching between the four editors. */
+/** Tabbed editor host switching between the five editors. */
 export function EditorArea() {
   const activeView = useStore((s) => s.editor.activeView);
   const setActiveView = useStore((s) => s.setActiveView);
@@ -140,6 +142,7 @@ export function EditorArea() {
             {active && view === 'drums' ? <DrumGrid /> : null}
             {active && view === 'arranger' ? <Arranger /> : null}
             {active && view === 'automation' ? <AutomationLaneEditor /> : null}
+            {active && view === 'tempoMap' ? <TempoMapEditor /> : null}
           </div>
         );
       })}
