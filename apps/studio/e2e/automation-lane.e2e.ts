@@ -29,14 +29,34 @@ async function requiredBox(
   locator: Locator,
 ): Promise<Readonly<{ x: number; y: number; width: number; height: number }>> {
   const result = await locator.evaluate((element) => {
-    element.scrollIntoView({ block: 'center', inline: 'center' });
     const horizontalScroller = element.closest<HTMLElement>(
       '.automation-lane__timeline-scroll',
     );
+    const verticalScroller = element.closest<HTMLElement>('.editor-body');
     // `overflow-x: auto` makes the lane a programmatic vertical scroll
     // container too, even though its Y overflow is hidden. Browser
-    // actionability scrolling can therefore move a point behind the lane's
-    // own chrome. Keep the intentionally horizontal-only scroller pinned.
+    // actionability scrolling can therefore move a point behind the mixer.
+    // Scroll each intended axis ourselves and keep the lane's hidden Y offset
+    // pinned instead of using scrollIntoView across both nested scrollers.
+    if (horizontalScroller) {
+      horizontalScroller.scrollTop = 0;
+      const pointBox = element.getBoundingClientRect();
+      const scrollBox = horizontalScroller.getBoundingClientRect();
+      horizontalScroller.scrollLeft +=
+        pointBox.left
+        + pointBox.width / 2
+        - scrollBox.left
+        - scrollBox.width / 2;
+    }
+    if (verticalScroller) {
+      const pointBox = element.getBoundingClientRect();
+      const scrollBox = verticalScroller.getBoundingClientRect();
+      verticalScroller.scrollTop +=
+        pointBox.top
+        + pointBox.height / 2
+        - scrollBox.top
+        - scrollBox.height / 2;
+    }
     if (horizontalScroller) horizontalScroller.scrollTop = 0;
 
     const box = element.getBoundingClientRect();
