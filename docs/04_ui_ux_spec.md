@@ -132,6 +132,15 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 320px幅ではdocument全体を横overflowさせず、時間軸だけをlane内部で横scrollさせる。target、snap、追加、Inspector、削除、全消去は折り返して読める状態を保ち、hover、focus-visible、selected、disabled、errorを色以外でも区別する
 - 現行のlaneは常時再生へ適用される。read / bypass、write / touch / latch記録、Master、insert / send / tempo automation、MIDI CC / LFO modulationを利用可能に見せるcontrolや状態名は表示しない
 
+#### 2.3.5 Tempo / 拍子map Editor
+
+- Editorの5つ目のARIA tabを「テンポ / 拍子」とし、tempo laneと拍子laneを同じ小節目盛り・playhead・内部横scroll領域に並べる。固定tempoだけの初期Projectでもbeat 0 anchorを明示し、空に見せない
+- 「再生位置に追加」はtempoを現在beatへ、拍子を現在位置を含む小節の開始境界へ置く。同beatに既存eventがある場合は黙って上書きせず、そのeventを選択して編集方法を案内する
+- eventは最低44×44 CSS pxのnative buttonとし、種類、順番、小節 / 拍、値、先頭anchorかどうかをaccessible nameに含める。矢印キーで前後event、Home / Endで先頭 / 末尾へ移り、削除後は次、前、追加buttonの順にfocusを回復する
+- 選択eventのInspectorはbeat、BPMまたは分子 / 分母をlabel付きcontrolで編集する。beat 0は位置と削除をdisabledにし、値の編集は残す。小節境界、範囲、衝突、Project末尾整合の拒否理由をinline alert、成功と再生停止をpolite statusで通知する
+- local draftやfocus変更ではProjectを変えず、確定したadd / edit / move / deleteだけを1 gesture = 1 Undoにする。Undo / Redoと保存・再読込後もevent ID、位置、値、compatibility mirrorを保つ
+- 320px幅ではtoolbar / Inspectorを折り返し、document横overflowを出さず時間軸だけを内部scrollする。連続tempo ramp、audio follow / Smart Tempo、tempo automationを利用可能に見せるcontrolは置かない
+
 ### 2.4 Chord Palette
 
 タブ:
