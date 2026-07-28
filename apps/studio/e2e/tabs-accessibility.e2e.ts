@@ -40,6 +40,16 @@ test('editor, inspector, and project tabs keep focus and ARIA targets in sync', 
   await expect(drumTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#editor-tabpanel-drums')).toBeVisible();
   await expect(page.locator('#editor-tabpanel-pianoRoll')).toBeHidden();
+  await drumTab.press('End');
+  const automationTab = editorTabs.getByRole('tab', { name: 'オートメーション' });
+  await expect(automationTab).toBeFocused();
+  await expect(automationTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#editor-tabpanel-automation')).toBeVisible();
+  await automationTab.press('Home');
+  await expect(pianoRollTab).toBeFocused();
+  await expect(pianoRollTab).toHaveAttribute('aria-selected', 'true');
+  await pianoRollTab.press('ArrowRight');
+  await expect(drumTab).toBeFocused();
   const barSelector = page.getByRole('group', { name: '小節切替', exact: true });
   const firstBar = barSelector.getByRole('button', { name: '1', exact: true });
   const secondBar = barSelector.getByRole('button', { name: '2', exact: true });
