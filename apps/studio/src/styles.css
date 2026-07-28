@@ -5026,3 +5026,417 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
     grid-column: 1;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Tempo / time-signature map editor                                  */
+/* ------------------------------------------------------------------ */
+.tempo-map-editor {
+  display: grid;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--sp-3);
+  overflow: hidden;
+}
+
+.tempo-map-editor__header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.tempo-map-editor__header h3,
+.tempo-map-editor__header p,
+.tempo-map-editor__eyebrow {
+  margin: 0;
+}
+
+.tempo-map-editor__header h3 {
+  font-size: 16px;
+}
+
+.tempo-map-editor__header h3 + p {
+  margin-top: var(--sp-1);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tempo-map-editor__eyebrow {
+  margin-bottom: 2px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tempo-map-editor__playhead-readout {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-2);
+  color: var(--text);
+  font: 650 12px/1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tempo-map-editor__toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.tempo-map-editor__toolbar button {
+  min-height: 44px;
+}
+
+.tempo-map-editor__primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 700;
+}
+
+.tempo-map-editor__busy {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tempo-map-editor__hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tempo-map-editor__timeline-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  scrollbar-gutter: stable;
+  overscroll-behavior-inline: contain;
+}
+
+.tempo-map-editor__timeline {
+  position: relative;
+  height: 220px;
+  max-width: none;
+  overflow: hidden;
+  background: var(--bg-input);
+}
+
+.tempo-map-editor__ruler {
+  position: relative;
+  z-index: 2;
+  height: 28px;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-panel-2);
+  color: var(--text-faint);
+  font: 10px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tempo-map-editor__bar-label {
+  position: absolute;
+  top: 8px;
+  transform: translateX(5px);
+}
+
+.tempo-map-editor__bar-grid {
+  position: absolute;
+  z-index: 0;
+  inset: 28px 0 0;
+  pointer-events: none;
+}
+
+.tempo-map-editor__bar-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--border) 66%, transparent);
+}
+
+.tempo-map-editor__lane {
+  position: relative;
+  z-index: 1;
+  height: 96px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tempo-map-editor__lane--signature {
+  border-bottom: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg-panel-2) 38%, transparent),
+      transparent
+    );
+}
+
+.tempo-map-editor__lane-label {
+  position: absolute;
+  z-index: 1;
+  top: 5px;
+  left: 5px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
+  color: var(--text-faint);
+  font: 700 10px/1 var(--mono);
+  letter-spacing: 0.04em;
+}
+
+.tempo-map-editor__tempo-steps {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tempo-map-editor__tempo-step {
+  position: absolute;
+  top: 35px;
+  height: 24px;
+  min-width: 1px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding-left: 24px;
+  border-top: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--text-dim);
+  font: 650 10px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tempo-map-editor__marker {
+  position: absolute;
+  z-index: 4;
+  top: 58px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0 var(--sp-1);
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--text);
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 3px var(--bg-input);
+  color: var(--text);
+  font: 700 10px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tempo-map-editor__marker--tempo {
+  width: 44px;
+  border-radius: 50%;
+}
+
+.tempo-map-editor__marker--signature {
+  width: 44px;
+  min-width: 44px;
+  border-radius: var(--radius-sm);
+  border-color: var(--learn);
+}
+
+.tempo-map-editor__marker:hover {
+  background: color-mix(in srgb, var(--bg-elevated) 70%, var(--accent));
+}
+
+.tempo-map-editor__marker--signature:hover {
+  background: color-mix(in srgb, var(--bg-elevated) 70%, var(--learn));
+}
+
+.tempo-map-editor__marker.is-anchor {
+  border-style: dashed;
+}
+
+.tempo-map-editor__marker.is-selected {
+  border-color: var(--accent-contrast);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow:
+    0 0 0 3px var(--bg-input),
+    0 0 0 5px var(--accent);
+}
+
+.tempo-map-editor__marker--signature.is-selected {
+  background: var(--learn);
+  box-shadow:
+    0 0 0 3px var(--bg-input),
+    0 0 0 5px var(--learn);
+}
+
+.tempo-map-editor__playhead {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-1px);
+  background: var(--learn);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-input) 70%, transparent);
+  pointer-events: none;
+}
+
+.tempo-map-editor__inspector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  min-width: 0;
+  align-items: end;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-2);
+}
+
+.tempo-map-editor__inspector legend {
+  padding: 0 var(--sp-1);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tempo-map-editor__inspector label {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-1);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tempo-map-editor__inspector input,
+.tempo-map-editor__inspector select,
+.tempo-map-editor__inspector button {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.tempo-map-editor__inspector output,
+.tempo-map-editor__anchor-help {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tempo-map-editor__inspector output {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tempo-map-editor__delete {
+  border-color: color-mix(in srgb, var(--danger) 64%, var(--border));
+  color: var(--danger);
+}
+
+.tempo-map-editor__empty-selection {
+  min-width: 0;
+  padding: var(--sp-3);
+  border-left: 3px solid var(--learn);
+  background: var(--bg-panel-2);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tempo-map-editor__empty-selection p {
+  margin: 0;
+}
+
+.tempo-map-editor__empty-selection p + p {
+  margin-top: var(--sp-1);
+}
+
+.tempo-map-editor__keyboard {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tempo-map-editor__keyboard summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.tempo-map-editor__keyboard p {
+  margin: 0;
+  padding: 0 0 var(--sp-2);
+  line-height: 1.6;
+}
+
+.tempo-map-editor__notice {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--accent);
+  background: var(--bg-panel-2);
+  color: var(--text-dim);
+}
+
+.tempo-map-editor__notice.is-error {
+  border-left-color: var(--danger);
+  color: var(--text);
+}
+
+@media (max-width: 640px) {
+  .tempo-map-editor__playhead-readout,
+  .tempo-map-editor__busy {
+    width: 100%;
+  }
+
+  .tempo-map-editor__inspector {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tempo-map-editor__anchor-help,
+  .tempo-map-editor__inspector output,
+  .tempo-map-editor__delete {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 380px) {
+  .tempo-map-editor__toolbar,
+  .tempo-map-editor__toolbar button {
+    width: 100%;
+  }
+
+  .tempo-map-editor__inspector {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tempo-map-editor__anchor-help,
+  .tempo-map-editor__inspector output,
+  .tempo-map-editor__delete {
+    grid-column: 1;
+  }
+}
