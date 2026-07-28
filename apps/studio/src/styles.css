@@ -4622,6 +4622,7 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
 /* ------------------------------------------------------------------ */
 .automation-lane {
   display: grid;
+  flex: 0 0 auto;
   min-width: 0;
   max-width: 100%;
   gap: var(--sp-3);
