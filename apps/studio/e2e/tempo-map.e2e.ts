@@ -283,7 +283,6 @@ test('edits, persists, exports, and responsively renders both musical maps', asy
 
   await signatureBeatInput.fill('8');
   await signatureInspector.getByLabel('分子', { exact: true }).fill('3');
-  await signatureInspector.getByLabel('分母', { exact: true }).selectOption('4');
   await signatureInspector
     .getByRole('button', { name: '変更を反映', exact: true })
     .click();
