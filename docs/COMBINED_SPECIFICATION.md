@@ -526,6 +526,15 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - raw PCMを48 kHz PCM16 WAVへ正規化し、bytesとchecksum receiptをrepositoryへ確定してからだけProjectへ採用する。既存TrackではそのTrackのvolume / pan / effects / routingを保ったままAsset metadataと補正済みsource rangeのClipを追記し、新規TrackではTrack / routing / Clipを作る。どちらも開始時snapshotへのexact CAS、Undo 1回、revision 1回として扱う
 - permission / device loss / context世代変更 / clock不連続 / arm失敗 / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProject / history / selectionを変更しない。transport loopはtake / compがない間は開始前に拒否する。入力hot switch、長時間streaming、再生中の任意punch、cycle take / lane / compは未実装である
 
+### 7.8 Tempo / 拍子map Editor
+
+- Editorの「テンポ / 拍子」tabは既存schema v4の`tempoMap`と`timeSignatureMap`を同じmusical timeline上で編集する。tempoは20〜300 BPM、拍子は分子1〜32・分母2 / 4 / 8 / 16で、beat 0の先頭eventは位置固定かつ削除不可だが値は編集できる
+- tempo eventは曲末未満の任意beat、拍子eventは曲末未満かつ直前segmentから見た小節境界だけへ新規追加・移動できる。同じmapの同beat重複、範囲外、後続拍子eventまたは曲末を小節途中にする候補をatomicに拒否する。canonical schema v4で既に`beat === lengthBeats`にある終端eventは互換入力として、位置を据え置いた値編集 / no-op、曲内への移動、削除だけを許し、新規追加または曲内eventの終端への移動は許さない
+- mapはbeat昇順とProject全体のglobal ID一意性を保つ。先頭tempo / 拍子の編集時は`bpm` / `timeSignature` mirrorを同じcommandで更新し、拍子map変更時は`lengthBeats`を正本として`lengthBars` mirrorを再計算する。schema versionは増やさない
+- add / update / move / deleteはsourceとcandidateのcanonical codecを通過した時だけ開始時Project参照へcompare-and-swapする。採用された1操作はProject変更・Undo・save revision各1回、no-op / stale / busy / invalid候補はProject、history、selection、transportを変えない
+- active playback中の採用はsession snapshotを停止して有限なplayheadを保持する。次の再生、metronome、live / WAV / MIDI、Arranger / Piano Roll / Drum / Chord timelineは保存済みmapを既存の共通musical-time compilerから読む
+- 320px幅ではdocument全体を横overflowさせず時間軸だけを内部scrollする。eventはnative controlで選択・keyboard操作でき、anchor保護、入力error、成功、再生停止を日本語のalert / statusで伝える。連続tempo ramp、audio follow / Smart Tempo、tempo automationはこのincrementに含めない
+
 ## 8. Mixer
 
 ### 8.1 MVP仕様
@@ -1039,6 +1048,15 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 320px幅ではdocument全体を横overflowさせず、時間軸だけをlane内部で横scrollさせる。target、snap、追加、Inspector、削除、全消去は折り返して読める状態を保ち、hover、focus-visible、selected、disabled、errorを色以外でも区別する
 - 現行のlaneは常時再生へ適用される。read / bypass、write / touch / latch記録、Master、insert / send / tempo automation、MIDI CC / LFO modulationを利用可能に見せるcontrolや状態名は表示しない
 
+#### 2.3.5 Tempo / 拍子map Editor
+
+- Editorの5つ目のARIA tabを「テンポ / 拍子」とし、tempo laneと拍子laneを同じ小節目盛り・playhead・内部横scroll領域に並べる。固定tempoだけの初期Projectでもbeat 0 anchorを明示し、空に見せない
+- 「再生位置に追加」はtempoを現在beatへ、拍子を現在位置を含む小節の開始境界へ置く。同beatに既存eventがある場合は黙って上書きせず、そのeventを選択して編集方法を案内する
+- eventは最低44×44 CSS pxのnative buttonとし、種類、順番、小節 / 拍、値、先頭anchorかどうかをaccessible nameに含める。矢印キーで前後event、Home / Endで先頭 / 末尾へ移り、削除後は次、前、追加buttonの順にfocusを回復する
+- 選択eventのInspectorはbeat、BPMまたは分子 / 分母をlabel付きcontrolで編集する。beat 0は位置と削除をdisabledにし、値の編集は残す。小節境界、範囲、衝突、Project末尾整合の拒否理由をinline alert、成功と再生停止をpolite statusで通知する
+- local draftやfocus変更ではProjectを変えず、確定したadd / edit / move / deleteだけを1 gesture = 1 Undoにする。Undo / Redoと保存・再読込後もevent ID、位置、値、compatibility mirrorを保つ
+- 320px幅ではtoolbar / Inspectorを折り返し、document横overflowを出さず時間軸だけを内部scrollする。連続tempo ramp、audio follow / Smart Tempo、tempo automationを利用可能に見せるcontrolは置かない
+
 ### 2.4 Chord Palette
 
 タブ:
@@ -1451,6 +1469,15 @@ schema v4 aggregateとAudio Asset repositoryは正本を分離する。Project J
 4. 採用されたlane編集はsession snapshotを無効化するため、active playbackを1回停止して有限なplayheadを保つ。次のplayback requestが新Projectからautomation commandを再構築する。no-opと拒否ではsessionへ触れない。
 5. snapは入力正規化でありschema fieldを追加しない。保存されるのは既存schema v4のtarget、point ID、beat、value、interpolationだけで、SQLite autosaveと`.ctsproj.json`の既存exact roundtripを使う。live lookahead、transport loop、可変tempo分割、offline WAVは既存の共通resolverをそのまま使うため、Editor固有のcurve evaluatorを別の音声正本にしない。
 6. 現行runtimeはlaneが存在すれば常時読み出す。read / bypass stateとwrite / touch / latch captureは先行するhidden fieldを持たず、Master、insert / send / tempo parameter、MIDI CC / LFO modulationもこのtransactionの対象外とする。
+
+#### 5.8.2 Tempo / 拍子map editing transaction
+
+1. UIは選択event IDと、tempoの`beat / bpm`または拍子の`beat / numerator / denominator`だけをlocal draftからcommandへ渡す。beat 0 anchorの位置・削除controlは無効にし、値だけを更新できる。
+2. project-modelのpublic mutationはsource Projectをcanonical codecで先に検査し、有限な曲内beat、BPM 20〜300、拍子1〜32 / 分母2・4・8・16、map上限、global ID、厳密昇順、同beat衝突をno-throwのtyped resultで検査する。新規追加と移動先は`0 <= beat < lengthBeats`、拍子eventの追加・移動はさらに直前segmentの小節境界に限定する。canonical sourceで既に`beat === lengthBeats`にあるeventだけは、同じbeatでの値更新 / no-op、曲内への移動、削除を互換操作として許す。
+3. 拍子候補は後続eventを含む全segmentと`lengthBeats`終端をcompileし、全てが小節境界になる場合だけ`lengthBars`を再導出する。終端exactの拍子eventは長さ0の最終segmentとしてcanonical validatorと同じく許容し、他のmap eventを更新・削除した候補も再計算できるようにする。先頭eventの値を変えた候補では`bpm` / `timeSignature` mirrorも同じimmutable candidate内で更新する。
+4. candidate全体がcanonical codecを通過した時だけStudio actionが開始時Project参照へcompare-and-swapする。成功したadd / update / move / deleteは各1 Project change、Undo 1回、save revision 1回で、semantic no-op、stale snapshot、busy operation、invalid source / candidateではProject、history、revision、selection、transportを変更しない。
+5. 採用されたmap変更は再生session snapshotを停止し、有限なplayheadを保持する。次のplayback / metronome / WAV / MIDI / timelineは既存のcompiled musical-time indexを再構築するため、Editor固有の変換器を作らない。schema versionと保存形式はv4のままである。
+6. 連続tempo ramp、音声からのtempo追従、AutomationLaneのtempo targetは別の品質gateとし、このtransactionに予約fieldを先行追加しない。
 
 ### 5.9 Audio Track import / content-addressed transaction（Batch 5）
 
@@ -1989,6 +2016,18 @@ production Editorが変更する正本は既存の`Project.automationLanes`だ�
 - lane編集はactive playbackのimmutable session snapshotを停止させるが、その停止状態と保持playheadは永続fieldではない。再生時とoffline WAVは保存済みlaneを既存のtempo / loop-aware resolverへ入力する
 - read / bypass、write / touch / latch、Master、insert / send / tempo automation、MIDI CC / LFO modulationのstateは未定義であり、互換予約fieldも先行追加しない
 
+### 2.6.3 Tempo / 拍子map編集（schema v4）
+
+production Editorが変更する正本は既存の`Project.tempoMap`と`Project.timeSignatureMap`であり、schema versionとentity型を増やさない。両mapはbeat 0 anchorをexact 1件持ち、IDを保った厳密昇順event列である。
+
+- production Editorが新規追加または移動先として確定するtempo eventは有限な`0 <= beat < lengthBeats`と20〜300 BPMを持つ。拍子eventは分子1〜32、分母2 / 4 / 8 / 16を持ち、先行segmentから見た小節境界の`0 <= beat < lengthBeats`に置く
+- canonical schema v4が許容する既存の`beat === lengthBeats` eventは互換入力として保持する。終端eventは同じbeatでの値更新 / no-op、曲内への移動、削除だけを許し、新規追加と曲内eventの終端への移動は拒否する。終端exactの拍子eventが表す最終segmentは長さ0であり、`lengthBars`へ加算しない
+- beat 0 anchorは移動・削除できないが値は更新できる。先頭tempo / 拍子変更時は`bpm` / `timeSignature` mirrorを同じ候補で更新し、全拍子変更時は`lengthBeats`を変えずに実小節数`lengthBars`を再導出する
+- 拍子候補は後続eventとProject終端も小節境界に保たなければならない。同beat衝突、曲外、上限、global ID衝突、invalid source / candidateを採用しない
+- add / update / move / deleteはimmutableなtyped resultで、semantic no-opとfailureは元Project参照を返す。成功だけが1 history snapshot / save revisionとなる
+- 選択event、Inspector draft、focus、timeline scroll、playback停止通知はruntime-onlyでProject / SQLite / `.ctsproj.json`へ保存しない
+- live / WAV / MIDI / metronome / 各timelineは保存済みmapを同じcompiled musical-time indexへ入力する。連続tempo ramp、audio follow、tempo automationの永続stateは未定義である
+
 ### 2.7 Track管理とpreset（schema v4）
 
 - productionで新規生成するTrackはinstrument / drum / bus、またはimport済みassetを持つaudioで、roleは`general`とする。instrument / drumは開始0・長さ`Project.lengthBeats`の空MIDI / Drum Clipを1つ、audioはcanonical asset全rangeのAudio Clipを1つ持つ。BusはClip / instrumentを持たない。先頭Masterがあればその直前、Masterがないlegacy Projectでは末尾へ置き、全新規TrackへMaster直結outputを同じtransactionで作る
@@ -2464,6 +2503,23 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 - pointへkeyboardで到達・編集でき、削除後のfocusが回復する。320px幅ではdocument全体に横overflowがなく、lane時間軸だけが内部scrollする
 - read / bypass、write / touch / latch、Master、insert / send / tempo automation、modulationを実装済みと示すcontrolがない
 
+### E2E-005: Tempo / 拍子mapを編集する
+
+1. Editorの「テンポ / 拍子」tabを開き、beat 0のtempo / 拍子anchorが位置固定・削除不可で値編集可能なことを確認する
+2. 再生位置とtimelineからtempo eventを追加し、BPMと位置を編集する
+3. 小節境界へ拍子eventを追加し、分子 / 分母を変更する。小節途中、同beat、曲末整合を壊す候補を入力する
+4. 有効なeventを削除し、Undo / Redo、保存・再読込を行う
+5. active playback中にmapを変更し、320px viewportでtimelineを横scrollする
+
+期待結果:
+
+- 採用された各add / edit / move / deleteはUndo / save revision各1回、拒否 / no-opはProject / history / transportを変えない
+- tempo / 拍子mapは厳密昇順かつID一意で、`bpm` / `timeSignature` / `lengthBars` mirrorが正本と一致する。schemaVersionは4のままである
+- 拍子eventとProject終端は小節境界を保ち、invalid候補は日本語のinline alertで理由を説明する
+- active playbackはplayheadを保持して停止し、Undo / Redo、保存・再読込後も両mapとmirrorがexactに一致する
+- tab / event / Inspectorをkeyboardで操作でき、320pxではdocument横overflowがなくtimelineだけが内部scrollする
+- 連続tempo ramp、audio follow / Smart Tempo、tempo automationを実装済みと示すcontrolがない
+
 ## 5. 音声テスト
 
 | テスト | 内容 |
@@ -2745,6 +2801,15 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - 実測校正componentは通常録音と別wizardで、exact入力を選び、interfaceの出力→入力をケーブル接続する案内、スピーカー / マイクの空中loopback禁止、monitor強制OFF、固定低出力、PRBS複数burst、500 ms上限、cancelを確認する。成功だけがprofileをatomic置換し、失敗 / cancelは前回profileを保持する。出力identityを取得できない制約と、出力device / driver / buffer変更後の再校正案内も検査する
 - 録音配置は推定 / 実測 / 無補正の3modeを比較する。実測modeではexact一致profileのframe値がinput / base / output / limiter推定全体を置換し、手動offsetだけが後段で加算されること、不一致profileで推定へfallbackしないこと、可変tempo / beat 0 trimが同じであることをsample frame fixtureで検査する
 - 3OS実deviceでpermission、システム既定 / 明示device選択、`devicechange` / device loss、Record Arm先への追記、disk full、monitor feedback、close、再起動再生を確認する。shared AudioContextの伴奏同期と推定 / 実測 / 手動latency補正を有線・Bluetoothを分けて聴感 / 波形比較し、host申告値がない環境も確認する。実測はinterfaceの物理cable loopbackを使い、interface / driver mixerのDirect Monitor、hardware Loopback、同一outputへのreturnをOFFにして電気的feedbackがないこと、Project Master fader 0 / 1 / 2でも固定probe levelと測定値が一致することを確認する。OSごとに既知frame shiftとの誤差、silence / clip / ambiguity拒否、再校正案内を記録する。長時間streamingを閉じた後、cycle take / compingへ進む
+
+### 7.10 Production Tempo / 拍子map editor regression gate
+
+- domain public APIで両mapのadd / update / move / delete、beat 0保護、BPM / 拍子範囲、strict order、同beat、曲末未満の新規追加 / 移動先、map上限、global ID、throwing ID factory、source / candidate codecを検査する。canonical sourceに既存の`beat === lengthBeats` eventがあるfixtureでは、位置据え置きのsemantic no-op / 値更新、曲内への移動、削除を許し、曲内eventの終端への移動は拒否する。failure / semantic no-opは元Project参照、成功はsource immutableとする
+- 拍子変更は先行segmentの小節境界、全後続event、`lengthBeats`終端を検査し、終端exact eventの長さ0最終segmentを許容した上で成功時だけ`lengthBars`を再導出する。終端eventを残した他eventのadd / update / removeも回帰し、先頭値変更時の`bpm` / `timeSignature` mirrorを同一候補で更新する
+- Studio actionはexact Project CAS、busy / stale拒否、1 command = 1 history / revision、Undo / Redo exact、active playback停止とplayhead保持を検査する。拒否 / no-opはtransportと保存状態も変えない
+- 5つのEditor tab / panel関係、両lane、anchor-only、再生位置追加、選択 / Inspector、keyboard移動、削除後focus、inline alert / polite statusをcomponent / E2Eで検査する
+- 保存・再読込後のID / map / mirrorをexact比較し、live / WAV / MIDI / metronome / Arranger / Piano Roll / Drum / Chordの既存variable-map回帰を維持する
+- 4,096 tempo / 1,024拍子上限fixtureはboundedに拒否または表示し、320pxでdocument横overflowなし・timeline内部横scrollを実ブラウザで検査する。連続ramp / audio follow / tempo automationが未実装である境界も表示と仕様で一致させる
 
 ## 8. 手動QAチェックリスト
 
