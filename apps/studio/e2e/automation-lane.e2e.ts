@@ -33,6 +33,20 @@ async function requiredBox(
       '.automation-lane__timeline-scroll',
     );
     const verticalScroller = element.closest<HTMLElement>('.editor-body');
+    const centerPane = element.closest<HTMLElement>('.center-pane');
+    const mixer = document.querySelector<HTMLElement>('.mixer-strip');
+    const rectSnapshot = (candidate: Element | null) => {
+      if (!candidate) return null;
+      const rect = candidate.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
     // `overflow-x: auto` makes the lane a programmatic vertical scroll
     // container too, even though its Y overflow is hidden. Browser
     // actionability scrolling can therefore move a point behind the mixer.
@@ -75,11 +89,44 @@ async function requiredBox(
           ? hit.getAttribute('aria-label') ?? hit.className
           : String(hit),
       receivesPointer: hit === element || element.contains(hit),
+      geometry: {
+        point: rectSnapshot(element),
+        horizontalScroller: rectSnapshot(horizontalScroller),
+        verticalScroller: rectSnapshot(verticalScroller),
+        centerPane: rectSnapshot(centerPane),
+        mixer: rectSnapshot(mixer),
+        horizontalScroll:
+          horizontalScroller === null
+            ? null
+            : {
+                left: horizontalScroller.scrollLeft,
+                top: horizontalScroller.scrollTop,
+                clientWidth: horizontalScroller.clientWidth,
+                scrollWidth: horizontalScroller.scrollWidth,
+              },
+        verticalScroll:
+          verticalScroller === null
+            ? null
+            : {
+                top: verticalScroller.scrollTop,
+                clientHeight: verticalScroller.clientHeight,
+                scrollHeight: verticalScroller.scrollHeight,
+              },
+        viewport: {
+          innerHeight: window.innerHeight,
+          scrollY: window.scrollY,
+          bodyHeight: document.body.scrollHeight,
+          rootHeight: document.documentElement.scrollHeight,
+        },
+      },
     };
   });
   expect(
     result.receivesPointer,
-    `Expected automation control to receive pointer; hit ${result.hitLabel}`,
+    [
+      `Expected automation control to receive pointer; hit ${result.hitLabel}`,
+      JSON.stringify(result.geometry),
+    ].join('\n'),
   ).toBe(true);
   return result.box;
 }
