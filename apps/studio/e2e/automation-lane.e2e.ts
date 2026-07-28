@@ -28,14 +28,40 @@ async function saveProject(page: Page): Promise<void> {
 async function requiredBox(
   locator: Locator,
 ): Promise<Readonly<{ x: number; y: number; width: number; height: number }>> {
-  await locator.evaluate((element) => {
+  const result = await locator.evaluate((element) => {
     element.scrollIntoView({ block: 'center', inline: 'center' });
+    const horizontalScroller = element.closest<HTMLElement>(
+      '.automation-lane__timeline-scroll',
+    );
+    // `overflow-x: auto` makes the lane a programmatic vertical scroll
+    // container too, even though its Y overflow is hidden. Browser
+    // actionability scrolling can therefore move a point behind the lane's
+    // own chrome. Keep the intentionally horizontal-only scroller pinned.
+    if (horizontalScroller) horizontalScroller.scrollTop = 0;
+
+    const box = element.getBoundingClientRect();
+    const centerX = box.left + box.width / 2;
+    const centerY = box.top + box.height / 2;
+    const hit = document.elementFromPoint(centerX, centerY);
+    return {
+      box: {
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+      },
+      hitLabel:
+        hit instanceof HTMLElement
+          ? hit.getAttribute('aria-label') ?? hit.className
+          : String(hit),
+      receivesPointer: hit === element || element.contains(hit),
+    };
   });
-  await locator.hover();
-  const box = await locator.boundingBox();
-  expect(box).not.toBeNull();
-  if (box === null) throw new Error('Expected a visible automation control');
-  return box;
+  expect(
+    result.receivesPointer,
+    `Expected automation control to receive pointer; hit ${result.hitLabel}`,
+  ).toBe(true);
+  return result.box;
 }
 
 async function pointLabels(points: Locator): Promise<readonly string[]> {
