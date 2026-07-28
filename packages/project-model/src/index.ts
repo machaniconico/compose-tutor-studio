@@ -19,6 +19,7 @@ export * from './audio-clips';
 export * from './audio-routing';
 export * from './audio-routing-mutations';
 export * from './automation-mutations';
+export * from './tempo-map-mutations';
 // Persistable id helper with a per-realm nonce and monotonic local counter.
 export * from './ids';
 // New factory helpers (createDefaultProject, createInstrumentTrack, createDrumTrack,
