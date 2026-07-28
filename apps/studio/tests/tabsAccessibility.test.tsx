@@ -123,7 +123,7 @@ describe('accessible tab components', () => {
     const html = renderToStaticMarkup(<EditorArea />);
     const tags = tabTags(html);
 
-    expect(tags).toHaveLength(4);
+    expect(tags).toHaveLength(5);
     expectRovingTabIndex(tags);
     expect(tags).toEqual(
       expect.arrayContaining([
@@ -135,8 +135,11 @@ describe('accessible tab components', () => {
         expect.stringContaining('aria-controls="editor-tabpanel-arranger"'),
         expect.stringContaining('id="editor-tab-automation"'),
         expect.stringContaining('aria-controls="editor-tabpanel-automation"'),
+        expect.stringContaining('id="editor-tab-tempoMap"'),
+        expect.stringContaining('aria-controls="editor-tabpanel-tempoMap"'),
       ]),
     );
+    expect(html).toContain('>テンポ / 拍子</button>');
     expect(html).toContain('role="tablist" aria-label="エディタ切替"');
     expectCompleteTabRelationships(html);
   });
