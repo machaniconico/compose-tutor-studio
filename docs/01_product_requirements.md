@@ -60,6 +60,7 @@
 | US-013 | 作曲者として、手元の音声を曲へ置いて非破壊編集したい | Must | WAV / MP3 / M4A / AACをAudio Trackへ読み込み、移動、左右trim、gain、fade、loop、split、独立複製、削除をUndo/Redoでき、live再生・WAV・再読込で同じ範囲を使う |
 | US-014 | 作曲者として、マイク入力を新規または既存のAudio Trackへ録音したい | Must | Audio Trackを1件だけ録音待機にでき、システム既定または列挙された入力を選び、通常は現在playheadから1 Clip、明示loop時は2〜128回の固定passを連続録音して自動take folderとして採用できる。さらに明示Punch範囲ではpre/post-roll付きのbounded Auto Punchを行い、既存素材を旧takeとして残して新takeを採用する。いずれもasset-first・Undo 1回、途中停止・失敗・cancelはProject不変とする |
 | US-015 | 作曲者として、同じ区間を複数回録った素材から良い部分をつないで仕上げたい | Must | 同一Audio Track・同一時間窓の既存Clipを非破壊take folderへまとめ、複数範囲を別takeへ切り替え、境界調整・未使用take削除・Undo/Redo・保存/再読込・live/WAVで同じcompを使える |
+| US-016 | 作曲者として、音量やパンの変化を一時的に外して元のTrack設定と聴き比べたい | Must | volume / panのAutomation laneをRead / Bypassで切り替え、Bypass中もpointを保持・編集できる。live再生とWAVはBypass時にTrack scalarを使い、Undo / Redo・保存 / 再読込後も同じ状態になる |
 
 ## 3. MVP機能範囲
 
@@ -103,6 +104,7 @@
 - 0.5〜60秒の単一マイク入力録音。録音待機なしでは新規Audio Track、録音待機中の既存Audio Trackでは同Trackへ追加する。loop OFF / punch OFFは1 Clip、loop ONは2〜128固定pass、punch ONは録音待機中の既存Audio Trackへ明示`[in, out)`だけを録るbounded Auto Punchとする。Punchはloopと排他で、pre-rollから伴奏、future render frameのinでcapture、out＋正latency tailでcapture完了、post-roll自然完了の両方を確認してから採用する。60秒上限は正のlatency tailを含み、途中停止・cancel・unmount・失敗では全体を破棄する。録音待機、入力device、loop / punch locator、roll / pass指定はruntime-onlyでProjectへ保存しない
 - WAV/MP3/M4A/AACのステレオ音源を使う、ローカル完結の中央定位ボーカル軽減
 - stereo Bus、各non-Masterのmain output、pre/post-fader send / return。循環は候補Project採用前に拒否し、live再生とoffline WAVで同じrouting graphを使う
+- non-Master Trackのvolume / pan Automation lane。pointのhold / linear curve編集に加え、parameter-lane Read / Bypassを保存・Undoできる。Bypass中はpointを破棄せず、live再生とoffline WAVの両方でTrack scalarを使う
 
 ### 3.5 Export
 

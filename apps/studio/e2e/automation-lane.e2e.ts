@@ -137,6 +137,14 @@ async function pointLabels(points: Locator): Promise<readonly string[]> {
   );
 }
 
+async function pointIds(points: Locator): Promise<readonly string[]> {
+  return points.evaluateAll((elements) =>
+    elements.map(
+      (element) => element.getAttribute('data-automation-point-id') ?? '',
+    ),
+  );
+}
+
 async function importProject(
   page: Page,
   project: Project,
@@ -201,6 +209,7 @@ function maximumAutomationLaneProject(): Project {
     automationLanes: [{
       id: 'automation-stress-lane',
       target: { type: 'track-volume', trackId },
+      bypassed: false,
       points: Array.from(
         { length: MAX_AUTOMATION_POINTS_PER_LANE },
         (_, index) => ({
@@ -272,6 +281,7 @@ function offGridAutomationProject(): Project {
         type: 'track-volume',
         trackId: 'automation-stress-track',
       },
+      bypassed: false,
       points: [{
         id: 'automation-off-grid-point',
         beat: 1.234567,
@@ -292,7 +302,7 @@ function offGridBeat(project: Project): number {
 
 test('edits independent volume and pan automation with accessible responsive controls', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.goto('/');
   await dismissWelcome(page);
 
@@ -313,6 +323,12 @@ test('edits independent volume and pan automation with accessible responsive con
   const addAtPlayhead = panel.getByRole('button', {
     name: '再生位置に点を追加',
   });
+  let readToggle = panel.locator('[data-automation-read-toggle]');
+  await expect(readToggle).toHaveCount(0);
+  await expect(panel.getByText(
+    '最初の点を追加すると、Readが有効なレーンを作成します。',
+    { exact: true },
+  )).toBeVisible();
   await addAtPlayhead.click();
   let points = panel.locator('[data-automation-point-id]');
   await expect(points).toHaveCount(1);
@@ -320,6 +336,11 @@ test('edits independent volume and pan automation with accessible responsive con
     'aria-label',
     /音量 1点目、拍 0、値 \d+%、次の点まで直線/,
   );
+  await expect(readToggle).toHaveText('Read');
+  await expect(readToggle).toHaveAttribute('aria-pressed', 'false');
+  const readToggleBox = await readToggle.boundingBox();
+  expect(readToggleBox?.width).toBeGreaterThanOrEqual(44);
+  expect(readToggleBox?.height).toBeGreaterThanOrEqual(44);
 
   await addAtPlayhead.click();
   await expect(points).toHaveCount(1);
@@ -356,14 +377,88 @@ test('edits independent volume and pan automation with accessible responsive con
   await volumeInput.press('Enter');
   await expect(points.nth(1)).toHaveAttribute('aria-label', /値 110%/);
 
+  const volumePointIdsBeforeBypass = await pointIds(points);
+  const volumePointLabelsBeforeBypass = await pointLabels(points);
+  await page.getByRole('button', { name: '再生', exact: true }).click();
+  await expect(page.getByRole('button', {
+    name: '一時停止',
+    exact: true,
+  })).toBeVisible();
+  await panel.getByRole('button', {
+    name: 'レーンをクリア',
+    exact: true,
+  }).focus();
+  await page.keyboard.press('Tab');
+  await expect(readToggle).toBeFocused();
+  const focusStyle = await readToggle.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+    };
+  });
+  expect(focusStyle.outlineStyle).not.toBe('none');
+  expect(Number.parseFloat(focusStyle.outlineWidth)).toBeGreaterThanOrEqual(2);
+  await page.keyboard.press('Space');
+  await expect(readToggle).toHaveText('Bypass');
+  await expect(readToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(panel.locator('.automation-lane')).toHaveClass(/is-bypassed/);
+  await expect(panel.locator('#automation-lane-read-description')).toContainText(
+    '再生とWAV書き出しではトラックの現在の基準値を使います。',
+  );
+  await expect(page.locator('#transport-playback-status'))
+    .toHaveText('再生は停止しています。');
+  await expect(notice).toContainText('Bypass');
+  await expect(notice).toContainText('再生を停止しました');
+  expect(await pointIds(points)).toEqual(volumePointIdsBeforeBypass);
+  expect(await pointLabels(points)).toEqual(volumePointLabelsBeforeBypass);
+
+  const editableWhileBypassed = points.nth(1);
+  const labelBeforeBypassedEdit = await editableWhileBypassed.getAttribute(
+    'aria-label',
+  );
+  expect(labelBeforeBypassedEdit).toBeTruthy();
+  await editableWhileBypassed.focus();
+  await editableWhileBypassed.press('ArrowUp');
+  await expect(editableWhileBypassed).not.toHaveAttribute(
+    'aria-label',
+    labelBeforeBypassedEdit ?? '',
+  );
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
+  await expect(editableWhileBypassed).toHaveAttribute(
+    'aria-label',
+    labelBeforeBypassedEdit ?? '',
+  );
+  await expect(readToggle).toHaveText('Bypass');
+
+  await saveProject(page);
+  const exportedBypassed = await exportProject(
+    page,
+    testInfo.outputPath('automation-bypassed.ctsproj.json'),
+  );
+  const exportedVolumeLane = exportedBypassed.automationLanes.find(
+    (candidate) =>
+      candidate.target.type === 'track-volume'
+      && candidate.target.trackId === exportedBypassed.tracks.find(
+        (track) => track.type !== 'master',
+      )?.id,
+  );
+  expect(exportedVolumeLane?.bypassed).toBe(true);
+  expect(exportedVolumeLane?.points.map((point) => point.id)).toEqual(
+    volumePointIdsBeforeBypass,
+  );
+
   await panTarget.click();
   await expect(panTarget).toHaveAttribute('aria-pressed', 'true');
   await expect(
     panel.getByRole('group', { name: 'パンオートメーションレーン' }),
   ).toBeVisible();
   await expect(panel.locator('[data-automation-point-id]')).toHaveCount(0);
+  await expect(readToggle).toHaveCount(0);
   await addAtPlayhead.click();
   await expect(panel.locator('[data-automation-point-id]')).toHaveCount(1);
+  await expect(readToggle).toHaveText('Read');
+  await expect(readToggle).toHaveAttribute('aria-pressed', 'false');
   await expect(panel.locator('[data-automation-point-id]').first()).toHaveAttribute(
     'aria-label',
     /パン 1点目、拍 0、値 中央、次の点まで直線/,
@@ -386,6 +481,21 @@ test('edits independent volume and pan automation with accessible responsive con
   await expect(panel.locator('[data-automation-point-id]').nth(1)).toHaveAttribute(
     'aria-label',
     /拍 2、値 110%、次の点まで保持/,
+  );
+  readToggle = panel.locator('[data-automation-read-toggle]');
+  await expect(readToggle).toHaveText('Bypass');
+  await expect(readToggle).toHaveAttribute('aria-pressed', 'true');
+  expect(await pointIds(panel.locator('[data-automation-point-id]'))).toEqual(
+    volumePointIdsBeforeBypass,
+  );
+  await readToggle.click();
+  await expect(readToggle).toHaveText('Read');
+  await expect(readToggle).toHaveAttribute('aria-pressed', 'false');
+  expect(await pointIds(panel.locator('[data-automation-point-id]'))).toEqual(
+    volumePointIdsBeforeBypass,
+  );
+  expect(await pointLabels(panel.locator('[data-automation-point-id]'))).toEqual(
+    volumePointLabelsBeforeBypass,
   );
   await panTarget.click();
   await expect(panel.locator('[data-automation-point-id]')).toHaveCount(1);
@@ -594,6 +704,9 @@ test('edits independent volume and pan automation with accessible responsive con
     const point = document.querySelector<HTMLElement>(
       '[data-automation-point-id]',
     );
+    const readToggle = document.querySelector<HTMLElement>(
+      '[data-automation-read-toggle]',
+    );
     return {
       documentWidth: document.documentElement.scrollWidth,
       viewportWidth: document.documentElement.clientWidth,
@@ -601,6 +714,8 @@ test('edits independent volume and pan automation with accessible responsive con
       timelineScrollWidth: scroll?.scrollWidth ?? 0,
       pointWidth: point?.getBoundingClientRect().width ?? 0,
       pointHeight: point?.getBoundingClientRect().height ?? 0,
+      readToggleWidth: readToggle?.getBoundingClientRect().width ?? 0,
+      readToggleHeight: readToggle?.getBoundingClientRect().height ?? 0,
     };
   });
   expect(responsive.documentWidth).toBeLessThanOrEqual(
@@ -611,6 +726,8 @@ test('edits independent volume and pan automation with accessible responsive con
   );
   expect(responsive.pointWidth).toBeGreaterThanOrEqual(44);
   expect(responsive.pointHeight).toBeGreaterThanOrEqual(44);
+  expect(responsive.readToggleWidth).toBeGreaterThanOrEqual(44);
+  expect(responsive.readToggleHeight).toBeGreaterThanOrEqual(44);
 });
 
 test('value-only edits preserve a high-precision off-grid beat', async ({

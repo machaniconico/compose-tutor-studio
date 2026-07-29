@@ -1320,6 +1320,52 @@ describe('WAV Audio Clip integration', () => {
     expect(clipGain?.disconnectCalls).toBe(1);
     expect(destination.disconnectCalls).toBe(0);
   });
+
+  it('uses the Track scalar for a bypassed lane in offline WAV scheduling', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const readProject = await projectWithAudioClip(bytes);
+    readProject.automationLanes = [{
+      id: 'wav-volume-automation',
+      bypassed: false,
+      target: { type: 'track-volume', trackId: 'wav-audio-track' },
+      points: [{
+        id: 'wav-volume-point',
+        beat: 0,
+        value: 0.25,
+        interpolation: 'hold',
+      }],
+    }];
+    const readContext = installAudioClipOfflineContext();
+    const readRender = await renderProjectToWav(readProject, {
+      audioAssetResolver: { resolve: async () => bytes },
+    });
+    const readBytes = new Uint8Array(await readRender.blob.arrayBuffer());
+    readRender.release();
+
+    expect(readContext.gains.some((gain) =>
+      gain.gain.commands.some((command) =>
+        command.kind === 'set' && command.value === 0.25))).toBe(true);
+
+    vi.unstubAllGlobals();
+    const bypassedProject: Project = {
+      ...readProject,
+      automationLanes: readProject.automationLanes.map((lane) => ({
+        ...lane,
+        bypassed: true,
+      })),
+    };
+    const bypassedContext = installAudioClipOfflineContext();
+    const bypassedRender = await renderProjectToWav(bypassedProject, {
+      audioAssetResolver: { resolve: async () => bytes },
+    });
+    const bypassedBytes = new Uint8Array(await bypassedRender.blob.arrayBuffer());
+    bypassedRender.release();
+
+    expect(bypassedContext.gains.some((gain) =>
+      gain.gain.commands.some((command) =>
+        command.kind === 'set' && command.value === 0.25))).toBe(false);
+    expect(bypassedBytes).toEqual(readBytes);
+  });
 });
 
 describe('renderProjectToWav graph ownership', () => {

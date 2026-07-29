@@ -134,6 +134,7 @@ export function automationCommandsInWindow(
   includeEnd = false,
   tempoChangeBeats: readonly number[] = [],
 ): AutomationCommand[] {
+  if (lane.bypassed) return [];
   if (!(endBeat > startBeat)) return [];
   if (!loop || !(loop.endBeat > loop.startBeat)) {
     return commandsOnce(

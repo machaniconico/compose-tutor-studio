@@ -11,6 +11,7 @@ import {
 
 const lane: AutomationLane = {
   id: 'automation-volume',
+  bypassed: false,
   target: { type: 'track-volume', trackId: 'track-1' },
   points: [
     { id: 'point-1', beat: 2, value: 0.5, interpolation: 'linear' },
@@ -21,6 +22,7 @@ const lane: AutomationLane = {
 
 const linearLane: AutomationLane = {
   id: 'automation-linear',
+  bypassed: false,
   target: { type: 'track-volume', trackId: 'track-1' },
   points: [
     { id: 'linear-start', beat: 0, value: 0, interpolation: 'linear' },
@@ -51,6 +53,48 @@ function valueAtTime(commands: readonly TimedCommand[], time: number): number {
 }
 
 describe('track automation planning', () => {
+  it('keeps the stored curve editable but schedules nothing while bypassed', () => {
+    const bypassed = { ...linearLane, bypassed: true };
+
+    expect(automationValueAt(bypassed, 0.8, 4)).toBe(0.5);
+    expect(automationCommandsInWindow(
+      bypassed,
+      0.8,
+      0,
+      8,
+      null,
+      true,
+      [4],
+    )).toEqual([]);
+    expect(automationCommandsInWindow(
+      bypassed,
+      0.8,
+      4,
+      12,
+      { startBeat: 4, endBeat: 8 },
+      false,
+      [6],
+    )).toEqual([]);
+
+    expect(automationCommandsInWindow(
+      { ...bypassed, bypassed: false },
+      0.8,
+      0,
+      8,
+      null,
+      true,
+      [4],
+    )).toEqual(automationCommandsInWindow(
+      linearLane,
+      0.8,
+      0,
+      8,
+      null,
+      true,
+      [4],
+    ));
+  });
+
   it('uses the Track scalar before the first point and interpolates after it', () => {
     expect(automationValueAt(lane, 0.8, 1)).toBe(0.8);
     expect(automationValueAt(lane, 0.8, 2)).toBe(0.5);

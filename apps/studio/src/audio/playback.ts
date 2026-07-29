@@ -17,7 +17,11 @@ import {
   type Project,
   type Track,
 } from '@cts/project-model';
-import { useStore, type AudioIssue } from '../state/store';
+import {
+  hasPlaybackTopologyChanged,
+  useStore,
+  type AudioIssue,
+} from '../state/store';
 import {
   automationBaseValue,
   automationCommandsInWindow,
@@ -809,6 +813,20 @@ export function restoreRuntimeMaster(
 }
 
 /**
+ * Dispose audio captured from an obsolete Project topology, including a
+ * naturally draining session whose transport is already stopped.
+ */
+export function stopRuntimePlaybackForProjectTopologyChange(
+  previousProject: Project,
+  nextProject: Project,
+  stop: () => void,
+): boolean {
+  if (!hasPlaybackTopologyChanged(previousProject, nextProject)) return false;
+  stop();
+  return true;
+}
+
+/**
  * Install the store subscriptions. Idempotent — safe to call from multiple
  * component mounts. Returns a teardown function owned by the first caller.
  */
@@ -860,10 +878,20 @@ export function initAudioBridge(): () => void {
     });
   });
 
-  // Apply mixer changes to the accepted session only. Notes, tempo and loop
-  // topology remain snapshots until the next playback request, as before.
+  // Dispose sessions captured from obsolete topology, including a natural
+  // drain whose transport already reached stopped. Apply compatible mixer
+  // changes to the accepted running session only.
   const unsubProject = useStore.subscribe((next, previous) => {
     if (next.project === previous.project) return;
+    if (
+      stopRuntimePlaybackForProjectTopologyChange(
+        previous.project,
+        next.project,
+        () => controller.stop(),
+      )
+    ) {
+      return;
+    }
     const trackMixChanged = hasLiveMixChanged(
       previous.project.tracks,
       next.project.tracks,

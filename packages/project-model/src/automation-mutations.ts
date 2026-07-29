@@ -31,6 +31,7 @@ export type AutomationMutationErrorCode =
   | 'invalid-beat'
   | 'invalid-value'
   | 'invalid-interpolation'
+  | 'invalid-bypassed'
   | 'point-beat-conflict'
   | 'lane-limit'
   | 'point-limit'
@@ -420,6 +421,7 @@ export function addAutomationPoint(
     if (currentLane === undefined) {
       const lane: AutomationLane = {
         id: laneId,
+        bypassed: false,
         target,
         points: [point],
       };
@@ -438,6 +440,37 @@ export function addAutomationPoint(
       automationLanes: project.automationLanes.map((lane) =>
         lane.id === currentLane.id ? nextLane : lane),
     }, target.trackId, currentLane.id, true, point.id);
+  });
+}
+
+/** Toggle whether playback and export read a lane without changing its curve. */
+export function setAutomationLaneBypassed(
+  project: Project,
+  laneId: string,
+  bypassed: boolean,
+): AutomationMutationResult {
+  return runMutation(project, () => {
+    const locatedLane = laneById(project, laneId);
+    if (locatedLane === null) {
+      return failure('lane-not-found', `Automation lane not found: ${String(laneId)}`);
+    }
+    if (typeof bypassed !== 'boolean') {
+      return failure(
+        'invalid-bypassed',
+        'Automation lane bypassed state must be a boolean.',
+      );
+    }
+    const { lane, index: laneIndex } = locatedLane;
+    if (lane.bypassed === bypassed) {
+      return success(project, lane.target.trackId, lane.id, false);
+    }
+
+    const automationLanes = [...project.automationLanes];
+    automationLanes[laneIndex] = { ...lane, bypassed };
+    return success({
+      ...project,
+      automationLanes,
+    }, lane.target.trackId, lane.id, true);
   });
 }
 

@@ -236,11 +236,35 @@ function migrateV4ToV5(
   };
 }
 
+/** Keep every existing curve active when schema-v6 adds lane-scoped bypass. */
+function migrateV5ToV6(
+  project: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const automationLanes = Array.isArray(project.automationLanes)
+    ? project.automationLanes.map((lane) => {
+        if (typeof lane !== 'object' || lane === null || Array.isArray(lane)) {
+          return lane;
+        }
+        return {
+          ...(lane as Readonly<Record<string, unknown>>),
+          bypassed: false,
+        };
+      })
+    : project.automationLanes;
+
+  return {
+    ...project,
+    schemaVersion: 6,
+    automationLanes,
+  };
+}
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 1, to: 2, migrate: migrateV1ToV2 },
   { from: 2, to: 3, migrate: migrateV2ToV3 },
   { from: 3, to: 4, migrate: migrateV3ToV4 },
   { from: 4, to: 5, migrate: migrateV4ToV5 },
+  { from: 5, to: 6, migrate: migrateV5ToV6 },
 ]);
 
 export type ProjectMigrationErrorCode =

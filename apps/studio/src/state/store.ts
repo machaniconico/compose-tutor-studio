@@ -645,6 +645,7 @@ function automationTopologyEqual(left: Project, right: Project): boolean {
       const candidate = right.automationLanes[laneIndex];
       return (
         candidate?.id === lane.id &&
+        candidate.bypassed === lane.bypassed &&
         candidate.target.type === lane.target.type &&
         candidate.target.trackId === lane.target.trackId &&
         candidate.points.length === lane.points.length &&

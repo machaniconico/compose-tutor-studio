@@ -268,7 +268,7 @@ test('groups existing clips and persists one non-destructive Audio comp', async 
     page,
     testInfo.outputPath('audio-take-comp.ctsproj.json'),
   );
-  expect(exported.schemaVersion).toBe(5);
+  expect(exported.schemaVersion).toBe(6);
   expect(exported.audioTakeFolders).toHaveLength(1);
   expect(
     exported.tracks.find((track) => track.name === 'Comp Vocal')?.clips,

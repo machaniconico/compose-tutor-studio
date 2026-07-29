@@ -196,6 +196,7 @@ describe('playback topology changes', () => {
     if (!target) throw new Error('track fixture missing');
     project.automationLanes = [{
       id: 'volume-lane',
+      bypassed: false,
       target: { type: 'track-volume', trackId: target.id },
       points: [{ id: 'volume-point', beat: 0, value: 0.5, interpolation: 'hold' }],
     }];
@@ -215,6 +216,13 @@ describe('playback topology changes', () => {
       automationLanes: project.automationLanes.map((lane) => ({
         ...lane,
         points: lane.points.map((point) => ({ ...point, value: 0.25 })),
+      })),
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(project, {
+      ...project,
+      automationLanes: project.automationLanes.map((lane) => ({
+        ...lane,
+        bypassed: true,
       })),
     })).toBe(true);
   });

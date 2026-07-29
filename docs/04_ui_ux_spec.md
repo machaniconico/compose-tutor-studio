@@ -128,9 +128,10 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - local draftまたはpointer previewは確定前にProject / history / revisionを変えない。Enter / blur / pointerupなど1 gestureの確定をProject変更1回、Undo 1回にまとめ、no-opでは履歴・保存通知を増やさない
 - Inspectorはfieldごとのdirty状態を持ち、無編集blurではcommandを発行しない。値だけの確定はbeatをpatchせず、beat snapはbeat fieldの確定時だけに適用する。表示用の丸め値を未変更fieldへ書き戻さず、off-grid / 高精度beatを保持する
 - lane編集でactive playbackが停止した場合は、再生位置を保持して次回再生から新しいcurveを使うことを通知する。保存・再読込、Undo / Redo、transport loop、可変tempo、offline WAVで同じlaneを使う
+- laneが存在する時は最低44×44 CSS pxのnative Read / Bypass controlを表示し、`aria-pressed`と文字で状態を伝える。Bypass中もcurve / pointは表示・編集可能なままmuted表示し、「点は保持され、再生 / WAVはTrackの基準値を使う」と明示する。laneがない時は最初のpointがRead状態でlaneを作ることだけを説明し、保存先のないtoggleを表示しない
 - 最大20,000 pointの正当なlaneでもnative point controlはviewportと選択pointを合わせて最大400件、curveは意味を保った最大3本のSVG pathへまとめる。30 Hzの再生位置購読はplayheadだけへ隔離し、lane全体を再renderしない。keyboardでviewport外を選択した場合もそのpointをrenderしてfocus / scrollを回復する
 - 320px幅ではdocument全体を横overflowさせず、時間軸だけをlane内部で横scrollさせる。target、snap、追加、Inspector、削除、全消去は折り返して読める状態を保ち、hover、focus-visible、selected、disabled、errorを色以外でも区別する
-- 現行のlaneは常時再生へ適用される。read / bypass、write / touch / latch記録、Master、insert / send / tempo automation、MIDI CC / LFO modulationを利用可能に見せるcontrolや状態名は表示しない
+- parameter lane単位のRead / Bypassだけを提供する。Track / global Read、write / touch / latch記録、Master、insert / send / tempo automation、MIDI CC / LFO modulationを利用可能に見せるcontrolや状態名は表示しない
 
 #### 2.3.5 Tempo / 拍子map Editor
 

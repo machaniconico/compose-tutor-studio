@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutomationLane, Project } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 
@@ -128,6 +128,79 @@ describe('studio automation commands', () => {
       playbackStopped: false,
     });
     expectMutationStateUnchanged(before);
+  });
+
+  it('bypasses and restores a lane atomically while preserving every point', () => {
+    const added = addVolumePoint();
+    if (!added.ok || added.pointId === undefined) {
+      throw new Error('automation point fixture missing');
+    }
+    const beforeBypass = useStore.getState();
+    const runtimeStop = vi.fn();
+    const requestId = startPlayback();
+
+    expect(automationActions.setStudioAutomationLaneBypassed(
+      added.laneId,
+      true,
+      { stopRuntimePlaybackAudio: runtimeStop },
+    )).toMatchObject({
+      ok: true,
+      changed: true,
+      laneId: added.laneId,
+      playbackStopped: true,
+    });
+    expect(volumeLane()).toMatchObject({
+      id: added.laneId,
+      bypassed: true,
+      points: [{
+        id: added.pointId,
+        beat: 2,
+        value: 0.75,
+        interpolation: 'linear',
+      }],
+    });
+    expect(runtimeStop).toHaveBeenCalledOnce();
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'stopped',
+      playbackRequestId: requestId + 1,
+    });
+    expect(useStore.getState().past).toHaveLength(beforeBypass.past.length + 1);
+    expect(useStore.getState().saveState.revision).toBe(
+      beforeBypass.saveState.revision + 1,
+    );
+
+    useStore.getState().undo();
+    expect(volumeLane().bypassed).toBe(false);
+    expect(volumeLane().points).toEqual(beforeBypass.project.automationLanes[0]?.points);
+    useStore.getState().redo();
+    expect(volumeLane().bypassed).toBe(true);
+  });
+
+  it('does not stop runtime audio for a bypass no-op or rejected lane', () => {
+    const added = addVolumePoint();
+    if (!added.ok) throw new Error('automation lane fixture missing');
+    const runtimeStop = vi.fn();
+    const beforeNoOp = useStore.getState();
+
+    expect(automationActions.setStudioAutomationLaneBypassed(
+      added.laneId,
+      false,
+      { stopRuntimePlaybackAudio: runtimeStop },
+    )).toMatchObject({
+      ok: true,
+      changed: false,
+      playbackStopped: false,
+    });
+    expectMutationStateUnchanged(beforeNoOp);
+    expect(runtimeStop).not.toHaveBeenCalled();
+
+    expect(automationActions.setStudioAutomationLaneBypassed(
+      'missing-lane',
+      true,
+      { stopRuntimePlaybackAudio: runtimeStop },
+    )).toEqual({ ok: false, code: 'lane-not-found' });
+    expectMutationStateUnchanged(beforeNoOp);
+    expect(runtimeStop).not.toHaveBeenCalled();
   });
 
   it('records one update change and one Undo restores its exact prior content', () => {

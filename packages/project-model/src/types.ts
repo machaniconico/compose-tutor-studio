@@ -224,6 +224,8 @@ export type AutomationTarget = {
 
 export type AutomationLane = {
   id: string;
+  /** When true, playback and export use the Track's persisted scalar value. */
+  bypassed: boolean;
   target: AutomationTarget;
   points: AutomationPoint[];
 };

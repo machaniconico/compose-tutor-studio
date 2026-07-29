@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEmptyProject, encodeProjectJson, type Project } from '@cts/project-model';
+import {
+  CURRENT_SCHEMA_VERSION,
+  createEmptyProject,
+  encodeProjectJson,
+  type Project,
+} from '@cts/project-model';
 import {
   MemoryProjectRepository,
   LocalStorageProjectRepository,
@@ -59,14 +64,41 @@ function migrateArchivedCorpusProjectJson(projectJson: string): string {
   if (
     project.schemaVersion !== LEGACY_MIGRATION_VERSION - 1
     || LEGACY_MIGRATION_VERSION !== 5
+    || CURRENT_SCHEMA_VERSION !== 6
     || Object.prototype.hasOwnProperty.call(project, 'audioTakeFolders')
   ) {
     throw new Error('archived legacy corpus is not an unmigrated schema-v4 project');
   }
-  project.schemaVersion = LEGACY_MIGRATION_VERSION;
+  if (!Array.isArray(project.automationLanes)) {
+    throw new Error('archived legacy corpus is missing schema-v4 automation lanes');
+  }
+  const automationLanes = project.automationLanes.map((lane) => {
+    if (typeof lane !== 'object' || lane === null || Array.isArray(lane)) {
+      throw new Error('archived legacy corpus contains an invalid automation lane');
+    }
+    const migratedLane: Array<[string, unknown]> = [];
+    let insertedBypassed = false;
+    for (const entry of Object.entries(lane)) {
+      migratedLane.push(entry);
+      if (entry[0] === 'id') {
+        migratedLane.push(['bypassed', false]);
+        insertedBypassed = true;
+      }
+    }
+    if (!insertedBypassed) {
+      throw new Error('archived legacy corpus automation lane is missing an id');
+    }
+    return Object.fromEntries(migratedLane);
+  });
+
+  project.schemaVersion = CURRENT_SCHEMA_VERSION;
   const migratedEntries: Array<[string, unknown]> = [];
   for (const entry of Object.entries(project)) {
-    migratedEntries.push(entry);
+    migratedEntries.push(
+      entry[0] === 'automationLanes'
+        ? ['automationLanes', automationLanes]
+        : entry,
+    );
     if (entry[0] === 'audioAssets') {
       migratedEntries.push(['audioTakeFolders', []]);
     }
