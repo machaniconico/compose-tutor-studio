@@ -465,8 +465,11 @@ describe('TakeCompEditor', () => {
     tree = renderEditor();
     takeLane(tree, 'take-b').props.onPointerCancel?.(pointerEvent(80, 11));
     expect(actionMocks.paint).not.toHaveBeenCalled();
-
     tree = renderEditor();
+    expect(renderToStaticMarkup(tree)).toContain(
+      '範囲選択をキャンセルしました',
+    );
+
     takeLane(tree, 'take-b').props.onPointerDown?.(pointerEvent(20, 12));
     tree = renderEditor();
     takeLane(tree, 'take-b').props.onKeyDown?.({
@@ -479,6 +482,10 @@ describe('TakeCompEditor', () => {
     } as unknown as ReactKeyboardEvent<HTMLButtonElement>);
 
     expect(actionMocks.paint).not.toHaveBeenCalled();
+    tree = renderEditor();
+    expect(renderToStaticMarkup(tree)).toContain(
+      '範囲選択をキャンセルしました',
+    );
   });
 
   it('commits the exact take/start/end form and one numeric boundary edit', () => {

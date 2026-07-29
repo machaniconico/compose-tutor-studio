@@ -108,12 +108,16 @@ async function dragTakeLane(
   endFraction: number,
   cancel: boolean,
 ): Promise<void> {
+  await expect(lane).toBeEnabled();
+  await lane.scrollIntoViewIfNeeded();
   const box = await lane.boundingBox();
   if (!box) throw new Error('Take lane has no pointer geometry');
   const y = box.y + box.height / 2;
   await page.mouse.move(box.x + box.width * startFraction, y);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * endFraction, y, { steps: 4 });
+  await expect(lane).toBeFocused();
+  await expect(page.locator('.take-comp__drag-preview')).toHaveCount(1);
   if (cancel) await page.keyboard.press('Escape');
   await page.mouse.up();
 }
