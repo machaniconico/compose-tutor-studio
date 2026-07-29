@@ -9,7 +9,14 @@ async function dismissWelcome(page: Page): Promise<void> {
 
 async function installSyntheticRecordingInput(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    let stream: MediaStream | null = null;
+    type SyntheticInputState = Readonly<{
+      context: AudioContext;
+      oscillator: OscillatorNode;
+      gain: GainNode;
+      stream: MediaStream;
+    }>;
+
+    let state: SyntheticInputState | null = null;
     const mediaDevices = navigator.mediaDevices;
     Object.defineProperty(mediaDevices, 'enumerateDevices', {
       configurable: true,
@@ -18,8 +25,13 @@ async function installSyntheticRecordingInput(page: Page): Promise<void> {
     Object.defineProperty(mediaDevices, 'getUserMedia', {
       configurable: true,
       value: async () => {
-        if (stream?.getAudioTracks().some((track) => track.readyState === 'live')) {
-          return stream;
+        if (state?.stream.getAudioTracks().some((track) => track.readyState === 'live')) {
+          return state.stream;
+        }
+        if (state) {
+          state.oscillator.stop();
+          await state.context.close().catch(() => undefined);
+          state = null;
         }
         const context = new AudioContext({ sampleRate: 48_000 });
         const destination = context.createMediaStreamDestination();
@@ -30,9 +42,9 @@ async function installSyntheticRecordingInput(page: Page): Promise<void> {
         oscillator.connect(gain);
         gain.connect(destination);
         oscillator.start();
+        state = { context, oscillator, gain, stream: destination.stream };
         await context.resume();
-        stream = destination.stream;
-        return stream;
+        return destination.stream;
       },
     });
   });
@@ -81,6 +93,12 @@ test('records an exact fixed-pass cycle atomically and discards a manually stopp
     /サイクル録音中・テイク|最終テイクの入力遅延を収録中/,
     { timeout: 8_000 },
   );
+  const inputMeter = completeDialog.getByRole('meter', { name: 'マイク入力レベル' });
+  await expect(inputMeter).toBeVisible();
+  await expect.poll(
+    async () => Number(await inputMeter.getAttribute('aria-valuenow')),
+    { timeout: 8_000 },
+  ).toBeGreaterThan(0);
   await expect(completeDialog).toBeHidden({ timeout: 20_000 });
 
   const takeEditorTab = page.getByRole('tab', {
