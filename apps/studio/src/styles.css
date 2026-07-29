@@ -2592,8 +2592,13 @@ button.pr__note:hover {
 
 @media (min-width: 901px) and (max-height: 700px) {
   .transport-bar__row {
-    gap: var(--sp-2);
+    gap: var(--sp-1);
     padding: var(--sp-1) var(--sp-3);
+  }
+
+  .transport-bar__row > button,
+  .transport-bar__loop-control > button {
+    padding-inline: var(--sp-2);
   }
 
   .transport-bar__title {
@@ -2606,8 +2611,8 @@ button.pr__note:hover {
   }
 
   .transport-bar__loop-range {
-    min-width: 52px;
-    max-width: 52px;
+    min-width: 48px;
+    max-width: 48px;
     grid-template-columns: minmax(0, 1fr);
     padding-inline: var(--sp-1);
   }

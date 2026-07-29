@@ -194,12 +194,25 @@ export type SynchronizedRecordingPlaybackClock = Readonly<{
   cycle?: SynchronizedRecordingPlaybackCycle;
   /** Unwrapped Nth right boundary where finite cycle playback stops. */
   cycleEndBeat?: number;
+  /** Present only for a bounded Auto Punch generation. */
+  punch?: SynchronizedRecordingPlaybackPunch;
+  /** Exact render frame where the microphone capture begins. */
+  captureStartContextFrame?: number;
+  /** Exact render frame for the half-open Auto Punch out boundary. */
+  punchEndContextFrame?: number;
 }>;
 
 export type SynchronizedRecordingPlaybackCycle = Readonly<{
   loopStartBeat: number;
   loopEndBeat: number;
   passCount: number;
+}>;
+
+export type SynchronizedRecordingPlaybackPunch = Readonly<{
+  targetTrackId: string;
+  punchInBeat: number;
+  punchOutBeat: number;
+  playbackEndBeat: number;
 }>;
 
 export type StartSynchronizedRecordingPlaybackOptions = Readonly<{
@@ -209,15 +222,20 @@ export type StartSynchronizedRecordingPlaybackOptions = Readonly<{
   signal: AbortSignal;
   /** Frozen finite-cycle contract. Omit for the existing one-shot recording path. */
   cycle?: SynchronizedRecordingPlaybackCycle;
+  /** Frozen bounded Auto Punch contract. Mutually exclusive with cycle. */
+  punch?: SynchronizedRecordingPlaybackPunch;
   /**
    * Fires synchronously only when the scheduler reaches the requested Nth
    * cycle boundary. Manual stop/interruption never calls it.
    */
   onFiniteCycleComplete?: (requestId: number) => void;
+  /** Fires only at the owned natural post-roll boundary. */
+  onFinitePunchComplete?: (requestId: number) => void;
   armCapture: (
     context: AudioContext,
     startFrame: number,
     contextGeneration: number,
+    playbackAnchorFrame?: number,
   ) => Promise<void>;
 }>;
 
@@ -260,16 +278,52 @@ function isValidSynchronizedRecordingCycle(
   return Number.isFinite(endBeat) && endBeat > cycle.loopEndBeat;
 }
 
-function synchronizedCycleMatchesTransport(
+function isValidSynchronizedRecordingPunch(
+  punch: SynchronizedRecordingPlaybackPunch,
+  project: Project,
+  startBeat: number,
+): boolean {
+  return (
+    typeof punch.targetTrackId === 'string'
+    && punch.targetTrackId.length > 0
+    && project.tracks.some(
+      (track) => track.id === punch.targetTrackId && track.type === 'audio',
+    )
+    && Number.isFinite(startBeat)
+    && Number.isFinite(punch.punchInBeat)
+    && Number.isFinite(punch.punchOutBeat)
+    && Number.isFinite(punch.playbackEndBeat)
+    && startBeat >= 0
+    && startBeat <= punch.punchInBeat
+    && punch.punchInBeat >= 0
+    && punch.punchOutBeat > punch.punchInBeat
+    && punch.playbackEndBeat >= punch.punchOutBeat
+    && punch.playbackEndBeat <= project.lengthBeats
+  );
+}
+
+function synchronizedRecordingModeMatchesTransport(
   cycle: SynchronizedRecordingPlaybackCycle | undefined,
+  punch: SynchronizedRecordingPlaybackPunch | undefined,
   transport: Readonly<{
     loopEnabled: boolean;
     loopStartBeat: number;
     loopEndBeat: number;
+    punchEnabled: boolean;
+    punchInBeat: number;
+    punchOutBeat: number;
   }>,
 ): boolean {
-  if (!cycle) return !transport.loopEnabled;
+  if (cycle && punch) return false;
+  if (punch) {
+    return !transport.loopEnabled
+      && transport.punchEnabled
+      && transport.punchInBeat === punch.punchInBeat
+      && transport.punchOutBeat === punch.punchOutBeat;
+  }
+  if (!cycle) return !transport.loopEnabled && !transport.punchEnabled;
   return transport.loopEnabled
+    && !transport.punchEnabled
     && transport.loopStartBeat === cycle.loopStartBeat
     && transport.loopEndBeat === cycle.loopEndBeat;
 }
@@ -320,8 +374,14 @@ function classifySynchronizedIntentFailure(
   ) {
     return synchronizedError('stale-request');
   }
-  if (!synchronizedCycleMatchesTransport(intent.cycle, state.transport)) {
-    return synchronizedError(intent.cycle ? 'stale-request' : 'loop-enabled');
+  if (!synchronizedRecordingModeMatchesTransport(
+    intent.cycle,
+    intent.punch,
+    state.transport,
+  )) {
+    return synchronizedError(
+      intent.cycle || intent.punch ? 'stale-request' : 'loop-enabled',
+    );
   }
   return synchronizedError('playback-start-failed');
 }
@@ -380,8 +440,14 @@ function assertSynchronizedIntentCurrent(
   ) {
     throw synchronizedError('stale-operation');
   }
-  if (!synchronizedCycleMatchesTransport(intent.cycle, state.transport)) {
-    throw synchronizedError(intent.cycle ? 'stale-request' : 'loop-enabled');
+  if (!synchronizedRecordingModeMatchesTransport(
+    intent.cycle,
+    intent.punch,
+    state.transport,
+  )) {
+    throw synchronizedError(
+      intent.cycle || intent.punch ? 'stale-request' : 'loop-enabled',
+    );
   }
   const engine = getAudioEngine();
   if (
@@ -417,6 +483,7 @@ async function armSynchronizedCapture(
   intent: SynchronizedStartIntent,
   context: AudioContext,
   anchorContextFrame: number,
+  captureStartContextFrame: number,
   contextGeneration: number,
 ): Promise<void> {
   const deadlineSeconds = (
@@ -444,8 +511,9 @@ async function armSynchronizedCapture(
   try {
     captureArm = intent.armCapture(
       context,
-      anchorContextFrame,
+      captureStartContextFrame,
       contextGeneration,
+      anchorContextFrame,
     );
   } catch {
     removeAbortListener();
@@ -501,10 +569,16 @@ function waitForSynchronizedPlaybackConfirmation(
         finish(undefined, synchronizedError('stale-operation'));
         return;
       }
-      if (!synchronizedCycleMatchesTransport(intent.cycle, state.transport)) {
+      if (!synchronizedRecordingModeMatchesTransport(
+        intent.cycle,
+        intent.punch,
+        state.transport,
+      )) {
         finish(
           undefined,
-          synchronizedError(intent.cycle ? 'stale-request' : 'loop-enabled'),
+          synchronizedError(
+            intent.cycle || intent.punch ? 'stale-request' : 'loop-enabled',
+          ),
         );
         return;
       }
@@ -882,20 +956,37 @@ export function startSynchronizedRecordingPlayback(
     return Promise.reject(synchronizedError('stale-operation'));
   }
   if (
-    options.cycle
-    && (
-      !isValidSynchronizedRecordingCycle(
-        options.cycle,
-        options.projectSnapshot.lengthBeats,
+    (options.cycle !== undefined && options.punch !== undefined)
+    || (
+      options.cycle
+      && (
+        !isValidSynchronizedRecordingCycle(
+          options.cycle,
+          options.projectSnapshot.lengthBeats,
+        )
+        || options.startBeat !== options.cycle.loopStartBeat
       )
-      || options.startBeat !== options.cycle.loopStartBeat
+    )
+    || (
+      options.punch
+      && !isValidSynchronizedRecordingPunch(
+        options.punch,
+        options.projectSnapshot,
+        options.startBeat,
+      )
     )
   ) {
     return Promise.reject(synchronizedError('invalid-start'));
   }
-  if (!synchronizedCycleMatchesTransport(options.cycle, state.transport)) {
+  if (!synchronizedRecordingModeMatchesTransport(
+    options.cycle,
+    options.punch,
+    state.transport,
+  )) {
     return Promise.reject(
-      synchronizedError(options.cycle ? 'stale-request' : 'loop-enabled'),
+      synchronizedError(
+        options.cycle || options.punch ? 'stale-request' : 'loop-enabled',
+      ),
     );
   }
   if (
@@ -916,6 +1007,9 @@ export function startSynchronizedRecordingPlayback(
   const frozenCycle = options.cycle
     ? Object.freeze({ ...options.cycle })
     : undefined;
+  const frozenPunch = options.punch
+    ? Object.freeze({ ...options.punch })
+    : undefined;
   let resolveClock!: (clock: SynchronizedRecordingPlaybackClock) => void;
   let rejectClock!: (error: SynchronizedRecordingPlaybackError) => void;
   const clockPromise = new Promise<SynchronizedRecordingPlaybackClock>((resolve, reject) => {
@@ -925,6 +1019,7 @@ export function startSynchronizedRecordingPlayback(
   const intent: SynchronizedStartIntent = {
     ...options,
     ...(frozenCycle ? { cycle: frozenCycle } : {}),
+    ...(frozenPunch ? { punch: frozenPunch } : {}),
     requestId: expectedRequestId,
     claimed: false,
     settled: false,
@@ -939,6 +1034,7 @@ export function startSynchronizedRecordingPlayback(
     options.operationId,
     options.startBeat,
     frozenCycle,
+    frozenPunch,
   );
   if (requestId !== expectedRequestId) {
     synchronizedStartIntents.delete(expectedRequestId);
@@ -1092,9 +1188,15 @@ async function createRuntimeSessionImpl(
     ) {
       throw synchronizedError('stale-request');
     }
-    if (!synchronizedCycleMatchesTransport(synchronizedIntent.cycle, transport)) {
+    if (!synchronizedRecordingModeMatchesTransport(
+      synchronizedIntent.cycle,
+      synchronizedIntent.punch,
+      transport,
+    )) {
       throw synchronizedError(
-        synchronizedIntent.cycle ? 'stale-request' : 'loop-enabled',
+        synchronizedIntent.cycle || synchronizedIntent.punch
+          ? 'stale-request'
+          : 'loop-enabled',
       );
     }
   }
@@ -1323,10 +1425,14 @@ async function createRuntimeSessionImpl(
     if (!isCurrent()) throw new CancelledPlaybackRequest();
 
     let startupAnchorTime: number | null = null;
-    const schedulerEnd = synchronizedIntent?.cycle
+    const schedulerEnd = synchronizedIntent?.cycle || synchronizedIntent?.punch
       ? (): void => {
           try {
-            synchronizedIntent.onFiniteCycleComplete?.(requestId);
+            if (synchronizedIntent.cycle) {
+              synchronizedIntent.onFiniteCycleComplete?.(requestId);
+            } else {
+              synchronizedIntent.onFinitePunchComplete?.(requestId);
+            }
           } catch {
             // Completion observers are advisory and cannot turn a proven
             // scheduler boundary into an interruption.
@@ -1355,7 +1461,9 @@ async function createRuntimeSessionImpl(
         }
       },
       onError: () => handlers.onInterrupted(),
-      ...(loop && !synchronizedIntent?.cycle ? {} : { onEnd: schedulerEnd }),
+      ...(loop && !synchronizedIntent?.cycle && !synchronizedIntent?.punch
+        ? {}
+        : { onEnd: schedulerEnd }),
     });
 
     let anchorTime = engine.now();
@@ -1371,11 +1479,43 @@ async function createRuntimeSessionImpl(
         context.currentTime,
         context.sampleRate,
       );
+      let captureStartContextFrame = anchorContextFrame;
+      let punchEndContextFrame: number | undefined;
+      if (synchronizedIntent.punch) {
+        const punchInOffsetSeconds =
+          tempo.beatToSeconds(synchronizedIntent.punch.punchInBeat)
+          - tempo.beatToSeconds(startBeat);
+        const punchOutOffsetSeconds =
+          tempo.beatToSeconds(synchronizedIntent.punch.punchOutBeat)
+          - tempo.beatToSeconds(startBeat);
+        const punchInOffsetFrames = Math.round(
+          punchInOffsetSeconds * context.sampleRate,
+        );
+        const punchOutOffsetFrames = Math.round(
+          punchOutOffsetSeconds * context.sampleRate,
+        );
+        if (
+          !Number.isFinite(punchInOffsetSeconds)
+          || !Number.isFinite(punchOutOffsetSeconds)
+          || punchInOffsetSeconds < 0
+          || punchOutOffsetSeconds <= punchInOffsetSeconds
+          || !Number.isSafeInteger(punchInOffsetFrames)
+          || !Number.isSafeInteger(punchOutOffsetFrames)
+          || punchOutOffsetFrames <= punchInOffsetFrames
+          || !Number.isSafeInteger(anchorContextFrame + punchInOffsetFrames)
+          || !Number.isSafeInteger(anchorContextFrame + punchOutOffsetFrames)
+        ) {
+          throw synchronizedError('invalid-start');
+        }
+        captureStartContextFrame = anchorContextFrame + punchInOffsetFrames;
+        punchEndContextFrame = anchorContextFrame + punchOutOffsetFrames;
+      }
       anchorTime = anchorContextFrame / context.sampleRate;
       await armSynchronizedCapture(
         synchronizedIntent,
         context,
         anchorContextFrame,
+        captureStartContextFrame,
         contextGeneration,
       );
       assertSynchronizedIntentCurrent(
@@ -1394,6 +1534,9 @@ async function createRuntimeSessionImpl(
         contextGeneration,
         sampleRate: context.sampleRate,
         anchorContextFrame,
+        ...(synchronizedIntent.punch
+          ? { captureStartContextFrame, punchEndContextFrame }
+          : {}),
         anchorBeat: startBeat,
         tempo,
         requestId,
@@ -1404,9 +1547,33 @@ async function createRuntimeSessionImpl(
             cycleEndBeat: synchronizedRecordingCycleEndBeat(synchronizedIntent.cycle),
           }
           : {}),
+        ...(synchronizedIntent.punch
+          ? { punch: synchronizedIntent.punch }
+          : {}),
       });
     }
     const startupRoutingMix = resolveAudioRoutingMix(startupStore.project, routingPlan);
+    if (synchronizedIntent?.punch && synchronizedClock) {
+      const targetGraph = graphs.get(synchronizedIntent.punch.targetTrackId);
+      if (!targetGraph) throw synchronizedError('stale-request');
+      const {
+        captureStartContextFrame,
+        punchEndContextFrame,
+      } = synchronizedClock;
+      if (
+        captureStartContextFrame === undefined
+        || punchEndContextFrame === undefined
+      ) {
+        throw synchronizedError('invalid-start');
+      }
+      targetGraph.schedulePunchAudibility(
+        captureStartContextFrame / context.sampleRate,
+        punchEndContextFrame / context.sampleRate,
+        startupRoutingMix.audibleChannelIds.has(
+          synchronizedIntent.punch.targetTrackId,
+        ),
+      );
+    }
     const everAudibleTrackIds = new Set(startupRoutingMix.audibleChannelIds);
     const everAudibleEdgeIds = new Set(startupRoutingMix.activeEdgeIds);
     let naturalDrainStarted = false;
@@ -1503,6 +1670,8 @@ async function createRuntimeSessionImpl(
 
     const endBeat = synchronizedIntent?.cycle
       ? synchronizedRecordingCycleEndBeat(synchronizedIntent.cycle)
+      : synchronizedIntent?.punch
+        ? synchronizedIntent.punch.playbackEndBeat
       : loop
         ? Infinity
         : lengthBeats;

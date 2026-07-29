@@ -894,6 +894,135 @@ describe('transport playback lifecycle', () => {
     expect(store.getState().future).toBe(before.future);
   });
 
+  it('keeps Auto Punch locators runtime-only and independent from the loop range', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const before = store.getState();
+    const projectLength = before.project.lengthBeats;
+
+    before.togglePunch();
+    expect(store.getState().transport).toMatchObject({
+      punchEnabled: true,
+      punchInBeat: 0,
+      punchOutBeat: projectLength,
+      punchPreRollBeats: 4,
+      punchPostRollBeats: 4,
+      loopEnabled: false,
+    });
+    expect(store.getState().setPunchRange(4, 8)).toBe(true);
+    expect(store.getState().setPunchRoll(2, 3)).toBe(true);
+    expect(store.getState().transport).toMatchObject({
+      punchEnabled: true,
+      punchInBeat: 4,
+      punchOutBeat: 8,
+      punchPreRollBeats: 2,
+      punchPostRollBeats: 3,
+      positionBeat: 2,
+      loopEnabled: false,
+    });
+    expect(store.getState().project).toBe(before.project);
+    expect(store.getState().past).toBe(before.past);
+    expect(store.getState().future).toBe(before.future);
+
+    store.getState().toggleLoop();
+    expect(store.getState().transport).toMatchObject({
+      loopEnabled: true,
+      punchEnabled: false,
+      punchInBeat: 4,
+      punchOutBeat: 8,
+    });
+    store.getState().togglePunch();
+    expect(store.getState().transport).toMatchObject({
+      loopEnabled: false,
+      punchEnabled: true,
+      loopStartBeat: 0,
+      loopEndBeat: projectLength,
+    });
+  });
+
+  it('accepts only the exact armed-track Auto Punch playback contract', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const audioTrack = {
+      id: 'audio-punch-target',
+      name: 'Punch target',
+      type: 'audio' as const,
+      role: 'general' as const,
+      clips: [],
+      volume: 1,
+      pan: 0,
+      mute: false,
+      solo: false,
+      effects: [],
+    };
+    store.setState((state) => ({
+      project: {
+        ...state.project,
+        tracks: [audioTrack, ...state.project.tracks],
+      },
+    }));
+    expect(store.getState().setAudioTrackArmed(audioTrack.id)).toBe(true);
+    expect(store.getState().setPunchRange(4, 8)).toBe(true);
+    expect(store.getState().setPunchRoll(2, 3)).toBe(true);
+    const operationId = store.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('punch recording ownership fixture missing');
+
+    expect(store.getState().startAudioRecordingPlayback(
+      operationId,
+      2,
+      undefined,
+      {
+        targetTrackId: audioTrack.id,
+        punchInBeat: 4,
+        punchOutBeat: 8,
+        playbackEndBeat: 11,
+      },
+    )).not.toBeNull();
+    expect(store.getState().transport).toMatchObject({
+      phase: 'starting',
+      positionBeat: 2,
+      punchEnabled: true,
+      loopEnabled: false,
+    });
+  });
+
+  it.each([
+    [{ targetTrackId: 'wrong-track', punchInBeat: 4, punchOutBeat: 8, playbackEndBeat: 11 }, 2],
+    [{ targetTrackId: 'audio-punch-target', punchInBeat: 3, punchOutBeat: 8, playbackEndBeat: 11 }, 2],
+    [{ targetTrackId: 'audio-punch-target', punchInBeat: 4, punchOutBeat: 9, playbackEndBeat: 11 }, 2],
+    [{ targetTrackId: 'audio-punch-target', punchInBeat: 4, punchOutBeat: 8, playbackEndBeat: 10 }, 2],
+    [{ targetTrackId: 'audio-punch-target', punchInBeat: 4, punchOutBeat: 8, playbackEndBeat: 11 }, 1],
+  ])('rejects a mismatched Auto Punch playback intent %#', (punch, startBeat) => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const audioTrack = {
+      id: 'audio-punch-target',
+      name: 'Punch target',
+      type: 'audio' as const,
+      role: 'general' as const,
+      clips: [],
+      volume: 1,
+      pan: 0,
+      mute: false,
+      solo: false,
+      effects: [],
+    };
+    store.setState((state) => ({
+      project: { ...state.project, tracks: [audioTrack, ...state.project.tracks] },
+    }));
+    expect(store.getState().setAudioTrackArmed(audioTrack.id)).toBe(true);
+    expect(store.getState().setPunchRange(4, 8)).toBe(true);
+    expect(store.getState().setPunchRoll(2, 3)).toBe(true);
+    const operationId = store.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('punch recording ownership fixture missing');
+    const before = store.getState().transport;
+
+    expect(store.getState().startAudioRecordingPlayback(
+      operationId,
+      startBeat,
+      undefined,
+      punch,
+    )).toBeNull();
+    expect(store.getState().transport).toBe(before);
+  });
+
   it.each([
     [Number.NaN, 4],
     [0, Number.POSITIVE_INFINITY],

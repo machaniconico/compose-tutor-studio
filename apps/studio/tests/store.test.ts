@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppEvent } from '@cts/tutorial-engine';
 import {
   MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS,
+  adoptRecordedAudioPunch,
   createAudioTrackClip,
   createRecordedAudioTakeFolder,
   duplicateClip,
@@ -107,6 +108,64 @@ function createCycleRecordingAdditionFixture(
   });
   if (!created.ok) throw new Error(created.error.code);
   return created;
+}
+
+function punchAsset(
+  suffix: string,
+  frameCount: number,
+): ReadyAudioAsset {
+  return {
+    id: `asset-punch-${suffix}`,
+    availability: 'ready',
+    checksumSha256: 'c'.repeat(64),
+    originalName: `${suffix}.wav`,
+    mediaType: 'audio/wav',
+    byteLength: frameCount * 2 + 44,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount,
+  };
+}
+
+function createPunchRecordingAdditionFixture(
+  snapshot: Project,
+  trackId: string,
+  suffix: string,
+  punchInBeat: number,
+  punchOutBeat: number,
+  frameCount: number,
+) {
+  const idCounts = new Map<string, number>();
+  const mutation = adoptRecordedAudioPunch(snapshot, {
+    trackId,
+    asset: punchAsset(suffix, frameCount),
+    punchInBeat,
+    punchOutBeat,
+    idFactory: (kind) => {
+      const count = (idCounts.get(kind) ?? 0) + 1;
+      idCounts.set(kind, count);
+      return `${kind}-punch-${suffix}-${count}`;
+    },
+  });
+  if (!mutation.ok) throw new Error(mutation.error.code);
+  return mutation;
+}
+
+function punchProof(
+  mutation: ReturnType<typeof createPunchRecordingAdditionFixture>,
+  punchInBeat: number,
+  punchOutBeat: number,
+) {
+  return {
+    mode: mutation.mode,
+    trackId: mutation.trackId,
+    folderId: mutation.folderId,
+    createdClipId: mutation.createdClipId,
+    createdTakeId: mutation.createdTakeId,
+    preservedOuterClipIds: mutation.preservedOuterClipIds,
+    punchInBeat,
+    punchOutBeat,
+  } as const;
 }
 
 describe('default project', () => {
@@ -333,6 +392,178 @@ describe('microphone recording lifecycle fence', () => {
     useStore.getState().undo();
     const undone = useStore.getState().project;
     expect({ ...undone, updatedAt: before.project.updatedAt }).toEqual(before.project);
+  });
+
+  it.each([
+    ['empty-window', 4, 6, 48_000],
+    ['created-folder', 0.5, 1.5, 24_000],
+    ['appended-folder', 4, 6, 48_000],
+  ] as const)(
+    'strictly commits one %s Auto Punch result and makes it one-shot with one Undo',
+    (expectedMode, punchInBeat, punchOutBeat, frameCount) => {
+      const trackId = addAudioTrackFixture(`punch-${expectedMode}`);
+      if (expectedMode === 'appended-folder') {
+        const folder = createRecordedAudioTakeFolder(useStore.getState().project, {
+          target: { kind: 'existing-audio-track', trackId },
+          assets: [
+            punchAsset('existing-folder-a', 48_000),
+            punchAsset('existing-folder-b', 48_000),
+          ],
+          startBeat: punchInBeat,
+          lengthBeats: punchOutBeat - punchInBeat,
+          idFactory: (() => {
+            let index = 0;
+            return (kind) => `${kind}-punch-existing-${++index}`;
+          })(),
+        });
+        if (!folder.ok) throw new Error(folder.error.code);
+        expect(useStore.getState().applyProjectChange(() => folder.project)).toBe(true);
+      }
+
+      const before = useStore.getState();
+      const operationId = before.tryBeginAudioRecordingOperation();
+      if (operationId === null) throw new Error('recording token missing');
+      const mutation = createPunchRecordingAdditionFixture(
+        before.project,
+        trackId,
+        expectedMode,
+        punchInBeat,
+        punchOutBeat,
+        frameCount,
+      );
+      expect(mutation.mode).toBe(expectedMode);
+      const addition = {
+        operationId,
+        expectedSnapshot: before.project,
+        verifiedAudioAssetId: mutation.audioAssetId,
+        proof: punchProof(mutation, punchInBeat, punchOutBeat),
+        nextProject: mutation.project,
+      };
+
+      expect(useStore.getState().applyVerifiedPunchRecordingAddition(addition)).toBe(true);
+      const committed = useStore.getState();
+      const committedProject = committed.project;
+      expect({
+        ...committedProject,
+        updatedAt: mutation.project.updatedAt,
+      }).toEqual(mutation.project);
+      expect(committed.project.audioAssets.at(-1)?.id).toBe(mutation.audioAssetId);
+      expect(committed.past).toHaveLength(before.past.length + 1);
+      expect(committed.saveState.revision).toBe(before.saveState.revision + 1);
+      expect(committed.applyVerifiedPunchRecordingAddition(addition)).toBe(false);
+      expect(useStore.getState().project).toBe(committedProject);
+
+      committed.finishAudioRecordingOperation(operationId);
+      expect(useStore.getState().applyVerifiedPunchRecordingAddition(addition)).toBe(false);
+      useStore.getState().undo();
+      expect({
+        ...useStore.getState().project,
+        updatedAt: before.project.updatedAt,
+      }).toEqual(before.project);
+    },
+  );
+
+  it('rejects stale ownership and tampered Auto Punch asset, proof, or Project atomically', () => {
+    const trackId = addAudioTrackFixture('punch-proof-tamper');
+    const before = useStore.getState();
+    const operationId = before.tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const punchInBeat = 0.5;
+    const punchOutBeat = 1.5;
+    const mutation = createPunchRecordingAdditionFixture(
+      before.project,
+      trackId,
+      'proof-tamper',
+      punchInBeat,
+      punchOutBeat,
+      24_000,
+    );
+    const exact = {
+      operationId,
+      expectedSnapshot: before.project,
+      verifiedAudioAssetId: mutation.audioAssetId,
+      proof: punchProof(mutation, punchInBeat, punchOutBeat),
+      nextProject: mutation.project,
+    };
+    const outerClipId = mutation.preservedOuterClipIds[0];
+    if (outerClipId === undefined) throw new Error('preserved punch outer Clip missing');
+    const tamperedOuterProjects = [
+      { sourceStartFrameDelta: 1, sourceFrameCountDelta: 0, fadeInFramesDelta: 0 },
+      { sourceStartFrameDelta: 0, sourceFrameCountDelta: -1, fadeInFramesDelta: 0 },
+      { sourceStartFrameDelta: 0, sourceFrameCountDelta: 0, fadeInFramesDelta: 1 },
+    ].map((delta): Project => ({
+      ...mutation.project,
+      tracks: mutation.project.tracks.map((track) => (
+        track.id === trackId
+          ? {
+              ...track,
+              clips: track.clips.map((clip) => (
+                clip.id === outerClipId && clip.type === 'audio'
+                  ? {
+                      ...clip,
+                      sourceStartFrame:
+                        (clip.sourceStartFrame ?? 0) + delta.sourceStartFrameDelta,
+                      sourceFrameCount:
+                        (clip.sourceFrameCount ?? 0) + delta.sourceFrameCountDelta,
+                      fadeInFrames:
+                        (clip.fadeInFrames ?? 0) + delta.fadeInFramesDelta,
+                    }
+                  : clip
+              )),
+            }
+          : track
+      )),
+    }));
+
+    try {
+      expect(useStore.getState().applyVerifiedPunchRecordingAddition({
+        ...exact,
+        operationId: operationId + 1,
+      })).toBe(false);
+      expect(useStore.getState().applyVerifiedPunchRecordingAddition({
+        ...exact,
+        expectedSnapshot: { ...before.project },
+      })).toBe(false);
+      expect(useStore.getState().applyVerifiedPunchRecordingAddition({
+        ...exact,
+        verifiedAudioAssetId: 'asset-punch-unverified',
+      })).toBe(false);
+      expect(useStore.getState().applyVerifiedPunchRecordingAddition({
+        ...exact,
+        proof: {
+          ...exact.proof,
+          folderId: 'folder-punch-tampered-proof',
+        },
+      })).toBe(false);
+      for (const nextProject of tamperedOuterProjects) {
+        expect(useStore.getState().applyVerifiedPunchRecordingAddition({
+          ...exact,
+          nextProject,
+        })).toBe(false);
+      }
+      expect(useStore.getState().applyVerifiedPunchRecordingAddition({
+        ...exact,
+        proof: {
+          ...exact.proof,
+          preservedOuterClipIds: [
+            ...exact.proof.preservedOuterClipIds,
+            'clip-punch-smuggled-proof',
+          ],
+        },
+      })).toBe(false);
+      expect(useStore.getState().applyVerifiedPunchRecordingAddition({
+        ...exact,
+        nextProject: {
+          ...mutation.project,
+          bpm: mutation.project.bpm + 1,
+        },
+      })).toBe(false);
+      expect(useStore.getState().project).toBe(before.project);
+      expect(useStore.getState().past).toBe(before.past);
+      expect(useStore.getState().saveState).toBe(before.saveState);
+    } finally {
+      useStore.getState().finishAudioRecordingOperation(operationId);
+    }
   });
 
   it('commits one complete cycle folder to an existing Audio Track as one Undo step', () => {

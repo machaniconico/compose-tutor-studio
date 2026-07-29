@@ -214,8 +214,11 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Audio Trackだけに`R`の録音待機buttonを表示し、Track ListとInspectorの両方で同じ単一選択を`aria-pressed`、文字、形で示す。computed nameは`${Track名} 録音待機`とし、色だけに依存しない。Project操作または録音中は切替をdisabledにする
 - transportの録音buttonには、通常レイアウトで待機中のTrack名または`新規Track`を可視表示し、accessible name / titleでも録音先を伝える。最小高のcompact layoutでは編集領域を守るため補助表示だけを省略し、`R`の状態とaccessible name / titleは維持する。録音待機なしでは新規Audio Track、待機中ではその既存Trackへ新しいClipを追加する
 - 録音dialogは開始前に録音先と入力deviceを表示する。入力は`システム既定`を常に選べ、列挙済みdeviceのlabelが空なら`マイク N`を使う。`devicechange`後に選択済み入力が見つからなければalertと選び直しを表示し、一覧取得不可でもシステム既定による再試行を残す
-- 録音開始後は録音先と入力deviceを固定し、終了または破棄まで変更controlを表示しない。3秒後に伴奏と録音を同じaudio clockで開始し、通常録音は「録音中・伴奏再生中」と表示する。開始前に`実測 / 自動（推定） / 自動なし`と-500〜+500 msの手動offsetを選べるようにし、正値=早め、負値=遅め、推定値は実測校正ではないことを常時説明する。実測optionは現在の明示入力に一致する成功profileがある時だけ表示し、不一致時は黙って録音を続けず再校正を案内する。再生中の任意punch、device hot switchを対応済みと示唆しない
+- 録音開始後は録音先と入力deviceを固定し、終了または破棄まで変更controlを表示しない。3秒後に伴奏と録音を同じaudio clockで開始し、通常録音は「録音中・伴奏再生中」と表示する。開始前に`実測 / 自動（推定） / 自動なし`と-500〜+500 msの手動offsetを選べるようにし、正値=早め、負値=遅め、推定値は実測校正ではないことを常時説明する。実測optionは現在の明示入力に一致する成功profileがある時だけ表示し、不一致時は黙って録音を続けず再校正を案内する。再生中へ途中参加するQuick Punch、device hot switchを対応済みと示唆しない
 - transport loopがONなら録音dialogに「サイクル録音」、明示loop範囲、2〜128のテイク数、約総時間、完走後にtake folderへまとめることを表示する。総時間は正のlatency tail込みで60秒以内に制限し、録音中は`テイク N/M`、Nth右境界後は最終入力遅延の収録状態を文字で示す。唯一の停止操作は「サイクル録音を中止して破棄」とし、manual stop / cancel / unmount / failureでは部分takeを保存しない。完走時はfolderを選択して「テイク編集」tabへ移り、生成テイク数をtoastで伝える
+- transportにはloopと独立した`パンチ`toggle、音楽位置の範囲summary、punch-in / outと0〜16整数拍のpre/post-roll dialogを置く。Punch ONではloopをOFFにするが双方の範囲値を保持する。再生・Project操作・録音中はtoggleと編集をlockし、色だけでなく`aria-pressed`と文字で状態を示す。既存Audio Trackの`R`がない時は録音buttonに`R待機が必要`と理由を表示する
+- Punch録音dialogは対象Track、exact範囲、約時間、pre/post-roll、既存素材を旧takeとして残すことを開始前に説明する。進行中は`パンチイン待機中`、`パンチ録音中`、`入力遅延の末尾を収録中`、`ポストロール再生中`を別の文字状態で示す。自然post-rollまでは手動保存を出さず、中止操作は常に全破棄とする。成功時は空き窓ならArranger、take生成 / 追加ならテイク編集へ移り、1回のUndoで元素材へ戻せることをtoastで伝える
+- この導線はpre-rollから新規sessionを始めるbounded Auto Punchであり、再生中の任意Quick PunchやLogic相当の自動input monitoringを示唆しない
 - 実測校正は通常録音とは別wizardで、明示選択した入力IDがある時だけ開ける。`システム既定`ではbuttonをdisabledにし、通常録音は既定入力のまま使えることと、校正には接続先の明示選択が必要な理由を表示する。wizardはスピーカーをOFFにしてinterface出力から選択入力へ物理cableを接続すること、入出力levelを低くすること、開放スピーカーとマイクでは実行しないこと、app monitorに加えてinterface / driver mixerのDirect Monitor・hardware Loopback・同一outputへのreturnもOFFにすること、出力 / driver / buffer変更後は再校正することを開始前に示す
 - 校正中は3秒countdown、測定状態、入力level、取消をstatus / meterで示し暗黙dismissを無効にする。instructions / running / success / errorの各表示切替では、消えるbuttonにfocusを残さず新stepのprimary actionへ移す。成功時はmsとsample数を表示し、Projectや測定PCMを保存しない。通常のcancel / silence / clipping / ambiguity / low confidenceでは以前のprofileを維持する。入力選択または`devicechange`では進行中の校正を中止して旧profileも破棄し、推定へ戻ったことを明示する
 
@@ -228,7 +231,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - comp境界を選択すると左右のtake名と境界beatを表示し、native number inputで移動できる。採用中でないtakeだけに削除buttonを出し、確認後の削除でfocus対象が消えた時は次のtake、なければ前のtakeへ戻す
 - accepted操作が再生を止めた場合は「仕上がりを更新したため、再生位置を保って停止しました」をpolite statusで伝える。errorはProjectが変更されなかったこと、素材problemは対象素材名、busyは録音 / 保存終了後に再試行できることをalertで伝える
 - 320px幅ではtablistやdocumentを横overflowさせず、takeのmusical timelineだけを内部scrollする。lane、form、境界、削除はnative control、明確なfocus ring、44px相当のpointer targetを持つ。pointer精度をkeyboard利用の前提にしない
-- UIに固定pass Audio cycle recording以外の任意punch、MIDI comping、名前付き複数comp、flattenを示すcontrolや予約labelを出さない
+- UIにbounded Auto Punch以外のQuick Punch、MIDI comping、名前付き複数comp、flattenを示すcontrolや予約labelを出さない
 
 ## 3. ナビゲーション
 
@@ -283,8 +286,8 @@ Chord Track のコンテキスト内操作:
 | MIDI読み込み失敗 | 全failure pathで`MIDI読み込みによる曲・選択・表示の変更はありません。`を一度だけ伝え、上限、破損、対応形式、再試行を初心者向けに案内する |
 | Audio Track読み込み中 | dialogを`aria-busy`にし、検査 / decode / resample / encode / 保存の進捗とcancelを表示する。別Track追加、閉じる、再importを競合させない |
 | Audio Track入力が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、1〜2 channel、canonical output 128 MiB以下、decode PCM 256 MiB以下、source / decode / resample / WAV / 保存copyを含むphase peak 384 MiB以下という条件と、端末codecでdecodeできなかった可能性を分けて案内する。失敗時は曲・履歴・選択が不変であることを伝える |
-| Audio Track録音の開始前 | transportとTrack追加の両方から開ける。Track追加は常に新規Track、transportはAudio Trackの`R`が1件だけ待機中なら既存Track、待機なしなら新規Trackを対象にする。loop OFFは現在playheadへのone-shot、loop ONは明示範囲の2〜128固定passと約総時間を示す。0.5〜60秒、3秒countdown、dry録音、端末内処理を説明し、monitorは初期OFF、ON時はヘッドホン推奨を常時表示する |
-| Audio Track録音中 | 通常は`録音中`、cycleは`テイク N/M`を色以外の文字でも示し、経過時間と入力level meterを表示する。one-shotは44px以上の保存 / 破棄、cycleは中止して全破棄だけをkeyboard操作可能にする。録音・保存中のX / Escape / backdrop、Project切替、window closeは安全に拒否し、cycle完走だけを自動保存する |
+| Audio Track録音の開始前 | transportとTrack追加の両方から開ける。Track追加は常に新規Track、transportはAudio Trackの`R`が1件だけ待機中なら既存Track、待機なしなら新規Trackを対象にする。loop / punch OFFは現在playheadへのone-shot、loop ONは明示範囲の2〜128固定pass、punch ONは録音待機Trackへの範囲・pre/post-roll・非破壊take採用を示す。0.5〜60秒、3秒countdown、dry録音、端末内処理を説明し、monitorは初期OFF、ON時はヘッドホン推奨を常時表示する |
+| Audio Track録音中 | 通常は`録音中`、cycleは`テイク N/M`、Auto Punchはwait / capture / latency tail / post-rollを色以外の文字でも示し、経過時間と入力level meterを表示する。one-shotは44px以上の保存 / 破棄、cycle / punchは中止して全破棄だけをkeyboard操作可能にする。録音・保存中のX / Escape / backdrop、Project切替、window closeは安全に拒否し、cycle完走またはcapture＋自然post-roll完了だけを自動保存する |
 | Audio Track録音失敗 | permission拒否、マイクなし / 使用中 / 切断、短すぎる録音、memory上限、WAV変換、素材保存を区別し、再試行方法と`プロジェクトは変更されていません`を表示する。保存cancel後のlate resultを採用しない |
 | Audio Assetが見つからない / 変更された | 素材名と`見つかりません` / `内容が変わっています` / `保存場所を利用できません`をClipと編集panelに表示する。別fileへ黙って置換せず、元のprofile / 端末で開き直すよう案内する。保存場所を利用できない場合はstorage / 権限を確認して再読込する。配置と編集metadataは保持し、素材を必要とする編集controlを無効にするが、最後の参照を安全に外せる削除は利用可能にする |
 | テイク編集の対象不足 / 不一致 | 同じAudio Track・同じ開始位置・同じ長さの非loop Clipが2件以上必要であることを説明し、既存Clipや履歴を変更しない |

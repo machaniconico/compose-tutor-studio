@@ -8,11 +8,18 @@ import {
 import {
   formatMusicalPosition,
   formatLoopRangeSummary,
+  isPunchEditingLocked,
   LoopRangeControl,
   LoopRangeDialog,
   LoopRangeEditor,
+  MAX_PUNCH_ROLL_BEATS,
   PlaybackLifecycleControl,
+  PunchRangeControl,
+  PunchRangeDialog,
+  PunchRangeEditor,
+  RecordingOpenControl,
   validateLoopRangeDraft,
+  validatePunchRangeDraft,
 } from '../src/features/transport/TransportBar';
 import { Dialog } from '../src/features/common/Dialog';
 import type { TransportState } from '../src/state/store';
@@ -26,6 +33,11 @@ const stopped: TransportState = {
   loopEnabled: false,
   loopStartBeat: 0,
   loopEndBeat: 4,
+  punchEnabled: false,
+  punchInBeat: 0,
+  punchOutBeat: 4,
+  punchPreRollBeats: 4,
+  punchPostRollBeats: 4,
   metronome: false,
 };
 
@@ -214,6 +226,193 @@ describe('TransportBar loop range', () => {
     ['2', String(2 + MIN_EVENT_DURATION_BEATS / 2), 'ループ範囲が短すぎます。'],
   ])('explains invalid draft %s..%s beside the fields', (start, end, message) => {
     expect(validateLoopRangeDraft(start, end, 8)).toEqual({ ok: false, error: message });
+  });
+});
+
+describe('TransportBar Auto Punch range', () => {
+  it('keeps the toggle and mapped range compact, textual, and accessible', () => {
+    const html = renderToStaticMarkup(
+      <PunchRangeControl
+        enabled
+        expanded={false}
+        disabled={false}
+        summary="1.1–2.1"
+        preRollBeats={4}
+        postRollBeats={2}
+        onToggle={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('transport-bar__punch-control');
+    expect(html).toContain('aria-label="オートパンチ録音"');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('現在 1.1–2.1');
+    expect(html).toContain('プリロール4拍、ポストロール2拍');
+    expect(html).not.toContain('type="number"');
+  });
+
+  it('locks both Punch actions when transport or lifecycle work owns editing', () => {
+    expect(isPunchEditingLocked('stopped', false, null)).toBe(false);
+    expect(isPunchEditingLocked('starting', false, null)).toBe(true);
+    expect(isPunchEditingLocked('playing', false, null)).toBe(true);
+    expect(isPunchEditingLocked('stopped', true, null)).toBe(true);
+    expect(isPunchEditingLocked('stopped', false, 8)).toBe(true);
+
+    const html = renderToStaticMarkup(
+      <PunchRangeControl
+        enabled={false}
+        expanded={false}
+        disabled
+        summary="1.1–2.1"
+        preRollBeats={4}
+        postRollBeats={4}
+        onToggle={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
+    expect(html.match(/disabled=""/g)).toHaveLength(2);
+  });
+
+  it('renders four labelled fields, bounded integer rolls, errors, and modal semantics', () => {
+    const onClose = vi.fn();
+    const tree = PunchRangeDialog({
+      projectLength: 8,
+      punchInValue: '2',
+      punchOutValue: '6',
+      preRollValue: '4',
+      postRollValue: '2',
+      error: 'パンチアウト拍はパンチイン拍より後にしてください。',
+      onPunchInValueChange: () => undefined,
+      onPunchOutValueChange: () => undefined,
+      onPreRollValueChange: () => undefined,
+      onPostRollValueChange: () => undefined,
+      onSave: () => undefined,
+      onClose,
+    });
+    expect(tree.type).toBe(Dialog);
+    tree.props.onClose();
+    expect(onClose).toHaveBeenCalledOnce();
+
+    const html = renderToStaticMarkup(tree);
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('>パンチイン拍<');
+    expect(html).toContain('>パンチアウト拍<');
+    expect(html).toContain('>プリロール（拍）<');
+    expect(html).toContain('>ポストロール（拍）<');
+    expect(html).toContain(`max="${MAX_PUNCH_ROLL_BEATS}"`);
+    expect(html).toContain('step="1"');
+    expect(html).toContain('data-modal-initial-focus="true"');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('パンチアウト拍はパンチイン拍より後にしてください。');
+    expect(html).toContain('>パンチ範囲を設定</button>');
+  });
+
+  it('routes Cancel and unlocked submit while blocking a locked submit', () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn();
+    const props = {
+      projectLength: 8,
+      punchInValue: '2',
+      punchOutValue: '6',
+      preRollValue: '4',
+      postRollValue: '2',
+      error: null,
+      onPunchInValueChange: () => undefined,
+      onPunchOutValueChange: () => undefined,
+      onPreRollValueChange: () => undefined,
+      onPostRollValueChange: () => undefined,
+      onSave,
+      onClose,
+    };
+    const tree = PunchRangeEditor(props);
+    const cancel = findElement(tree, (element) => element.props.children === 'キャンセル');
+    const form = findElement(tree, (element) => element.type === 'form');
+    cancel?.props.onClick?.();
+    const preventDefault = vi.fn();
+    form?.props.onSubmit?.({ preventDefault });
+
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onSave).toHaveBeenCalledOnce();
+
+    const lockedForm = findElement(
+      PunchRangeEditor({ ...props, disabled: true }),
+      (element) => element.type === 'form',
+    );
+    lockedForm?.props.onSubmit?.({ preventDefault: vi.fn() });
+    expect(onSave).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['', '4', '4', '4', 'パンチイン拍とパンチアウト拍を入力してください。'],
+    ['nope', '4', '4', '4', 'パンチ位置は数値で入力してください。'],
+    ['-1', '4', '4', '4', 'パンチ範囲は0〜8拍の中で指定してください。'],
+    ['0', '9', '4', '4', 'パンチ範囲は0〜8拍の中で指定してください。'],
+    ['4', '4', '4', '4', 'パンチアウト拍はパンチイン拍より後にしてください。'],
+    [
+      '2',
+      String(2 + MIN_EVENT_DURATION_BEATS / 2),
+      '4',
+      '4',
+      'パンチ範囲が短すぎます。',
+    ],
+    ['2', '6', '', '4', 'プリロールとポストロールを入力してください。'],
+    ['2', '6', '1.5', '4', 'プリロールとポストロールは0〜16の整数拍で指定してください。'],
+    ['2', '6', '-1', '4', 'プリロールとポストロールは0〜16の整数拍で指定してください。'],
+    ['2', '6', '4', '17', 'プリロールとポストロールは0〜16の整数拍で指定してください。'],
+  ])(
+    'explains invalid Punch draft %s..%s with %s/%s roll',
+    (punchIn, punchOut, preRoll, postRoll, message) => {
+      expect(validatePunchRangeDraft(
+        punchIn,
+        punchOut,
+        preRoll,
+        postRoll,
+        8,
+      )).toEqual({ ok: false, error: message });
+    },
+  );
+
+  it('accepts fractional Punch locators and inclusive 0/16 integer rolls', () => {
+    expect(validatePunchRangeDraft('1.5', '6.25', '0', '16', 8)).toEqual({
+      ok: true,
+      punchInBeat: 1.5,
+      punchOutBeat: 6.25,
+      preRollBeats: 0,
+      postRollBeats: 16,
+    });
+  });
+
+  it('tells Punch users to arm an existing Audio Track with R', () => {
+    const needsTarget = renderToStaticMarkup(
+      <RecordingOpenControl
+        armedTrackName={null}
+        punchEnabled
+        disabled={false}
+        onOpen={() => undefined}
+      />,
+    );
+    expect(needsTarget).toContain(
+      'title="録音先: 既存のオーディオトラックをRで録音待機してください"',
+    );
+    expect(needsTarget).toContain('R待機が必要');
+    expect(needsTarget).not.toContain('新規Track');
+
+    const armed = renderToStaticMarkup(
+      <RecordingOpenControl
+        armedTrackName="Lead Vox"
+        punchEnabled
+        disabled={false}
+        onOpen={() => undefined}
+      />,
+    );
+    expect(armed).toContain('title="録音先: Lead Vox"');
+    expect(armed).toContain('Lead Vox');
+    expect(armed).not.toContain('R待機が必要');
   });
 });
 

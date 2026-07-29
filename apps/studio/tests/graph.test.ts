@@ -20,6 +20,7 @@ import {
   estimateRoutingGraphNodeCount,
   readMeterLevel,
   resolveAudioRoutingMix,
+  TrackGraph,
 } from '../src/audio/graph';
 
 /** Minimal Track factory for mute/solo tests. */
@@ -272,6 +273,87 @@ describe('compiled bus routing mix', () => {
 });
 
 describe('buildTrackGraphs', () => {
+  it('gates only the exact Auto Punch window and restores the frozen audibility', () => {
+    const project = routingProject(
+      [track('source')],
+      {
+        outputs: [{ sourceTrackId: 'source', destination: { type: 'master' } }],
+        sends: [],
+      },
+    );
+    const plan = compileRouting(project);
+    const { context } = routingContext();
+    const master = new RoutingTestNode();
+    const graphs = buildTrackGraphs(
+      context,
+      master as unknown as AudioNode,
+      project,
+      0,
+      'disabled',
+      plan,
+    );
+    try {
+      const graph = graphs.get('source');
+      const input = graph?.input as unknown as RoutingTestGain;
+      input.gain.setValueAtTime.mockClear();
+
+      graph?.schedulePunchAudibility(1.25, 2.75, true);
+      expect(input.gain.setValueAtTime.mock.calls).toEqual([
+        [0, 1.25],
+        [1, 2.75],
+      ]);
+
+      input.gain.setValueAtTime.mockClear();
+      graph?.schedulePunchAudibility(3, 4, false);
+      expect(input.gain.setValueAtTime.mock.calls).toEqual([
+        [0, 3],
+        [0, 4],
+      ]);
+    } finally {
+      for (const graph of graphs.values()) graph.dispose();
+    }
+  });
+
+  it.each([
+    [Number.NaN, 2],
+    [-1, 2],
+    [2, 2],
+    [3, 2],
+    [1, Number.POSITIVE_INFINITY],
+  ])('rejects an invalid Auto Punch gate window (%s, %s)', (start, end) => {
+    const { context } = routingContext();
+    const destination = new RoutingTestNode();
+    const graph = new TrackGraph(
+      context,
+      destination as unknown as AudioNode,
+      track('direct'),
+      'disabled',
+    );
+    try {
+      expect(() => graph.schedulePunchAudibility(start, end, true)).toThrow(RangeError);
+    } finally {
+      graph.dispose();
+    }
+  });
+
+  it('leaves a direct legacy graph unchanged for a valid punch window', () => {
+    const { context, gains } = routingContext();
+    const destination = new RoutingTestNode();
+    const graph = new TrackGraph(
+      context,
+      destination as unknown as AudioNode,
+      track('direct'),
+      'disabled',
+    );
+    try {
+      for (const gain of gains) gain.gain.setValueAtTime.mockClear();
+      expect(() => graph.schedulePunchAudibility(1, 2, true)).not.toThrow();
+      expect(gains.every((gain) => gain.gain.setValueAtTime.mock.calls.length === 0)).toBe(true);
+    } finally {
+      graph.dispose();
+    }
+  });
+
   it('builds channels first, taps pre-fader sends before inserts, and smooths edge gain', () => {
     const project = routingProject(
       [track('source', { volume: 0.8 }), track('bus', { type: 'bus' })],
