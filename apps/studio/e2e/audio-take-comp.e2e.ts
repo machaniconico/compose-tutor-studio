@@ -170,8 +170,6 @@ test('groups existing clips and persists one non-destructive Audio comp', async 
   await groupButton.click();
 
   const folder = page.locator('[data-take-folder-id]');
-  await expect(folder).toHaveCount(1);
-  await expect(rawClips).toHaveCount(0);
   await expect(
     page.getByRole('tab', { name: 'テイク編集', exact: true }),
   ).toHaveAttribute('aria-selected', 'true');
@@ -268,6 +266,9 @@ test('groups existing clips and persists one non-destructive Audio comp', async 
   );
   expect(exported.schemaVersion).toBe(5);
   expect(exported.audioTakeFolders).toHaveLength(1);
+  expect(
+    exported.tracks.find((track) => track.name === 'Comp Vocal')?.clips,
+  ).toHaveLength(0);
   expect(exported.audioTakeFolders[0]).toMatchObject({
     startBeat: 0,
     lengthBeats: 4,
@@ -288,6 +289,7 @@ test('groups existing clips and persists one non-destructive Audio comp', async 
 
   await page.reload();
   await dismissWelcome(page);
+  await page.getByRole('tab', { name: 'アレンジ', exact: true }).click();
   await expect(folder).toHaveCount(1);
   await folder.focus();
   await page.keyboard.press('Enter');

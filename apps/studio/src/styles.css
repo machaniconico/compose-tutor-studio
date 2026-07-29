@@ -973,6 +973,7 @@ input[type='range'] {
 
 .editor-toolbar {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--sp-1);
   padding: var(--sp-2);
@@ -983,12 +984,36 @@ input[type='range'] {
 .editor-tabs,
 .editor-options {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--sp-1);
 }
 
+.editor-tabs > button,
+.editor-options > button {
+  flex: 0 0 auto;
+}
+
 .editor-options {
   margin-left: auto;
+}
+
+@media (min-width: 641px) {
+  .editor-toolbar {
+    flex-wrap: nowrap;
+  }
+
+  .editor-tabs {
+    flex: 1 1 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+
+  .editor-options {
+    flex: 0 0 auto;
+  }
 }
 
 .editor-body {
