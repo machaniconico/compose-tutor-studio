@@ -333,3 +333,9 @@ Chord Track のコンテキスト内操作:
 - トグルは `aria-pressed` と `aria-keyshortcuts="S"` を持ち、オン／オフと効果を読み上げ可能な状態テキストで通知する
 - 単一文字ショートカットは対応コントロールへフォーカスがある間だけ有効にする。無効化・再割当なしで画面全体へ適用しない
 - `Cmd/Ctrl+S` の保存操作と混同せず、スケールスナップへフォーカス中の修飾キーなし `S` だけを切替に使う
+
+### 7.2 選択Track WAV
+
+- Exportには選択Track名と対応type（楽器・ドラム・Audio）を表示する。未選択・Master・Busは具体的理由付きで無効化する
+- 保存済みmute/soloをbounce viewだけで無視すること、下流Bus/send/effects/automationを含むこと、個別WAVの加算では元mixを再現しないことを明示する
+- filenameはProject名とTrack名を別々にsanitizeし、制御文字と不正Unicodeを除いて`Project - Track.wav`とする

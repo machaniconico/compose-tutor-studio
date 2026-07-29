@@ -3,7 +3,20 @@
 /** Sanitize a project title into a safe-ish filename stem. */
 export function safeFileStem(title: string): string {
   const trimmed = title.trim();
-  const cleaned = trimmed.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_');
+  // String iteration preserves valid Unicode pairs (for example emoji) while
+  // exposing a lone surrogate as its own code point. Control characters and
+  // malformed Unicode must not reach native save-dialog filenames.
+  const printable = Array.from(trimmed, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return (
+      codePoint <= 0x1f
+      || (codePoint >= 0x7f && codePoint <= 0x9f)
+      || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+    )
+      ? '_'
+      : character;
+  }).join('');
+  const cleaned = printable.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_');
   return cleaned.length > 0 ? cleaned : 'project';
 }
 

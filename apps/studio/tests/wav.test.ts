@@ -39,6 +39,7 @@ import {
   floatToInt16,
   planWavRender,
   renderProjectToWav,
+  renderSelectedTrackToWav,
   scheduleWavFinalFade,
 } from '../src/audio/wav';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from '../src/audio/masterBus';
@@ -1296,6 +1297,66 @@ describe('WAV Audio Clip integration', () => {
     expect(offlineContext).not.toHaveBeenCalled();
   });
 
+  it('resolves only selected Audio sources and ignores unrelated broken or oversized assets', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    const selectedTrack = project.tracks[0]!;
+    const unrelatedAsset = {
+      ...project.audioAssets[0]!,
+      id: 'unrelated-broken-asset',
+      originalName: 'missing-and-oversized.wav',
+      checksumSha256: 'f'.repeat(64),
+      byteLength: MAX_HEAVY_AUDIO_RESOURCE_BYTES + 1,
+      frameCount: MAX_HEAVY_AUDIO_RESOURCE_BYTES,
+    };
+    project.audioAssets.push(unrelatedAsset);
+    project.tracks.push({
+      ...selectedTrack,
+      id: 'unrelated-audio-track',
+      name: 'Unrelated broken Audio',
+      clips: selectedTrack.clips.map((clip) => ({
+        ...clip,
+        id: 'unrelated-audio-clip',
+        trackId: 'unrelated-audio-track',
+        audioAssetId: unrelatedAsset.id,
+      })),
+    });
+    project.audioRouting.outputs.push({
+      sourceTrackId: 'unrelated-audio-track',
+      destination: { type: 'master' },
+    });
+    const resolve = vi.fn(async (asset: { id: string }) => {
+      if (asset.id !== 'wav-audio-asset') throw new Error('unrelated resolver I/O leaked');
+      return bytes;
+    });
+    installAudioClipOfflineContext();
+
+    const rendered = await renderSelectedTrackToWav(project, selectedTrack.id, {
+      audioAssetResolver: { resolve },
+    });
+    rendered.release();
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve.mock.calls[0]?.[0]).toMatchObject({ id: 'wav-audio-asset' });
+  });
+
+  it('fails a selected missing Audio asset before OfflineAudioContext construction', async () => {
+    const project = await projectWithAudioClip(Uint8Array.from([1, 2, 3, 4]));
+    const offlineContext = vi.fn(() => {
+      throw new Error('OfflineAudioContext must not be allocated');
+    });
+    vi.stubGlobal('OfflineAudioContext', offlineContext);
+    const missing = new AudioAssetPlaybackError(
+      'asset-missing',
+      'wav-audio-asset',
+    );
+
+    await expect(renderSelectedTrackToWav(project, 'wav-audio-track', {
+      audioAssetResolver: { resolve: async () => { throw missing; } },
+    })).rejects.toBe(missing);
+    expect(offlineContext).not.toHaveBeenCalled();
+  });
+
   it('decodes, schedules, loops, and releases the planned Audio Clip source', async () => {
     const bytes = Uint8Array.from([1, 2, 3, 4]);
     const project = await projectWithAudioClip(bytes);
@@ -1412,9 +1473,129 @@ describe('WAV Audio Clip integration', () => {
       interpolation: 'hold',
     }]);
   });
+
+  it('uses identical variable-tempo automation commands for mix and selected bounce Read states', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    project.tempoMap = [
+      { id: 'tempo-0', beat: 0, bpm: 120 },
+      { id: 'tempo-1', beat: 2, bpm: 60 },
+    ];
+    project.automationLanes = [{
+      id: 'wav-variable-tempo-volume',
+      bypassed: false,
+      target: { type: 'track-volume', trackId: 'wav-audio-track' },
+      points: [
+        { id: 'point-0', beat: 0, value: 0.25, interpolation: 'hold' },
+        { id: 'point-1', beat: 3, value: 0.75, interpolation: 'linear' },
+      ],
+    }];
+
+    for (const variant of [
+      project,
+      { ...project, automationReadState: { globalEnabled: false, disabledTrackIds: [] } },
+      {
+        ...project,
+        automationReadState: {
+          globalEnabled: true,
+          disabledTrackIds: ['wav-audio-track'],
+        },
+      },
+      {
+        ...project,
+        automationLanes: project.automationLanes.map((lane) => ({
+          ...lane,
+          bypassed: true,
+        })),
+      },
+    ] satisfies Project[]) {
+      vi.unstubAllGlobals();
+      const mixContext = installAudioClipOfflineContext();
+      const mix = await renderProjectToWav(variant, {
+        audioAssetResolver: { resolve: async () => bytes },
+      });
+      mix.release();
+      const mixCommands = mixContext.gains.map((gain) => gain.gain.commands);
+
+      vi.unstubAllGlobals();
+      const selectedContext = installAudioClipOfflineContext();
+      const selected = await renderSelectedTrackToWav(
+        variant,
+        'wav-audio-track',
+        { audioAssetResolver: { resolve: async () => bytes } },
+      );
+      selected.release();
+      expect(selectedContext.gains.map((gain) => gain.gain.commands)).toEqual(mixCommands);
+    }
+  });
+
+  it('does not schedule automation for a Track outside the selected routing closure', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    project.tracks.push({
+      id: 'unrelated-automated-track',
+      name: 'Unrelated automated Track',
+      type: 'instrument',
+      role: 'general',
+      clips: [],
+      volume: 1,
+      pan: 0,
+      mute: false,
+      solo: false,
+      instrument: { type: 'synth', preset: 'softPad' },
+      effects: [],
+    });
+    project.audioRouting.outputs.push({
+      sourceTrackId: 'unrelated-automated-track',
+      destination: { type: 'master' },
+    });
+    project.automationLanes = [{
+      id: 'unrelated-volume-lane',
+      bypassed: false,
+      target: {
+        type: 'track-volume',
+        trackId: 'unrelated-automated-track',
+      },
+      points: [{
+        id: 'unrelated-volume-point',
+        beat: 0,
+        value: 1.91,
+        interpolation: 'hold',
+      }],
+    }];
+    const context = installAudioClipOfflineContext();
+
+    const rendered = await renderSelectedTrackToWav(
+      project,
+      'wav-audio-track',
+      { audioAssetResolver: { resolve: async () => bytes } },
+    );
+    rendered.release();
+
+    expect(context.gains.some((gain) =>
+      gain.gain.commands.some((command) => command.value === 1.91))).toBe(false);
+  });
 });
 
 describe('renderProjectToWav graph ownership', () => {
+  it('keeps the origin/main full-mix WAV characterization byte-identical', async () => {
+    const audioBuffer = {
+      numberOfChannels: 2,
+      sampleRate: 44_100,
+      getChannelData: vi.fn(() => new Float32Array([0])),
+    } as unknown as AudioBuffer;
+    installOfflineContext(() => Promise.resolve(audioBuffer));
+
+    const rendered = await renderProjectToWav(projectWithMasterOnly());
+    const bytes = new Uint8Array(await rendered.blob.arrayBuffer());
+    rendered.release();
+
+    expect(bytes.byteLength).toBe(48);
+    expect(await sha256Hex(bytes)).toBe(
+      'aca24651856ecbfcb63cafa9d1f5f17a410730ae09c64e19ea15aa9f910a2083',
+    );
+  });
+
   it('transfers the shared reservation to the encoded Blob lease', async () => {
     let finishRendering!: (buffer: AudioBuffer) => void;
     const rendering = new Promise<AudioBuffer>((resolve) => {

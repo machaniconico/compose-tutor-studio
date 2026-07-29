@@ -214,6 +214,8 @@ Batch 4ではmetadata/domain foundationに加え、Automationのlive/offline sch
 - [x] Batch 6c-2 bounded increment: 明示loop-range UI、2〜128 fixed-pass cycle、正latency tail込み0.5〜60秒、各周exact Asset、自動take folder / first-full comp、manual / cancel / unmount / failure全破棄、1 Undoを実装する。
 - [x] Batch 6c-3 bounded Auto Punch: runtime-only independent locator / pre / post-roll、exact frame＋latency、target-only gate、capture＋natural post-roll proof、empty / spanning / exact-folder非破壊adoption、asset-first domain replay、strict CAS、1 Undo、failure atomicityを実装する。
 - [ ] Batch 6c residual / release gate: bounded cycle / Auto PunchをmacOS / Windows / Linuxの実入力で検証し、Quick Punch、automatic input monitoring、cycle併用、長時間disk streaming、arbitrary overlaps、input hot switch、multi-input、MIDI comp、named comps / flattenをそれぞれ独立gateで設計・検証する。
+- [x] Selected Track WAV bounded increment: instrument / drum / Audioの単一選択を、downstream Bus・send・effects・automation込みでsolo bounceする。persisted mute/soloはbounce viewだけで無視し、full-mix PCM、Project、history、revisionを変更しない。
+- [ ] Stem residual: batch、Bus/Master stem、range、bit depth、MP3/M4A、個別stem加算によるmix再構成保証は未実装。
 
 ### リリース判定
 

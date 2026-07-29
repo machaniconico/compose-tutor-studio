@@ -13,7 +13,11 @@ import { useStore } from '../../state/store';
 import { uid } from '../../state/ids';
 import { publishAppEvent } from '../../state/appEvents';
 import { pushToast } from '../../state/tutorialBridge';
-import { renderProjectToWav, WavRenderLimitError } from '../../audio/wav';
+import {
+  renderProjectToWav,
+  renderSelectedTrackToWav,
+  WavRenderLimitError,
+} from '../../audio/wav';
 import { AudioAssetPlaybackError } from '../../audio/audioAssetResolver';
 import { AudioClipPlanLimitError } from '../../audio/audioClipPlanner';
 import {
@@ -22,6 +26,10 @@ import {
   safeFileStem,
 } from './download';
 import { saveWavRenderLease } from './wavExport';
+import {
+  selectedTrackWavAvailability,
+  selectedTrackWavFileName,
+} from './trackWavExport';
 import { cloneProjectForImport } from './projectImport';
 import { studioRuntime } from '../../platform/runtime';
 import {
@@ -86,12 +94,15 @@ export function ExportMenuContent({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const project = useStore((s) => s.project);
+  const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
   const replaceProject = useStore((s) => s.replaceProject);
 
   const stem = safeFileStem(project.title);
   const isNative = studioRuntime.kind === 'native';
   const operationBusy = activeOperation !== null;
-  const rendering = activeOperation === 'wav-export';
+  const renderingMix = activeOperation === 'wav-export';
+  const renderingTrack = activeOperation === 'track-wav-export';
+  const selectedWav = selectedTrackWavAvailability(project, selectedTrackId);
 
   const exportMidi = async () => {
     const operation = 'midi-export' satisfies ExportOperation;
@@ -131,6 +142,29 @@ export function ExportMenuContent({
       if (result.status === 'cancelled') return;
       publishAppEvent({ type: 'export.wav', payload: { format: 'wav' } });
       pushToast('WAVファイルを書き出しました。', 'success');
+    } catch (error) {
+      pushToast(wavExportFailureMessage(error), 'error');
+    } finally {
+      finishOperation(operation);
+    }
+  };
+
+  const exportSelectedTrackWav = async () => {
+    if (!selectedWav.enabled || !selectedWav.track) return;
+    const operation = 'track-wav-export' satisfies ExportOperation;
+    if (!beginOperation(operation)) return;
+    try {
+      const rendered = await renderSelectedTrackToWav(project, selectedWav.track.id);
+      const fileName = selectedTrackWavFileName(project.title, selectedWav.track.name);
+      const result = await saveWavRenderLease(rendered, fileName, {
+        runtime: isNative ? 'native' : 'web',
+        exportNative: (bytes, suggestedFileName) =>
+          nativeFileGateway.exportWav(bytes, suggestedFileName),
+        downloadWeb: downloadBlobAndWaitForHandoff,
+      });
+      if (result.status === 'cancelled') return;
+      publishAppEvent({ type: 'export.wav', payload: { format: 'wav' } });
+      pushToast(`「${selectedWav.track.name}」をWAVファイルに書き出しました。`, 'success');
     } catch (error) {
       pushToast(wavExportFailureMessage(error), 'error');
     } finally {
@@ -245,11 +279,25 @@ export function ExportMenuContent({
                   onClick={() => void exportWav()}
                   disabled={operationBusy}
                 >
-                  {rendering ? '書き出し中…' : 'WAVエクスポート'}
+                  {renderingMix ? '書き出し中…' : 'WAVエクスポート'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportSelectedTrackWav()}
+                  disabled={operationBusy || !selectedWav.enabled}
+                  title={selectedWav.reason ?? undefined}
+                >
+                  {renderingTrack ? '選択トラックを書き出し中…' : '選択トラックをWAV'}
                 </button>
               </div>
               <p className="export-menu__hint">
                 MIDIは他のアプリで編集でき、WAVはそのまま再生・共有できます。
+              </p>
+              <p className="export-menu__hint">
+                選択中: {selectedWav.track?.name ?? 'なし'}。楽器・ドラム・オーディオに対応します。
+                保存済みのミュート／ソロは無視し、下流Bus、センド、エフェクト、オートメーション込みで書き出します。
+                個別WAVを加算しても元のミックスを再現するものではありません。
+                {selectedWav.reason ? ` ${selectedWav.reason}` : ''}
               </p>
             </section>
 

@@ -8,6 +8,7 @@ import { Dialog } from '../common/Dialog';
 export type ExportOperation =
   | 'midi-export'
   | 'wav-export'
+  | 'track-wav-export'
   | 'project-export'
   | 'project-import';
 

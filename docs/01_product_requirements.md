@@ -150,6 +150,7 @@
 - 8小節のコード進行に対して、ドラム、ベース、メロディを作成できる
 - レッスンの開始、判定、完了、進捗保存ができる
 - MIDI/WAVを書き出せる
+- 選択した楽器・ドラム・Audio Trackを、保存済みmute/soloを無視しつつ到達可能な下流Bus、send、effects、automation、Master音量込みの単一WAVとして書き出せる。Bus/Master stem、batch、range、bit depth、MP3/M4A、加算再構成は対象外とする
 - 利用許諾のあるステレオ音源から、ローカル処理でカラオケ用WAVを作成できる
 - instrument / drum / Audio / Bus Trackの管理と音色・routing変更が、Master保護、schema v4学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
 - Audio Trackへ取り込んだ音声を非破壊編集でき、live再生とWAVが同じsource range / gain / fade / loopを使う。欠落・変更されたbinaryは別素材へ黙って置換せず、Project metadataを保持して説明する
