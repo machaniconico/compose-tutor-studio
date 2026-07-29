@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useStore } from '../../state/store';
 import type { EditorView } from '../../state/store';
 import { PianoRoll } from '../pianoRoll/PianoRoll';
@@ -41,6 +42,14 @@ export function EditorArea() {
   const chordToneHighlight = useStore((s) => s.editor.chordToneHighlight);
   const toggleScaleSnap = useStore((s) => s.toggleScaleSnap);
   const toggleChordToneHighlight = useStore((s) => s.toggleChordToneHighlight);
+  const activeTabRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView?.({
+      block: 'nearest',
+      inline: 'nearest',
+    });
+  }, [activeView]);
 
   return (
     <div className="editor-area">
@@ -52,6 +61,7 @@ export function EditorArea() {
               key={view}
               role="tab"
               id={editorTabId(view)}
+              ref={activeView === view ? activeTabRef : undefined}
               aria-controls={editorTabPanelId(view)}
               aria-selected={activeView === view}
               tabIndex={activeView === view ? 0 : -1}
