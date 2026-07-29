@@ -267,10 +267,20 @@ export function TakeCompEditor() {
   useEffect(() => {
     if (focusTakeId === null) return;
     const target = takeButtonRefs.current.get(focusTakeId);
-    if (!target) return;
+    // A project mutation immediately starts auto-save, which temporarily
+    // disables take controls. Keep the focus request queued until the target
+    // becomes interactive again instead of losing keyboard position.
+    if (!target || target.disabled) return;
     target.focus();
     setFocusTakeId(null);
-  }, [focusTakeId, folder?.takes]);
+  }, [
+    audioAssetIssues,
+    audioRecordingOperationId,
+    focusTakeId,
+    folder?.takes,
+    projectOperationBusy,
+    savePending,
+  ]);
 
   if (selectedTakeFolderId === null) {
     return (

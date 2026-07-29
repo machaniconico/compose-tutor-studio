@@ -201,7 +201,7 @@ type ElementProps = {
   'data-preview-start'?: string;
   'data-preview-end'?: string;
   'data-horizontal-scroll'?: string;
-  ref?: (node: { focus: () => void } | null) => void;
+  ref?: (node: { disabled?: boolean; focus: () => void } | null) => void;
   onClick?: (event?: { detail?: number }) => void;
   onChange?: (event: { currentTarget: { value: string } }) => void;
   onKeyDown?: (
@@ -544,7 +544,8 @@ describe('TakeCompEditor', () => {
   it('deletes only an unused take and restores focus to a deterministic neighbor', () => {
     let tree = renderEditor();
     const focus = vi.fn();
-    takeLane(tree, 'take-b').props.ref?.({ focus });
+    const focusTarget = { disabled: true, focus };
+    takeLane(tree, 'take-b').props.ref?.(focusTarget);
 
     const deleteUnused = findElement(
       tree,
@@ -560,6 +561,13 @@ describe('TakeCompEditor', () => {
       'take-c',
     );
 
+    storeMock.state.saveState.phase = 'pending';
+    tree = renderEditor();
+    flushEffects();
+    expect(focus).not.toHaveBeenCalled();
+
+    focusTarget.disabled = false;
+    storeMock.state.saveState.phase = 'idle';
     tree = renderEditor();
     flushEffects();
     expect(focus).toHaveBeenCalledOnce();
