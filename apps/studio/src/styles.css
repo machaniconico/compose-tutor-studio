@@ -2597,11 +2597,22 @@ button.pr__note:hover {
   }
 
   .transport-bar__title {
-    width: 160px;
-    min-width: 120px;
+    width: 96px;
+    min-width: 80px;
   }
 
   .transport-bar__record small {
+    display: none;
+  }
+
+  .transport-bar__loop-range {
+    min-width: 52px;
+    max-width: 52px;
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: var(--sp-1);
+  }
+
+  .transport-bar__loop-range > span {
     display: none;
   }
 

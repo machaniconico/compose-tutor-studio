@@ -83,14 +83,21 @@ test('records an exact fixed-pass cycle atomically and discards a manually stopp
   );
   await expect(completeDialog).toBeHidden({ timeout: 20_000 });
 
+  const takeEditorTab = page.getByRole('tab', {
+    name: 'テイク編集',
+    exact: true,
+  });
+  await expect(takeEditorTab).toHaveAttribute('aria-selected', 'true');
+  const takeEditor = page.locator('#editor-tabpanel-comping');
+  await expect(takeEditor).toBeVisible();
+  await expect(takeEditor.locator('[data-take-id]')).toHaveCount(2);
+  await expect(takeEditor.locator('[data-comp-segment-id]')).toHaveCount(1);
+
+  await page.getByRole('tab', { name: 'アレンジ', exact: true }).click();
   const takeFolder = page.locator('.arranger__clip.is-take-folder');
   await expect(takeFolder).toHaveCount(1);
   await expect(takeFolder).toContainText('2テイク');
   await expect(page.locator('.track-row')).toHaveCount(trackCountBefore + 1);
-  await expect(page.getByRole('tab', { name: 'テイク編集', exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
 
   await page.getByRole('button', { name: '元に戻す', exact: true }).click();
   await expect(takeFolder).toHaveCount(0);
