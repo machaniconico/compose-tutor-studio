@@ -516,6 +516,38 @@ export class TrackGraph {
     applyAudioParam(this.audibilityGate.gain, audible ? 1 : 0, when, mode);
   }
 
+  /**
+   * Gate one owned Auto Punch window without mutating persisted mix state.
+   *
+   * Web Audio automation is evaluated on the render clock, so the half-open
+   * [punchInTime, punchOutTime) interval remains sample-accurate even when the
+   * scheduler lookahead wakes late. Direct/legacy graphs have no independent
+   * audibility gate and deliberately remain unchanged.
+   */
+  schedulePunchAudibility(
+    punchInTime: number,
+    punchOutTime: number,
+    restoreAudible: boolean,
+  ): void {
+    if (
+      !Number.isFinite(punchInTime)
+      || !Number.isFinite(punchOutTime)
+      || punchInTime < 0
+      || punchOutTime <= punchInTime
+    ) {
+      throw new RangeError('Auto Punch requires a positive finite AudioContext time window.');
+    }
+    if (!this.audibilityGate) return;
+    const gain = this.audibilityGate.gain as AudioParam & {
+      setValueAtTime?: (value: number, startTime: number) => AudioParam;
+    };
+    if (typeof gain.setValueAtTime !== 'function') {
+      throw new Error('Auto Punch requires sample-accurate audibility automation.');
+    }
+    gain.setValueAtTime(0, punchInTime);
+    gain.setValueAtTime(restoreAudible ? 1 : 0, punchOutTime);
+  }
+
   /** Append one sample-accurate volume or pan automation command. */
   scheduleAutomation(
     target: AutomationTarget['type'],

@@ -65,6 +65,9 @@ test('keeps the primary editor usable at the Tauri minimum window size', async (
   const loopRangeEditor = page.getByRole('button', { name: /ループ範囲を編集/ });
   await expect(loopRangeEditor).toBeVisible();
   await expect(loopRangeEditor).toBeInViewport();
+  const punchRangeEditor = page.getByRole('button', { name: /パンチ範囲を編集/ });
+  await expect(punchRangeEditor).toBeVisible();
+  await expect(punchRangeEditor).toBeInViewport();
   const expand = mixer.getByRole('button', { name: 'ミキサーを開く', exact: true });
   await expect(expand).toBeFocused();
   await expect(expand).toHaveAttribute('aria-expanded', 'false');

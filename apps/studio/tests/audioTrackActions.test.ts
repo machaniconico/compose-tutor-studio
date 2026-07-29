@@ -1,5 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project, ReadyAudioAsset } from '@cts/project-model';
+import {
+  appendAudioTrackClip,
+  compileMusicalTime,
+  createRecordedAudioTakeFolder,
+  inspectAudioPunchTarget,
+  type Project,
+  type ReadyAudioAsset,
+} from '@cts/project-model';
 import {
   AudioAssetRepositoryError,
   MemoryAudioAssetRepository,
@@ -21,6 +28,7 @@ import {
   MICROPHONE_CAPTURE_RESERVATION_BYTES,
   type MicrophonePcmCapture,
 } from '../src/audio/microphoneCapture';
+import { planPunchRecording } from '../src/audio/punchRecording';
 import { installLocalStorage } from './localStorageStub';
 
 let useStore: typeof import('../src/state/store')['useStore'];
@@ -119,6 +127,131 @@ function beginRecordingHandle() {
   expect(result.ok).toBe(true);
   if (!result.ok) throw new Error(result.code);
   return result.handle;
+}
+
+function punchFixtureAsset(
+  suffix: string,
+  frameCount = 96_000,
+): ReadyAudioAsset {
+  return {
+    id: `asset-action-punch-${suffix}`,
+    availability: 'ready',
+    checksumSha256: 'd'.repeat(64),
+    originalName: `${suffix}.wav`,
+    mediaType: 'audio/wav',
+    byteLength: frameCount * 2 + 44,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount,
+  };
+}
+
+function canonicalPunchResult(frameCount = 48_000): CanonicalAudioAssetResult {
+  return {
+    ...canonicalResult(),
+    frameCount,
+  };
+}
+
+function configurePunch(
+  trackId: string,
+  punchInBeat: number,
+  punchOutBeat: number,
+  preRollBeats = 1,
+  postRollBeats = 1,
+): void {
+  expect(useStore.getState().setPunchRoll(preRollBeats, postRollBeats)).toBe(true);
+  expect(useStore.getState().setPunchRange(punchInBeat, punchOutBeat)).toBe(true);
+  if (useStore.getState().armedAudioTrackId !== trackId) {
+    expect(useStore.getState().setAudioTrackArmed(trackId)).toBe(true);
+  }
+  expect(useStore.getState().armedAudioTrackId).toBe(trackId);
+}
+
+async function beginBoundPunchSession(
+  manualAdjustmentMs = 0,
+  markPostrollComplete = true,
+  stopPlayback = true,
+) {
+  const { result: imported } = await importFixture();
+  expect(useStore.getState().setRecordingLatencyCompensationMode('off')).toBe(true);
+  expect(useStore.getState().setRecordingLatencyAdjustmentMs(manualAdjustmentMs)).toBe(true);
+  configurePunch(imported.trackId, 1, 3);
+  const snapshot = useStore.getState().project;
+  const ownership = actions.beginStudioAudioTrackRecording({
+    target: { kind: 'existing-audio-track', trackId: imported.trackId },
+  });
+  if (!ownership.ok || ownership.punch === null) {
+    throw new Error(ownership.ok ? 'punch ownership missing' : ownership.code);
+  }
+  const context = {
+    sampleRate: 48_000,
+    baseLatency: 0,
+    outputLatency: 0,
+  } as AudioContext;
+  const prepared = actions.prepareStudioAudioTrackPunchCapture(
+    ownership.handle,
+    {
+      context,
+      contextGeneration: 7,
+      inputLatencySeconds: null,
+    },
+  );
+  if (!prepared.ok) throw new Error(prepared.code);
+  const requestId = useStore.getState().startAudioRecordingPlayback(
+    ownership.handle.operationId,
+    ownership.startBeat,
+    undefined,
+    ownership.punch,
+  );
+  if (requestId === null) throw new Error('punch playback request missing');
+  useStore.getState().confirmPlaybackStarted(requestId);
+  const captureStartContextFrame = 120_000;
+  const punchEndContextFrame = 168_000;
+  const clock = {
+    context,
+    contextGeneration: 7,
+    sampleRate: 48_000,
+    anchorContextFrame: 96_000,
+    anchorBeat: 0,
+    tempo: {},
+    requestId,
+    projectSnapshot: snapshot,
+    punch: ownership.punch,
+    captureStartContextFrame,
+    punchEndContextFrame,
+  } as unknown as Parameters<
+    typeof actions.bindStudioAudioTrackRecordingToPlayback
+  >[1];
+  expect(
+    actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, clock),
+  ).toBe(true);
+  if (markPostrollComplete) {
+    expect(actions.markStudioAudioTrackPunchPostrollComplete(
+      ownership.handle,
+      requestId,
+    )).toBe(true);
+  }
+  if (stopPlayback) useStore.getState().stop();
+  const capture: MicrophonePcmCapture = {
+    ...microphoneCaptureShape(prepared.effectiveCaptureFrameCount),
+    stopReason: 'duration-limit',
+    contextGeneration: 7,
+    firstContextFrame: captureStartContextFrame,
+    endContextFrameExclusive:
+      captureStartContextFrame + prepared.effectiveCaptureFrameCount,
+    inputLatencySeconds: null,
+  };
+  return {
+    imported,
+    snapshot,
+    ownership,
+    context,
+    prepared,
+    requestId,
+    captureStartContextFrame,
+    capture,
+  };
 }
 
 beforeAll(async () => {
@@ -1156,6 +1289,503 @@ describe('Studio Audio Track microphone recording', () => {
     });
     expect(useStore.getState().audioRecordingOperationId).toBeNull();
     expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('preflights empty, spanning-clip, and exact-folder punch targets before permission', async () => {
+    const { result: imported } = await importFixture();
+    configurePunch(imported.trackId, 8, 12);
+
+    for (const expected of [
+      {
+        mode: 'empty-window',
+        punchInBeat: 8,
+        punchOutBeat: 12,
+      },
+      {
+        mode: 'created-folder',
+        punchInBeat: 1,
+        punchOutBeat: 3,
+      },
+    ] as const) {
+      expect(useStore.getState().setPunchRange(
+        expected.punchInBeat,
+        expected.punchOutBeat,
+      )).toBe(true);
+      expect(inspectAudioPunchTarget(useStore.getState().project, {
+        trackId: imported.trackId,
+        punchInBeat: expected.punchInBeat,
+        punchOutBeat: expected.punchOutBeat,
+      })).toMatchObject({ ok: true, mode: expected.mode });
+      const ownership = actions.beginStudioAudioTrackRecording({
+        target: { kind: 'existing-audio-track', trackId: imported.trackId },
+      });
+      expect(ownership).toMatchObject({
+        ok: true,
+        punch: {
+          targetTrackId: imported.trackId,
+          punchInBeat: expected.punchInBeat,
+          punchOutBeat: expected.punchOutBeat,
+        },
+      });
+      if (!ownership.ok) throw new Error(ownership.code);
+      actions.discardStudioAudioTrackRecording(ownership.handle);
+    }
+
+    const folder = createRecordedAudioTakeFolder(useStore.getState().project, {
+      target: { kind: 'existing-audio-track', trackId: imported.trackId },
+      assets: [
+        punchFixtureAsset('eligibility-folder-a'),
+        punchFixtureAsset('eligibility-folder-b'),
+      ],
+      startBeat: 8,
+      lengthBeats: 4,
+      idFactory: (() => {
+        let index = 0;
+        return (kind) => `${kind}-action-punch-folder-${++index}`;
+      })(),
+    });
+    if (!folder.ok) throw new Error(folder.error.code);
+    expect(useStore.getState().applyProjectChange(() => folder.project)).toBe(true);
+    expect(useStore.getState().setPunchRange(8, 12)).toBe(true);
+    expect(inspectAudioPunchTarget(useStore.getState().project, {
+      trackId: imported.trackId,
+      punchInBeat: 8,
+      punchOutBeat: 12,
+    })).toMatchObject({
+      ok: true,
+      mode: 'appended-folder',
+      folderId: folder.folderId,
+    });
+    const ownership = actions.beginStudioAudioTrackRecording({
+      target: { kind: 'existing-audio-track', trackId: imported.trackId },
+    });
+    expect(ownership).toMatchObject({
+      ok: true,
+      startBeat: 7,
+      punch: {
+        targetTrackId: imported.trackId,
+        playbackStartBeat: 7,
+        punchInBeat: 8,
+        punchOutBeat: 12,
+        playbackEndBeat: 13,
+      },
+    });
+    if (!ownership.ok) throw new Error(ownership.code);
+    actions.discardStudioAudioTrackRecording(ownership.handle);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+  });
+
+  it.each(['missing', 'changed', 'unavailable'] as const)(
+    'rejects source asset issue %s before punch permission ownership',
+    async (issue) => {
+      const { result: imported } = await importFixture();
+      configurePunch(imported.trackId, 1, 3);
+      const before = useStore.getState();
+      useStore.setState({
+        audioAssetIssues: { [imported.audioAssetId]: issue },
+      });
+
+      expect(actions.beginStudioAudioTrackRecording({
+        target: { kind: 'existing-audio-track', trackId: imported.trackId },
+      })).toEqual({ ok: false, code: 'punch-target-ineligible' });
+      expect(useStore.getState().project).toBe(before.project);
+      expect(useStore.getState().audioRecordingOperationId).toBe(
+        before.audioRecordingOperationId,
+      );
+      expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+    },
+  );
+
+  it('rejects an unavailable take-folder asset before punch permission ownership', async () => {
+    const { result: imported } = await importFixture();
+    const folderAssetA = punchFixtureAsset('issue-folder-a');
+    const folderAssetB = punchFixtureAsset('issue-folder-b');
+    const folder = createRecordedAudioTakeFolder(useStore.getState().project, {
+      target: { kind: 'existing-audio-track', trackId: imported.trackId },
+      assets: [folderAssetA, folderAssetB],
+      startBeat: 8,
+      lengthBeats: 4,
+      idFactory: (() => {
+        let index = 0;
+        return (kind) => `${kind}-action-punch-issue-folder-${++index}`;
+      })(),
+    });
+    if (!folder.ok) throw new Error(folder.error.code);
+    expect(useStore.getState().applyProjectChange(() => folder.project)).toBe(true);
+    configurePunch(imported.trackId, 8, 12);
+    const before = useStore.getState();
+    useStore.setState({
+      audioAssetIssues: { [folderAssetB.id]: 'unavailable' },
+    });
+
+    expect(actions.beginStudioAudioTrackRecording({
+      target: { kind: 'existing-audio-track', trackId: imported.trackId },
+    })).toEqual({ ok: false, code: 'punch-target-ineligible' });
+    expect(useStore.getState().project).toBe(before.project);
+    expect(useStore.getState().audioRecordingOperationId).toBe(
+      before.audioRecordingOperationId,
+    );
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('rejects ambiguous overlapping Audio Clips before reserving microphone ownership', async () => {
+    const { result: imported } = await importFixture();
+    const appended = appendAudioTrackClip(
+      useStore.getState().project,
+      imported.trackId,
+      punchFixtureAsset('ambiguous-overlap'),
+      {
+        startBeat: 0,
+        sourceFrameCount: 96_000,
+        idFactory: () => 'clip-action-punch-ambiguous',
+      },
+    );
+    if (!appended.ok) throw new Error(appended.error.code);
+    expect(useStore.getState().applyProjectChange(() => appended.project)).toBe(true);
+    configurePunch(imported.trackId, 1, 3);
+    const before = useStore.getState();
+
+    expect(actions.beginStudioAudioTrackRecording({
+      target: { kind: 'existing-audio-track', trackId: imported.trackId },
+    })).toEqual({ ok: false, code: 'punch-target-ineligible' });
+    expect(useStore.getState().project).toBe(before.project);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('freezes punch locators and latency, plans exact frames, and binds only the exact capture arm', async () => {
+    const { result: imported } = await importFixture();
+    expect(useStore.getState().setRecordingLatencyCompensationMode('off')).toBe(true);
+    expect(useStore.getState().setRecordingLatencyAdjustmentMs(20)).toBe(true);
+    configurePunch(imported.trackId, 1, 3);
+    const snapshot = useStore.getState().project;
+    const requestedTarget: {
+      kind: 'existing-audio-track';
+      trackId: string;
+    } = { kind: 'existing-audio-track', trackId: imported.trackId };
+    const ownership = actions.beginStudioAudioTrackRecording({
+      target: requestedTarget,
+    });
+    if (!ownership.ok || ownership.punch === null) {
+      throw new Error(ownership.ok ? 'punch ownership missing' : ownership.code);
+    }
+    requestedTarget.trackId = 'mutated-after-punch-permission';
+    expect(Object.isFrozen(ownership.punch)).toBe(true);
+    expect(ownership).toMatchObject({
+      startBeat: 0,
+      punch: {
+        targetTrackId: imported.trackId,
+        playbackStartBeat: 0,
+        punchInBeat: 1,
+        punchOutBeat: 3,
+        playbackEndBeat: 4,
+      },
+    });
+    expect(useStore.getState().setPunchRange(2, 4)).toBe(false);
+    expect(useStore.getState().setRecordingLatencyAdjustmentMs(0)).toBe(false);
+
+    const context = {
+      sampleRate: 48_000,
+      baseLatency: 0,
+      outputLatency: 0,
+    } as AudioContext;
+    expect(actions.prepareStudioAudioTrackPunchCapture(ownership.handle, {
+      context,
+      contextGeneration: 7,
+      inputLatencySeconds: null,
+    })).toEqual({
+      ok: true,
+      punch: ownership.punch,
+      effectiveCaptureFrameCount: 48_960,
+      durationSeconds: 1.02,
+    });
+    const requestId = useStore.getState().startAudioRecordingPlayback(
+      ownership.handle.operationId,
+      ownership.startBeat,
+      undefined,
+      ownership.punch,
+    );
+    if (requestId === null) throw new Error('punch playback request missing');
+    useStore.getState().confirmPlaybackStarted(requestId);
+    const clock = {
+      context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: 0,
+      tempo: {},
+      requestId,
+      projectSnapshot: snapshot,
+      punch: ownership.punch,
+      captureStartContextFrame: 120_000,
+      punchEndContextFrame: 168_000,
+    } as unknown as Parameters<
+      typeof actions.bindStudioAudioTrackRecordingToPlayback
+    >[1];
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(
+      ownership.handle,
+      { ...clock, captureStartContextFrame: 120_001 },
+    )).toBe(false);
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(
+      ownership.handle,
+      { ...clock, punchEndContextFrame: 168_001 },
+    )).toBe(false);
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(
+      ownership.handle,
+      clock,
+    )).toBe(true);
+    expect(actions.markStudioAudioTrackPunchPostrollComplete(
+      ownership.handle,
+      requestId + 1,
+    )).toBe(false);
+    expect(actions.markStudioAudioTrackPunchPostrollComplete(
+      ownership.handle,
+      requestId,
+    )).toBe(true);
+    expect(actions.markStudioAudioTrackPunchPostrollComplete(
+      ownership.handle,
+      requestId,
+    )).toBe(false);
+    useStore.getState().stop();
+    actions.discardStudioAudioTrackRecording(ownership.handle);
+  });
+
+  it('rejects an exact punch capture without natural post-roll proof', async () => {
+    const session = await beginBoundPunchSession(0, false);
+    const createAudioBuffer = vi.fn(() => audioBufferShape(48_000, 48_000));
+
+    await expect(actions.recordStudioAudioTrack({
+      recordingHandle: session.ownership.handle,
+      capture: session.capture,
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer,
+      canonicalize: async () => canonicalPunchResult(),
+    })).resolves.toEqual({
+      ok: false,
+      code: 'recording-alignment-failed',
+    });
+    expect(createAudioBuffer).not.toHaveBeenCalled();
+    expect(useStore.getState().project).toBe(session.snapshot);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+  });
+
+  it('materializes only the latency-compensated exact punch output window', () => {
+    const planned = planPunchRecording({
+      musicalTime: compileMusicalTime(useStore.getState().project),
+      playbackStartBeat: 0,
+      punchInBeat: 1,
+      punchOutBeat: 3,
+      playbackEndBeat: 4,
+      sampleRate: 48_000,
+      latencyCompensationSeconds: 0.02,
+    });
+    if (!planned.ok) throw new Error(planned.error.code);
+    const ramp = Float32Array.from(
+      { length: planned.plan.effectiveCaptureFrameCount },
+      (_, index) => index,
+    );
+    const capture: MicrophonePcmCapture = {
+      ...microphoneCaptureShape(planned.plan.effectiveCaptureFrameCount),
+      stopReason: 'duration-limit',
+      firstContextFrame: 120_000,
+      endContextFrameExclusive:
+        120_000 + planned.plan.effectiveCaptureFrameCount,
+      getChannelData: () => ramp,
+    };
+
+    const exact = actions.createPunchRecordingCapture(capture, planned.plan);
+    expect(exact).toMatchObject({
+      length: 48_000,
+      sampleRate: 48_000,
+      durationSeconds: 1,
+      firstContextFrame: 120_000,
+      endContextFrameExclusive: 168_000,
+    });
+    expect(exact.getChannelData(0)).toHaveLength(48_000);
+    expect(exact.getChannelData(0)[0]).toBe(960);
+    expect(exact.getChannelData(0).at(-1)).toBe(48_959);
+  });
+
+  it.each([
+    ['manual stop', (capture: MicrophonePcmCapture): MicrophonePcmCapture => ({
+      ...capture,
+      stopReason: 'manual',
+    })],
+    ['context generation', (capture: MicrophonePcmCapture): MicrophonePcmCapture => ({
+      ...capture,
+      contextGeneration: capture.contextGeneration + 1,
+    })],
+    ['first context frame', (capture: MicrophonePcmCapture): MicrophonePcmCapture => ({
+      ...capture,
+      firstContextFrame: capture.firstContextFrame + 1,
+      endContextFrameExclusive: capture.endContextFrameExclusive + 1,
+    })],
+    ['capture duration', (capture: MicrophonePcmCapture): MicrophonePcmCapture => ({
+      ...capture,
+      length: capture.length - 1,
+      durationSeconds: (capture.length - 1) / capture.sampleRate,
+      endContextFrameExclusive: capture.endContextFrameExclusive - 1,
+    })],
+    ['exclusive end frame', (capture: MicrophonePcmCapture): MicrophonePcmCapture => ({
+      ...capture,
+      endContextFrameExclusive: capture.endContextFrameExclusive + 1,
+    })],
+    ['input latency', (capture: MicrophonePcmCapture): MicrophonePcmCapture => ({
+      ...capture,
+      inputLatencySeconds: 0.01,
+    })],
+  ] as const)(
+    'rejects punch capture tampering: %s',
+    async (_label, tamper) => {
+      const session = await beginBoundPunchSession();
+      const createAudioBuffer = vi.fn(() => audioBufferShape(48_000, 48_000));
+      await expect(actions.recordStudioAudioTrack({
+        recordingHandle: session.ownership.handle,
+        capture: tamper(session.capture),
+      }, {
+        repository: new MemoryAudioAssetRepository(),
+        createAudioBuffer,
+        canonicalize: async () => canonicalPunchResult(),
+      })).resolves.toEqual({
+        ok: false,
+        code: 'recording-alignment-failed',
+      });
+      expect(createAudioBuffer).not.toHaveBeenCalled();
+      expect(useStore.getState().project).toBe(session.snapshot);
+      expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    },
+  );
+
+  it.each([47_998, 48_002])(
+    'rejects canonical punch frame mismatch before asset storage: %i frames',
+    async (canonicalFrameCount) => {
+      const session = await beginBoundPunchSession();
+      const store = vi.fn(async () => {
+        throw new Error('mismatched canonical audio must not be stored');
+      });
+      const repository: AudioAssetRepository = {
+        kind: 'memory',
+        store,
+        read: async () => { throw new AudioAssetRepositoryError('missing'); },
+        verify: async () => { throw new AudioAssetRepositoryError('missing'); },
+      };
+      const createAudioBuffer = vi.fn(
+        () => audioBufferShape(48_000, 48_000),
+      );
+
+      await expect(actions.recordStudioAudioTrack({
+        recordingHandle: session.ownership.handle,
+        capture: session.capture,
+      }, {
+        repository,
+        createAudioBuffer,
+        canonicalize: async () => canonicalPunchResult(canonicalFrameCount),
+      })).resolves.toEqual({
+        ok: false,
+        code: 'canonicalize-failed',
+      });
+      expect(createAudioBuffer).toHaveBeenCalledTimes(1);
+      expect(store).not.toHaveBeenCalled();
+      expect(useStore.getState().project).toBe(session.snapshot);
+      expect(useStore.getState().audioRecordingOperationId).toBeNull();
+    },
+  );
+
+  it('stores punch bytes before strict CAS and adopts one selected take in one Undo step', async () => {
+    const session = await beginBoundPunchSession();
+    const before = useStore.getState();
+    const repository = new MemoryAudioAssetRepository();
+    const events: string[] = [];
+    const orderedRepository: AudioAssetRepository = {
+      kind: 'memory',
+      store: async (request) => {
+        events.push('asset-store');
+        return repository.store(request);
+      },
+      read: (reference) => repository.read(reference),
+      verify: (reference) => repository.verify(reference),
+    };
+    const originalApply = before.applyVerifiedPunchRecordingAddition;
+    const applyVerifiedPunchRecordingAddition = vi.fn(
+      (addition: Parameters<typeof originalApply>[0]) => {
+        events.push('strict-cas');
+        return originalApply(addition);
+      },
+    );
+    useStore.setState({ applyVerifiedPunchRecordingAddition });
+    let result: Awaited<ReturnType<typeof actions.recordStudioAudioTrack>>;
+    try {
+      result = await actions.recordStudioAudioTrack({
+        recordingHandle: session.ownership.handle,
+        capture: session.capture,
+        fileName: 'Auto Punch.wav',
+      }, {
+        repository: orderedRepository,
+        createAudioBuffer: (capture) => {
+          expect(capture).toMatchObject({
+            length: 48_000,
+            durationSeconds: 1,
+            firstContextFrame: session.captureStartContextFrame,
+          });
+          return audioBufferShape(capture.length, capture.sampleRate);
+        },
+        canonicalize: async () => canonicalPunchResult(),
+        createAssetId: () => 'asset-action-punch-adopted',
+      });
+    } finally {
+      useStore.setState({
+        applyVerifiedPunchRecordingAddition: originalApply,
+      });
+    }
+
+    expect(events).toEqual(['asset-store', 'strict-cas']);
+    expect(applyVerifiedPunchRecordingAddition).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      trackId: session.imported.trackId,
+      audioAssetIds: ['asset-action-punch-adopted'],
+      takeCount: 2,
+    });
+    if (!result.ok || !('folderId' in result)) {
+      throw new Error(result.ok ? 'punch folder missing' : result.code);
+    }
+    const adopted = useStore.getState();
+    const folder = adopted.project.audioTakeFolders.find(
+      (candidate) => candidate.id === result.folderId,
+    );
+    if (!folder) throw new Error('adopted punch folder missing');
+    expect(folder).toMatchObject({
+      trackId: session.imported.trackId,
+      startBeat: 1,
+      lengthBeats: 2,
+    });
+    expect(folder.takes.at(-1)?.audioAssetId).toBe(
+      'asset-action-punch-adopted',
+    );
+    expect(folder.compSegments).toEqual([
+      expect.objectContaining({ takeId: folder.takes.at(-1)?.id }),
+    ]);
+    expect(adopted.editor).toMatchObject({
+      activeView: 'comping',
+      selectedTrackId: session.imported.trackId,
+      selectedTakeFolderId: result.folderId,
+      selectedClipId: null,
+    });
+    expect(adopted.past).toHaveLength(before.past.length + 1);
+    expect(adopted.saveState.revision).toBe(before.saveState.revision + 1);
+    expect(adopted.audioRecordingOperationId).toBeNull();
+    const asset = adopted.project.audioAssets.find(
+      (candidate) => candidate.id === 'asset-action-punch-adopted',
+    );
+    if (asset?.availability !== 'ready') throw new Error('punch asset missing');
+    await expect(repository.read(asset)).resolves.toEqual(bytes);
+
+    adopted.undo();
+    expect({
+      ...useStore.getState().project,
+      updatedAt: session.snapshot.updatedAt,
+    }).toEqual(session.snapshot);
   });
 
   it('adopts an exact fixed-pass cycle as one take folder and one Undo step', async () => {

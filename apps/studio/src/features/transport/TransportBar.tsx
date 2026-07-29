@@ -39,6 +39,8 @@ const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'blues', label: 'ブルース' },
 ];
 
+export const MAX_PUNCH_ROLL_BEATS = 16;
+
 type TransportBarProps = {
   /** Re-open the first-launch onboarding / guided entry point. */
   onOpenGuide: () => void;
@@ -111,6 +113,90 @@ export function validateLoopRangeDraft(
     return { ok: false, error: 'ループ範囲が短すぎます。' };
   }
   return { ok: true, startBeat, endBeat };
+}
+
+export type PunchRangeDraftValidation =
+  | Readonly<{
+    ok: true;
+    punchInBeat: number;
+    punchOutBeat: number;
+    preRollBeats: number;
+    postRollBeats: number;
+  }>
+  | Readonly<{ ok: false; error: string }>;
+
+/** Validate all Auto Punch fields before either runtime locator mutation runs. */
+export function validatePunchRangeDraft(
+  punchInValue: string,
+  punchOutValue: string,
+  preRollValue: string,
+  postRollValue: string,
+  projectLength: number,
+): PunchRangeDraftValidation {
+  if (punchInValue.trim() === '' || punchOutValue.trim() === '') {
+    return { ok: false, error: 'パンチイン拍とパンチアウト拍を入力してください。' };
+  }
+  const punchInBeat = Number(punchInValue);
+  const punchOutBeat = Number(punchOutValue);
+  if (!Number.isFinite(punchInBeat) || !Number.isFinite(punchOutBeat)) {
+    return { ok: false, error: 'パンチ位置は数値で入力してください。' };
+  }
+  if (
+    !Number.isFinite(projectLength)
+    || projectLength <= 0
+    || punchInBeat < 0
+    || punchInBeat > projectLength
+    || punchOutBeat < 0
+    || punchOutBeat > projectLength
+  ) {
+    return {
+      ok: false,
+      error: `パンチ範囲は0〜${projectLength}拍の中で指定してください。`,
+    };
+  }
+  if (punchOutBeat <= punchInBeat) {
+    return { ok: false, error: 'パンチアウト拍はパンチイン拍より後にしてください。' };
+  }
+  if (punchOutBeat - punchInBeat < MIN_EVENT_DURATION_BEATS) {
+    return { ok: false, error: 'パンチ範囲が短すぎます。' };
+  }
+  if (preRollValue.trim() === '' || postRollValue.trim() === '') {
+    return { ok: false, error: 'プリロールとポストロールを入力してください。' };
+  }
+  const preRollBeats = Number(preRollValue);
+  const postRollBeats = Number(postRollValue);
+  if (
+    !Number.isSafeInteger(preRollBeats)
+    || !Number.isSafeInteger(postRollBeats)
+    || preRollBeats < 0
+    || preRollBeats > MAX_PUNCH_ROLL_BEATS
+    || postRollBeats < 0
+    || postRollBeats > MAX_PUNCH_ROLL_BEATS
+  ) {
+    return {
+      ok: false,
+      error: `プリロールとポストロールは0〜${MAX_PUNCH_ROLL_BEATS}の整数拍で指定してください。`,
+    };
+  }
+  return {
+    ok: true,
+    punchInBeat,
+    punchOutBeat,
+    preRollBeats: preRollBeats === 0 ? 0 : preRollBeats,
+    postRollBeats: postRollBeats === 0 ? 0 : postRollBeats,
+  };
+}
+
+export function isPunchEditingLocked(
+  phase: TransportState['phase'],
+  projectOperationBusy: boolean,
+  audioRecordingOperationId: number | null,
+): boolean {
+  return (
+    phase !== 'stopped'
+    || projectOperationBusy
+    || audioRecordingOperationId !== null
+  );
 }
 
 function editableLoopRange(
@@ -265,6 +351,253 @@ export function LoopRangeDialog(props: LoopRangeEditorProps) {
   );
 }
 
+type PunchRangeControlProps = {
+  enabled: boolean;
+  expanded: boolean;
+  disabled: boolean;
+  summary: string;
+  preRollBeats: number;
+  postRollBeats: number;
+  onToggle: () => void;
+  onEdit: () => void;
+};
+
+/** Compact Auto Punch toggle plus a mapped musical-position summary. */
+export function PunchRangeControl({
+  enabled,
+  expanded,
+  disabled,
+  summary,
+  preRollBeats,
+  postRollBeats,
+  onToggle,
+  onEdit,
+}: PunchRangeControlProps) {
+  return (
+    <div
+      className="transport-bar__loop-control transport-bar__punch-control"
+      role="group"
+      aria-label="オートパンチ録音"
+    >
+      <button
+        type="button"
+        className={enabled
+          ? 'is-active transport-bar__loop-toggle transport-bar__punch-toggle'
+          : 'transport-bar__loop-toggle transport-bar__punch-toggle'}
+        aria-pressed={enabled}
+        disabled={disabled}
+        onClick={onToggle}
+      >
+        パンチ
+      </button>
+      <button
+        type="button"
+        className="transport-bar__loop-range transport-bar__punch-range"
+        aria-haspopup="dialog"
+        aria-expanded={expanded}
+        aria-label={`パンチ範囲を編集。現在 ${summary}。プリロール${preRollBeats}拍、ポストロール${postRollBeats}拍`}
+        disabled={disabled}
+        onClick={onEdit}
+      >
+        <span>範囲</span>
+        <output>{summary}</output>
+      </button>
+    </div>
+  );
+}
+
+type PunchRangeEditorProps = {
+  projectLength: number;
+  punchInValue: string;
+  punchOutValue: string;
+  preRollValue: string;
+  postRollValue: string;
+  error: string | null;
+  disabled?: boolean;
+  onPunchInValueChange: (value: string) => void;
+  onPunchOutValueChange: (value: string) => void;
+  onPreRollValueChange: (value: string) => void;
+  onPostRollValueChange: (value: string) => void;
+  onSave: () => void;
+  onClose: () => void;
+};
+
+export function PunchRangeEditor({
+  projectLength,
+  punchInValue,
+  punchOutValue,
+  preRollValue,
+  postRollValue,
+  error,
+  disabled = false,
+  onPunchInValueChange,
+  onPunchOutValueChange,
+  onPreRollValueChange,
+  onPostRollValueChange,
+  onSave,
+  onClose,
+}: PunchRangeEditorProps) {
+  const describedBy = error
+    ? 'punch-range-help punch-range-error'
+    : 'punch-range-help';
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (!disabled) onSave();
+  };
+
+  return (
+    <form
+      className="loop-range-editor punch-range-editor"
+      onSubmit={submit}
+    >
+      <p
+        id="punch-range-help"
+        className="loop-range-editor__help punch-range-editor__help"
+      >
+        指定範囲だけを録音し、前後は再生します（全長 {projectLength}拍）。
+        プリロールとポストロールは0〜{MAX_PUNCH_ROLL_BEATS}の整数拍です。
+      </p>
+      <div className="loop-range-editor__fields punch-range-editor__fields">
+        <label htmlFor="punch-range-in">
+          パンチイン拍
+          <input
+            id="punch-range-in"
+            type="number"
+            min={0}
+            max={projectLength}
+            step={MIN_EVENT_DURATION_BEATS}
+            value={punchInValue}
+            aria-describedby={describedBy}
+            aria-invalid={error !== null}
+            disabled={disabled}
+            data-modal-initial-focus
+            onChange={(event) => onPunchInValueChange(event.target.value)}
+          />
+        </label>
+        <label htmlFor="punch-range-out">
+          パンチアウト拍
+          <input
+            id="punch-range-out"
+            type="number"
+            min={0}
+            max={projectLength}
+            step={MIN_EVENT_DURATION_BEATS}
+            value={punchOutValue}
+            aria-describedby={describedBy}
+            aria-invalid={error !== null}
+            disabled={disabled}
+            onChange={(event) => onPunchOutValueChange(event.target.value)}
+          />
+        </label>
+        <label htmlFor="punch-range-pre-roll">
+          プリロール（拍）
+          <input
+            id="punch-range-pre-roll"
+            type="number"
+            min={0}
+            max={MAX_PUNCH_ROLL_BEATS}
+            step={1}
+            value={preRollValue}
+            aria-describedby={describedBy}
+            aria-invalid={error !== null}
+            disabled={disabled}
+            onChange={(event) => onPreRollValueChange(event.target.value)}
+          />
+        </label>
+        <label htmlFor="punch-range-post-roll">
+          ポストロール（拍）
+          <input
+            id="punch-range-post-roll"
+            type="number"
+            min={0}
+            max={MAX_PUNCH_ROLL_BEATS}
+            step={1}
+            value={postRollValue}
+            aria-describedby={describedBy}
+            aria-invalid={error !== null}
+            disabled={disabled}
+            onChange={(event) => onPostRollValueChange(event.target.value)}
+          />
+        </label>
+      </div>
+      {error ? (
+        <p
+          id="punch-range-error"
+          className="loop-range-editor__error punch-range-editor__error"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
+      <div className="loop-range-editor__actions punch-range-editor__actions">
+        <button type="button" onClick={onClose}>
+          キャンセル
+        </button>
+        <button
+          type="submit"
+          className="loop-range-editor__save punch-range-editor__save"
+          disabled={disabled}
+        >
+          パンチ範囲を設定
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function PunchRangeDialog(props: PunchRangeEditorProps) {
+  return (
+    <Dialog
+      title="オートパンチ範囲"
+      className="dialog--loop-range dialog--punch-range"
+      onClose={props.onClose}
+    >
+      <PunchRangeEditor {...props} />
+    </Dialog>
+  );
+}
+
+type RecordingOpenControlProps = {
+  armedTrackName: string | null;
+  punchEnabled: boolean;
+  disabled: boolean;
+  onOpen: () => void;
+};
+
+/** Recording target is always textual so Punch readiness never depends on color. */
+export function RecordingOpenControl({
+  armedTrackName,
+  punchEnabled,
+  disabled,
+  onOpen,
+}: RecordingOpenControlProps) {
+  const normalizedTrackName = armedTrackName?.trim() || null;
+  const punchNeedsArmedTrack = punchEnabled && normalizedTrackName === null;
+  const recordingTargetLabel = normalizedTrackName
+    ? `録音先: ${normalizedTrackName}`
+    : punchNeedsArmedTrack
+      ? '録音先: 既存のオーディオトラックをRで録音待機してください'
+      : '録音先: 新しいオーディオトラック';
+
+  return (
+    <button
+      type="button"
+      className="transport-bar__record"
+      aria-haspopup="dialog"
+      aria-label={`録音を開く。${recordingTargetLabel}`}
+      title={recordingTargetLabel}
+      disabled={disabled}
+      onClick={onOpen}
+    >
+      <span aria-hidden="true" />
+      録音
+      <small>
+        {normalizedTrackName ?? (punchNeedsArmedTrack ? 'R待機が必要' : '新規Track')}
+      </small>
+    </button>
+  );
+}
+
 /** Render the async playback lifecycle independently from the rest of the bar. */
 export function PlaybackLifecycleControl({
   transport,
@@ -335,6 +668,9 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const stop = useStore((s) => s.stop);
   const setLoopRange = useStore((s) => s.setLoopRange);
   const toggleLoop = useStore((s) => s.toggleLoop);
+  const setPunchRange = useStore((s) => s.setPunchRange);
+  const setPunchRoll = useStore((s) => s.setPunchRoll);
+  const togglePunch = useStore((s) => s.togglePunch);
   const toggleMetronome = useStore((s) => s.toggleMetronome);
   const setBpm = useStore((s) => s.setBpm);
   const setKey = useStore((s) => s.setKey);
@@ -357,7 +693,19 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
     endValue: string;
   } | null>(null);
   const [loopRangeError, setLoopRangeError] = useState<string | null>(null);
+  const [punchRangeDraft, setPunchRangeDraft] = useState<{
+    punchInValue: string;
+    punchOutValue: string;
+    preRollValue: string;
+    postRollValue: string;
+  } | null>(null);
+  const [punchRangeError, setPunchRangeError] = useState<string | null>(null);
   const recordingControlsLocked = audioRecordingOperationId !== null;
+  const punchControlsLocked = isPunchEditingLocked(
+    transport.phase,
+    projectOperationBusy,
+    audioRecordingOperationId,
+  );
 
   // Connect the store to the audio engine once. The bridge confirms the
   // asynchronous starting -> playing transition; this component only sends
@@ -375,9 +723,6 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const armedAudioTrack = project.tracks.find(
     (track) => track.id === armedAudioTrackId && track.type === 'audio',
   );
-  const recordingTargetLabel = armedAudioTrack
-    ? `録音先: ${armedAudioTrack.name}`
-    : '録音先: 新しいオーディオトラック';
   const currentLoopRange = editableLoopRange(
     transport.loopStartBeat,
     transport.loopEndBeat,
@@ -388,7 +733,19 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
     currentLoopRange.startBeat,
     currentLoopRange.endBeat,
   );
+  const currentPunchRange = editableLoopRange(
+    transport.punchInBeat,
+    transport.punchOutBeat,
+    project.lengthBeats,
+  );
+  const punchRangeSummary = formatLoopRangeSummary(
+    musicalTime,
+    currentPunchRange.startBeat,
+    currentPunchRange.endBeat,
+  );
   const openLoopRangeEditor = (): void => {
+    setPunchRangeDraft(null);
+    setPunchRangeError(null);
     setLoopRangeError(null);
     setLoopRangeDraft({
       startValue: String(currentLoopRange.startBeat),
@@ -419,6 +776,53 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
       return;
     }
     closeLoopRangeEditor();
+  };
+  const openPunchRangeEditor = (): void => {
+    if (punchControlsLocked) return;
+    setLoopRangeDraft(null);
+    setLoopRangeError(null);
+    setPunchRangeError(null);
+    setPunchRangeDraft({
+      punchInValue: String(currentPunchRange.startBeat),
+      punchOutValue: String(currentPunchRange.endBeat),
+      preRollValue: String(transport.punchPreRollBeats),
+      postRollValue: String(transport.punchPostRollBeats),
+    });
+  };
+  const closePunchRangeEditor = (): void => {
+    setPunchRangeDraft(null);
+    setPunchRangeError(null);
+  };
+  const savePunchRange = (): void => {
+    if (!punchRangeDraft) return;
+    if (punchControlsLocked) {
+      setPunchRangeError(
+        '再生中、プロジェクト処理中、または録音中はパンチ設定を変更できません。',
+      );
+      return;
+    }
+    const result = validatePunchRangeDraft(
+      punchRangeDraft.punchInValue,
+      punchRangeDraft.punchOutValue,
+      punchRangeDraft.preRollValue,
+      punchRangeDraft.postRollValue,
+      project.lengthBeats,
+    );
+    if (!result.ok) {
+      setPunchRangeError(result.error);
+      return;
+    }
+    if (!setPunchRoll(result.preRollBeats, result.postRollBeats)) {
+      setPunchRangeError('プリロールとポストロールを設定できませんでした。');
+      return;
+    }
+    if (!setPunchRange(result.punchInBeat, result.punchOutBeat)) {
+      setPunchRangeError(
+        'パンチ範囲を設定できませんでした。再生状態と曲の長さを確認してください。',
+      );
+      return;
+    }
+    closePunchRangeEditor();
   };
   const exportEmergencyBackup = async () => {
     if (emergencyExportLock.current) return;
@@ -477,19 +881,12 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           playDisabled={recordingControlsLocked}
         />
 
-        <button
-          type="button"
-          className="transport-bar__record"
-          aria-haspopup="dialog"
-          aria-label={`録音を開く。${recordingTargetLabel}`}
-          title={recordingTargetLabel}
+        <RecordingOpenControl
+          armedTrackName={armedAudioTrack?.name ?? null}
+          punchEnabled={transport.punchEnabled}
           disabled={projectOperationBusy || audioRecordingOperationId !== null}
-          onClick={() => setRecordingOpen(true)}
-        >
-          <span aria-hidden="true" />
-          録音
-          <small>{armedAudioTrack ? armedAudioTrack.name : '新規Track'}</small>
-        </button>
+          onOpen={() => setRecordingOpen(true)}
+        />
 
         <button
           type="button"
@@ -507,6 +904,17 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           summary={loopRangeSummary}
           onToggle={toggleLoop}
           onEdit={openLoopRangeEditor}
+        />
+
+        <PunchRangeControl
+          enabled={transport.punchEnabled}
+          expanded={punchRangeDraft !== null}
+          disabled={punchControlsLocked}
+          summary={punchRangeSummary}
+          preRollBeats={transport.punchPreRollBeats}
+          postRollBeats={transport.punchPostRollBeats}
+          onToggle={togglePunch}
+          onEdit={openPunchRangeEditor}
         />
 
         <button
@@ -618,6 +1026,35 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           }}
           onSave={saveLoopRange}
           onClose={closeLoopRangeEditor}
+        />
+      ) : null}
+      {punchRangeDraft ? (
+        <PunchRangeDialog
+          projectLength={project.lengthBeats}
+          punchInValue={punchRangeDraft.punchInValue}
+          punchOutValue={punchRangeDraft.punchOutValue}
+          preRollValue={punchRangeDraft.preRollValue}
+          postRollValue={punchRangeDraft.postRollValue}
+          error={punchRangeError}
+          disabled={punchControlsLocked}
+          onPunchInValueChange={(punchInValue) => {
+            setPunchRangeError(null);
+            setPunchRangeDraft((draft) => draft ? { ...draft, punchInValue } : draft);
+          }}
+          onPunchOutValueChange={(punchOutValue) => {
+            setPunchRangeError(null);
+            setPunchRangeDraft((draft) => draft ? { ...draft, punchOutValue } : draft);
+          }}
+          onPreRollValueChange={(preRollValue) => {
+            setPunchRangeError(null);
+            setPunchRangeDraft((draft) => draft ? { ...draft, preRollValue } : draft);
+          }}
+          onPostRollValueChange={(postRollValue) => {
+            setPunchRangeError(null);
+            setPunchRangeDraft((draft) => draft ? { ...draft, postRollValue } : draft);
+          }}
+          onSave={savePunchRange}
+          onClose={closePunchRangeEditor}
         />
       ) : null}
     </>

@@ -18,11 +18,13 @@ const actionMocks = vi.hoisted(() => ({
   handle: { operationId: 41 },
   begin: vi.fn(),
   prepareCycle: vi.fn(),
+  preparePunch: vi.fn(),
   bind: vi.fn(),
   discard: vi.fn(),
   beginCalibration: vi.fn(),
   commitCalibration: vi.fn(),
   discardCalibration: vi.fn(),
+  markPostroll: vi.fn(),
   record: vi.fn(),
   pushToast: vi.fn(),
 }));
@@ -116,7 +118,9 @@ vi.mock('../src/state/audioTrackActions', () => ({
   commitStudioRecordingLatencyCalibration: actionMocks.commitCalibration,
   discardStudioAudioTrackRecording: actionMocks.discard,
   discardStudioRecordingLatencyCalibration: actionMocks.discardCalibration,
+  markStudioAudioTrackPunchPostrollComplete: actionMocks.markPostroll,
   prepareStudioAudioTrackCycleCapture: actionMocks.prepareCycle,
+  prepareStudioAudioTrackPunchCapture: actionMocks.preparePunch,
   recordStudioAudioTrack: actionMocks.record,
   studioAudioActionErrorMessage: (code: string) => `action:${code}`,
 }));
@@ -173,6 +177,7 @@ function renderDialog(
   phase: string = 'idle',
   refs: Array<{ current: unknown }> = [],
   stateOverrides: ReadonlyMap<number, unknown> = new Map(),
+  targetTrackId?: string,
 ) {
   hookState.stateIndex = 0;
   hookState.refIndex = 0;
@@ -183,6 +188,7 @@ function renderDialog(
   hookState.refs = refs;
   return AudioTrackRecordingDialog({
     trackName: 'Lead Take',
+    ...(targetTrackId === undefined ? {} : { targetTrackId }),
     onClose,
     onCreated,
   });
@@ -197,22 +203,183 @@ function button(tree: ReactNode, label: string): ReactElement<ElementProps> {
   return found;
 }
 
+const autoPunch = Object.freeze({
+  targetTrackId: 'audio-track-1',
+  playbackStartBeat: 0,
+  punchInBeat: 1,
+  punchOutBeat: 4,
+  playbackEndBeat: 5,
+});
+
+function enableAutoPunch(
+  overrides: Partial<Readonly<{
+    punchInBeat: number;
+    punchOutBeat: number;
+    punchPreRollBeats: number;
+    punchPostRollBeats: number;
+  }>> = {},
+): void {
+  useStore.setState({
+    transport: {
+      ...useStore.getState().transport,
+      phase: 'stopped',
+      isPlaying: false,
+      loopEnabled: false,
+      punchEnabled: true,
+      punchInBeat: 1,
+      punchOutBeat: 4,
+      punchPreRollBeats: 2,
+      punchPostRollBeats: 1,
+      ...overrides,
+    },
+  });
+}
+
+function punchCapture(stopReason: 'manual' | 'duration-limit' = 'duration-limit') {
+  return {
+    numberOfChannels: 1,
+    length: 72_960,
+    sampleRate: 48_000,
+    durationSeconds: 1.52,
+    stopReason,
+    contextGeneration: 7,
+    firstContextFrame: 96_000,
+    endContextFrameExclusive: 168_960,
+    inputLatencySeconds: 0.02,
+    getChannelData: () => new Float32Array(72_960),
+  } as const;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function mockAutoPunchOwnership(): void {
+  actionMocks.begin.mockReturnValue({
+    ok: true,
+    handle: actionMocks.handle,
+    startBeat: autoPunch.playbackStartBeat,
+    playbackStopped: false,
+    cycle: null,
+    punch: autoPunch,
+  });
+}
+
+type PunchPlaybackHarnessOptions = Readonly<{
+  projectSnapshot: unknown;
+  armCapture: (
+    context: unknown,
+    startFrame: number,
+    contextGeneration: number,
+  ) => Promise<void>;
+  onFinitePunchComplete?: (requestId: number) => void;
+}>;
+
+function installSynchronizedPunchSession(
+  result: Promise<ReturnType<typeof punchCapture>>,
+) {
+  const cancel = vi.fn();
+  const stop = vi.fn(async () => punchCapture('manual'));
+  let playbackOptions: PunchPlaybackHarnessOptions | null = null;
+
+  audioMocks.startPlayback.mockImplementation(async (rawOptions: unknown) => {
+    const options = rawOptions as PunchPlaybackHarnessOptions;
+    playbackOptions = options;
+    await options.armCapture(audioMocks.context, 96_000, 7);
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        phase: 'playing',
+        isPlaying: true,
+        positionBeat: autoPunch.playbackStartBeat,
+        playbackRequestId: 42,
+      },
+    });
+    return {
+      context: audioMocks.context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: autoPunch.playbackStartBeat,
+      tempo: {},
+      requestId: 42,
+      projectSnapshot: options.projectSnapshot,
+    };
+  });
+  microphoneMocks.start.mockImplementation(async (rawOptions: unknown) => {
+    const options = rawOptions as Readonly<{
+      synchronize: (input: Readonly<{
+        context: unknown;
+        contextGeneration: number;
+        sampleRate: number;
+        inputLatencySeconds: number;
+        renderQuantumSize: number;
+        earliestStartFrame: number;
+        armAtFrame: (startFrame: number, maximumFrames?: number) => Promise<void>;
+      }>) => Promise<void>;
+    }>;
+    await options.synchronize({
+      context: audioMocks.context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      inputLatencySeconds: 0.02,
+      renderQuantumSize: 128,
+      earliestStartFrame: 90_000,
+      armAtFrame: async () => undefined,
+    });
+    return {
+      startedAt: 0,
+      maxDurationSeconds: 60,
+      result,
+      elapsedSeconds: () => 0.5,
+      stop,
+      cancel,
+    };
+  });
+
+  return {
+    cancel,
+    stop,
+    getPlaybackOptions: () => playbackOptions,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   onClose.mockReset();
   onCreated.mockReset();
+  microphoneMocks.start.mockReset();
   actionMocks.begin.mockReturnValue({
     ok: true,
     handle: actionMocks.handle,
     startBeat: 4,
     playbackStopped: true,
     cycle: null,
+    punch: null,
   });
   actionMocks.prepareCycle.mockReturnValue({
     ok: true,
     cycle: { loopStartBeat: 0, loopEndBeat: 4, passCount: 3 },
     effectiveCaptureFrameCount: 288_960,
     durationSeconds: 6.02,
+  });
+  actionMocks.preparePunch.mockReturnValue({
+    ok: true,
+    punch: {
+      targetTrackId: 'audio-track-1',
+      playbackStartBeat: 0,
+      punchInBeat: 1,
+      punchOutBeat: 4,
+      playbackEndBeat: 5,
+    },
+    effectiveCaptureFrameCount: 72_960,
+    durationSeconds: 1.52,
   });
   actionMocks.record.mockResolvedValue({ ok: false, code: 'cancelled' });
   actionMocks.bind.mockReturnValue(true);
@@ -223,6 +390,7 @@ beforeEach(() => {
     playbackStopped: false,
   });
   actionMocks.commitCalibration.mockReturnValue(true);
+  actionMocks.markPostroll.mockReturnValue(true);
   microphoneMocks.startCalibration.mockReturnValue(new Promise(() => undefined));
   audioMocks.ensureContext.mockResolvedValue({
     context: audioMocks.context,
@@ -260,6 +428,11 @@ beforeEach(() => {
       loopEnabled: false,
       loopStartBeat: 0,
       loopEndBeat: 4,
+      punchEnabled: false,
+      punchInBeat: 0,
+      punchOutBeat: 4,
+      punchPreRollBeats: 4,
+      punchPostRollBeats: 4,
     },
   });
 });
@@ -398,6 +571,7 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
       startBeat: 0,
       playbackStopped: false,
       cycle: { loopStartBeat: 0, loopEndBeat: 4, passCount: 3 },
+      punch: null,
     });
     microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
 
@@ -439,6 +613,7 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
       startBeat: 0,
       playbackStopped: false,
       cycle,
+      punch: null,
     });
     actionMocks.prepareCycle.mockReturnValue({
       ok: true,
@@ -485,6 +660,172 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     }
     await playbackOptions.armCapture(audioMocks.context, 96_000, 7);
     expect(armAtFrame).toHaveBeenCalledWith(96_000, 288_960);
+  });
+
+  it('shows the armed existing-track punch range and disables ineligible targets or ranges', () => {
+    enableAutoPunch();
+    const eligible = renderDialog('idle', [], new Map(), autoPunch.targetTrackId);
+
+    expect(textContent(eligible)).toContain('既存トラック「Lead Take」');
+    expect(textContent(eligible)).toContain('オートパンチ録音');
+    expect(textContent(eligible)).toContain('1〜4拍');
+    expect(textContent(eligible)).toContain('プリロール 2拍');
+    expect(textContent(eligible)).toContain('パンチアウト後も 1拍');
+    expect(textContent(eligible)).toContain('既存素材は元テイクとして残し、新しい録音を採用します');
+    expect(button(eligible, 'オートパンチを開始').props.disabled).not.toBe(true);
+
+    const newTrack = renderDialog();
+    expect(button(newTrack, 'オートパンチを開始').props.disabled).toBe(true);
+    expect(textContent(newTrack)).toContain('既存のオーディオトラックをRで録音待機');
+
+    enableAutoPunch({ punchInBeat: 1, punchOutBeat: 1.5 });
+    const tooShort = renderDialog('idle', [], new Map(), autoPunch.targetTrackId);
+    expect(button(tooShort, 'オートパンチを開始').props.disabled).toBe(true);
+    expect(textContent(tooShort)).toContain('パンチ範囲を0.5〜60秒へ設定');
+  });
+
+  it('rejects a 60-second punch before permission when latency needs capture tail', () => {
+    const currentProject = useStore.getState().project;
+    const bpm = currentProject.lengthBeats;
+    useStore.setState({
+      project: {
+        ...currentProject,
+        bpm,
+        tempoMap: currentProject.tempoMap.map((event, index) => (
+          index === 0 ? { ...event, bpm } : event
+        )),
+      },
+      recordingLatencyCompensationMode: 'estimated',
+      recordingLatencyAdjustmentMs: 0,
+    });
+    enableAutoPunch({
+      punchInBeat: 0,
+      punchOutBeat: currentProject.lengthBeats,
+      punchPreRollBeats: 0,
+      punchPostRollBeats: 0,
+    });
+
+    const estimated = renderDialog(
+      'idle',
+      [],
+      new Map(),
+      autoPunch.targetTrackId,
+    );
+    expect(button(estimated, 'オートパンチを開始').props.disabled).toBe(true);
+    expect(textContent(estimated)).toContain(
+      '正の録音タイミング補正の末尾収録を含めて最大60秒',
+    );
+
+    useStore.setState({
+      recordingLatencyCompensationMode: 'off',
+      recordingLatencyAdjustmentMs: 0,
+    });
+    const noTail = renderDialog(
+      'idle',
+      [],
+      new Map(),
+      autoPunch.targetTrackId,
+    );
+    expect(button(noTail, 'オートパンチを開始').props.disabled).not.toBe(true);
+    useStore.setState({ project: currentProject });
+  });
+
+  it('freezes the punch proof before playback and arms the exact effective frame count', async () => {
+    enableAutoPunch();
+    actionMocks.begin.mockReturnValue({
+      ok: true,
+      handle: actionMocks.handle,
+      startBeat: autoPunch.playbackStartBeat,
+      playbackStopped: false,
+      cycle: null,
+      punch: autoPunch,
+    });
+    actionMocks.preparePunch.mockReturnValue({
+      ok: true,
+      punch: autoPunch,
+      effectiveCaptureFrameCount: 72_960,
+      durationSeconds: 1.52,
+    });
+    microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
+    const tree = renderDialog('idle', [], new Map(), autoPunch.targetTrackId);
+
+    button(tree, 'オートパンチを開始').props.onClick?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(actionMocks.begin).toHaveBeenCalledWith({
+      target: { kind: 'existing-audio-track', trackId: autoPunch.targetTrackId },
+    });
+    const captureOptions = microphoneMocks.start.mock.calls[0]?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    const synchronize = captureOptions?.synchronize;
+    if (typeof synchronize !== 'function') throw new Error('punch synchronizer missing');
+    const armAtFrame = vi.fn(async () => undefined);
+    await synchronize({
+      context: audioMocks.context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      inputLatencySeconds: 0.02,
+      renderQuantumSize: 128,
+      earliestStartFrame: 90_000,
+      armAtFrame,
+    });
+
+    expect(actionMocks.preparePunch).toHaveBeenCalledWith(actionMocks.handle, {
+      context: audioMocks.context,
+      contextGeneration: 7,
+      inputLatencySeconds: 0.02,
+    });
+    expect(audioMocks.startPlayback).toHaveBeenCalledWith(expect.objectContaining({
+      startBeat: autoPunch.playbackStartBeat,
+      punch: autoPunch,
+      onFinitePunchComplete: expect.any(Function),
+    }));
+    const playbackOptions = audioMocks.startPlayback.mock.calls[0]?.[0];
+    if (!playbackOptions || typeof playbackOptions.armCapture !== 'function') {
+      throw new Error('punch playback arm callback missing');
+    }
+    await playbackOptions.armCapture(audioMocks.context, 96_000, 7);
+    expect(armAtFrame).toHaveBeenCalledWith(96_000, 72_960);
+  });
+
+  it('announces every Auto Punch wait, capture-tail, and post-roll state in Japanese', () => {
+    enableAutoPunch();
+    const refs: Array<{ current: unknown }> = [];
+    refs[20] = { current: autoPunch };
+
+    const countdown = renderDialog(
+      'countdown',
+      refs,
+      new Map([[2, 2]]),
+      autoPunch.targetTrackId,
+    );
+    expect(textContent(countdown)).toContain('プリロール開始まで2秒');
+
+    const preparing = renderDialog('preparing', refs, new Map(), autoPunch.targetTrackId);
+    expect(textContent(preparing)).toContain('パンチイン待機中・プリロールを再生しています');
+    expect(textContent(preparing)).toContain('指定範囲 1〜4拍だけを録音します');
+
+    const recording = renderDialog(
+      'recording',
+      refs,
+      new Map([[3, 0.5]]),
+      autoPunch.targetTrackId,
+    );
+    expect(textContent(recording)).toContain('パンチ録音中・伴奏再生中');
+
+    const latencyTail = renderDialog(
+      'recording',
+      refs,
+      new Map([[3, 1.6]]),
+      autoPunch.targetTrackId,
+    );
+    expect(textContent(latencyTail)).toContain('パンチアウト済み・入力遅延の末尾を収録中');
+
+    const postroll = renderDialog('postroll', refs, new Map(), autoPunch.targetTrackId);
+    expect(textContent(postroll)).toContain('ポストロール再生中・録音範囲は完了しました');
+    expect(textContent(postroll)).toContain('完了後に新しいテイクとして保存します');
   });
 
   it('labels automatic latency as an estimate and explains manual direction', () => {
@@ -919,6 +1260,183 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
+  it('atomically discards Auto Punch when the user manually stops it', async () => {
+    enableAutoPunch();
+    mockAutoPunchOwnership();
+    const capture = deferred<ReturnType<typeof punchCapture>>();
+    const harness = installSynchronizedPunchSession(capture.promise);
+    const refs: Array<{ current: unknown }> = [];
+    const idle = renderDialog('idle', refs, new Map(), autoPunch.targetTrackId);
+
+    button(idle, 'オートパンチを開始').props.onClick?.();
+    await vi.waitFor(() => expect(refs[5]?.current).toBeTruthy());
+
+    const recording = renderDialog(
+      'recording',
+      refs,
+      new Map([[3, 0.5]]),
+      autoPunch.targetTrackId,
+    );
+    expect(textContent(recording)).not.toContain('録音を終了して保存');
+    button(recording, 'パンチ録音を中止して破棄').props.onClick?.();
+    expect(harness.cancel).toHaveBeenCalledOnce();
+    expect(harness.stop).not.toHaveBeenCalled();
+
+    capture.reject(new MicrophoneCaptureError('cancelled'));
+    await vi.waitFor(() => {
+      expect(actionMocks.discard).toHaveBeenCalledOnce();
+      expect(actionMocks.discard).toHaveBeenCalledWith(actionMocks.handle);
+      expect(actionMocks.record).not.toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('atomically discards Auto Punch when permission waiting is cancelled', async () => {
+    enableAutoPunch();
+    mockAutoPunchOwnership();
+    audioMocks.ensureContext.mockReturnValue(new Promise(() => undefined));
+    const refs: Array<{ current: unknown }> = [];
+    const idle = renderDialog('idle', refs, new Map(), autoPunch.targetTrackId);
+
+    button(idle, 'オートパンチを開始').props.onClick?.();
+    const requesting = renderDialog(
+      'requesting',
+      refs,
+      new Map(),
+      autoPunch.targetTrackId,
+    );
+    button(requesting, 'キャンセル').props.onClick?.();
+
+    await vi.waitFor(() => {
+      expect(actionMocks.discard).toHaveBeenCalledOnce();
+      expect(actionMocks.discard).toHaveBeenCalledWith(actionMocks.handle);
+      expect(actionMocks.record).not.toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+    expect(microphoneMocks.start).not.toHaveBeenCalled();
+  });
+
+  it('discards a completed punch capture when playback stops before post-roll proof', async () => {
+    enableAutoPunch();
+    mockAutoPunchOwnership();
+    const capture = deferred<ReturnType<typeof punchCapture>>();
+    installSynchronizedPunchSession(capture.promise);
+    const refs: Array<{ current: unknown }> = [];
+    const idle = renderDialog('idle', refs, new Map(), autoPunch.targetTrackId);
+
+    button(idle, 'オートパンチを開始').props.onClick?.();
+    await vi.waitFor(() => expect(refs[5]?.current).toBeTruthy());
+    capture.resolve(punchCapture());
+    await vi.waitFor(() => {
+      expect(hookState.stateSetters[0]).toHaveBeenCalledWith('postroll');
+    });
+    expect(actionMocks.record).not.toHaveBeenCalled();
+
+    const postroll = renderDialog(
+      'postroll',
+      refs,
+      new Map(),
+      autoPunch.targetTrackId,
+    );
+    expect(textContent(postroll)).toContain('ポストロール再生中');
+    const lifecycleCleanup = hookState.effects.at(-1)?.();
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        phase: 'stopped',
+        isPlaying: false,
+      },
+    });
+
+    expect(actionMocks.discard).toHaveBeenCalledOnce();
+    expect(actionMocks.discard).toHaveBeenCalledWith(actionMocks.handle);
+    expect(actionMocks.record).not.toHaveBeenCalled();
+    if (typeof lifecycleCleanup === 'function') lifecycleCleanup();
+    expect(actionMocks.discard).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a scheduler post-roll callback that cannot prove the owned playback', async () => {
+    enableAutoPunch();
+    mockAutoPunchOwnership();
+    actionMocks.markPostroll.mockReturnValue(false);
+    const capture = deferred<ReturnType<typeof punchCapture>>();
+    const harness = installSynchronizedPunchSession(capture.promise);
+    const refs: Array<{ current: unknown }> = [];
+    const idle = renderDialog('idle', refs, new Map(), autoPunch.targetTrackId);
+
+    button(idle, 'オートパンチを開始').props.onClick?.();
+    await vi.waitFor(() => expect(refs[5]?.current).toBeTruthy());
+    const completePostroll = harness.getPlaybackOptions()?.onFinitePunchComplete;
+    if (!completePostroll) throw new Error('finite punch callback missing');
+    completePostroll(42);
+
+    expect(actionMocks.markPostroll).toHaveBeenCalledWith(actionMocks.handle, 42);
+    expect(harness.cancel).toHaveBeenCalledOnce();
+    capture.reject(new MicrophoneCaptureError('cancelled'));
+    await vi.waitFor(() => {
+      expect(actionMocks.discard).toHaveBeenCalledOnce();
+      expect(actionMocks.record).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(['capture-first', 'postroll-first'] as const)(
+    'finalizes Auto Punch once after both completion signals arrive (%s)',
+    async (completionOrder) => {
+      enableAutoPunch();
+      mockAutoPunchOwnership();
+      const capture = deferred<ReturnType<typeof punchCapture>>();
+      const harness = installSynchronizedPunchSession(capture.promise);
+      actionMocks.record.mockResolvedValue({
+        ok: true,
+        changed: true,
+        trackId: autoPunch.targetTrackId,
+        trackName: 'Lead Take',
+        folderId: 'take-folder-1',
+        audioAssetIds: ['take-1', 'take-2'],
+        takeCount: 2,
+        deduplicated: false,
+        playbackStopped: true,
+      });
+      const refs: Array<{ current: unknown }> = [];
+      const idle = renderDialog('idle', refs, new Map(), autoPunch.targetTrackId);
+
+      button(idle, 'オートパンチを開始').props.onClick?.();
+      await vi.waitFor(() => expect(refs[5]?.current).toBeTruthy());
+      const completePostroll = harness.getPlaybackOptions()?.onFinitePunchComplete;
+      if (!completePostroll) throw new Error('finite punch callback missing');
+      const completedCapture = punchCapture();
+
+      if (completionOrder === 'capture-first') {
+        capture.resolve(completedCapture);
+        await vi.waitFor(() => {
+          expect(hookState.stateSetters[0]).toHaveBeenCalledWith('postroll');
+        });
+        expect(actionMocks.record).not.toHaveBeenCalled();
+        completePostroll(42);
+      } else {
+        completePostroll(42);
+        await Promise.resolve();
+        expect(actionMocks.record).not.toHaveBeenCalled();
+        capture.resolve(completedCapture);
+      }
+
+      await vi.waitFor(() => {
+        expect(actionMocks.record).toHaveBeenCalledOnce();
+        expect(onCreated).toHaveBeenCalledOnce();
+      });
+      expect(actionMocks.markPostroll).toHaveBeenCalledWith(actionMocks.handle, 42);
+      expect(actionMocks.record).toHaveBeenCalledWith(expect.objectContaining({
+        recordingHandle: actionMocks.handle,
+        capture: completedCapture,
+      }));
+
+      completePostroll(42);
+      await Promise.resolve();
+      expect(actionMocks.record).toHaveBeenCalledOnce();
+      expect(onCreated).toHaveBeenCalledOnce();
+    },
+  );
+
   it('waits for the capture tail after the finite cycle boundary but cancels on manual transport stop', () => {
     const cycle = { loopStartBeat: 0, loopEndBeat: 4, passCount: 3 };
     const naturalStop = vi.fn(async () => undefined);
@@ -944,7 +1462,7 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     };
     naturalRefs[3] = { current: 42 };
     naturalRefs[19] = { current: cycle };
-    naturalRefs[21] = { current: 42 };
+    naturalRefs[25] = { current: 42 };
     renderDialog('recording', naturalRefs);
     const naturalLifecycle = hookState.effects.at(-1)?.();
     useStore.setState({

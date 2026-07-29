@@ -16,10 +16,12 @@ import {
 } from '@cts/project-persistence';
 import {
   clipContentOwnerId,
+  adoptRecordedAudioPunch,
   createEmptyProject,
   decodeProject,
   encodeProjectJson,
   findClip as findProjectClip,
+  inspectAudioPunchTarget,
   MAX_AUDIO_TAKES_PER_FOLDER,
   MIN_EVENT_DURATION_BEATS,
   resolveClipContent,
@@ -117,6 +119,12 @@ export type TransportState = {
   loopEnabled: boolean;
   loopStartBeat: number;
   loopEndBeat: number;
+  /** Runtime-only Auto Punch locators; independent from the cycle loop range. */
+  punchEnabled: boolean;
+  punchInBeat: number;
+  punchOutBeat: number;
+  punchPreRollBeats: number;
+  punchPostRollBeats: number;
   metronome: boolean;
 };
 
@@ -124,6 +132,13 @@ export type AudioRecordingCyclePlayback = Readonly<{
   loopStartBeat: number;
   loopEndBeat: number;
   passCount: number;
+}>;
+
+export type AudioRecordingPunchPlayback = Readonly<{
+  targetTrackId: string;
+  punchInBeat: number;
+  punchOutBeat: number;
+  playbackEndBeat: number;
 }>;
 
 export type EditorState = {
@@ -229,6 +244,25 @@ export type VerifiedCycleRecordingAddition = Readonly<{
   nextProject: Project;
 }>;
 
+export type VerifiedPunchRecordingProof = Readonly<{
+  mode: 'empty-window' | 'created-folder' | 'appended-folder';
+  trackId: string;
+  folderId: string | null;
+  createdClipId: string | null;
+  createdTakeId: string | null;
+  preservedOuterClipIds: readonly string[];
+  punchInBeat: number;
+  punchOutBeat: number;
+}>;
+
+export type VerifiedPunchRecordingAddition = Readonly<{
+  operationId: number;
+  expectedSnapshot: Project;
+  verifiedAudioAssetId: string;
+  proof: VerifiedPunchRecordingProof;
+  nextProject: Project;
+}>;
+
 export type StoreState = {
   project: Project;
   transport: TransportState;
@@ -276,6 +310,10 @@ export type StoreState = {
   /** Commit one complete cycle-recording take folder against its frozen snapshot. */
   applyVerifiedCycleRecordingAddition: (
     addition: VerifiedCycleRecordingAddition,
+  ) => boolean;
+  /** Commit one bounded non-destructive Auto Punch edit against its snapshot. */
+  applyVerifiedPunchRecordingAddition: (
+    addition: VerifiedPunchRecordingAddition,
   ) => boolean;
 
   // project metadata actions
@@ -333,6 +371,7 @@ export type StoreState = {
     operationId: number,
     startBeat: number,
     cycle?: AudioRecordingCyclePlayback,
+    punch?: AudioRecordingPunchPlayback,
   ) => number | null;
   /** Confirm an audio start only when it still belongs to the active request. */
   confirmPlaybackStarted: (requestId: number) => void;
@@ -360,6 +399,9 @@ export type StoreState = {
   /** Adopt an exact scheduler-safe runtime loop and enable it without touching Project/history. */
   setLoopRange: (startBeat: number, endBeat: number) => boolean;
   toggleLoop: () => void;
+  setPunchRange: (punchInBeat: number, punchOutBeat: number) => boolean;
+  setPunchRoll: (preRollBeats: number, postRollBeats: number) => boolean;
+  togglePunch: () => void;
   toggleMetronome: () => void;
 
   // microphone recording lifecycle (runtime-only)
@@ -432,6 +474,11 @@ function makeTransport(playbackRequestId = 0): TransportState {
     loopEnabled: false,
     loopStartBeat: 0,
     loopEndBeat: 0,
+    punchEnabled: false,
+    punchInBeat: 0,
+    punchOutBeat: 0,
+    punchPreRollBeats: 4,
+    punchPostRollBeats: 4,
     metronome: false,
   };
 }
@@ -862,6 +909,12 @@ const CYCLE_RECORDING_PROJECT_MUTABLE_KEYS = new Set([
   'audioRouting',
   'updatedAt',
 ]);
+const PUNCH_RECORDING_PROJECT_MUTABLE_KEYS = new Set([
+  'audioAssets',
+  'audioTakeFolders',
+  'tracks',
+  'updatedAt',
+]);
 const TRACK_CLIP_KEY = new Set(['clips']);
 const ROUTING_OUTPUTS_KEY = new Set(['outputs']);
 
@@ -1046,6 +1099,318 @@ function isVerifiedCycleRecordingAddition(
       isExistingTrackCycleRecordingAddition(current, next, folderId)
       || isNewTrackCycleRecordingAddition(current, next, folderId)
     );
+}
+
+function clipOverlapsPunch(
+  clip: Track['clips'][number],
+  punchInBeat: number,
+  punchOutBeat: number,
+): boolean {
+  return clip.startBeat < punchOutBeat
+    && clip.startBeat + clip.lengthBeats > punchInBeat;
+}
+
+/**
+ * Replay the pure domain mutation with the exact entity ids found in `next`.
+ * JSON equality then proves every source-frame, fade, gain, outer Clip, Take,
+ * Comp segment, and timestamp field—not just the small store-facing proof.
+ */
+function matchesCanonicalPunchRecordingAddition(
+  current: Project,
+  next: Project,
+  verifiedAudioAssetId: string,
+  proof: VerifiedPunchRecordingProof,
+): boolean {
+  const asset = next.audioAssets.at(-1);
+  if (
+    asset?.id !== verifiedAudioAssetId
+    || asset.availability !== 'ready'
+  ) {
+    return false;
+  }
+  const inspection = inspectAudioPunchTarget(current, {
+    trackId: proof.trackId,
+    punchInBeat: proof.punchInBeat,
+    punchOutBeat: proof.punchOutBeat,
+  });
+  if (!inspection.ok || inspection.mode !== proof.mode) return false;
+
+  const ids: Record<'clip' | 'folder' | 'take' | 'segment', string[]> = {
+    clip: [],
+    folder: [],
+    take: [],
+    segment: [],
+  };
+  if (proof.mode === 'empty-window') {
+    if (typeof proof.createdClipId !== 'string') return false;
+    ids.clip.push(proof.createdClipId);
+  } else if (proof.mode === 'created-folder') {
+    if (
+      typeof proof.folderId !== 'string'
+      || inspection.sourceClipId === null
+    ) {
+      return false;
+    }
+    const currentTrack = current.tracks.find(
+      (track) => track.id === proof.trackId && track.type === 'audio',
+    );
+    const sourceClip = currentTrack?.clips.find(
+      (clip) => clip.id === inspection.sourceClipId && clip.type === 'audio',
+    );
+    const folder = next.audioTakeFolders.find(
+      (candidate) => candidate.id === proof.folderId,
+    );
+    const oldTake = folder?.takes[0];
+    const newTake = folder?.takes[1];
+    const segment = folder?.compSegments[0];
+    if (!sourceClip || !folder || !oldTake || !newTake || !segment) return false;
+    const preservesBothSides = sourceClip.startBeat < proof.punchInBeat - 1e-9
+      && sourceClip.startBeat + sourceClip.lengthBeats > proof.punchOutBeat + 1e-9;
+    if (preservesBothSides) {
+      const extraOuterClipId = proof.preservedOuterClipIds.find(
+        (id) => id !== sourceClip.id,
+      );
+      if (extraOuterClipId === undefined) return false;
+      ids.clip.push(extraOuterClipId);
+    }
+    ids.folder.push(folder.id);
+    ids.take.push(oldTake.id, newTake.id);
+    ids.segment.push(segment.id);
+  } else {
+    if (typeof proof.folderId !== 'string') return false;
+    const folderIndex = current.audioTakeFolders.findIndex(
+      (folder) => folder.id === proof.folderId,
+    );
+    const folder = folderIndex < 0 ? undefined : next.audioTakeFolders[folderIndex];
+    const take = folder?.takes.at(-1);
+    const segment = folder?.compSegments[0];
+    if (!folder || !take || !segment) return false;
+    ids.take.push(take.id);
+    ids.segment.push(segment.id);
+  }
+
+  const offsets: Record<keyof typeof ids, number> = {
+    clip: 0,
+    folder: 0,
+    take: 0,
+    segment: 0,
+  };
+  const replayed = adoptRecordedAudioPunch(
+    current,
+    {
+      trackId: proof.trackId,
+      punchInBeat: proof.punchInBeat,
+      punchOutBeat: proof.punchOutBeat,
+      asset,
+      idFactory: (kind) => {
+        const id = ids[kind][offsets[kind]];
+        if (id === undefined) throw new Error(`missing ${kind} id`);
+        offsets[kind] += 1;
+        return id;
+      },
+    },
+    () => new Date(next.updatedAt),
+  );
+  if (
+    !replayed.ok
+    || replayed.mode !== proof.mode
+    || replayed.folderId !== proof.folderId
+    || replayed.createdClipId !== proof.createdClipId
+    || replayed.createdTakeId !== proof.createdTakeId
+    || replayed.preservedOuterClipIds.length !== proof.preservedOuterClipIds.length
+    || !replayed.preservedOuterClipIds.every(
+      (id, index) => id === proof.preservedOuterClipIds[index],
+    )
+    || (Object.keys(ids) as Array<keyof typeof ids>).some(
+      (kind) => offsets[kind] !== ids[kind].length,
+    )
+  ) {
+    return false;
+  }
+  const expected = encodeProjectJson(replayed.project);
+  const actual = encodeProjectJson(next);
+  return expected.ok && actual.ok && expected.json === actual.json;
+}
+
+function isVerifiedPunchRecordingAddition(
+  current: Project,
+  next: Project,
+  verifiedAudioAssetId: string,
+  proof: VerifiedPunchRecordingProof,
+): boolean {
+  if (
+    next === current
+    || !sameOwnPropertiesExcept(current, next, PUNCH_RECORDING_PROJECT_MUTABLE_KEYS)
+    || next.lengthBars !== current.lengthBars
+    || next.lengthBeats !== current.lengthBeats
+    || next.audioRouting !== current.audioRouting
+    || !hasVerifiedReadyAudioAssetAppend(current, next, verifiedAudioAssetId)
+    || !matchesCanonicalPunchRecordingAddition(
+      current,
+      next,
+      verifiedAudioAssetId,
+      proof,
+    )
+    || !Number.isFinite(proof.punchInBeat)
+    || !Number.isFinite(proof.punchOutBeat)
+    || proof.punchOutBeat <= proof.punchInBeat
+    || new Set(proof.preservedOuterClipIds).size
+      !== proof.preservedOuterClipIds.length
+  ) {
+    return false;
+  }
+  const inspection = inspectAudioPunchTarget(current, {
+    trackId: proof.trackId,
+    punchInBeat: proof.punchInBeat,
+    punchOutBeat: proof.punchOutBeat,
+  });
+  if (
+    !inspection.ok
+    || inspection.mode !== proof.mode
+    || inspection.folderId !== (
+      proof.mode === 'appended-folder' ? proof.folderId : null
+    )
+  ) {
+    return false;
+  }
+  const currentTrackIndex = current.tracks.findIndex(
+    (track) => track.id === proof.trackId && track.type === 'audio',
+  );
+  if (
+    currentTrackIndex < 0
+    || next.tracks.length !== current.tracks.length
+    || !current.tracks.every((track, index) => (
+      index === currentTrackIndex || next.tracks[index] === track
+    ))
+  ) {
+    return false;
+  }
+  const currentTrack = current.tracks[currentTrackIndex];
+  const nextTrack = next.tracks[currentTrackIndex];
+  if (
+    !currentTrack
+    || !nextTrack
+    || nextTrack.type !== 'audio'
+    || !sameOwnPropertiesExcept(currentTrack, nextTrack, TRACK_CLIP_KEY)
+  ) {
+    return false;
+  }
+
+  if (proof.mode === 'empty-window') {
+    const addedClip = nextTrack.clips.at(-1);
+    return proof.folderId === null
+      && proof.createdTakeId === null
+      && proof.preservedOuterClipIds.length === 0
+      && typeof proof.createdClipId === 'string'
+      && next.audioTakeFolders === current.audioTakeFolders
+      && nextTrack.clips.length === currentTrack.clips.length + 1
+      && currentTrack.clips.every(
+        (clip, index) => nextTrack.clips[index] === clip,
+      )
+      && addedClip?.id === proof.createdClipId
+      && addedClip.type === 'audio'
+      && addedClip.trackId === proof.trackId
+      && addedClip.audioAssetId === verifiedAudioAssetId
+      && addedClip.startBeat === proof.punchInBeat
+      && addedClip.lengthBeats === proof.punchOutBeat - proof.punchInBeat
+      && addedClip.loop === false;
+  }
+
+  if (proof.mode === 'created-folder') {
+    if (
+      typeof proof.folderId !== 'string'
+      || proof.createdClipId !== null
+      || typeof proof.createdTakeId !== 'string'
+      || next.audioTakeFolders.length !== current.audioTakeFolders.length + 1
+      || !current.audioTakeFolders.every(
+        (folder, index) => next.audioTakeFolders[index] === folder,
+      )
+    ) {
+      return false;
+    }
+    const folder = next.audioTakeFolders.at(-1);
+    const newTake = folder?.takes[1];
+    const oldTake = folder?.takes[0];
+    const segment = folder?.compSegments[0];
+    if (
+      folder?.id !== proof.folderId
+      || folder.trackId !== proof.trackId
+      || folder.startBeat !== proof.punchInBeat
+      || folder.lengthBeats !== proof.punchOutBeat - proof.punchInBeat
+      || folder.takes.length !== 2
+      || !oldTake
+      || newTake?.id !== proof.createdTakeId
+      || newTake.audioAssetId !== verifiedAudioAssetId
+      || newTake.offsetBeats !== 0
+      || newTake.lengthBeats !== folder.lengthBeats
+      || folder.compSegments.length !== 1
+      || segment?.takeId !== newTake.id
+      || segment.offsetBeats !== 0
+      || segment.lengthBeats !== folder.lengthBeats
+    ) {
+      return false;
+    }
+    const sourceClipId = inspection.sourceClipId;
+    if (sourceClipId === null) return false;
+    const sourceClip = currentTrack.clips.find((clip) => clip.id === sourceClipId);
+    if (
+      sourceClip?.type !== 'audio'
+      || oldTake.audioAssetId !== sourceClip.audioAssetId
+      || proof.preservedOuterClipIds.some(
+        (clipId) => !nextTrack.clips.some((clip) => clip.id === clipId),
+      )
+      || nextTrack.clips.some(
+        (clip) => clipOverlapsPunch(clip, proof.punchInBeat, proof.punchOutBeat),
+      )
+    ) {
+      return false;
+    }
+    const unaffected = currentTrack.clips.filter((clip) => clip.id !== sourceClipId);
+    return unaffected.every((clip) => nextTrack.clips.includes(clip))
+      && nextTrack.clips.every((clip) => (
+        unaffected.includes(clip)
+        || proof.preservedOuterClipIds.includes(clip.id)
+      ));
+  }
+
+  if (
+    typeof proof.folderId !== 'string'
+    || proof.createdClipId !== null
+    || typeof proof.createdTakeId !== 'string'
+    || proof.preservedOuterClipIds.length !== 0
+    || next.tracks !== current.tracks
+    || next.audioTakeFolders.length !== current.audioTakeFolders.length
+  ) {
+    return false;
+  }
+  const folderIndex = current.audioTakeFolders.findIndex(
+    (folder) => folder.id === proof.folderId,
+  );
+  if (
+    folderIndex < 0
+    || !current.audioTakeFolders.every((folder, index) => (
+      index === folderIndex || next.audioTakeFolders[index] === folder
+    ))
+  ) {
+    return false;
+  }
+  const currentFolder = current.audioTakeFolders[folderIndex];
+  const nextFolder = next.audioTakeFolders[folderIndex];
+  const newTake = nextFolder?.takes.at(-1);
+  const segment = nextFolder?.compSegments[0];
+  return !!currentFolder
+    && !!nextFolder
+    && sameOwnPropertiesExcept(currentFolder, nextFolder, new Set(['takes', 'compSegments']))
+    && nextFolder.takes.length === currentFolder.takes.length + 1
+    && currentFolder.takes.every((take, index) => nextFolder.takes[index] === take)
+    && newTake?.id === proof.createdTakeId
+    && newTake.audioAssetId === verifiedAudioAssetId
+    && newTake.offsetBeats === 0
+    && newTake.lengthBeats === currentFolder.lengthBeats
+    && nextFolder.compSegments.length === 1
+    && segment?.takeId === newTake.id
+    && segment.offsetBeats === 0
+    && segment.lengthBeats === currentFolder.lengthBeats;
 }
 
 function isExistingTrackRecordingAddition(
@@ -2064,6 +2429,29 @@ export function createStudioStore(
         },
       );
     },
+    applyVerifiedPunchRecordingAddition: (addition) => {
+      const state = get();
+      if (
+        state.audioRecordingOperationId !== addition.operationId
+        || state.project !== addition.expectedSnapshot
+        || !isVerifiedPunchRecordingAddition(
+          addition.expectedSnapshot,
+          addition.nextProject,
+          addition.verifiedAudioAssetId,
+          addition.proof,
+        )
+      ) {
+        return false;
+      }
+      return commitProject(
+        addition.nextProject,
+        addition.verifiedAudioAssetId,
+        {
+          operationId: addition.operationId,
+          expectedSnapshot: addition.expectedSnapshot,
+        },
+      );
+    },
 
     // --- project metadata ---
     setBpm: (bpm) => {
@@ -2357,13 +2745,19 @@ export function createStudioStore(
         },
       });
     },
-    startAudioRecordingPlayback: (operationId, startBeat, cycle) => {
+    startAudioRecordingPlayback: (operationId, startBeat, cycle, punch) => {
       const state = get();
       const projectLength = transportProjectLengthBeats(state.project);
-      const oneShotIntentValid = cycle === undefined && !state.transport.loopEnabled;
+      const oneShotIntentValid =
+        cycle === undefined
+        && punch === undefined
+        && !state.transport.loopEnabled
+        && !state.transport.punchEnabled;
       const cycleIntentValid = cycle !== undefined
+        && punch === undefined
         && cycle !== null
         && state.transport.loopEnabled
+        && !state.transport.punchEnabled
         && Number.isSafeInteger(cycle.passCount)
         && cycle.passCount >= 2
         && cycle.passCount <= MAX_AUDIO_TAKES_PER_FOLDER
@@ -2375,11 +2769,37 @@ export function createStudioStore(
         && cycle.loopStartBeat === state.transport.loopStartBeat
         && cycle.loopEndBeat === state.transport.loopEndBeat
         && startBeat === cycle.loopStartBeat;
+      const punchIntentValid = punch !== undefined
+        && punch !== null
+        && cycle === undefined
+        && state.transport.punchEnabled
+        && !state.transport.loopEnabled
+        && punch.targetTrackId === state.armedAudioTrackId
+        && state.project.tracks.some(
+          (track) => track.id === punch.targetTrackId && track.type === 'audio',
+        )
+        && isExactLoopRangeValid(
+          punch.punchInBeat,
+          punch.punchOutBeat,
+          projectLength,
+        )
+        && punch.punchInBeat === state.transport.punchInBeat
+        && punch.punchOutBeat === state.transport.punchOutBeat
+        && startBeat === Math.max(
+          0,
+          punch.punchInBeat - state.transport.punchPreRollBeats,
+        )
+        && Number.isFinite(punch.playbackEndBeat)
+        && punch.playbackEndBeat === Math.min(
+          projectLength,
+          punch.punchOutBeat + state.transport.punchPostRollBeats,
+        )
+        && punch.playbackEndBeat >= punch.punchOutBeat;
       if (
         state.projectOperationBusy
         || state.audioRecordingOperationId !== operationId
         || state.transport.phase !== 'stopped'
-        || (!oneShotIntentValid && !cycleIntentValid)
+        || (!oneShotIntentValid && !cycleIntentValid && !punchIntentValid)
         || !Number.isFinite(startBeat)
         || startBeat < 0
         || startBeat >= projectLength
@@ -2527,6 +2947,7 @@ export function createStudioStore(
           loopEnabled: true,
           loopStartBeat: startBeat,
           loopEndBeat: endBeat,
+          punchEnabled: false,
         },
       });
       return true;
@@ -2558,6 +2979,92 @@ export function createStudioStore(
             loopEnabled: !s.transport.loopEnabled,
             loopStartBeat: bounds.startBeat,
             loopEndBeat: bounds.endBeat,
+            punchEnabled: false,
+          },
+        };
+      }),
+    setPunchRange: (punchInBeat, punchOutBeat) => {
+      const state = get();
+      const projectLength = transportProjectLengthBeats(state.project);
+      if (
+        state.audioRecordingOperationId !== null
+        || state.projectOperationBusy
+        || state.transport.phase !== 'stopped'
+        || !isExactLoopRangeValid(punchInBeat, punchOutBeat, projectLength)
+      ) {
+        return false;
+      }
+      set({
+        transport: {
+          ...state.transport,
+          punchEnabled: true,
+          punchInBeat,
+          punchOutBeat,
+          loopEnabled: false,
+          positionBeat: Math.max(
+            0,
+            punchInBeat - state.transport.punchPreRollBeats,
+          ),
+        },
+      });
+      return true;
+    },
+    setPunchRoll: (preRollBeats, postRollBeats) => {
+      const state = get();
+      if (
+        state.audioRecordingOperationId !== null
+        || state.projectOperationBusy
+        || state.transport.phase !== 'stopped'
+        || !Number.isSafeInteger(preRollBeats)
+        || !Number.isSafeInteger(postRollBeats)
+        || preRollBeats < 0
+        || preRollBeats > 16
+        || postRollBeats < 0
+        || postRollBeats > 16
+      ) {
+        return false;
+      }
+      set({
+        transport: {
+          ...state.transport,
+          punchPreRollBeats: preRollBeats,
+          punchPostRollBeats: postRollBeats,
+          positionBeat: state.transport.punchEnabled
+            ? Math.max(0, state.transport.punchInBeat - preRollBeats)
+            : state.transport.positionBeat,
+        },
+      });
+      return true;
+    },
+    togglePunch: () =>
+      set((state) => {
+        if (
+          state.audioRecordingOperationId !== null
+          || state.projectOperationBusy
+          || state.transport.phase !== 'stopped'
+        ) {
+          return state;
+        }
+        const projectLength = transportProjectLengthBeats(state.project);
+        const bounds = safeLoopBounds(
+          state.transport.punchInBeat,
+          state.transport.punchOutBeat,
+          projectLength,
+        );
+        const punchEnabled = !state.transport.punchEnabled;
+        return {
+          transport: {
+            ...state.transport,
+            punchEnabled,
+            punchInBeat: bounds.startBeat,
+            punchOutBeat: bounds.endBeat,
+            loopEnabled: punchEnabled ? false : state.transport.loopEnabled,
+            positionBeat: punchEnabled
+              ? Math.max(
+                  0,
+                  bounds.startBeat - state.transport.punchPreRollBeats,
+                )
+              : safeTransportPosition(state.transport.positionBeat, projectLength),
           },
         };
       }),
