@@ -79,3 +79,47 @@ test('repeated effects expose stable unique names for every editor control', asy
   await expect(first).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
+
+test('TrackList and Mixer volume/pan controls share accessible gesture descriptions', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page
+    .getByRole('dialog', { name: 'ようこそ' })
+    .getByRole('button', { name: 'あとで', exact: true })
+    .click();
+
+  const trackList = page.getByRole('navigation', { name: 'トラック一覧' });
+  const mixer = page.getByRole('region', { name: 'ミキサー' });
+  const controls = [
+    trackList.getByRole('slider', { name: 'Chords 音量', exact: true }),
+    trackList.getByRole('slider', { name: 'Chords パン', exact: true }),
+    mixer.getByRole('slider', { name: 'Chords 音量', exact: true }),
+    mixer.getByRole('slider', { name: 'Chords パン', exact: true }),
+  ];
+
+  for (const control of controls) {
+    const box = await control.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    const description = await control.evaluate((element) => {
+      const id = element.getAttribute('aria-describedby');
+      return id ? document.getElementById(id)?.textContent ?? '' : '';
+    });
+    expect(description).toContain('Chords');
+    expect(description).toContain('トラックID');
+    expect(description).toContain('Touch、Latch、Write');
+  }
+
+  const trackVolume = controls[0]!;
+  const mixerVolume = controls[2]!;
+  const initialValue = Number(await mixerVolume.inputValue());
+  await trackVolume.focus();
+  await trackVolume.press('ArrowUp');
+  await expect(mixerVolume).toHaveValue(String(initialValue + 0.01));
+
+  const trackPan = controls[1]!;
+  const mixerPan = controls[3]!;
+  await trackPan.focus();
+  await trackPan.press('ArrowRight');
+  await expect(mixerPan).toHaveValue('0.01');
+});

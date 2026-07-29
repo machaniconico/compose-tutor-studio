@@ -28,6 +28,7 @@ import {
   type StudioRoutingCommandResult,
 } from '../../state/routingActions';
 import { pushToast } from '../../state/tutorialBridge';
+import { useAutomationGesture } from '../automation/useAutomationGesture';
 
 type EffectInfo = {
   label: string;
@@ -288,6 +289,17 @@ function ChannelStrip(props: {
   const setTrackPan = useStore((s) => s.setTrackPan);
   const toggleMute = useStore((s) => s.toggleMute);
   const toggleSolo = useStore((s) => s.toggleSolo);
+  const volumeGesture = useAutomationGesture({
+    trackId: track.id,
+    targetType: 'track-volume',
+    setScalar: (value) => setTrackVolume(track.id, value),
+  });
+  const panGesture = useAutomationGesture({
+    trackId: track.id,
+    targetType: 'track-pan',
+    setScalar: (value) => setTrackPan(track.id, value),
+  });
+  const automationDescriptionId = `mixer-automation-${encodeURIComponent(track.id)}`;
 
   return (
     <div className={`mix-ch${isMaster ? ' is-master' : ''}`}>
@@ -312,7 +324,10 @@ function ChannelStrip(props: {
           step={0.01}
           value={track.volume}
           aria-label={`${accessibleName} 音量`}
-          onChange={(e) => setTrackVolume(track.id, Number(e.target.value))}
+          aria-describedby={isMaster ? undefined : automationDescriptionId}
+          {...(isMaster
+            ? { onChange: (event) => setTrackVolume(track.id, Number(event.target.value)) }
+            : volumeGesture)}
         />
         <span className="mix-ch__db">{gainToDbLabel(track.volume)}</span>
       </div>
@@ -326,10 +341,21 @@ function ChannelStrip(props: {
             step={0.01}
             value={track.pan}
             aria-label={`${accessibleName} パン`}
-            onChange={(e) => setTrackPan(track.id, Number(e.target.value))}
+            aria-describedby={automationDescriptionId}
+            {...panGesture}
           />
           <span className="mix-ch__pan-label">{panLabel(track.pan)}</span>
         </div>
+      ) : null}
+
+      {!isMaster ? (
+        <span
+          id={automationDescriptionId}
+          className="visually-hidden"
+        >
+          {accessibleName}、トラックID {track.id}。再生中のTouch、Latch、Writeでは
+          オートメーションジェスチャーとして記録します。
+        </span>
       ) : null}
 
       {!isMaster ? (

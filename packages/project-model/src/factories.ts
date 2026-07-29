@@ -16,7 +16,7 @@ import type {
   TrackType,
 } from './types';
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 export type CreateProjectOptions = {
   title?: string;
@@ -169,6 +169,7 @@ export function createEmptyProject(options: CreateProjectOptions = {}): Project 
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [chords, bass, melody, drums].map((track) => ({
         sourceTrackId: track.id,

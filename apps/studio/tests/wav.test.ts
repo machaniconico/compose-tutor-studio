@@ -106,6 +106,7 @@ function projectWithDrumClip(clip: Clip): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [{ sourceTrackId: 'drums', destination: { type: 'master' } }],
       sends: [],
@@ -475,6 +476,7 @@ describe('buildWavScheduleEvents drum groove parity', () => {
       audioAssets: [],
       audioTakeFolders: [],
       automationLanes: [],
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
       audioRouting: {
         outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],
         sends: [],
@@ -734,6 +736,7 @@ describe('MIDI Clip loop live/WAV parity', () => {
       audioAssets: [],
       audioTakeFolders: [],
       automationLanes: [],
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
       audioRouting: {
         outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],
         sends: [],
@@ -1324,6 +1327,7 @@ describe('WAV Audio Clip integration', () => {
   it('uses the Track scalar for a bypassed lane in offline WAV scheduling', async () => {
     const bytes = Uint8Array.from([1, 2, 3, 4]);
     const readProject = await projectWithAudioClip(bytes);
+    readProject.tracks[0] = { ...readProject.tracks[0]!, volume: 0.73 };
     readProject.automationLanes = [{
       id: 'wav-volume-automation',
       bypassed: false,
@@ -1345,6 +1349,7 @@ describe('WAV Audio Clip integration', () => {
     expect(readContext.gains.some((gain) =>
       gain.gain.commands.some((command) =>
         command.kind === 'set' && command.value === 0.25))).toBe(true);
+    const readGainCommands = readContext.gains.map((gain) => gain.gain.commands);
 
     vi.unstubAllGlobals();
     const bypassedProject: Project = {
@@ -1364,7 +1369,48 @@ describe('WAV Audio Clip integration', () => {
     expect(bypassedContext.gains.some((gain) =>
       gain.gain.commands.some((command) =>
         command.kind === 'set' && command.value === 0.25))).toBe(false);
+    expect(bypassedContext.gains.some((gain) =>
+      gain.gain.commands.some((command) =>
+        command.kind === 'set' && command.value === 0.73 && command.time === 0))).toBe(true);
     expect(bypassedBytes).toEqual(readBytes);
+
+    for (const automationReadState of [
+      { globalEnabled: false, disabledTrackIds: [] },
+      { globalEnabled: true, disabledTrackIds: ['wav-audio-track'] },
+    ]) {
+      vi.unstubAllGlobals();
+      const disabledContext = installAudioClipOfflineContext();
+      const disabledRender = await renderProjectToWav({
+        ...readProject,
+        automationReadState,
+      }, {
+        audioAssetResolver: { resolve: async () => bytes },
+      });
+      disabledRender.release();
+      expect(disabledContext.gains.some((gain) =>
+        gain.gain.commands.some((command) =>
+          command.kind === 'set' && command.value === 0.25))).toBe(false);
+      expect(disabledContext.gains.some((gain) =>
+        gain.gain.commands.some((command) =>
+          command.kind === 'set' && command.value === 0.73 && command.time === 0))).toBe(true);
+    }
+
+    vi.unstubAllGlobals();
+    const reenabledContext = installAudioClipOfflineContext();
+    const reenabledRender = await renderProjectToWav({
+      ...readProject,
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
+    }, {
+      audioAssetResolver: { resolve: async () => bytes },
+    });
+    reenabledRender.release();
+    expect(reenabledContext.gains.map((gain) => gain.gain.commands)).toEqual(readGainCommands);
+    expect(readProject.automationLanes[0]?.points).toEqual([{
+      id: 'wav-volume-point',
+      beat: 0,
+      value: 0.25,
+      interpolation: 'hold',
+    }]);
   });
 });
 

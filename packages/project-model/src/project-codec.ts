@@ -10,6 +10,7 @@ import type {
   AudioTakeFolder,
   AutomationLane,
   AutomationPoint,
+  AutomationReadState,
   AutomationTarget,
   ChordEvent,
   Clip,
@@ -886,9 +887,20 @@ function inspectLegacyAutomationLane(
   decoder: StructureDecoder,
   value: unknown,
   path: string,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6,
 ): void {
-  const record = decoder.record(value, path, ['id', 'target', 'points']) ?? {};
+  const record = decoder.record(
+    value,
+    path,
+    schemaVersion >= 6 ? ['id', 'bypassed', 'target', 'points'] : ['id', 'target', 'points'],
+  ) ?? {};
   decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`);
+  if (schemaVersion >= 6) {
+    decoder.boolean(
+      decoder.required(record, 'bypassed', `${path}.bypassed`),
+      `${path}.bypassed`,
+    );
+  }
   decodeAutomationTarget(
     decoder,
     decoder.required(record, 'target', `${path}.target`),
@@ -899,6 +911,25 @@ function inspectLegacyAutomationLane(
     `${path}.points`,
     (item, itemPath) => decodeAutomationPoint(decoder, item, itemPath),
   );
+}
+
+function decodeAutomationReadState(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AutomationReadState {
+  const record = decoder.record(value, path, ['globalEnabled', 'disabledTrackIds']) ?? {};
+  return {
+    globalEnabled: decoder.boolean(
+      decoder.required(record, 'globalEnabled', `${path}.globalEnabled`),
+      `${path}.globalEnabled`,
+    ),
+    disabledTrackIds: decoder.array(
+      decoder.required(record, 'disabledTrackIds', `${path}.disabledTrackIds`),
+      `${path}.disabledTrackIds`,
+      (item, itemPath) => decoder.string(item, itemPath),
+    ),
+  };
 }
 
 function decodeAudioRouteDestination(
@@ -1020,6 +1051,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
       'audioAssets',
       'audioTakeFolders',
       'automationLanes',
+      'automationReadState',
       'audioRouting',
       'tracks',
       'chordTrack',
@@ -1089,6 +1121,11 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
         'automationLanes',
         (item, itemPath) => decodeAutomationLane(decoder, item, itemPath),
       ),
+      automationReadState: decodeAutomationReadState(
+        decoder,
+        decoder.required(record, 'automationReadState', 'automationReadState'),
+        'automationReadState',
+      ),
       audioRouting: decodeAudioRouting(
         decoder,
         decoder.required(record, 'audioRouting', 'audioRouting'),
@@ -1152,7 +1189,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
 /** Reject fields that were not part of the declared legacy transport shape. */
 function inspectLegacyProjectStructure(
   input: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6,
 ): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
@@ -1217,7 +1254,12 @@ function inspectLegacyProjectStructure(
     decoder.array(
       decoder.required(record, 'automationLanes', 'automationLanes'),
       'automationLanes',
-      (item, itemPath) => inspectLegacyAutomationLane(decoder, item, itemPath),
+      (item, itemPath) => inspectLegacyAutomationLane(
+        decoder,
+        item,
+        itemPath,
+        schemaVersion,
+      ),
     );
   }
   if (schemaVersion >= 4) {
@@ -1323,7 +1365,7 @@ export function decodeProject(input: unknown): ProjectDecodeResult {
   if (version.version < CURRENT_SCHEMA_VERSION) {
     const legacyIssues = inspectLegacyProjectStructure(
       input,
-      version.version as 1 | 2 | 3 | 4 | 5,
+      version.version as 1 | 2 | 3 | 4 | 5 | 6,
     );
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };

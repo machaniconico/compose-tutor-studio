@@ -97,6 +97,7 @@ function project(tracks: Track[]): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: tracks
         .filter((track) => track.type !== 'master')
@@ -514,6 +515,7 @@ describe('buildScheduleEvents', () => {
     delete legacyRecord.audioAssets;
     delete legacyRecord.audioTakeFolders;
     delete legacyRecord.automationLanes;
+    delete legacyRecord.automationReadState;
     delete legacyRecord.audioRouting;
     for (const track of legacyRecord.tracks as Array<Record<string, unknown>>) {
       delete track.role;

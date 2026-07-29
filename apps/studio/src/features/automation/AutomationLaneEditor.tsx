@@ -10,6 +10,7 @@ import type {
   AutomationInterpolation,
   AutomationPoint,
   AutomationTarget,
+  AutomationWriteMode,
 } from '@cts/project-model';
 import { automationValueAt } from '../../audio/automation';
 import {
@@ -17,6 +18,8 @@ import {
   clearStudioAutomationLane,
   removeStudioAutomationPoint,
   setStudioAutomationLaneBypassed,
+  setStudioGlobalAutomationReadEnabled,
+  setStudioTrackAutomationReadEnabled,
   studioAutomationErrorMessage,
   updateStudioAutomationPoint,
 } from '../../state/automationActions';
@@ -50,6 +53,16 @@ const DRAWING_INSET = AUTOMATION_POINT_SIZE / 2;
 const DEFAULT_SNAP_BEATS = 0.25;
 const KEYBOARD_VALUE_STEP = 0.05;
 const VIEWPORT_POINT_BUFFER_PX = AUTOMATION_POINT_SIZE * 2;
+const AUTOMATION_WRITE_MODES: readonly AutomationWriteMode[] = [
+  'read',
+  'touch',
+  'latch',
+  'write',
+];
+
+function automationModeLabel(mode: AutomationWriteMode): string {
+  return `${mode.slice(0, 1).toUpperCase()}${mode.slice(1)}`;
+}
 
 type Notice = Readonly<{
   kind: 'error' | 'status';
@@ -152,6 +165,12 @@ export function AutomationLaneEditor() {
   const redo = useStore((state) => state.redo);
   const canUndo = useStore((state) => state.canUndo);
   const canRedo = useStore((state) => state.canRedo);
+  const automationRecording = useStore(
+    (state) => state.automationRecording,
+  );
+  const setTrackAutomationMode = useStore(
+    (state) => state.setTrackAutomationMode,
+  );
 
   const [targetType, setTargetType] =
     useState<AutomationTargetType>('track-volume');
@@ -162,6 +181,7 @@ export function AutomationLaneEditor() {
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [focusTarget, setFocusTarget] = useState<string | 'add' | null>(null);
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
+  const [writeConfirmationOpen, setWriteConfirmationOpen] = useState(false);
   const [viewport, setViewport] = useState({
     scrollLeft: 0,
     width: AUTOMATION_LANE_MIN_WIDTH,
@@ -172,6 +192,8 @@ export function AutomationLaneEditor() {
   const addAtPlayheadRef = useRef<HTMLButtonElement | null>(null);
   const clearLaneButtonRef = useRef<HTMLButtonElement | null>(null);
   const confirmClearButtonRef = useRef<HTMLButtonElement | null>(null);
+  const writeModeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const confirmWriteButtonRef = useRef<HTMLButtonElement | null>(null);
   const pointRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const selectedTrack =
@@ -194,6 +216,18 @@ export function AutomationLaneEditor() {
         );
   const disabled =
     projectOperationBusy || audioRecordingOperationId !== null;
+  const globalReadEnabled = project.automationReadState.globalEnabled;
+  const trackReadEnabled = selectedTrack === null
+    ? false
+    : !project.automationReadState.disabledTrackIds.includes(selectedTrack.id);
+  const selectedTrackMode: AutomationWriteMode = selectedTrack === null
+    ? 'read'
+    : automationRecording.trackModes[selectedTrack.id] ?? 'read';
+  const selectedTrackWriting = selectedTrack === null
+    ? false
+    : automationRecording.writingTrackIds.includes(selectedTrack.id);
+  const selectedTrackArmed =
+    selectedTrackMode !== 'read' && !selectedTrackWriting;
   const lengthBeats = Math.max(0, project.lengthBeats);
   const canvasWidth = Math.max(
     AUTOMATION_LANE_MIN_WIDTH,
@@ -264,6 +298,7 @@ export function AutomationLaneEditor() {
     setDragPreview(null);
     setNotice(null);
     setClearConfirmationOpen(false);
+    setWriteConfirmationOpen(false);
   }, [selectedTrackId]);
 
   useEffect(() => {
@@ -309,6 +344,10 @@ export function AutomationLaneEditor() {
   }, [clearConfirmationOpen]);
 
   useEffect(() => {
+    if (writeConfirmationOpen) confirmWriteButtonRef.current?.focus();
+  }, [writeConfirmationOpen]);
+
+  useEffect(() => {
     const element = timelineScrollRef.current;
     if (element === null) return;
     const measure = (): void => {
@@ -335,6 +374,39 @@ export function AutomationLaneEditor() {
     setNotice({
       kind: 'error',
       message: studioAutomationErrorMessage(result.code),
+    });
+  };
+
+  const setReadNotice = (
+    scope: 'Global' | 'Track',
+    enabled: boolean,
+    playbackStopped: boolean,
+  ): void => {
+    setNotice({
+      kind: 'status',
+      message: `${scope} Readを${enabled ? 'オン' : 'オフ'}にしました。${stoppedSuffix(
+        playbackStopped,
+      )}`,
+    });
+  };
+
+  const setMode = (mode: AutomationWriteMode): void => {
+    if (selectedTrack === null || selectedTrack.type === 'master' || disabled) {
+      return;
+    }
+    if (!setTrackAutomationMode(selectedTrack.id, mode)) {
+      setNotice({
+        kind: 'error',
+        message: 'オートメーションモードを安全に変更できませんでした。',
+      });
+      return;
+    }
+    setNotice({
+      kind: 'status',
+      message:
+        mode === 'read'
+          ? 'Readモードです。操作は通常のトラック値として扱います。'
+          : `${mode}を待機しました。再生中の操作を一括記録します。`,
     });
   };
 
@@ -676,6 +748,8 @@ export function AutomationLaneEditor() {
       data-automation-read-state={
         lane === null ? 'empty' : lane.bypassed ? 'bypassed' : 'read'
       }
+      data-global-read={globalReadEnabled ? 'on' : 'off'}
+      data-track-read={trackReadEnabled ? 'on' : 'off'}
       aria-labelledby="automation-lane-title"
     >
       <header className="automation-lane__header">
@@ -710,6 +784,197 @@ export function AutomationLaneEditor() {
           )}
         </div>
       </header>
+
+      <div
+        className="automation-lane__automation-controls"
+        aria-label="オートメーションのReadと記録"
+      >
+        <div
+          className="automation-lane__read-gates"
+          role="group"
+          aria-label="Read設定"
+        >
+          <button
+            type="button"
+            className={globalReadEnabled ? 'is-active' : ''}
+            aria-pressed={globalReadEnabled}
+            disabled={disabled}
+            onClick={() => {
+              const result = setStudioGlobalAutomationReadEnabled(
+                !globalReadEnabled,
+              );
+              if (!result.ok) {
+                commandFailed(result);
+                return;
+              }
+              setReadNotice(
+                'Global',
+                !globalReadEnabled,
+                result.playbackStopped,
+              );
+            }}
+          >
+            Global Read: {globalReadEnabled ? 'オン' : 'オフ'}
+          </button>
+          <button
+            type="button"
+            className={trackReadEnabled ? 'is-active' : ''}
+            aria-pressed={trackReadEnabled}
+            disabled={disabled}
+            onClick={() => {
+              const result = setStudioTrackAutomationReadEnabled(
+                selectedTrack.id,
+                !trackReadEnabled,
+              );
+              if (!result.ok) {
+                commandFailed(result);
+                return;
+              }
+              setReadNotice(
+                'Track',
+                !trackReadEnabled,
+                result.playbackStopped,
+              );
+            }}
+          >
+            Track Read: {trackReadEnabled ? 'オン' : 'オフ'}
+          </button>
+        </div>
+
+        <div
+          className="automation-lane__mode-selector"
+          role="radiogroup"
+          aria-label={`${selectedTrack.name} 記録モード`}
+        >
+          {AUTOMATION_WRITE_MODES.map((mode) => (
+            <button
+              key={mode}
+              ref={mode === 'write' ? writeModeButtonRef : undefined}
+              type="button"
+              role="radio"
+              aria-checked={selectedTrackMode === mode}
+              className={selectedTrackMode === mode ? 'is-active' : ''}
+              disabled={disabled}
+              onClick={() => {
+                if (mode === 'write') {
+                  setWriteConfirmationOpen(true);
+                  return;
+                }
+                setMode(mode);
+              }}
+            >
+              {automationModeLabel(mode)}
+            </button>
+          ))}
+        </div>
+
+        <p
+          className={`automation-lane__write-status${
+            selectedTrackWriting
+              ? ' is-writing'
+              : selectedTrackArmed
+                ? ' is-armed'
+                : ' is-read'
+          }`}
+          role="status"
+          aria-live="polite"
+          data-automation-write-status={
+            selectedTrackWriting
+              ? 'writing'
+              : selectedTrackArmed
+                ? 'armed'
+                : 'read'
+          }
+        >
+          <strong>
+            {selectedTrackWriting
+              ? '記録中（Writing）'
+              : selectedTrackArmed
+                ? '待機中（Armed）'
+                : '読み取り（Read）'}
+          </strong>
+          {' — '}
+          {automationModeLabel(selectedTrackMode)}
+        </p>
+      </div>
+
+      {automationRecording.passActive && automationRecording.status ? (
+        <div
+          className="automation-lane__recording-recovery"
+          role="alert"
+          aria-live="assertive"
+        >
+          <p>
+            <strong>オートメーション記録を確定できませんでした。</strong>{' '}
+            {automationRecording.status.message}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              const store = useStore.getState();
+              if (!store.cancelAutomationRecording()) {
+                setNotice({
+                  kind: 'error',
+                  message:
+                    '記録を安全に破棄できませんでした。プロジェクトを切り替えず、もう一度お試しください。',
+                });
+                return;
+              }
+              useStore.getState().stop();
+              setNotice({
+                kind: 'status',
+                message:
+                  '未確定のオートメーション記録を破棄して、再生を停止しました。',
+              });
+            }}
+          >
+            記録を破棄して停止
+          </button>
+        </div>
+      ) : null}
+
+      {writeConfirmationOpen ? (
+        <dialog
+          open
+          className="automation-lane__write-confirmation"
+          aria-labelledby="automation-write-confirmation-title"
+          aria-describedby="automation-write-confirmation-description"
+        >
+          <h4 id="automation-write-confirmation-title">
+            Writeモードを有効にしますか？
+          </h4>
+          <p id="automation-write-confirmation-description">
+            Writeは、コントロールに触れなくても再生位置の下にある音量とパンのオートメーションを両方とも置き換えます。パスをパンチアウトすると、安全なTouchモードへ自動的に戻ります。
+          </p>
+          <div>
+            <button
+              ref={confirmWriteButtonRef}
+              type="button"
+              className="automation-lane__delete"
+              onClick={() => {
+                setMode('write');
+                setWriteConfirmationOpen(false);
+                writeModeButtonRef.current?.focus();
+              }}
+            >
+              Writeを有効にする
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setWriteConfirmationOpen(false);
+                setNotice({
+                  kind: 'status',
+                  message: 'Writeモードへの変更をキャンセルしました。',
+                });
+                writeModeButtonRef.current?.focus();
+              }}
+            >
+              キャンセル
+            </button>
+          </div>
+        </dialog>
+      ) : null}
 
       <div className="automation-lane__toolbar">
         <label>
@@ -779,6 +1044,7 @@ export function AutomationLaneEditor() {
                 lane.bypassed ? 'is-bypassed' : 'is-read'
               }`}
               data-automation-read-toggle="true"
+              aria-label={`Lane Bypass: ${lane.bypassed ? 'オン' : 'オフ'}`}
               aria-pressed={lane.bypassed}
               aria-describedby="automation-lane-read-description"
               disabled={disabled}
@@ -787,7 +1053,11 @@ export function AutomationLaneEditor() {
               {lane.bypassed ? 'Bypass' : 'Read'}
             </button>
             <p id="automation-lane-read-description">
-              <strong>{lane.bypassed ? 'Bypass中。' : 'Read中。'}</strong>{' '}
+              <strong>
+                {lane.bypassed
+                  ? 'Lane Bypass中。'
+                  : 'Lane Bypassはオフです。'}
+              </strong>{' '}
               {lane.bypassed
                 ? '曲線と点は保持され、再生とWAV書き出しではトラックの現在の基準値を使います。点はそのまま編集できます。'
                 : '曲線を再生とWAV書き出しに反映します。Bypassに切り替えても点は削除されません。'}

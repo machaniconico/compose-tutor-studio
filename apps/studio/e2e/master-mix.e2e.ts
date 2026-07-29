@@ -41,6 +41,7 @@ function masterMixProject(
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [{
         sourceTrackId: 'track-deterministic-tone',

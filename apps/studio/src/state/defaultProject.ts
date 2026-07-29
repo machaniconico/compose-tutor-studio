@@ -218,6 +218,7 @@ export function createDefaultProject(title = '最初の1曲'): Project {
     }],
     audioAssets: [],
     audioTakeFolders: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     automationLanes: [],
     audioRouting: {
       outputs: tracks

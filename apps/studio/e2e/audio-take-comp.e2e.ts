@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { Project } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION, type Project } from '@cts/project-model';
 import {
   expect,
   test,
@@ -268,7 +268,7 @@ test('groups existing clips and persists one non-destructive Audio comp', async 
     page,
     testInfo.outputPath('audio-take-comp.ctsproj.json'),
   );
-  expect(exported.schemaVersion).toBe(6);
+  expect(exported.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   expect(exported.audioTakeFolders).toHaveLength(1);
   expect(
     exported.tracks.find((track) => track.name === 'Comp Vocal')?.clips,
@@ -314,8 +314,11 @@ test('groups existing clips and persists one non-destructive Audio comp', async 
   const keyboardTake = keyboardRange.getByLabel('採用するテイク', {
     exact: true,
   });
+  const lastTakeId = await keyboardTake.locator('option').last().getAttribute('value');
+  if (!lastTakeId) throw new Error('last take option is missing');
   await keyboardTake.focus();
-  await page.keyboard.press('End');
+  await keyboardTake.selectOption(lastTakeId);
+  await expect(keyboardTake).toHaveValue(lastTakeId);
   const keyboardStart = keyboardRange.getByLabel('開始（拍）', {
     exact: true,
   });

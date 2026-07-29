@@ -32,6 +32,7 @@ function project(tracks: Track[], chordTrack: ChordEvent[] = []): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: tracks
         .filter((track) => track.type !== 'master')

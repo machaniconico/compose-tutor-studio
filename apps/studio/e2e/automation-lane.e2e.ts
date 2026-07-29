@@ -206,6 +206,7 @@ function maximumAutomationLaneProject(): Project {
     }],
     audioAssets: [],
     audioTakeFolders: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     automationLanes: [{
       id: 'automation-stress-lane',
       target: { type: 'track-volume', trackId },

@@ -143,8 +143,11 @@ export class PlaybackController<TSession extends PlaybackSession> {
       const confirmed = this.isCurrent(requestId, 'playing');
       const ready = this.active?.session.isReady?.() !== false;
       if (!confirmed || !ready) {
-        this.disposeActive(requestId);
-        if (confirmed && !ready) this.dependencies.interrupt(requestId);
+        if (confirmed && !ready) {
+          this.interruptActive(requestId);
+        } else {
+          this.disposeActive(requestId);
+        }
       }
     } catch (error) {
       candidate?.dispose();
@@ -197,8 +200,14 @@ export class PlaybackController<TSession extends PlaybackSession> {
       return;
     }
     if (this.active?.requestId !== requestId || !this.isCurrent(requestId, 'playing')) return;
-    this.disposeActive(requestId);
+    this.interruptActive(requestId);
+  }
+
+  private interruptActive(requestId: number): void {
     this.dependencies.interrupt(requestId);
+    if (!this.isCurrent(requestId, 'playing')) {
+      this.disposeActive(requestId);
+    }
   }
 
   private disposeActive(requestId?: number): void {

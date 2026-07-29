@@ -82,8 +82,9 @@ export function focusTrackSelectionControl(trackId: string): void {
   setTimeout(() => {
     const control = document.getElementById(trackSelectionControlId(trackId));
     if (!control) return;
-    control.focus();
-    control.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    control.focus({ preventScroll: true });
+    const row = control.closest<HTMLElement>('.track-row');
+    (row ?? control).scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, 0);
 }
 

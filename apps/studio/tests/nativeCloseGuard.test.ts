@@ -317,6 +317,38 @@ describe('registerNativeCloseGuard', () => {
     expect(store.getState().project.title).toBe('editable after blocked close');
   });
 
+  it('synchronously finalizes runtime capture before the edit fence and blocks on failure', async () => {
+    const harness = closeHarness();
+    const order: string[] = [];
+    const blocked = vi.fn();
+    const claimCloseRequest = vi.fn();
+    await registerNativeCloseGuard(
+      {
+        finalizeRuntimeEdits: () => {
+          order.push('finalize');
+          return false;
+        },
+        tryFenceEdits: () => {
+          order.push('fence');
+          return true;
+        },
+        claimCloseRequest,
+        flushAsync: async () => true,
+        flushSynchronously: () => true,
+        finishClose: async () => true,
+        onBlocked: blocked,
+      },
+      { window: harness.window, lifecycleGate: harness.lifecycleGate },
+    );
+
+    await harness.request();
+
+    expect(order).toEqual(['finalize']);
+    expect(blocked).toHaveBeenCalledWith('runtime-finalization');
+    expect(claimCloseRequest).not.toHaveBeenCalled();
+    expect(harness.lifecycleGate.owner()).toBe('idle');
+  });
+
   it('fails closed before native authorization when the Store mutation fence is busy', async () => {
     const harness = closeHarness();
     const claimCloseRequest = vi.fn(async () => 'close-0000000000000002');

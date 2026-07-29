@@ -130,6 +130,7 @@ function project(track: Track): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [{ sourceTrackId: track.id, destination: { type: 'master' } }],
       sends: [],

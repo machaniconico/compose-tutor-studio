@@ -7,10 +7,13 @@ import {
 } from '@cts/project-model';
 import type { NoteScheduleEvent } from '../src/audio/events';
 import {
+  automationCaptureCommitPreservesRuntimeSession,
+  automationReadScalarCommitPreservesRuntimeSession,
   beginRuntimeNaturalDrain,
   planRuntimeAudioTail,
   restoreRuntimeMaster,
   stopRuntimePlaybackForProjectTopologyChange,
+  transportTransitionOwnsRuntimeStop,
 } from '../src/audio/playback';
 import {
   PlaybackController,
@@ -97,6 +100,7 @@ function project(track: Track): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [{ sourceTrackId: track.id, destination: { type: 'master' } }],
       sends: [],
@@ -360,6 +364,28 @@ describe('beginRuntimeNaturalDrain', () => {
 });
 
 describe('Project topology changes during natural drain', () => {
+  it('keeps an exact capture-owned commit generation alive for its natural tail', () => {
+    expect(automationCaptureCommitPreservesRuntimeSession(7, 7, 7)).toBe(true);
+    expect(automationCaptureCommitPreservesRuntimeSession(7, 8, 7)).toBe(false);
+    expect(automationCaptureCommitPreservesRuntimeSession(7, 7, 6)).toBe(false);
+    expect(automationCaptureCommitPreservesRuntimeSession(7, 7, null)).toBe(false);
+  });
+
+  it('keeps only an exact Read scalar commit generation alive', () => {
+    const marker = { playbackRequestId: 7 };
+    expect(automationReadScalarCommitPreservesRuntimeSession(7, 7, marker))
+      .toBe(true);
+    expect(automationReadScalarCommitPreservesRuntimeSession(7, 8, marker))
+      .toBe(false);
+    expect(automationReadScalarCommitPreservesRuntimeSession(
+      7,
+      7,
+      { playbackRequestId: 6 },
+    )).toBe(false);
+    expect(automationReadScalarCommitPreservesRuntimeSession(7, 7, null))
+      .toBe(false);
+  });
+
   const pointA = {
     id: 'point-a',
     beat: 0,
@@ -419,6 +445,25 @@ describe('Project topology changes during natural drain', () => {
 
     completeDrain();
     expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('assigns one runtime-stop owner while retaining Project ownership for a drain', () => {
+    expect(transportTransitionOwnsRuntimeStop(
+      { phase: 'playing', playbackRequestId: 7 },
+      { phase: 'stopped', playbackRequestId: 8 },
+    )).toBe(true);
+    expect(transportTransitionOwnsRuntimeStop(
+      { phase: 'starting', playbackRequestId: 7 },
+      { phase: 'stopped', playbackRequestId: 8 },
+    )).toBe(true);
+    expect(transportTransitionOwnsRuntimeStop(
+      { phase: 'stopped', playbackRequestId: 7 },
+      { phase: 'stopped', playbackRequestId: 8 },
+    )).toBe(true);
+    expect(transportTransitionOwnsRuntimeStop(
+      { phase: 'stopped', playbackRequestId: 8 },
+      { phase: 'stopped', playbackRequestId: 8 },
+    )).toBe(false);
   });
 });
 

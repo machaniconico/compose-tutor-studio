@@ -664,6 +664,69 @@ export function validateProject(project: Project): ValidationResult {
     });
   });
 
+  const automationReadState: unknown = project.automationReadState;
+  if (
+    typeof automationReadState !== 'object'
+    || automationReadState === null
+    || Array.isArray(automationReadState)
+  ) {
+    push('automationReadState', 'automationReadState must be an object');
+  } else {
+    const readState = automationReadState as Record<string, unknown>;
+    for (const key of Object.keys(readState)) {
+      if (key !== 'globalEnabled' && key !== 'disabledTrackIds') {
+        push(`automationReadState.${key}`, `unknown automation Read field "${key}"`);
+      }
+    }
+    if (typeof readState.globalEnabled !== 'boolean') {
+      push(
+        'automationReadState.globalEnabled',
+        'globalEnabled must be a required boolean',
+      );
+    }
+    const disabledTrackIds = readState.disabledTrackIds;
+    if (!Array.isArray(disabledTrackIds)) {
+      push(
+        'automationReadState.disabledTrackIds',
+        'disabledTrackIds must be a required string array',
+      );
+    } else {
+      const disabledReadIds = new Set<string>();
+      disabledTrackIds.forEach((trackId, index) => {
+        const path = `automationReadState.disabledTrackIds[${index}]`;
+        if (typeof trackId !== 'string') {
+          push(path, 'automation Read track id must be a string');
+          return;
+        }
+        if (disabledReadIds.has(trackId)) {
+          push(path, `automation Read track id must be unique (duplicate id "${trackId}")`);
+        } else {
+          disabledReadIds.add(trackId);
+        }
+        const track = tracksById.get(trackId);
+        if (!track) {
+          push(path, `automation Read state references missing track "${trackId}"`);
+        } else if (track.type === 'master') {
+          push(path, 'automation Read state cannot reference a Master track');
+        }
+      });
+      const canonicalDisabledReadIds = project.tracks
+        .filter((track) => track.type !== 'master' && disabledReadIds.has(track.id))
+        .map((track) => track.id);
+      if (
+        canonicalDisabledReadIds.length === disabledTrackIds.length
+        && canonicalDisabledReadIds.some(
+          (trackId, index) => disabledTrackIds[index] !== trackId,
+        )
+      ) {
+        push(
+          'automationReadState.disabledTrackIds',
+          'automation Read track ids must use canonical project track order',
+        );
+      }
+    }
+  }
+
   const clipsById = new Map<string, { clip: Project['tracks'][number]['clips'][number]; trackId: string }>();
   for (const track of project.tracks) {
     for (const clip of track.clips) {

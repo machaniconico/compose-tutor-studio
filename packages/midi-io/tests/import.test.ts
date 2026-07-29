@@ -55,6 +55,7 @@ describe('parseMidiFile', () => {
       audioAssets: [],
       audioTakeFolders: [],
       automationLanes: [],
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
       audioRouting: {
         outputs: [
           { sourceTrackId: 'lead', destination: { type: 'master' } },

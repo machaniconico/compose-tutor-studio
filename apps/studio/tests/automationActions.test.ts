@@ -351,6 +351,112 @@ describe('studio automation commands', () => {
     }
   });
 
+  it('commits Global and Track Read as one CAS/Undo/save and leaves runtime stop to the bridge', () => {
+    const trackId = firstEditableTrackId();
+    const beforeTrack = useStore.getState();
+    const requestId = startPlayback();
+
+    expect(automationActions.setStudioTrackAutomationReadEnabled(
+      trackId,
+      false,
+    )).toEqual({
+      ok: true,
+      changed: true,
+      trackId,
+      playbackStopped: true,
+    });
+    const afterTrack = useStore.getState();
+    expect(afterTrack.project.automationReadState.disabledTrackIds).toEqual([trackId]);
+    expect(afterTrack.past).toHaveLength(beforeTrack.past.length + 1);
+    expect(afterTrack.saveState.revision).toBe(beforeTrack.saveState.revision + 1);
+    expect(afterTrack.transport).toMatchObject({
+      phase: 'stopped',
+      playbackRequestId: requestId + 1,
+    });
+
+    const beforeGlobal = useStore.getState();
+    expect(automationActions.setStudioGlobalAutomationReadEnabled(false)).toEqual({
+      ok: true,
+      changed: true,
+      playbackStopped: false,
+    });
+    expect(useStore.getState().project.automationReadState).toEqual({
+      globalEnabled: false,
+      disabledTrackIds: [trackId],
+    });
+    expect(useStore.getState().past).toHaveLength(beforeGlobal.past.length + 1);
+    expect(useStore.getState().saveState.revision).toBe(
+      beforeGlobal.saveState.revision + 1,
+    );
+    useStore.getState().undo();
+    expect(useStore.getState().project.automationReadState.globalEnabled).toBe(true);
+  });
+
+  it('rejects a Read CAS that loses the snapshot race without reporting success or stopping audio', () => {
+    const trackId = firstEditableTrackId();
+    const before = useStore.getState();
+    const originalApplyProjectChange = before.applyProjectChange;
+    startPlayback();
+    const playing = useStore.getState();
+
+    useStore.setState({
+      applyProjectChange: (adoptReadChange) => {
+        expect(originalApplyProjectChange((project) => ({
+          ...project,
+          title: '先に反映された変更',
+        }))).toBe(true);
+        return originalApplyProjectChange(adoptReadChange);
+      },
+    });
+
+    try {
+      expect(automationActions.setStudioTrackAutomationReadEnabled(
+        trackId,
+        false,
+      )).toEqual({ ok: false, code: 'commit-rejected' });
+      const after = useStore.getState();
+      expect(after.project.title).toBe('先に反映された変更');
+      expect(after.project.automationReadState.disabledTrackIds).toEqual([]);
+      expect(after.past).toHaveLength(playing.past.length + 1);
+      expect(after.saveState.revision).toBe(playing.saveState.revision + 1);
+      expect(after.transport).toBe(playing.transport);
+    } finally {
+      useStore.setState({ applyProjectChange: originalApplyProjectChange });
+    }
+  });
+
+  it('keeps Read no-ops and missing/Master/busy requests atomic', () => {
+    const initial = useStore.getState();
+    expect(automationActions.setStudioGlobalAutomationReadEnabled(true)).toEqual({
+      ok: true,
+      changed: false,
+      playbackStopped: false,
+    });
+    expectMutationStateUnchanged(initial);
+
+    expect(automationActions.setStudioTrackAutomationReadEnabled(
+      'missing',
+      false,
+    )).toEqual({ ok: false, code: 'track-not-found' });
+    const master = initial.project.tracks.find((track) => track.type === 'master')!;
+    expect(automationActions.setStudioTrackAutomationReadEnabled(
+      master.id,
+      false,
+    )).toEqual({ ok: false, code: 'master-protected' });
+    expectMutationStateUnchanged(initial);
+
+    useStore.setState({ projectOperationBusy: true });
+    try {
+      expect(automationActions.setStudioGlobalAutomationReadEnabled(false)).toEqual({
+        ok: false,
+        code: 'commit-rejected',
+      });
+      expect(useStore.getState().project).toBe(initial.project);
+    } finally {
+      useStore.setState({ projectOperationBusy: false });
+    }
+  });
+
   it('maps every common correction into plain actionable Japanese', () => {
     expect(
       automationActions.studioAutomationErrorMessage('point-beat-conflict'),

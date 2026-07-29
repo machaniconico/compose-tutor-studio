@@ -20,6 +20,7 @@ import {
   AUDIO_RENDER_QUANTUM_FRAMES,
   acquireRuntimeProjectAudioBuffers,
   classifyPlaybackStartFailure,
+  finalizeAutomationCycleBoundaryOnce,
   normalizeTransportLoop,
   planSynchronizedRecordingStartFrame,
   shouldRefreshAudioAssetIssuesAfterFailure,
@@ -78,6 +79,24 @@ describe('normalizeTransportLoop', () => {
       startBeat: 0,
       endBeat: 8,
     });
+  });
+});
+
+describe('automation loop right locator', () => {
+  it('retries a rejected finalization and handles the half-open boundary once after success', () => {
+    const finalize = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    let handled = false;
+
+    handled = finalizeAutomationCycleBoundaryOnce(handled, true, finalize);
+    expect(handled).toBe(false);
+    handled = finalizeAutomationCycleBoundaryOnce(handled, true, finalize);
+    expect(handled).toBe(true);
+    handled = finalizeAutomationCycleBoundaryOnce(handled, true, finalize);
+
+    expect(handled).toBe(true);
+    expect(finalize).toHaveBeenCalledTimes(2);
   });
 });
 

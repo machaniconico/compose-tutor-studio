@@ -11,6 +11,8 @@ import {
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   ScheduleEventLimitError,
+  AUTOMATION_TOUCH_RETURN_SECONDS,
+  type AutomationTarget,
   type AudioRouting,
   type CompiledAudioRoutingPlan,
   type MusicalTimeIndex,
@@ -25,6 +27,9 @@ import {
 import {
   automationBaseValue,
   automationCommandsInWindow,
+  automationLaneForTrack,
+  automationValueAt,
+  isAutomationReadEnabled,
 } from './automation';
 import {
   acquireProjectAudioBuffers,
@@ -49,6 +54,7 @@ import { getAudioEngine } from './engine';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import {
   applyMixState,
+  applyReadScalarMixState,
   applyRoutingMixState,
   AudioRoutingGraphError,
   assertRoutingGraphNodeBudget,
@@ -132,6 +138,7 @@ type RuntimeSession = PlaybackSession & {
   readonly everAudibleTrackIds: Set<string>;
   readonly everAudibleEdgeIds: Set<string>;
   positionTimer: ReturnType<typeof setInterval> | null;
+  automationCycleBoundaryHandled: boolean;
 };
 
 type NaturalDrainControls = Readonly<{
@@ -337,6 +344,20 @@ export function synchronizedRecordingCycleEndBeat(
 ): number {
   return cycle.loopStartBeat
     + (cycle.loopEndBeat - cycle.loopStartBeat) * cycle.passCount;
+}
+
+/**
+ * Claim a loop's half-open right boundary only after its capture pass commits.
+ * A rejected CAS stays unclaimed so the next scheduler tick can retry the same
+ * recoverable runtime pass; a successful claim suppresses second-loop repeats.
+ */
+export function finalizeAutomationCycleBoundaryOnce(
+  alreadyHandled: boolean,
+  boundaryCrossed: boolean,
+  finalize: () => boolean,
+): boolean {
+  if (alreadyHandled || !boundaryCrossed) return alreadyHandled;
+  return finalize();
 }
 
 function rejectSynchronizedIntent(
@@ -826,6 +847,49 @@ export function stopRuntimePlaybackForProjectTopologyChange(
   return true;
 }
 
+type RuntimeStopTransportSnapshot = Readonly<{
+  phase: 'stopped' | 'starting' | 'playing';
+  playbackRequestId: number;
+}>;
+
+/**
+ * Whether the transport subscription owns disposal for the same atomic store
+ * publication. Project topology remains the owner when an already-stopped
+ * transport may still have a naturally draining session.
+ */
+export function transportTransitionOwnsRuntimeStop(
+  previous: RuntimeStopTransportSnapshot,
+  next: RuntimeStopTransportSnapshot,
+): boolean {
+  return next.phase === 'stopped'
+    && (
+      previous.phase !== next.phase
+      || previous.playbackRequestId !== next.playbackRequestId
+    );
+}
+
+/** Capture commits keep the exact frozen playback generation and natural tail alive. */
+export function automationCaptureCommitPreservesRuntimeSession(
+  previousRequestId: number,
+  nextRequestId: number,
+  captureCommitRequestId: number | null,
+): boolean {
+  return captureCommitRequestId !== null
+    && captureCommitRequestId === previousRequestId
+    && previousRequestId === nextRequestId;
+}
+
+/** A target-scoped Read scalar commit keeps the same playback generation. */
+export function automationReadScalarCommitPreservesRuntimeSession(
+  previousRequestId: number,
+  nextRequestId: number,
+  marker: Readonly<{ playbackRequestId: number }> | null,
+): boolean {
+  return marker !== null
+    && marker.playbackRequestId === previousRequestId
+    && previousRequestId === nextRequestId;
+}
+
 /**
  * Install the store subscriptions. Idempotent — safe to call from multiple
  * component mounts. Returns a teardown function owned by the first caller.
@@ -883,11 +947,60 @@ export function initAudioBridge(): () => void {
   // changes to the accepted running session only.
   const unsubProject = useStore.subscribe((next, previous) => {
     if (next.project === previous.project) return;
+    if (automationCaptureCommitPreservesRuntimeSession(
+      previous.transport.playbackRequestId,
+      next.transport.playbackRequestId,
+      next.automationRecordingCommitRequestId,
+    )) {
+      // The active pass intentionally keeps playing its frozen session snapshot.
+      // This also preserves an already-started natural tail.
+      return;
+    }
+    if (automationReadScalarCommitPreservesRuntimeSession(
+      previous.transport.playbackRequestId,
+      next.transport.playbackRequestId,
+      next.automationReadScalarCommit,
+    )) {
+      const session = controller.activeSession;
+      if (!session?.scheduler.isRunning) return;
+      try {
+        const applied = applyReadScalarMixState(
+          session.graphs,
+          next.project,
+          next.automationReadScalarCommit!.targets,
+          getAudioEngine().now(),
+          session.routingPlan,
+        );
+        if (!applied) {
+          useStore.getState().interruptPlayback(
+            next.transport.playbackRequestId,
+            'interrupted',
+          );
+        }
+      } catch {
+        useStore.getState().interruptPlayback(
+          next.transport.playbackRequestId,
+          'audio-resource-limit',
+        );
+      }
+      return;
+    }
+    // commitProject moves an active/starting transport to stopped before store
+    // subscribers run. In that case unsubTransport already owns the single
+    // controller stop. The Project subscriber remains responsible for a
+    // topology change while transport is already stopped, notably a natural
+    // drain whose graph still owns audible tail resources.
+    const transportStopOwnsInvalidation = transportTransitionOwnsRuntimeStop(
+      previous.transport,
+      next.transport,
+    );
     if (
       stopRuntimePlaybackForProjectTopologyChange(
         previous.project,
         next.project,
-        () => controller.stop(),
+        () => {
+          if (!transportStopOwnsInvalidation) controller.stop();
+        },
       )
     ) {
       return;
@@ -1356,6 +1469,12 @@ async function createRuntimeSessionImpl(
   let unsubscribeContext = () => {};
   let cancelNaturalDrainTimer = () => {};
   let disposed = false;
+  const automationOwnership = Object.freeze({
+    projectId: project.id,
+    activationId: initialStore.saveState.activationId,
+    playbackRequestId: requestId,
+  });
+  let automationRuntimeAttached = false;
 
   const stopPositionUpdates = (): void => {
     if (session?.positionTimer != null) {
@@ -1372,6 +1491,10 @@ async function createRuntimeSessionImpl(
   const disposeResources = (): void => {
     if (disposed) return;
     disposed = true;
+    if (automationRuntimeAttached) {
+      automationRuntimeAttached = false;
+      useStore.getState().detachAutomationPlaybackRuntime(automationOwnership);
+    }
     synchronizedIntent?.removeAbortListener();
     cancelNaturalDrainTimer();
     cancelNaturalDrainTimer = () => {};
@@ -1678,6 +1801,7 @@ async function createRuntimeSessionImpl(
       everAudibleTrackIds,
       everAudibleEdgeIds,
       positionTimer: null,
+      automationCycleBoundaryHandled: false,
       ...(loop ? {} : { beginNaturalDrain }),
       isReady: () =>
         !disposed &&
@@ -1723,6 +1847,86 @@ async function createRuntimeSessionImpl(
     if (!scheduler.isRunning || String(context.state) !== 'running' || !isCurrent()) {
       throw new CancelledPlaybackRequest();
     }
+    const automationGraphBridge = {
+      beginOverride: (target: AutomationTarget, value: number): void => {
+        const graph = graphs.get(target.trackId);
+        if (!graph) throw new CancelledPlaybackRequest();
+        graph.beginAutomationOverride(
+          target.type,
+          value,
+          engine.now(),
+          startupRoutingMix.audibleChannelIds.has(target.trackId),
+        );
+      },
+      updateOverride: (target: AutomationTarget, value: number): void => {
+        const graph = graphs.get(target.trackId);
+        if (!graph) throw new CancelledPlaybackRequest();
+        graph.updateAutomationOverride(
+          target.type,
+          value,
+          engine.now(),
+          startupRoutingMix.audibleChannelIds.has(target.trackId),
+        );
+      },
+      releaseTouchOverride: (
+        target: AutomationTarget,
+        releaseBeat: number,
+      ): void => {
+        const graph = graphs.get(target.trackId);
+        if (!graph) throw new CancelledPlaybackRequest();
+        const returnBeat = tempo.secondsToBeat(
+          tempo.beatToSeconds(releaseBeat) + AUTOMATION_TOUCH_RETURN_SECONDS,
+        );
+        graph.releaseAutomationOverride(
+          target.type,
+          frozenAutomationValueAt(project, target, returnBeat),
+          engine.now(),
+          AUTOMATION_TOUCH_RETURN_SECONDS,
+          startupRoutingMix.audibleChannelIds.has(target.trackId),
+        );
+        scheduleAutomationTargetForWindow(
+          runtimeSession,
+          target,
+          returnBeat,
+          timeToBeat(
+            engine.now() + AUTOMATION_TOUCH_RETURN_SECONDS + LOOKAHEAD_S,
+            runtimeSession.transportTempo,
+            runtimeSession.anchorBeat,
+            runtimeSession.anchorTime,
+          ),
+        );
+      },
+      resumeOverride: (target: AutomationTarget, resumeBeat: number): void => {
+        const graph = graphs.get(target.trackId);
+        if (!graph) return;
+        graph.releaseAutomationOverride(
+          target.type,
+          frozenAutomationValueAt(project, target, resumeBeat),
+          engine.now(),
+          0.010,
+          startupRoutingMix.audibleChannelIds.has(target.trackId),
+        );
+        scheduleAutomationTargetForWindow(
+          runtimeSession,
+          target,
+          resumeBeat,
+          timeToBeat(
+            engine.now() + 0.010 + LOOKAHEAD_S,
+            runtimeSession.transportTempo,
+            runtimeSession.anchorBeat,
+            runtimeSession.anchorTime,
+          ),
+        );
+      },
+    };
+    if (!useStore.getState().attachAutomationPlaybackRuntime(
+      requestId,
+      () => scheduler.currentBeat(),
+      automationGraphBridge,
+    )) {
+      throw new CancelledPlaybackRequest();
+    }
+    automationRuntimeAttached = true;
     if (synchronizedIntent && synchronizedClock) {
       await waitForSynchronizedAnchor(
         synchronizedIntent,
@@ -1813,6 +2017,79 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
   }
 }
 
+function frozenAutomationValueAt(
+  project: Project,
+  target: AutomationTarget,
+  beat: number,
+): number {
+  const track = project.tracks.find((candidate) => candidate.id === target.trackId);
+  if (!track) return target.type === 'track-volume' ? 1 : 0;
+  const baseValue = automationBaseValue(track, target);
+  const lane = automationLaneForTrack(
+    project.automationLanes,
+    target.trackId,
+    target.type,
+  );
+  return lane && isAutomationReadEnabled(project.automationReadState, lane)
+    ? automationValueAt(lane, baseValue, beat)
+    : baseValue;
+}
+
+/** Rebuild only one target's cancelled lookahead after manual ownership ends. */
+function scheduleAutomationTargetForWindow(
+  session: RuntimeSession,
+  target: AutomationTarget,
+  windowStartBeat: number,
+  windowEndBeat: number,
+): void {
+  if (!(windowEndBeat > windowStartBeat)) return;
+  const lane = automationLaneForTrack(
+    session.projectSnapshot.automationLanes,
+    target.trackId,
+    target.type,
+  );
+  const track = session.projectSnapshot.tracks.find(
+    (candidate) => candidate.id === target.trackId,
+  );
+  const graph = session.graphs.get(target.trackId);
+  if (
+    !lane
+    || !track
+    || !graph
+    || !isAutomationReadEnabled(session.projectSnapshot.automationReadState, lane)
+  ) {
+    return;
+  }
+  const latestProject = useStore.getState().project;
+  const routingProject = latestProject.id === session.projectSnapshot.id
+    ? latestProject
+    : session.projectSnapshot;
+  const audible = resolveAudioRoutingMix(routingProject, session.routingPlan)
+    .audibleChannelIds.has(target.trackId);
+  for (const command of automationCommandsInWindow(
+    lane,
+    automationBaseValue(track, target),
+    windowStartBeat,
+    windowEndBeat,
+    session.loop,
+    false,
+    session.tempoChangeBeats,
+  )) {
+    graph.scheduleAutomation(
+      target.type,
+      command.value,
+      beatToTime(
+        command.beat,
+        session.transportTempo,
+        session.anchorBeat,
+        session.anchorTime,
+      ),
+      command.interpolation,
+      audible,
+    );
+  }
+}
+
 function scheduleAutomationForWindow(
   session: RuntimeSession,
   windowStartBeat: number,
@@ -1830,6 +2107,7 @@ function scheduleAutomationForWindow(
     .audibleChannelIds;
 
   for (const lane of session.projectSnapshot.automationLanes) {
+    if (!isAutomationReadEnabled(session.projectSnapshot.automationReadState, lane)) continue;
     const track = tracks.get(lane.target.trackId);
     const graph = session.graphs.get(lane.target.trackId);
     if (!track || !graph) continue;
@@ -1894,7 +2172,11 @@ function scheduleMetronomeForWindow(
 function startPositionLoop(session: RuntimeSession): void {
   if (session.positionTimer != null) clearInterval(session.positionTimer);
   session.positionTimer = setInterval(() => {
-    const { transport, setPosition } = useStore.getState();
+    const {
+      transport,
+      updatePlaybackPosition,
+      finalizeAutomationRecording,
+    } = useStore.getState();
     if (
       transport.phase !== 'playing' ||
       transport.playbackRequestId !== session.requestId ||
@@ -1903,6 +2185,27 @@ function startPositionLoop(session: RuntimeSession): void {
       return;
     }
     const beat = session.scheduler.currentBeat();
-    if (Number.isFinite(beat) && beat >= 0) setPosition(beat);
+    if (Number.isFinite(beat) && beat >= 0) {
+      if (session.loop && !session.automationCycleBoundaryHandled) {
+        const unwrappedBeat = timeToBeat(
+          getAudioEngine().now(),
+          session.transportTempo,
+          session.anchorBeat,
+          session.anchorTime,
+        );
+        if (unwrappedBeat >= session.loop.endBeat) {
+          session.automationCycleBoundaryHandled =
+            finalizeAutomationCycleBoundaryOnce(
+              session.automationCycleBoundaryHandled,
+              true,
+              () => finalizeAutomationRecording(
+                'cycle-right-locator',
+                session.loop!.endBeat,
+              ),
+            );
+        }
+      }
+      updatePlaybackPosition(session.requestId, beat);
+    }
   }, POSITION_TICK_MS);
 }

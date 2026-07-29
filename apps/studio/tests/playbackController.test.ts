@@ -272,7 +272,7 @@ describe('PlaybackController', () => {
     expect(failStart).not.toHaveBeenCalled();
   });
 
-  it('tears down the active generation before reporting interruption or natural end', async () => {
+  it('reports interruption before tearing down the active generation', async () => {
     let state: PlaybackRequestState = { phase: 'starting', requestId: 20 };
     let callbacks!: PlaybackSessionHandlers;
     const interrupted: number[] = [];

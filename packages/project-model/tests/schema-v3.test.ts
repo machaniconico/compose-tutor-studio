@@ -27,6 +27,7 @@ function toLegacyRecord(project: Project, schemaVersion: 1 | 2): Record<string, 
   delete legacy.audioAssets;
   delete legacy.audioTakeFolders;
   delete legacy.automationLanes;
+  delete legacy.automationReadState;
   delete legacy.audioRouting;
   for (const track of legacy.tracks as Array<Record<string, unknown>>) {
     delete track.role;

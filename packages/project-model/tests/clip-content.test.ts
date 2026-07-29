@@ -628,6 +628,7 @@ describe('project schema v1 to v2 clip migration', () => {
     delete legacy.audioAssets;
     delete legacy.audioTakeFolders;
     delete legacy.automationLanes;
+    delete legacy.automationReadState;
     delete legacy.audioRouting;
     for (const track of tracks as Array<Record<string, unknown>>) delete track.role;
     tracks[1]!.clips[0]!.aliasOf = 'formerly-ignored';

@@ -16,6 +16,7 @@ import {
 import {
   automationBaseValue,
   automationCommandsInWindow,
+  isAutomationReadEnabled,
 } from './automation';
 import {
   acquireProjectAudioBuffers,
@@ -558,6 +559,7 @@ export async function renderProjectToWav(
         const track = tracksById.get(lane.target.trackId);
         const graph = graphs.get(lane.target.trackId);
         if (!track || !graph) continue;
+        if (!isAutomationReadEnabled(project.automationReadState, lane)) continue;
         for (const command of automationCommandsInWindow(
           lane,
           automationBaseValue(track, lane.target),

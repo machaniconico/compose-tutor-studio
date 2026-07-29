@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  registerAutomationGestureLifecycle,
   registerPersistenceLifecycle,
+  registerRuntimeCaptureLifecycle,
+  type AutomationGestureLifecycleActions,
   type PersistenceLifecycleActions,
 } from '../src/state/persistenceLifecycle';
 
@@ -126,5 +129,78 @@ describe('registerPersistenceLifecycle', () => {
     expect(() => cleanup()).not.toThrow();
     expect(lifecycle.flushAsync).not.toHaveBeenCalled();
     expect(lifecycle.flushSynchronously).not.toHaveBeenCalled();
+  });
+});
+
+describe('registerRuntimeCaptureLifecycle', () => {
+  it('finalizes before the persistence pagehide listener observes the Project', () => {
+    const page = new EventTarget();
+    const order: string[] = [];
+    const cleanupCapture = registerRuntimeCaptureLifecycle({
+      finalize: vi.fn(() => {
+        order.push('finalize');
+        return true;
+      }),
+      cancel: vi.fn(() => {
+        order.push('cancel');
+        return true;
+      }),
+    }, page);
+    const cleanupPersistence = registerPersistenceLifecycle(actions({
+      flushSynchronously: vi.fn(() => {
+        order.push('flush');
+        return true;
+      }),
+    }), page, new VisibilityTarget());
+
+    page.dispatchEvent(new Event('pagehide'));
+
+    expect(order).toEqual(['finalize', 'flush']);
+    cleanupPersistence();
+    cleanupCapture();
+  });
+
+  it('uses a deterministic Project-no-op cancel when pagehide finalization fails', () => {
+    const page = new EventTarget();
+    const finalize = vi.fn(() => false);
+    const cancel = vi.fn(() => true);
+    const cleanup = registerRuntimeCaptureLifecycle({ finalize, cancel }, page);
+
+    page.dispatchEvent(new Event('pagehide'));
+
+    expect(finalize).toHaveBeenCalledWith('pagehide');
+    expect(cancel).toHaveBeenCalledOnce();
+    cleanup();
+  });
+});
+
+describe('registerAutomationGestureLifecycle', () => {
+  it.each(['pointerup', 'pointercancel', 'keyup', 'change', 'blur'])(
+    'ends active automation gestures on %s',
+    (eventName) => {
+      const page = new EventTarget();
+      const lifecycle: AutomationGestureLifecycleActions = {
+        endActiveGestures: vi.fn(() => true),
+      };
+      const cleanup = registerAutomationGestureLifecycle(lifecycle, page);
+
+      page.dispatchEvent(new Event(eventName));
+
+      expect(lifecycle.endActiveGestures).toHaveBeenCalledOnce();
+      cleanup();
+    },
+  );
+
+  it('ignores release events after cleanup', () => {
+    const page = new EventTarget();
+    const lifecycle: AutomationGestureLifecycleActions = {
+      endActiveGestures: vi.fn(() => true),
+    };
+    const cleanup = registerAutomationGestureLifecycle(lifecycle, page);
+
+    cleanup();
+    page.dispatchEvent(new Event('pointerup'));
+
+    expect(lifecycle.endActiveGestures).not.toHaveBeenCalled();
   });
 });

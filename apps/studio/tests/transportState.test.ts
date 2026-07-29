@@ -13,6 +13,13 @@ import {
   hasPlaybackTopologyChanged,
 } from '../src/state/store';
 
+const automationGraphBridge = {
+  beginOverride: () => {},
+  updateOverride: () => {},
+  releaseTouchOverride: () => {},
+  resumeOverride: () => {},
+};
+
 describe('playback topology changes', () => {
   it('detects track ordering, semantic roles, instrument configuration, and clip layout changes', () => {
     const project = createDefaultProject();
@@ -526,6 +533,127 @@ describe('playback topology changes', () => {
 
     expect(store.getState().project).toBe(before.project);
     expect(store.getState().transport).toBe(before.transport);
+  });
+});
+
+describe('automation capture transport boundaries', () => {
+  it('uses the scheduler clock for samples and punches out before an active seek', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const track = store.getState().project.tracks.find(
+      (candidate) => candidate.type !== 'master',
+    );
+    if (!track) throw new Error('automation Track fixture missing');
+    expect(store.getState().setTrackAutomationMode(track.id, 'latch')).toBe(true);
+    store.getState().play();
+    const requestId = store.getState().transport.playbackRequestId;
+    let schedulerBeat = 1;
+    expect(store.getState().attachAutomationPlaybackRuntime(
+      requestId,
+      () => schedulerBeat,
+      automationGraphBridge,
+    )).toBe(true);
+    store.getState().confirmPlaybackStarted(requestId);
+    expect(store.getState().transport.positionBeat).toBe(0);
+    expect(store.getState().beginAutomationGesture({
+      type: 'track-volume',
+      trackId: track.id,
+    }, 0.5)).toBe(true);
+
+    schedulerBeat = 1.5;
+    store.getState().setPosition(8);
+
+    expect(store.getState().automationRecording.passActive).toBe(false);
+    expect(store.getState().transport).toMatchObject({
+      phase: 'playing',
+      playbackRequestId: requestId,
+      positionBeat: 8,
+    });
+    const lane = store.getState().project.automationLanes.find(
+      (candidate) => candidate.target.trackId === track.id
+        && candidate.target.type === 'track-volume',
+    );
+    expect(lane?.points.some((point) => point.beat === 1)).toBe(true);
+    expect(lane?.points.every((point) => point.beat !== 0)).toBe(true);
+  });
+
+  it.each([
+    [
+      'setLoopRange',
+      (store: ReturnType<typeof createStudioStore>) =>
+        store.getState().setLoopRange(2, 6),
+    ],
+    [
+      'toggleLoop',
+      (store: ReturnType<typeof createStudioStore>) => {
+        store.getState().toggleLoop();
+        return true;
+      },
+    ],
+  ])('finalizes the old automation pass before %s supersedes playback', (
+    _operation,
+    changeLoop,
+  ) => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const track = store.getState().project.tracks.find(
+      (candidate) => candidate.type !== 'master',
+    );
+    if (!track) throw new Error('automation Track fixture missing');
+    expect(store.getState().setTrackAutomationMode(track.id, 'write')).toBe(true);
+    store.getState().play();
+    const oldRequestId = store.getState().transport.playbackRequestId;
+    let schedulerBeat = 1;
+    expect(store.getState().attachAutomationPlaybackRuntime(
+      oldRequestId,
+      () => schedulerBeat,
+      automationGraphBridge,
+    )).toBe(true);
+    store.getState().confirmPlaybackStarted(oldRequestId);
+    const oldOwnership = store.getState().automationRecording.ownership;
+    if (!oldOwnership) throw new Error('automation ownership fixture missing');
+    const revisionBefore = store.getState().saveState.revision;
+
+    schedulerBeat = 3;
+    expect(changeLoop(store)).toBe(true);
+
+    const superseded = store.getState();
+    expect(superseded.automationRecording).toMatchObject({
+      passActive: false,
+      ownership: null,
+      status: null,
+    });
+    expect(superseded.saveState.revision).toBe(revisionBefore + 1);
+    expect(superseded.transport).toMatchObject({
+      phase: 'starting',
+      isPlaying: false,
+      playbackRequestId: oldRequestId + 1,
+      loopEnabled: true,
+    });
+    expect(superseded.project.automationLanes).toHaveLength(2);
+    for (const lane of superseded.project.automationLanes) {
+      expect(lane.points.some((point) => point.beat === 3)).toBe(true);
+    }
+
+    // The old runtime may dispose only after the transport subscriber sees the
+    // new request. Its stale detach must not erase or poison the committed pass.
+    store.getState().detachAutomationPlaybackRuntime(oldOwnership);
+    expect(store.getState().automationRecording).toMatchObject({
+      passActive: false,
+      ownership: null,
+      status: null,
+    });
+
+    const nextRequestId = store.getState().transport.playbackRequestId;
+    expect(store.getState().attachAutomationPlaybackRuntime(
+      nextRequestId,
+      () => store.getState().transport.positionBeat,
+      automationGraphBridge,
+    )).toBe(true);
+    expect(store.getState().automationRecording).toMatchObject({
+      passActive: true,
+      ownership: { playbackRequestId: nextRequestId },
+      status: null,
+    });
+    expect(store.getState().saveState.revision).toBe(revisionBefore + 1);
   });
 });
 

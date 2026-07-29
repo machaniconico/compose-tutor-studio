@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import type { Track } from '@cts/project-model';
 import { useStore } from '../../state/store';
+import { useAutomationGesture } from '../automation/useAutomationGesture';
 import { AddTrackDialog } from './AddTrackDialog';
 import { audioTrackAssetSummary } from '../audioTrack/audioAssetPresentation';
 import {
@@ -20,9 +22,6 @@ export function TrackList() {
   const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
   const selectTrack = useStore((s) => s.selectTrack);
   const selectClip = useStore((s) => s.selectClip);
-  const setTrackVolume = useStore((s) => s.setTrackVolume);
-  const toggleMute = useStore((s) => s.toggleMute);
-  const toggleSolo = useStore((s) => s.toggleSolo);
   const armedAudioTrackId = useStore((s) => s.armedAudioTrackId);
   const setAudioTrackArmed = useStore((s) => s.setAudioTrackArmed);
   const recordingControlsBusy = useStore(
@@ -89,54 +88,13 @@ export function TrackList() {
                 </span>
               </button>
 
-              <div className="track-row__controls">
-                <input
-                  type="range"
-                  min={0}
-                  max={2}
-                  step={0.01}
-                  value={track.volume}
-                  aria-label={`${controlName} 音量`}
-                  onChange={(event) => setTrackVolume(track.id, Number(event.target.value))}
-                />
-                {track.type === 'audio' ? (
-                  <button
-                    type="button"
-                    className={`mini-btn mini-btn--record${armedAudioTrackId === track.id ? ' is-active' : ''}`}
-                    aria-pressed={armedAudioTrackId === track.id}
-                    aria-label={`${controlName} 録音待機`}
-                    disabled={recordingControlsBusy}
-                    onClick={() => setAudioTrackArmed(track.id)}
-                    title={armedAudioTrackId === track.id ? '録音待機を解除' : 'このトラックを録音先にする'}
-                  >
-                    R
-                  </button>
-                ) : null}
-                {track.type !== 'master' ? (
-                  <>
-                    <button
-                      type="button"
-                      className={`mini-btn${track.mute ? ' is-active' : ''}`}
-                      aria-pressed={track.mute}
-                      aria-label={`${controlName} ミュート`}
-                      onClick={() => toggleMute(track.id)}
-                      title="ミュート"
-                    >
-                      M
-                    </button>
-                    <button
-                      type="button"
-                      className={`mini-btn${track.solo ? ' is-active' : ''}`}
-                      aria-pressed={track.solo}
-                      aria-label={`${controlName} ソロ`}
-                      onClick={() => toggleSolo(track.id)}
-                      title="ソロ"
-                    >
-                      S
-                    </button>
-                  </>
-                ) : null}
-              </div>
+              <TrackMixControls
+                track={track}
+                accessibleName={controlName}
+                armed={armedAudioTrackId === track.id}
+                recordingControlsBusy={recordingControlsBusy}
+                setAudioTrackArmed={setAudioTrackArmed}
+              />
             </li>
           );
         })}
@@ -148,5 +106,110 @@ export function TrackList() {
         />
       ) : null}
     </nav>
+  );
+}
+
+function TrackMixControls(props: Readonly<{
+  track: Track;
+  accessibleName: string;
+  armed: boolean;
+  recordingControlsBusy: boolean;
+  setAudioTrackArmed: (trackId: string) => boolean;
+}>) {
+  const {
+    track,
+    accessibleName,
+    armed,
+    recordingControlsBusy,
+    setAudioTrackArmed,
+  } = props;
+  const setTrackVolume = useStore((state) => state.setTrackVolume);
+  const setTrackPan = useStore((state) => state.setTrackPan);
+  const toggleMute = useStore((state) => state.toggleMute);
+  const toggleSolo = useStore((state) => state.toggleSolo);
+  const volumeGesture = useAutomationGesture({
+    trackId: track.id,
+    targetType: 'track-volume',
+    setScalar: (value) => setTrackVolume(track.id, value),
+  });
+  const panGesture = useAutomationGesture({
+    trackId: track.id,
+    targetType: 'track-pan',
+    setScalar: (value) => setTrackPan(track.id, value),
+  });
+  const automationDescriptionId =
+    `track-list-automation-${encodeURIComponent(track.id)}`;
+  const isMaster = track.type === 'master';
+
+  return (
+    <div className="track-row__controls">
+      <input
+        type="range"
+        min={0}
+        max={2}
+        step={0.01}
+        value={track.volume}
+        aria-label={`${accessibleName} 音量`}
+        aria-describedby={isMaster ? undefined : automationDescriptionId}
+        {...(isMaster
+          ? { onChange: (event) => setTrackVolume(track.id, Number(event.target.value)) }
+          : volumeGesture)}
+      />
+      {!isMaster ? (
+        <input
+          type="range"
+          min={-1}
+          max={1}
+          step={0.01}
+          value={track.pan}
+          aria-label={`${accessibleName} パン`}
+          aria-describedby={automationDescriptionId}
+          {...panGesture}
+        />
+      ) : null}
+      {!isMaster ? (
+        <span id={automationDescriptionId} className="visually-hidden">
+          {accessibleName}、トラックID {track.id}。再生中のTouch、Latch、Writeでは
+          オートメーションジェスチャーとして記録します。
+        </span>
+      ) : null}
+      {track.type === 'audio' ? (
+        <button
+          type="button"
+          className={`mini-btn mini-btn--record${armed ? ' is-active' : ''}`}
+          aria-pressed={armed}
+          aria-label={`${accessibleName} 録音待機`}
+          disabled={recordingControlsBusy}
+          onClick={() => setAudioTrackArmed(track.id)}
+          title={armed ? '録音待機を解除' : 'このトラックを録音先にする'}
+        >
+          R
+        </button>
+      ) : null}
+      {!isMaster ? (
+        <>
+          <button
+            type="button"
+            className={`mini-btn${track.mute ? ' is-active' : ''}`}
+            aria-pressed={track.mute}
+            aria-label={`${accessibleName} ミュート`}
+            onClick={() => toggleMute(track.id)}
+            title="ミュート"
+          >
+            M
+          </button>
+          <button
+            type="button"
+            className={`mini-btn${track.solo ? ' is-active' : ''}`}
+            aria-pressed={track.solo}
+            aria-label={`${accessibleName} ソロ`}
+            onClick={() => toggleSolo(track.id)}
+            title="ソロ"
+          >
+            S
+          </button>
+        </>
+      ) : null}
+    </div>
   );
 }

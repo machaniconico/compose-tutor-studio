@@ -47,6 +47,7 @@ function schemaV3Record(project: Project): Record<string, unknown> {
   legacy.schemaVersion = 3;
   delete legacy.audioRouting;
   delete legacy.audioTakeFolders;
+  delete legacy.automationReadState;
   return legacy;
 }
 

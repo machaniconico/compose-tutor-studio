@@ -1,7 +1,13 @@
+import { readFileSync } from 'node:fs';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { installLocalStorage } from './localStorageStub';
 import { addTrackEffect } from '../src/state/editorActions';
+
+const studioStyles = readFileSync(
+  new URL('../src/styles.css', import.meta.url),
+  'utf8',
+);
 
 let useStore: typeof import('../src/state/store')['useStore'];
 let MixerStrip: typeof import('../src/features/mixer/MixerStrip')['MixerStrip'];
@@ -40,12 +46,41 @@ describe('Mixer mute/solo accessibility', () => {
     );
 
     for (const track of soundTracks) {
+      expect(html).toContain(`aria-label="${track.name} 音量"`);
+      expect(html).toContain(`aria-label="${track.name} パン"`);
       expect(html).toContain(`aria-label="${track.name} ミュート"`);
       expect(html).toContain(`aria-label="${track.name} ソロ"`);
     }
+    expect(html.match(/トラックID /g) ?? []).toHaveLength(soundTracks.length);
+    expect(html).not.toContain('aria-label="Master パン"');
+    expect(html).not.toContain('mixer-automation-Master');
     expect(html).not.toContain('aria-label="Master ミュート"');
     expect(html).not.toContain('aria-label="Master ソロ"');
     expect(html).toContain('aria-label="マスター レベル RMS -∞ dB / Peak -∞ dB"');
+  });
+
+  it('computes at least 44px focusable volume and pan sliders', () => {
+    const html = renderToStaticMarkup(<MixerStrip />);
+    const sliders = html.match(/<input[^>]*type="range"[^>]*>/g) ?? [];
+    const volumeRule = studioStyles.match(
+      /\.mix-ch__volume\s*\{([^}]*)\}/,
+    )?.[1] ?? '';
+    const panRule = studioStyles.match(
+      /\.mix-ch__pan input\s*\{([^}]*)\}/,
+    )?.[1] ?? '';
+
+    expect(sliders.length).toBeGreaterThan(0);
+    expect(sliders.every((slider) => (
+      !slider.includes('disabled=""') && !slider.includes('tabindex="-1"')
+    ))).toBe(true);
+    for (const declarations of [volumeRule, panRule]) {
+      expect(Number(
+        declarations.match(/min-height:\s*([\d.]+)px/)?.[1] ?? 0,
+      )).toBeGreaterThanOrEqual(44);
+    }
+    expect(studioStyles).toMatch(
+      /:focus-visible\s*\{[^}]*outline:\s*(?!none)[^;}]+;/,
+    );
   });
 
   it('gives repeated effects unique track-scoped groups and control names', () => {
@@ -82,8 +117,12 @@ describe('Mixer mute/solo accessibility', () => {
     const html = renderToStaticMarkup(<MixerStrip />);
     expect(html).toContain('aria-label="Harmony（同名 1/2） 音量"');
     expect(html).toContain('aria-label="Harmony（同名 2/2） 音量"');
+    expect(html).toContain('aria-label="Harmony（同名 1/2） パン"');
+    expect(html).toContain('aria-label="Harmony（同名 2/2） パン"');
     expect(html).toContain('aria-label="Harmony（同名 1/2） ミュート"');
     expect(html).toContain('aria-label="Harmony（同名 2/2） ミュート"');
+    expect(html).toContain(`トラックID ${first.id}`);
+    expect(html).toContain(`トラックID ${second.id}`);
   });
 
   it('names Bus output and pre/post-fader send controls in beginner-facing language', () => {

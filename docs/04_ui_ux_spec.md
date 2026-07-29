@@ -129,9 +129,13 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Inspectorはfieldごとのdirty状態を持ち、無編集blurではcommandを発行しない。値だけの確定はbeatをpatchせず、beat snapはbeat fieldの確定時だけに適用する。表示用の丸め値を未変更fieldへ書き戻さず、off-grid / 高精度beatを保持する
 - lane編集でactive playbackが停止した場合は、再生位置を保持して次回再生から新しいcurveを使うことを通知する。保存・再読込、Undo / Redo、transport loop、可変tempo、offline WAVで同じlaneを使う
 - laneが存在する時は最低44×44 CSS pxのnative Read / Bypass controlを表示し、`aria-pressed`と文字で状態を伝える。Bypass中もcurve / pointは表示・編集可能なままmuted表示し、「点は保持され、再生 / WAVはTrackの基準値を使う」と明示する。laneがない時は最初のpointがRead状態でlaneを作ることだけを説明し、保存先のないtoggleを表示しない
+- non-Master Trackではlaneの有無にかかわらず、Global Readと選択TrackのTrack Readを独立した最低44pxのnative buttonで表示する。`aria-pressed`、オン / オフの文字、両方とlane Bypassから決まるeffective Readの説明を持たせ、GlobalまたはTrackを切ってもlane Bypassやpointを暗黙変更しない。これら2状態はProjectへ保存される
+- Read / Touch / Latch / WriteはTrack名を含むnative radiogroupにし、ArmedとWritingを文字とlive regionで区別する。Touchは操作中だけ記録して100 msで元curveへ戻ること、Latchは最初の操作後も停止・seekなどのパンチアウトまで最後の値を書き続けることを初心者向けに説明する。音量 / パンのrange controlはpointer、矢印、Home / End、PageUp / PageDownのどの調整gestureでも開始・更新・終了をexactly once扱いにする
+- Write選択時は即座にmodeを変えず、modal dialogで「触れなくても音量とパンの両方を再生位置から置き換える」「パンチアウト後はTouchへ戻る」と警告する。取消はWrite controlへfocusを戻して以前のmodeを保ち、確認だけがWriteをArmedにする。pass確定後はTouchを選択状態にし、確定curveだけが保存されることをstatusで伝える
+- point / lane上限、CAS競合などでpassを確定できない時はassertive alertに理由と最低44pxの「記録を破棄して停止」を表示する。破棄は部分curveを採用せず、pass / overrideを解放してtransportを停止し、通常編集へ戻れるようにする
 - 最大20,000 pointの正当なlaneでもnative point controlはviewportと選択pointを合わせて最大400件、curveは意味を保った最大3本のSVG pathへまとめる。30 Hzの再生位置購読はplayheadだけへ隔離し、lane全体を再renderしない。keyboardでviewport外を選択した場合もそのpointをrenderしてfocus / scrollを回復する
 - 320px幅ではdocument全体を横overflowさせず、時間軸だけをlane内部で横scrollさせる。target、snap、追加、Inspector、削除、全消去は折り返して読める状態を保ち、hover、focus-visible、selected、disabled、errorを色以外でも区別する
-- parameter lane単位のRead / Bypassだけを提供する。Track / global Read、write / touch / latch記録、Master、insert / send / tempo automation、MIDI CC / LFO modulationを利用可能に見せるcontrolや状態名は表示しない
+- mode、Armed / Writing、gesture所有権はruntime-onlyであり、保存 / 再読込後はReadへ戻る。Master、insert / send / tempo automation、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loop passを利用可能に見せるcontrolや予約状態名は表示しない
 
 #### 2.3.5 Tempo / 拍子map Editor
 

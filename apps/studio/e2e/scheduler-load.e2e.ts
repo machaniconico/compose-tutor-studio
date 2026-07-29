@@ -65,6 +65,7 @@ function schedulerLoadProject(): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [{ sourceTrackId: trackId, destination: { type: 'master' } }],
       sends: [],
@@ -128,6 +129,7 @@ function shortLoopDensityProject(noteCount: number): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [{ sourceTrackId: trackId, destination: { type: 'master' } }],
       sends: [],
