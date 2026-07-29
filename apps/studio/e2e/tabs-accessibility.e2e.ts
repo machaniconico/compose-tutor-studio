@@ -43,10 +43,15 @@ test('editor, inspector, and project tabs keep focus and ARIA targets in sync', 
   await drumTab.press('End');
   const automationTab = editorTabs.getByRole('tab', { name: 'オートメーション' });
   const tempoMapTab = editorTabs.getByRole('tab', { name: 'テンポ / 拍子' });
+  const compingTab = editorTabs.getByRole('tab', { name: 'テイク編集' });
+  await expect(compingTab).toBeFocused();
+  await expect(compingTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#editor-tabpanel-comping')).toBeVisible();
+  await expect(page.locator('#editor-tabpanel-tempoMap')).toBeHidden();
+  await compingTab.press('ArrowLeft');
   await expect(tempoMapTab).toBeFocused();
   await expect(tempoMapTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#editor-tabpanel-tempoMap')).toBeVisible();
-  await expect(page.locator('#editor-tabpanel-automation')).toBeHidden();
   await tempoMapTab.press('ArrowLeft');
   await expect(automationTab).toBeFocused();
   await expect(automationTab).toHaveAttribute('aria-selected', 'true');

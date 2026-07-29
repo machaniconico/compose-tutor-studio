@@ -218,6 +218,17 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 実測校正は通常録音とは別wizardで、明示選択した入力IDがある時だけ開ける。`システム既定`ではbuttonをdisabledにし、通常録音は既定入力のまま使えることと、校正には接続先の明示選択が必要な理由を表示する。wizardはスピーカーをOFFにしてinterface出力から選択入力へ物理cableを接続すること、入出力levelを低くすること、開放スピーカーとマイクでは実行しないこと、app monitorに加えてinterface / driver mixerのDirect Monitor・hardware Loopback・同一outputへのreturnもOFFにすること、出力 / driver / buffer変更後は再校正することを開始前に示す
 - 校正中は3秒countdown、測定状態、入力level、取消をstatus / meterで示し暗黙dismissを無効にする。instructions / running / success / errorの各表示切替では、消えるbuttonにfocusを残さず新stepのprimary actionへ移す。成功時はmsとsample数を表示し、Projectや測定PCMを保存しない。通常のcancel / silence / clipping / ambiguity / low confidenceでは以前のprofileを維持する。入力選択または`devicechange`では進行中の校正を中止して旧profileも破棄し、推定へ戻ったことを明示する
 
+### 2.12 Audio Take / Comp Editor
+
+- 同一Audio Track・同一時間窓のAudio Clipを選択したAudio Clip Editorに「テイクにまとめる」を表示する。対象候補は自動検出し、2件未満、loop、素材problem、録音 / 保存中はbuttonをdisabledにして理由を同じpanelで説明する
+- group成功後はArranger上の重なった元Clipを1つのtake folder blockへ置き換え、folderを選択してEditorの6つ目のtab「テイク編集」を開く。blockは「テイク N件」と仕上がり範囲を文字でも示し、通常Audio Clipと形・ラベルの両方で区別する
+- Editorは最上段に「仕上がり」、続けてtake laneを縦に並べる。各laneはtake名と採用状態を持ち、選択範囲は色だけでなくoutline / pattern / accessible nameでも区別する。既存DAWのlane配置や専用tool iconを模倣せず、「この範囲を使う」という初心者向け動詞を使う
+- pointer drag中は仕上がりrowだけをlocal previewし、pointerupで1回確定する。Escape / pointer cancelではpreviewを破棄する。精密操作はtake、開始beat、終了beatのlabel付きinputと「この範囲を使う」buttonを同じformに置く
+- comp境界を選択すると左右のtake名と境界beatを表示し、native number inputで移動できる。採用中でないtakeだけに削除buttonを出し、確認後の削除でfocus対象が消えた時は次のtake、なければ前のtakeへ戻す
+- accepted操作が再生を止めた場合は「仕上がりを更新したため、再生位置を保って停止しました」をpolite statusで伝える。errorはProjectが変更されなかったこと、素材problemは対象素材名、busyは録音 / 保存終了後に再試行できることをalertで伝える
+- 320px幅ではtablistやdocumentを横overflowさせず、takeのmusical timelineだけを内部scrollする。lane、form、境界、削除はnative control、明確なfocus ring、44px相当のpointer targetを持つ。pointer精度をkeyboard利用の前提にしない
+- UIにcycle recording、任意punch、MIDI comping、名前付き複数comp、flattenを示すcontrolや予約labelを出さない
+
 ## 3. ナビゲーション
 
 | ショートカット | 状態 | 動作 |
@@ -275,6 +286,9 @@ Chord Track のコンテキスト内操作:
 | Audio Track録音中 | `録音中`を色以外の文字でも示し、経過時間、入力level meter、44px以上の`録音を終了して保存` / `録音を破棄`をkeyboard操作可能にする。録音・保存中のX / Escape / backdrop、Project切替、window closeは安全に拒否する |
 | Audio Track録音失敗 | permission拒否、マイクなし / 使用中 / 切断、短すぎる録音、memory上限、WAV変換、素材保存を区別し、再試行方法と`プロジェクトは変更されていません`を表示する。保存cancel後のlate resultを採用しない |
 | Audio Assetが見つからない / 変更された | 素材名と`見つかりません` / `内容が変わっています` / `保存場所を利用できません`をClipと編集panelに表示する。別fileへ黙って置換せず、元のprofile / 端末で開き直すよう案内する。保存場所を利用できない場合はstorage / 権限を確認して再読込する。配置と編集metadataは保持し、素材を必要とする編集controlを無効にするが、最後の参照を安全に外せる削除は利用可能にする |
+| テイク編集の対象不足 / 不一致 | 同じAudio Track・同じ開始位置・同じ長さの非loop Clipが2件以上必要であることを説明し、既存Clipや履歴を変更しない |
+| テイク素材が見つからない / 変更された | folderと該当takeを保持し、範囲採用・境界移動・take追加を無効にする。別素材へ黙って差し替えず、元の端末 / profileでの再読込を案内する |
+| テイク編集中の競合 | 録音または保存operation中はgroup / take追加 / comp確定 / 削除を無効にし、処理完了後に再試行できることを表示する。pointer previewはProject変更前に破棄する |
 | Project JSONへ音声がない | `.ctsproj.json`は音声binaryを同梱しないことをimport前に説明し、対応objectがlocal repositoryにない場合は現在のProjectを置換しない |
 | カラオケ音源が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、5分以下、stereoという条件と、端末codecでdecodeできなかった可能性を分けて案内する |
 | カラオケ音源がmono / near-mono | stereo中央定位の差分を利用する処理であることを説明し、左右に広がりのあるstereo音源を案内する |

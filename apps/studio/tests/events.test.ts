@@ -95,6 +95,7 @@ function project(tracks: Track[]): Project {
     tempoMap: [{ id: 'tempo-1', beat: 0, bpm: 120 }],
     timeSignatureMap: [{ id: 'signature-1', beat: 0, numerator: 4, denominator: 4 }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: tracks
@@ -511,6 +512,7 @@ describe('buildScheduleEvents', () => {
     delete legacyRecord.tempoMap;
     delete legacyRecord.timeSignatureMap;
     delete legacyRecord.audioAssets;
+    delete legacyRecord.audioTakeFolders;
     delete legacyRecord.automationLanes;
     delete legacyRecord.audioRouting;
     for (const track of legacyRecord.tracks as Array<Record<string, unknown>>) {

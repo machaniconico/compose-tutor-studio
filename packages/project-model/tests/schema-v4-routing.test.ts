@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CURRENT_SCHEMA_VERSION,
   MAX_AUDIO_ROUTING_EDGES,
   MAX_AUDIO_SENDS_PER_SOURCE,
   compileAudioRouting,
@@ -45,6 +46,7 @@ function schemaV3Record(project: Project): Record<string, unknown> {
   const legacy = structuredClone(project) as unknown as Record<string, unknown>;
   legacy.schemaVersion = 3;
   delete legacy.audioRouting;
+  delete legacy.audioTakeFolders;
   return legacy;
 }
 
@@ -61,7 +63,8 @@ describe('schema-v4 audio routing', () => {
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
     expect(decoded).toMatchObject({ sourceSchemaVersion: 3, migrated: true });
-    expect(decoded.project.schemaVersion).toBe(4);
+    expect(decoded.project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(decoded.project.audioTakeFolders).toEqual([]);
     expect(decoded.project.audioRouting).toEqual({
       outputs: decoded.project.tracks
         .filter((track) => track.type !== 'master')

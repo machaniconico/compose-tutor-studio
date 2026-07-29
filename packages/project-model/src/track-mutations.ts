@@ -6,7 +6,17 @@ import { isLearningTrack } from './learning-track';
 import { encodeProjectJson, MAX_PROJECT_STRING_LENGTH } from './project-codec';
 import { projectLengthBeats } from './time';
 import type { ProjectCodecIssue } from './project-codec';
-import type { Clip, DrumEvent, EffectConfig, NoteEvent, Project, Track } from './types';
+import type {
+  AudioCompSegment,
+  AudioTake,
+  AudioTakeFolder,
+  Clip,
+  DrumEvent,
+  EffectConfig,
+  NoteEvent,
+  Project,
+  Track,
+} from './types';
 import { MAX_PROJECT_TRACKS } from './validation';
 
 export const MAX_TRACK_NAME_CODE_POINTS = 128;
@@ -15,7 +25,16 @@ export const DEFAULT_DRUM_TRACK_PRESET = 'acoustic';
 
 export type AddTrackKind = 'instrument' | 'drum' | 'bus';
 export type TrackMoveDirection = 'up' | 'down';
-export type TrackEntityIdKind = 'track' | 'clip' | 'note' | 'drum' | 'effect' | 'send';
+export type TrackEntityIdKind =
+  | 'track'
+  | 'clip'
+  | 'note'
+  | 'drum'
+  | 'effect'
+  | 'send'
+  | 'folder'
+  | 'take'
+  | 'segment';
 export type TrackIdFactory = (kind: TrackEntityIdKind) => string;
 
 export type TrackMutationErrorCode =
@@ -136,6 +155,11 @@ function allEntityIds(project: Project): Set<string> {
   for (const event of project.tempoMap) ids.add(event.id);
   for (const event of project.timeSignatureMap) ids.add(event.id);
   for (const asset of project.audioAssets) ids.add(asset.id);
+  for (const folder of project.audioTakeFolders) {
+    ids.add(folder.id);
+    for (const take of folder.takes) ids.add(take.id);
+    for (const segment of folder.compSegments) ids.add(segment.id);
+  }
   for (const lane of project.automationLanes) {
     ids.add(lane.id);
     for (const point of lane.points) ids.add(point.id);
@@ -446,6 +470,38 @@ export function duplicateTrack(
       clips.push(cloned);
     }
 
+    const audioTakeFolders: AudioTakeFolder[] = [];
+    for (const folder of project.audioTakeFolders) {
+      if (folder.trackId !== source.id) continue;
+      const folderId = allocateId('folder', idFactory, reserved);
+      if (!folderId.ok) return folderId.result;
+      const takeIds = new Map<string, string>();
+      const takes: AudioTake[] = [];
+      for (const take of folder.takes) {
+        const takeId = allocateId('take', idFactory, reserved);
+        if (!takeId.ok) return takeId.result;
+        takeIds.set(take.id, takeId.id);
+        takes.push({ ...take, id: takeId.id });
+      }
+      const compSegments: AudioCompSegment[] = [];
+      for (const segment of folder.compSegments) {
+        const takeId = takeIds.get(segment.takeId);
+        if (takeId === undefined) {
+          return failure('project-not-adoptable', 'A comp segment take could not be remapped.');
+        }
+        const segmentId = allocateId('segment', idFactory, reserved);
+        if (!segmentId.ok) return segmentId.result;
+        compSegments.push({ ...segment, id: segmentId.id, takeId });
+      }
+      audioTakeFolders.push({
+        ...folder,
+        id: folderId.id,
+        trackId: newTrackId.id,
+        takes,
+        compSegments,
+      });
+    }
+
     const duplicate: Track = {
       ...source,
       id: newTrackId.id,
@@ -496,6 +552,7 @@ export function duplicateTrack(
     return success({
       ...project,
       tracks,
+      audioTakeFolders: [...project.audioTakeFolders, ...audioTakeFolders],
       audioRouting: {
         outputs,
         sends: [...project.audioRouting.sends, ...clonedSends],
@@ -552,17 +609,30 @@ export function removeTrack(project: Project, trackId: string): TrackMutationRes
     const automationLanes = project.automationLanes.filter(
       (lane) => lane.target.trackId !== trackId,
     );
-    const removedAudioAssetIds = new Set(
-      track.clips
-        .filter((clip) => clip.type === 'audio')
-        .map((clip) => clip.audioAssetId),
+    const audioTakeFolders = project.audioTakeFolders.filter(
+      (folder) => folder.trackId !== trackId,
     );
-    const remainingAudioAssetIds = new Set(
-      tracks.flatMap((candidate) =>
-        candidate.clips
+    const removedAudioAssetIds = new Set(
+      [
+        ...track.clips
           .filter((clip) => clip.type === 'audio')
           .map((clip) => clip.audioAssetId),
-      ),
+        ...project.audioTakeFolders
+          .filter((folder) => folder.trackId === trackId)
+          .flatMap((folder) => folder.takes.map((take) => take.audioAssetId)),
+      ],
+    );
+    const remainingAudioAssetIds = new Set(
+      [
+        ...tracks.flatMap((candidate) =>
+          candidate.clips
+            .filter((clip) => clip.type === 'audio')
+            .map((clip) => clip.audioAssetId),
+        ),
+        ...audioTakeFolders.flatMap((folder) =>
+          folder.takes.map((take) => take.audioAssetId),
+        ),
+      ],
     );
     const audioAssets = project.audioAssets.filter(
       (asset) => !removedAudioAssetIds.has(asset.id) || remainingAudioAssetIds.has(asset.id),
@@ -583,6 +653,7 @@ export function removeTrack(project: Project, trackId: string): TrackMutationRes
       ...project,
       tracks,
       automationLanes,
+      audioTakeFolders,
       audioAssets,
       audioRouting,
     }, trackId, true);

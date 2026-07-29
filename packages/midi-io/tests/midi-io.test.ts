@@ -340,6 +340,7 @@ describe('exportProjectToMidi', () => {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: 'track-1', destination: { type: 'master' } }],

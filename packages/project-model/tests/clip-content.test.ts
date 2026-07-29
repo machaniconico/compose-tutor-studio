@@ -626,6 +626,7 @@ describe('project schema v1 to v2 clip migration', () => {
     delete legacy.tempoMap;
     delete legacy.timeSignatureMap;
     delete legacy.audioAssets;
+    delete legacy.audioTakeFolders;
     delete legacy.automationLanes;
     delete legacy.audioRouting;
     for (const track of tracks as Array<Record<string, unknown>>) delete track.role;

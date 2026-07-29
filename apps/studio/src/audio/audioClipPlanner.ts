@@ -77,13 +77,23 @@ export type AudioClipTailSource = Readonly<{
 export type AudioClipRegionIndexEntry = Readonly<{
   trackId: string;
   clip: AudioClip;
+  /** Structured source identity; never parse or concatenate persisted ids. */
+  sourceIdentity: readonly string[];
   asset: ReadyAudioAsset;
   clipStartSeconds: number;
   audibleEndSeconds: number;
   sourceDurationSeconds: number;
   sourceStartSeconds: number;
+  /** Persisted outer take/clip fades, evaluated on their original time axis. */
   fadeInSeconds: number;
   fadeOutSeconds: number;
+  /** Original take/clip seconds already elapsed when this region begins. */
+  outerFadeOffsetSeconds: number;
+  /** Full original take/clip duration used by the persisted outer envelope. */
+  outerFadeDurationSeconds: number;
+  /** Independent comp-splice envelope, centered on a logical boundary. */
+  spliceFadeInSeconds: number;
+  spliceFadeOutSeconds: number;
   gainLinear: number;
 }>;
 
@@ -310,6 +320,7 @@ function collectAudioRegions(
       regions.push({
         trackId: track.id,
         clip,
+        sourceIdentity: Object.freeze(['clip', track.id, clip.id]),
         asset,
         clipStartSeconds,
         audibleEndSeconds: clipStartSeconds + audibleDurationSeconds,
@@ -317,11 +328,242 @@ function collectAudioRegions(
         sourceStartSeconds: clip.sourceStartFrame / asset.sampleRate,
         fadeInSeconds: normalizedFades.fadeInSeconds,
         fadeOutSeconds: normalizedFades.fadeOutSeconds,
+        outerFadeOffsetSeconds: 0,
+        outerFadeDurationSeconds: audibleDurationSeconds,
+        spliceFadeInSeconds: 0,
+        spliceFadeOutSeconds: 0,
         gainLinear: audioClipGainToLinear(clip.gainDb),
       });
     }
   }
+
+  for (const folder of project.audioTakeFolders) {
+    const track = project.tracks.find(
+      (candidate) => candidate.id === folder.trackId && candidate.type === 'audio',
+    );
+    if (!track) continue;
+    const takes = new Map(folder.takes.map((take) => [take.id, take]));
+    for (const [segmentIndex, segment] of folder.compSegments.entries()) {
+      const take = takes.get(segment.takeId);
+      if (!take) continue;
+      const asset = readyAssets.get(take.audioAssetId);
+      if (!asset || asset.sampleRate <= 0 || take.sourceFrameCount <= 0) continue;
+
+      const segmentStartBeat = folder.startBeat + segment.offsetBeats;
+      const segmentEndBeat = Math.min(
+        project.lengthBeats,
+        segmentStartBeat + segment.lengthBeats,
+      );
+      const takeStartBeat = folder.startBeat + take.offsetBeats;
+      const segmentStartSeconds = tempo.beatToSeconds(segmentStartBeat);
+      const segmentEndSeconds = tempo.beatToSeconds(segmentEndBeat);
+      const takeStartSeconds = tempo.beatToSeconds(takeStartBeat);
+      const elapsedTakeSeconds = segmentStartSeconds - takeStartSeconds;
+      const logicalSourceStartSeconds =
+        take.sourceStartFrame / asset.sampleRate + elapsedTakeSeconds;
+      const sourceWindowEndSeconds =
+        (take.sourceStartFrame + take.sourceFrameCount) / asset.sampleRate;
+      const logicalTimelineDurationSeconds = segmentEndSeconds - segmentStartSeconds;
+      const logicalSourceDurationSeconds =
+        sourceWindowEndSeconds - logicalSourceStartSeconds;
+      if (
+        !Number.isFinite(segmentStartSeconds) ||
+        !Number.isFinite(logicalTimelineDurationSeconds) ||
+        !Number.isFinite(logicalSourceStartSeconds) ||
+        !Number.isFinite(logicalSourceDurationSeconds) ||
+        logicalTimelineDurationSeconds <= 0 ||
+        logicalSourceDurationSeconds <= 0
+      ) {
+        continue;
+      }
+
+      const leftCrossfadeHalfSeconds = compBoundaryHalfSeconds({
+        folder,
+        leftSegment: folder.compSegments[segmentIndex - 1],
+        rightSegment: segment,
+        takes,
+        readyAssets,
+        tempo,
+      });
+      const rightCrossfadeHalfSeconds = compBoundaryHalfSeconds({
+        folder,
+        leftSegment: segment,
+        rightSegment: folder.compSegments[segmentIndex + 1],
+        takes,
+        readyAssets,
+        tempo,
+      });
+      const regionStartSeconds = segmentStartSeconds - leftCrossfadeHalfSeconds;
+      const regionEndSeconds = segmentEndSeconds + rightCrossfadeHalfSeconds;
+      const sourceStartSeconds =
+        logicalSourceStartSeconds - leftCrossfadeHalfSeconds;
+      const timelineDurationSeconds = regionEndSeconds - regionStartSeconds;
+      const sourceDurationSeconds = Math.min(
+        timelineDurationSeconds,
+        logicalSourceDurationSeconds
+          + leftCrossfadeHalfSeconds
+          + rightCrossfadeHalfSeconds,
+      );
+      const audibleDurationSeconds = Math.min(timelineDurationSeconds, sourceDurationSeconds);
+      // A persisted take fade is measured on the immutable take, not on the
+      // currently selected comp slice. Keep that take-local duration intact:
+      // an interior or short edge slice samples/truncates the original
+      // envelope instead of discarding or speeding it up to fit the slice.
+      const outerFades = {
+        fadeInSeconds: finiteNonNegative(take.fadeInFrames / asset.sampleRate),
+        fadeOutSeconds: finiteNonNegative(take.fadeOutFrames / asset.sampleRate),
+      };
+      const takeSourceStartSeconds = take.sourceStartFrame / asset.sampleRate;
+      const outerFadeOffsetSeconds = finiteNonNegative(
+        sourceStartSeconds - takeSourceStartSeconds,
+      );
+      const outerFadeDurationSeconds =
+        take.sourceFrameCount / asset.sampleRate;
+      const normalizedSpliceFades = normalizeFades(
+        leftCrossfadeHalfSeconds * 2,
+        rightCrossfadeHalfSeconds * 2,
+        audibleDurationSeconds,
+      );
+      if (regions.length >= maxRegions) {
+        throw new AudioClipPlanLimitError(maxRegions, regions.length + 1);
+      }
+      const virtualClip: AudioClip = {
+        id: JSON.stringify(['comp', folder.id, segment.id, take.id]),
+        trackId: track.id,
+        type: 'audio',
+        startBeat: tempo.secondsToBeat(regionStartSeconds),
+        lengthBeats:
+          tempo.secondsToBeat(regionEndSeconds) - tempo.secondsToBeat(regionStartSeconds),
+        loop: false,
+        audioAssetId: asset.id,
+        sourceStartFrame: Math.max(0, Math.round(sourceStartSeconds * asset.sampleRate)),
+        sourceFrameCount: Math.max(
+          1,
+          Math.floor(sourceDurationSeconds * asset.sampleRate),
+        ),
+        fadeInFrames: Math.max(
+          0,
+          Math.round(outerFades.fadeInSeconds * asset.sampleRate),
+        ),
+        fadeOutFrames: Math.max(
+          0,
+          Math.round(outerFades.fadeOutSeconds * asset.sampleRate),
+        ),
+        gainDb: take.gainDb,
+      };
+      regions.push({
+        trackId: track.id,
+        clip: virtualClip,
+        sourceIdentity: Object.freeze([
+          'comp',
+          track.id,
+          folder.id,
+          segment.id,
+          take.id,
+        ]),
+        asset,
+        clipStartSeconds: regionStartSeconds,
+        audibleEndSeconds: regionStartSeconds + audibleDurationSeconds,
+        sourceDurationSeconds,
+        sourceStartSeconds,
+        fadeInSeconds: outerFades.fadeInSeconds,
+        fadeOutSeconds: outerFades.fadeOutSeconds,
+        outerFadeOffsetSeconds,
+        outerFadeDurationSeconds,
+        spliceFadeInSeconds: normalizedSpliceFades.fadeInSeconds,
+        spliceFadeOutSeconds: normalizedSpliceFades.fadeOutSeconds,
+        gainLinear: audioClipGainToLinear(take.gainDb),
+      });
+    }
+  }
   return regions;
+}
+
+type CompBoundaryInput = Readonly<{
+  folder: Project['audioTakeFolders'][number];
+  leftSegment: Project['audioTakeFolders'][number]['compSegments'][number] | undefined;
+  rightSegment: Project['audioTakeFolders'][number]['compSegments'][number] | undefined;
+  takes: ReadonlyMap<string, Project['audioTakeFolders'][number]['takes'][number]>;
+  readyAssets: ReadonlyMap<string, ReadyAudioAsset>;
+  tempo: BeatTimeMapping;
+}>;
+
+/**
+ * Return the symmetric half-window around one logical comp boundary.
+ *
+ * A folder value of 10 ms therefore yields a 10 ms overlap: the outgoing
+ * source extends 5 ms right and the incoming source extends 5 ms left. The
+ * window is reduced deterministically when a segment or source handle is too
+ * short, so adjacent fades never request bytes outside either immutable take.
+ */
+function compBoundaryHalfSeconds(input: CompBoundaryInput): number {
+  const {
+    folder,
+    leftSegment,
+    rightSegment,
+    takes,
+    readyAssets,
+    tempo,
+  } = input;
+  if (
+    !leftSegment ||
+    !rightSegment ||
+    leftSegment.takeId === rightSegment.takeId ||
+    Math.abs(
+      leftSegment.offsetBeats
+        + leftSegment.lengthBeats
+        - rightSegment.offsetBeats,
+    ) > BEAT_EPSILON
+  ) {
+    return 0;
+  }
+  const requestedHalfSeconds = folder.crossfadeMs / 2_000;
+  if (!(requestedHalfSeconds > 0) || !Number.isFinite(requestedHalfSeconds)) {
+    return 0;
+  }
+  const leftTake = takes.get(leftSegment.takeId);
+  const rightTake = takes.get(rightSegment.takeId);
+  if (!leftTake || !rightTake) return 0;
+  const leftAsset = readyAssets.get(leftTake.audioAssetId);
+  const rightAsset = readyAssets.get(rightTake.audioAssetId);
+  if (!leftAsset || !rightAsset || leftAsset.sampleRate <= 0 || rightAsset.sampleRate <= 0) {
+    return 0;
+  }
+
+  const boundaryBeat =
+    folder.startBeat + leftSegment.offsetBeats + leftSegment.lengthBeats;
+  const boundarySeconds = tempo.beatToSeconds(boundaryBeat);
+  const leftStartSeconds = tempo.beatToSeconds(
+    folder.startBeat + leftSegment.offsetBeats,
+  );
+  const rightEndSeconds = tempo.beatToSeconds(
+    folder.startBeat + rightSegment.offsetBeats + rightSegment.lengthBeats,
+  );
+  const leftTakeStartSeconds = tempo.beatToSeconds(
+    folder.startBeat + leftTake.offsetBeats,
+  );
+  const rightTakeStartSeconds = tempo.beatToSeconds(
+    folder.startBeat + rightTake.offsetBeats,
+  );
+  const leftSourceAtBoundary =
+    leftTake.sourceStartFrame / leftAsset.sampleRate
+    + boundarySeconds
+    - leftTakeStartSeconds;
+  const rightSourceAtBoundary =
+    rightTake.sourceStartFrame / rightAsset.sampleRate
+    + boundarySeconds
+    - rightTakeStartSeconds;
+  const leftSourceEnd =
+    (leftTake.sourceStartFrame + leftTake.sourceFrameCount) / leftAsset.sampleRate;
+  const rightSourceStart = rightTake.sourceStartFrame / rightAsset.sampleRate;
+  const halfSeconds = Math.min(
+    requestedHalfSeconds,
+    Math.max(0, (boundarySeconds - leftStartSeconds) / 4),
+    Math.max(0, (rightEndSeconds - boundarySeconds) / 4),
+    Math.max(0, leftSourceEnd - leftSourceAtBoundary),
+    Math.max(0, rightSourceAtBoundary - rightSourceStart),
+  );
+  return Number.isFinite(halfSeconds) ? Math.max(0, halfSeconds) : 0;
 }
 
 /** Query the compiled interval index for half-open source overlap. */
@@ -538,14 +780,24 @@ function gainPoints(
 ): AudioClipGainPoint[] {
   const startElapsed = startSeconds - region.clipStartSeconds;
   const endElapsed = endSeconds - region.clipStartSeconds;
-  const fadeOutStart = Math.max(
+  const fadeInEnd =
+    region.fadeInSeconds - region.outerFadeOffsetSeconds;
+  const fadeOutStart =
+    region.outerFadeDurationSeconds
+    - region.fadeOutSeconds
+    - region.outerFadeOffsetSeconds;
+  const spliceFadeOutStart = Math.max(
     0,
-    region.audibleEndSeconds - region.clipStartSeconds - region.fadeOutSeconds,
+    region.audibleEndSeconds
+      - region.clipStartSeconds
+      - region.spliceFadeOutSeconds,
   );
   const breakpoints = [
     startElapsed,
-    region.fadeInSeconds,
+    fadeInEnd,
     fadeOutStart,
+    region.spliceFadeInSeconds,
+    spliceFadeOutStart,
     endElapsed,
   ]
     .filter((value) => value >= startElapsed && value <= endElapsed)
@@ -570,20 +822,38 @@ function envelopeGain(
   elapsedSeconds: number,
 ): number {
   const totalSeconds = region.audibleEndSeconds - region.clipStartSeconds;
+  const outerEnvelope = linearEdgeEnvelope(
+    region.outerFadeOffsetSeconds + elapsedSeconds,
+    region.outerFadeDurationSeconds,
+    region.fadeInSeconds,
+    region.fadeOutSeconds,
+  );
+  const spliceEnvelope = linearEdgeEnvelope(
+    elapsedSeconds,
+    totalSeconds,
+    region.spliceFadeInSeconds,
+    region.spliceFadeOutSeconds,
+  );
+  return region.gainLinear * outerEnvelope * spliceEnvelope;
+}
+
+function linearEdgeEnvelope(
+  elapsedSeconds: number,
+  totalSeconds: number,
+  fadeInSeconds: number,
+  fadeOutSeconds: number,
+): number {
   let envelope = 1;
-  if (region.fadeInSeconds > 0 && elapsedSeconds < region.fadeInSeconds) {
-    envelope = Math.min(envelope, Math.max(0, elapsedSeconds / region.fadeInSeconds));
+  if (fadeInSeconds > 0 && elapsedSeconds < fadeInSeconds) {
+    envelope = Math.min(envelope, Math.max(0, elapsedSeconds / fadeInSeconds));
   }
-  if (
-    region.fadeOutSeconds > 0 &&
-    elapsedSeconds > totalSeconds - region.fadeOutSeconds
-  ) {
+  if (fadeOutSeconds > 0 && elapsedSeconds > totalSeconds - fadeOutSeconds) {
     envelope = Math.min(
       envelope,
-      Math.max(0, (totalSeconds - elapsedSeconds) / region.fadeOutSeconds),
+      Math.max(0, (totalSeconds - elapsedSeconds) / fadeOutSeconds),
     );
   }
-  return region.gainLinear * envelope;
+  return envelope;
 }
 
 function normalizeFades(
@@ -614,12 +884,11 @@ function occurrenceId(
   cycleKey: string,
   fullStartProjectBeat: number,
 ): string {
-  return [
-    region.trackId,
-    region.clip.id,
+  return JSON.stringify([
+    ...region.sourceIdentity,
     cycleKey,
     roundBeat(fullStartProjectBeat),
-  ].join(':');
+  ]);
 }
 
 function positiveModulo(value: number, modulus: number): number {

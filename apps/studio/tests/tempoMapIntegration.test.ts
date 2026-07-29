@@ -50,6 +50,7 @@ function projectWithTimeline(
     tempoMap,
     timeSignatureMap,
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],

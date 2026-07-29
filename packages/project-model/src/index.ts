@@ -16,6 +16,7 @@ export * from './midi-clip-loop';
 export * from './learning-track';
 export * from './track-mutations';
 export * from './audio-clips';
+export * from './audio-take-comp';
 export * from './audio-routing';
 export * from './audio-routing-mutations';
 export * from './automation-mutations';

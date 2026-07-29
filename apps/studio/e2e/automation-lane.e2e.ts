@@ -197,6 +197,7 @@ function maximumAutomationLaneProject(): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [{
       id: 'automation-stress-lane',
       target: { type: 'track-volume', trackId },

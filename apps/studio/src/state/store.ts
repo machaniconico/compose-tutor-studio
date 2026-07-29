@@ -64,7 +64,8 @@ export type EditorView =
   | 'drums'
   | 'arranger'
   | 'automation'
-  | 'tempoMap';
+  | 'tempoMap'
+  | 'comping';
 
 export type TransportPhase = 'stopped' | 'starting' | 'playing';
 
@@ -121,6 +122,7 @@ export type EditorState = {
   activeView: EditorView;
   selectedTrackId: string | null;
   selectedClipId: string | null;
+  selectedTakeFolderId: string | null;
   selectedChordId: string | null;
   selectedNoteIds: string[];
   scaleSnap: boolean;
@@ -285,6 +287,7 @@ export type StoreState = {
   // selection (UI-only, no history)
   selectTrack: (trackId: string | null) => void;
   selectClip: (clipId: string | null) => void;
+  selectTakeFolder: (folderId: string | null) => void;
   selectChord: (chordId: string | null) => void;
   selectNotes: (noteIds: string[]) => void;
 
@@ -602,6 +605,47 @@ function audioRoutingTopologyEqual(left: Project, right: Project): boolean {
   );
 }
 
+function audioTakeFolderTopologyEqual(left: Project, right: Project): boolean {
+  return (
+    left.audioTakeFolders.length === right.audioTakeFolders.length &&
+    left.audioTakeFolders.every((folder, folderIndex) => {
+      const candidate = right.audioTakeFolders[folderIndex];
+      return (
+        candidate?.id === folder.id &&
+        candidate.trackId === folder.trackId &&
+        candidate.startBeat === folder.startBeat &&
+        candidate.lengthBeats === folder.lengthBeats &&
+        candidate.crossfadeMs === folder.crossfadeMs &&
+        candidate.takes.length === folder.takes.length &&
+        folder.takes.every((take, takeIndex) => {
+          const nextTake = candidate.takes[takeIndex];
+          return (
+            nextTake?.id === take.id &&
+            nextTake.audioAssetId === take.audioAssetId &&
+            nextTake.offsetBeats === take.offsetBeats &&
+            nextTake.lengthBeats === take.lengthBeats &&
+            nextTake.sourceStartFrame === take.sourceStartFrame &&
+            nextTake.sourceFrameCount === take.sourceFrameCount &&
+            nextTake.fadeInFrames === take.fadeInFrames &&
+            nextTake.fadeOutFrames === take.fadeOutFrames &&
+            nextTake.gainDb === take.gainDb
+          );
+        }) &&
+        candidate.compSegments.length === folder.compSegments.length &&
+        folder.compSegments.every((segment, segmentIndex) => {
+          const nextSegment = candidate.compSegments[segmentIndex];
+          return (
+            nextSegment?.id === segment.id &&
+            nextSegment.takeId === segment.takeId &&
+            nextSegment.offsetBeats === segment.offsetBeats &&
+            nextSegment.lengthBeats === segment.lengthBeats
+          );
+        })
+      );
+    })
+  );
+}
+
 /**
  * Whether an adopted project edit invalidates the topology captured by the
  * current playback session. Live mixer fields are applied by the audio bridge;
@@ -616,6 +660,7 @@ export function hasPlaybackTopologyChanged(current: Project, next: Project): boo
   if (current === next) return false;
   if (!musicalTimelineTopologyEqual(current, next)) return true;
   if (!audioAssetTopologyEqual(current, next)) return true;
+  if (!audioTakeFolderTopologyEqual(current, next)) return true;
   if (!automationTopologyEqual(current, next)) return true;
   if (!audioRoutingTopologyEqual(current, next)) return true;
   if (
@@ -666,6 +711,7 @@ function makeEditor(project: Project): EditorState {
     activeView: 'pianoRoll',
     selectedTrackId: firstTrack ? firstTrack.id : null,
     selectedClipId: firstClip ? firstClip.id : null,
+    selectedTakeFolderId: null,
     selectedChordId: null,
     selectedNoteIds: [],
     scaleSnap: false,
@@ -703,11 +749,21 @@ function reconcileEditorSelection(
   )
     ? editor.selectedChordId
     : null;
+  const selectedTakeFolder = project.audioTakeFolders.find(
+    (folder) => folder.id === editor.selectedTakeFolderId,
+  ) ?? (
+    editor.activeView === 'comping'
+      ? project.audioTakeFolders.find(
+          (folder) => folder.trackId === selectedTrackId,
+        ) ?? project.audioTakeFolders[0]
+      : undefined
+  );
 
   return {
     ...editor,
     selectedTrackId,
     selectedClipId: selectedClip?.id ?? null,
+    selectedTakeFolderId: selectedTakeFolder?.id ?? null,
     selectedChordId,
     selectedNoteIds: located
       ? editor.selectedNoteIds.filter((id) => noteIds.has(id))
@@ -2012,7 +2068,27 @@ export function createStudioStore(
 
     // --- selection (UI only) ---
     selectTrack: (trackId) => set((s) => ({ editor: { ...s.editor, selectedTrackId: trackId } })),
-    selectClip: (clipId) => set((s) => ({ editor: { ...s.editor, selectedClipId: clipId } })),
+    selectClip: (clipId) => set((state) => ({
+      editor: {
+        ...state.editor,
+        selectedClipId: clipId,
+        ...(clipId !== null ? { selectedTakeFolderId: null } : {}),
+      },
+    })),
+    selectTakeFolder: (folderId) => set((state) => {
+      const folder = folderId === null
+        ? undefined
+        : state.project.audioTakeFolders.find((candidate) => candidate.id === folderId);
+      return {
+        editor: {
+          ...state.editor,
+          selectedTakeFolderId: folder?.id ?? null,
+          ...(folder !== undefined
+            ? { selectedTrackId: folder.trackId, selectedClipId: null }
+            : {}),
+        },
+      };
+    }),
     selectChord: (chordId) => set((s) => ({ editor: { ...s.editor, selectedChordId: chordId } })),
     selectNotes: (noteIds) => set((s) => ({ editor: { ...s.editor, selectedNoteIds: noteIds } })),
 

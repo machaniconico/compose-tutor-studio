@@ -21,6 +21,7 @@ function overlappingProject(): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],

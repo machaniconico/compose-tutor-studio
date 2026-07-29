@@ -104,6 +104,7 @@ function projectWithDrumClip(clip: Clip): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: 'drums', destination: { type: 'master' } }],
@@ -472,6 +473,7 @@ describe('buildWavScheduleEvents drum groove parity', () => {
         denominator: 4,
       }],
       audioAssets: [],
+      audioTakeFolders: [],
       automationLanes: [],
       audioRouting: {
         outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],
@@ -730,6 +732,7 @@ describe('MIDI Clip loop live/WAV parity', () => {
         denominator: 4,
       }],
       audioAssets: [],
+      audioTakeFolders: [],
       automationLanes: [],
       audioRouting: {
         outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],

@@ -141,6 +141,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | US-012 | 作曲者として、曲に楽器・ドラム・音源・Busを足して音色と経路を整えたい | Must | production UIから安全に追加・複製・並べ替え・一般Track削除を行い、内蔵音色、main output、pre/post-fader sendを選んで保存・Undo・再生・WAVへ反映できる。schema v4では学習role Trackも改名できてroleを保持し、削除だけを保護する |
 | US-013 | 作曲者として、手元の音声を曲へ置いて非破壊編集したい | Must | WAV / MP3 / M4A / AACをAudio Trackへ読み込み、移動、左右trim、gain、fade、loop、split、独立複製、削除をUndo/Redoでき、live再生・WAV・再読込で同じ範囲を使う |
 | US-014 | 作曲者として、マイク入力を新規または既存のAudio Trackへ録音したい | Must | Audio Trackを1件だけ録音待機にでき、システム既定または列挙された入力を選び、最大60秒のdry録音を現在playheadから新しいClipとしてasset-firstで採用できる。成功はUndo 1回、失敗・cancelはProject不変とする |
+| US-015 | 作曲者として、同じ区間を複数回録った素材から良い部分をつないで仕上げたい | Must | 同一Audio Track・同一時間窓の既存Clipを非破壊take folderへまとめ、複数範囲を別takeへ切り替え、境界調整・未使用take削除・Undo/Redo・保存/再読込・live/WAVで同じcompを使える |
 
 ## 3. MVP機能範囲
 
@@ -162,6 +163,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 - Pattern/Clip: 1〜4小節単位の素材を組み合わせる
 - Track管理（部分実装）: instrument / drum / stereo Bus追加、音源fileからのAudio Track追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v4の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない。Folder / Stackは後続とする
 - Audio Clip: app-ownedな48 kHz mono/stereo PCM 16-bit WAVへ正規化し、移動、trim、gain、fade、loop、split、独立複製、削除を非破壊に行う。loop中は位相fieldがまだないためleft trimとsplitを無効にする
+- Audio Take Comp: 同一Audio Track・同一時間窓の既存非loop Clipをschema v5のtake folderへまとめ、範囲採用、境界移動、未使用take削除を1 gesture = 1 Undoで保存する。cycle captureからの自動take生成は後続とする
 
 ### 3.3 Learning
 
@@ -202,7 +204,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | 楽譜エディタ | 実装量が大きい | MIDI編集が安定後 |
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
 | VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
-| punch / cycle take / comp / 実測latency校正 | 単一入力の伴奏同期録音と推定＋手動位置補正までは持つが、再生中の任意punch、長時間streaming、loopback実測、take laneはまだ持たない | 3OS実機で共有clockと推定補正を検証し、loopback校正、cycle take、非破壊compの順で進む |
+| punch / cycle capture / 複数入力 / named comp | 単一入力の伴奏同期録音、物理loopback実測校正、既存Audio Clipの手動take folder化と非破壊compまでは持つが、再生中の任意punch、長時間streaming、loop passごとの自動take生成、複数入力、複数の名前付きcomp / flattenは持たない | 3OS実機で共有clock・校正・手動compを検証し、長時間streamingと明示loop範囲の後にcycle captureを追加する |
 
 ## 5. 非機能要件
 
@@ -229,6 +231,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 - instrument / drum / Audio / Bus Trackの管理と音色・routing変更が、Master保護、schema v4学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
 - Audio Trackへ取り込んだ音声を非破壊編集でき、live再生とWAVが同じsource range / gain / fade / loopを使う。欠落・変更されたbinaryは別素材へ黙って置換せず、Project metadataを保持して説明する
 - システム既定または選択した単一マイクから、新規または録音待機中の既存Audio Trackへ録音できる。録音待機と入力deviceはProject保存・履歴を汚さず、採用したAsset / ClipだけをUndo 1回で戻せる
+- 既存Audio Clipを非破壊take folderへまとめ、2つ以上の範囲を別takeへ切り替え、境界・未使用takeを編集できる。Undo/Redo、保存・再読込、live/WAVが同じgapless compを使う
 - 主要ロジックにテストがある
 - 既存DAWのUIコピーではなく、独自デザインである
 
@@ -260,6 +263,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | Vocal Cut | カラオケ作成 | Yes | ステレオ中央定位をローカル軽減し、A/B試聴後にPCM 16-bit WAVへ書き出す。ML stem分離ではない |
 | Track Management | Track追加・整理・音色 | Partial | production UIはinstrument / drum / stereo Busと音源fileからのAudio Trackを追加し、non-masterの複製・並べ替え、一般Trackの削除・改名、synth 4音色を扱う。schema v4では学習role Trackも改名可能でroleを保持し、削除だけを保護する。Folder / Stackは未実装 |
 | Audio Track | Audio file配置 / マイク録音 | Yes | fileまたは最大60秒の単一マイク入力をapp-owned 48 kHz mono/stereo PCM16 WAVへ正規化し、content-addressed保存、既存Audio TrackへのClip追記、非破壊編集、live/WAV再生、欠落・変更診断を行う。Project JSON単体にはbinaryを同梱しない |
+| Audio Take Comp | 既存Audio Clipからテイク編集 | Yes | 同一Track・同一時間窓のClipを非破壊take folderへまとめ、範囲ごとに採用takeを選んでlive/WAVへ反映する。cycle recording / punch / MIDI compingは未実装 |
 | Stem Separation | パート分離 | Future | 外部API/ローカルモデル検証後 |
 | Plugin Host | VST3/AU | Future | ライセンス/安定性確認後 |
 
@@ -511,7 +515,7 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - liveとoffline WAVは共通のAudio Clip window plannerを使い、seek途中、transport loop、Clip loop、variable tempo、source frame range、gain、fadeを同じhalf-open windowへ解決する。Audio Trackはsynth voiceを作らず、decoded AudioBufferをTrack graphへrate 1.0で接続する。再生前に対象assetを全件preflightし、途中までgraph / WAVを作った状態で欠落を発見しない
 - raw objectのchecksum / length検証とdecode cacheを共有し、raw preflightとdecoded PCMは各256 MiB以下に制限する。missing / changed / unavailable / decode / resource超過は型付きに分類し、Track / Clip単位の説明と再読み込み手段を表示する。metadataを自動的に`unresolved`へ書き換えたり、同名の別fileへ黙って置換したりしない
 - liveは実AudioContext sample rate確定後、resolver I/OとTrack graph生成前に未使用decoded LRUを解放し、active / in-flight cacheだけを保持量へ数える。resolve/hash phaseは`raw合計 + 2 × 最大raw + retained decoded`、decode phaseは`raw合計 + 最大raw decode copy + target-rate decoded合計 + retained decoded`をchecked加算し、大きい方が384 MiBを越えるProjectを型付きで拒否する
-- `.ctsproj.json`はschema v4 metadataとaudio routingのexact交換形式だがAudioAsset binaryを同梱しない。単体JSONを別端末・別profileで開く場合は、対応binaryが既に同じcontent-addressed repositoryに存在する時だけreadyとして採用し、それ以外は既存Projectを変更せず非同梱を説明する。per-song bundleは引き続き将来案である
+- `.ctsproj.json`はschema v5 metadata、audio take folder、audio routingのexact交換形式だがAudioAsset binaryを同梱しない。単体JSONを別端末・別profileで開く場合は、対応binaryが既に同じcontent-addressed repositoryに存在する時だけreadyとして採用し、それ以外は既存Projectを変更せず非同梱を説明する。per-song bundleは引き続き将来案である
 
 ### 7.7 Audio Track録音 / Record Arm
 
@@ -524,7 +528,7 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - 実測校正は通常の録音wizardとは分け、オーディオinterfaceの出力を選択入力へケーブル接続する外部I/O校正として案内する。スピーカーからマイクへの空中loopbackは禁止し、app monitorに加えてinterface / driver mixerのDirect Monitor・hardware Loopback・同一outputへのreturnもOFFにするよう開始前に明示する。開始時はtransport表示がstoppedでも保持中のnatural drain graphを同期disposeし、Master automationをProject値へ戻してからprobeを準備する。probe振幅は固定の低levelとし、排他中だけapp-wide AudioContextのMaster gainを既知unityへ正規化してfinallyで元値へ戻す。固定PRBSをMaster / limiter経由で複数burst送出し、同じ将来render frameから選択入力をcaptureする。各burstは最大500 msの整数sample lagを正規化相関し、silence、clipping、同率または近接peakによる曖昧さ、低confidence、context generation / sample rate変化をfail closedにする
 - 実測校正はopaqueなIDを固定できる明示選択済み入力だけで開始でき、`システム既定`では開始させない。校正成功時だけ`inputDeviceId / contextGeneration / sampleRate / latencyFrames / confidence`のprofileをrenderer runtimeへ置き換える。Project / history / revision / asset / autosave / SQLite / `.ctsproj.json`には保存しない。app lifetimeの`devicechange`購読はdialog表示や録音phaseにかかわらずfuture profileを破棄する。入力選択または校正中の`devicechange`では進行中校正も中止し、以前の入力へ戻しても自動再利用しない。通常takeは開始時policyをimmutableに所有し、bind前のprofile破棄はfail closed、bind後の変更は現在takeを変えず次回以降だけ無効化する。一般録音は引き続き`システム既定`を利用できる。Web Audioから安定した出力identityを取得できないため、出力deviceまたはdriver / buffer設定変更後は再校正するよう明示する。通常のcancelまたは解析失敗は直前のprofileを上書きしない
 - raw PCMを48 kHz PCM16 WAVへ正規化し、bytesとchecksum receiptをrepositoryへ確定してからだけProjectへ採用する。既存TrackではそのTrackのvolume / pan / effects / routingを保ったままAsset metadataと補正済みsource rangeのClipを追記し、新規TrackではTrack / routing / Clipを作る。どちらも開始時snapshotへのexact CAS、Undo 1回、revision 1回として扱う
-- permission / device loss / context世代変更 / clock不連続 / arm失敗 / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProject / history / selectionを変更しない。transport loopはtake / compがない間は開始前に拒否する。入力hot switch、長時間streaming、再生中の任意punch、cycle take / lane / compは未実装である
+- permission / device loss / context世代変更 / clock不連続 / arm失敗 / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProject / history / selectionを変更しない。録音dialogはtransport loopをcycle takeへ変換できないため開始前に拒否する。既存Clipの手動take / comp編集は別機能として利用できるが、入力hot switch、長時間streaming、再生中の任意punch、cycle capture / 自動take生成は未実装である
 
 ### 7.8 Tempo / 拍子map Editor
 
@@ -534,6 +538,18 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - add / update / move / deleteはsourceとcandidateのcanonical codecを通過した時だけ開始時Project参照へcompare-and-swapする。採用された1操作はProject変更・Undo・save revision各1回、no-op / stale / busy / invalid候補はProject、history、selection、transportを変えない
 - active playback中の採用はsession snapshotを停止して有限なplayheadを保持する。次の再生、metronome、live / WAV / MIDI、Arranger / Piano Roll / Drum / Chord timelineは保存済みmapを既存の共通musical-time compilerから読む
 - 320px幅ではdocument全体を横overflowさせず時間軸だけを内部scrollする。eventはnative controlで選択・keyboard操作でき、anchor保護、入力error、成功、再生停止を日本語のalert / statusで伝える。連続tempo ramp、audio follow / Smart Tempo、tempo automationはこのincrementに含めない
+
+### 7.9 Audio Take / Comp Editor
+
+- 同じAudio Trackにあり、`startBeat / lengthBeats`が一致する非loop Audio Clipを2件以上選べる時、Audio Clip Editorから「テイクにまとめる」を実行する。選択Clipと同じ時間窓の候補を自動検出し、ready asset、source coverage、上限を満たすものだけをschema v5のAudio Take Folderへ変換する
+- group後は元ClipをArrangerに重ねて表示せず、1つのtake folder objectとして表示・選択する。初期の「仕上がり」は先頭take全rangeで、後から一致Clipを追加しても現在の仕上がりは変えない
+- Editorの6つ目の「テイク編集」tabは「仕上がり」rowとtake laneを同一時間軸へ表示する。laneの範囲を選ぶと、そのtakeを採用するpreviewをcomponent内だけで示し、pointerupで1 Project change / Undo 1回へ確定する。Escape / pointer cancelはProjectとhistoryを変えない
+- keyboard / precise操作として、選択take、開始beat、終了beatをlabel付きnative controlで入力して範囲採用できる。comp境界は数値入力で移動でき、隣接rangeの最小長とfolder exact coverを維持する
+- compで使っていないtakeだけを削除でき、最低2 takeを残す。削除後は存在するtakeへfocusを戻す。assetがmissing / changed / unavailableのfolder、録音 / 保存operation中、stale selectionではcontrolをdisabledにして理由を表示する
+- accepted grouping / take追加 / range paint / boundary移動 / 未使用take削除はactive playbackを停止し、有限なplayheadを保持する。次のlive再生とoffline WAVは同じpure plannerを使い、選択takeだけと0〜50 msの中心crossfadeを鳴らす
+- 保存・再読込・Undo / Redoはfolder / take / comp segment ID、immutable source window、fade / gain、crossfade、gapless compを保持する。MIDIへAudioを出力しないが、壊れたtake参照を黙って無視せずMIDI export自体を`invalid-project`で拒否する
+- 320px幅ではdocument全体を横overflowさせず、take timelineだけを内部横scrollする。操作対象はnative button / inputと明確なfocus indicatorを持ち、44px相当のpointer targetを維持する
+- cycle recording、再生中の任意punch、MIDI take / comp、複数入力、名前付きの複数comp、flatten / bounceはこのincrementに含めず、対応済みと表示しない
 
 ## 8. Mixer
 
@@ -1134,6 +1150,17 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 実測校正は通常録音とは別wizardで、明示選択した入力IDがある時だけ開ける。`システム既定`ではbuttonをdisabledにし、通常録音は既定入力のまま使えることと、校正には接続先の明示選択が必要な理由を表示する。wizardはスピーカーをOFFにしてinterface出力から選択入力へ物理cableを接続すること、入出力levelを低くすること、開放スピーカーとマイクでは実行しないこと、app monitorに加えてinterface / driver mixerのDirect Monitor・hardware Loopback・同一outputへのreturnもOFFにすること、出力 / driver / buffer変更後は再校正することを開始前に示す
 - 校正中は3秒countdown、測定状態、入力level、取消をstatus / meterで示し暗黙dismissを無効にする。instructions / running / success / errorの各表示切替では、消えるbuttonにfocusを残さず新stepのprimary actionへ移す。成功時はmsとsample数を表示し、Projectや測定PCMを保存しない。通常のcancel / silence / clipping / ambiguity / low confidenceでは以前のprofileを維持する。入力選択または`devicechange`では進行中の校正を中止して旧profileも破棄し、推定へ戻ったことを明示する
 
+### 2.12 Audio Take / Comp Editor
+
+- 同一Audio Track・同一時間窓のAudio Clipを選択したAudio Clip Editorに「テイクにまとめる」を表示する。対象候補は自動検出し、2件未満、loop、素材problem、録音 / 保存中はbuttonをdisabledにして理由を同じpanelで説明する
+- group成功後はArranger上の重なった元Clipを1つのtake folder blockへ置き換え、folderを選択してEditorの6つ目のtab「テイク編集」を開く。blockは「テイク N件」と仕上がり範囲を文字でも示し、通常Audio Clipと形・ラベルの両方で区別する
+- Editorは最上段に「仕上がり」、続けてtake laneを縦に並べる。各laneはtake名と採用状態を持ち、選択範囲は色だけでなくoutline / pattern / accessible nameでも区別する。既存DAWのlane配置や専用tool iconを模倣せず、「この範囲を使う」という初心者向け動詞を使う
+- pointer drag中は仕上がりrowだけをlocal previewし、pointerupで1回確定する。Escape / pointer cancelではpreviewを破棄する。精密操作はtake、開始beat、終了beatのlabel付きinputと「この範囲を使う」buttonを同じformに置く
+- comp境界を選択すると左右のtake名と境界beatを表示し、native number inputで移動できる。採用中でないtakeだけに削除buttonを出し、確認後の削除でfocus対象が消えた時は次のtake、なければ前のtakeへ戻す
+- accepted操作が再生を止めた場合は「仕上がりを更新したため、再生位置を保って停止しました」をpolite statusで伝える。errorはProjectが変更されなかったこと、素材problemは対象素材名、busyは録音 / 保存終了後に再試行できることをalertで伝える
+- 320px幅ではtablistやdocumentを横overflowさせず、takeのmusical timelineだけを内部scrollする。lane、form、境界、削除はnative control、明確なfocus ring、44px相当のpointer targetを持つ。pointer精度をkeyboard利用の前提にしない
+- UIにcycle recording、任意punch、MIDI comping、名前付き複数comp、flattenを示すcontrolや予約labelを出さない
+
 ## 3. ナビゲーション
 
 | ショートカット | 状態 | 動作 |
@@ -1191,6 +1218,9 @@ Chord Track のコンテキスト内操作:
 | Audio Track録音中 | `録音中`を色以外の文字でも示し、経過時間、入力level meter、44px以上の`録音を終了して保存` / `録音を破棄`をkeyboard操作可能にする。録音・保存中のX / Escape / backdrop、Project切替、window closeは安全に拒否する |
 | Audio Track録音失敗 | permission拒否、マイクなし / 使用中 / 切断、短すぎる録音、memory上限、WAV変換、素材保存を区別し、再試行方法と`プロジェクトは変更されていません`を表示する。保存cancel後のlate resultを採用しない |
 | Audio Assetが見つからない / 変更された | 素材名と`見つかりません` / `内容が変わっています` / `保存場所を利用できません`をClipと編集panelに表示する。別fileへ黙って置換せず、元のprofile / 端末で開き直すよう案内する。保存場所を利用できない場合はstorage / 権限を確認して再読込する。配置と編集metadataは保持し、素材を必要とする編集controlを無効にするが、最後の参照を安全に外せる削除は利用可能にする |
+| テイク編集の対象不足 / 不一致 | 同じAudio Track・同じ開始位置・同じ長さの非loop Clipが2件以上必要であることを説明し、既存Clipや履歴を変更しない |
+| テイク素材が見つからない / 変更された | folderと該当takeを保持し、範囲採用・境界移動・take追加を無効にする。別素材へ黙って差し替えず、元の端末 / profileでの再読込を案内する |
+| テイク編集中の競合 | 録音または保存operation中はgroup / take追加 / comp確定 / 削除を無効にし、処理完了後に再試行できることを表示する。pointer previewはProject変更前に破棄する |
 | Project JSONへ音声がない | `.ctsproj.json`は音声binaryを同梱しないことをimport前に説明し、対応objectがlocal repositoryにない場合は現在のProjectを置換しない |
 | カラオケ音源が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、5分以下、stereoという条件と、端末codecでdecodeできなかった可能性を分けて案内する |
 | カラオケ音源がmono / near-mono | stereo中央定位の差分を利用する処理であることを説明し、左右に広がりのあるstereo音源を案内する |
@@ -1435,7 +1465,7 @@ drum Clipの表示小節数はdomain値を変更せず、Clip開始位置からc
 5. pitch frameを無声区間、中央値、semitone hysteresisで単音note候補へまとめる。強い第2倍音はfundamental energyと倍周期scoreを併用してoctave候補を補正する。候補はtransient stable ID、開始 / 終了、MIDI、confidenceへ正規化し、60 ms最小長、非重複、512件上限をpure editing domainで検証する
 6. 候補のpitch / position / boundary修正、split / merge / 除外とbounded Undo / Redo、target Clip、quantizeはReact local stateに保持する。source変更、cancel、失敗、unmountでは候補historyと表示投影を破棄する。確定時だけcurrent draftをseconds→beats mappingとproject validationへ渡し、`replaceClipNotes`の単一changeで全notesを採用する
 
-decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否ではProject fingerprintを変えない。schema v4ではcompiled tempo mapの共通seconds↔beat resolverを使い、beat 0だけの固定mapも同じ経路で従来と同じ結果にする。
+decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否ではProject fingerprintを変えない。current schema v5ではcompiled tempo mapの共通seconds↔beat resolverを使い、beat 0だけの固定mapも同じ経路で従来と同じ結果にする。
 
 ### 5.7 Track管理transaction（Batch 3 + Audio Track + Bus routing）
 
@@ -1446,20 +1476,20 @@ decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否で�
 5. `commitProject`は候補全体をcanonical encode / validationし、採用時だけhistory、revision、autosaveとselection reconciliationを1回進める。128 Trackまたはcodec上限超過、stale ID、Master / 学習role保護、invalid name / preset、no-opではProject参照と全付随stateを変えない
 6. playback schedule、AutomationLane、TrackGraphはsession開始時snapshotであるため、採用されたTrack / Clip構造、semantic role、tempo / 拍子map、曲長、preset、automation lane、routingのsource / target / position / edge集合変更をcommit境界で停止し、有限な現在playheadを保持する。sendのgain / enabledだけは既存edge gainを10ms平滑更新する。AutomationLaneが1件以上ある時のmixer / effect変更も停止する。次のplayが新snapshotからclock / topology / voice / AudioParam commandを再構築する。改名、mixerに無関係なevent編集、拒否、no-opでは予約済みautomationへ触れずsessionを停止しない
 
-Track管理はschema v4 aggregate codecを正本にし、Undo/Redo、SQLite autosave、`.ctsproj.json`へrole、Audio metadata、routingを含めて保存する。Audio Trackはproduction追加・再生・非破壊編集、stereo Busはproduction追加・routing・insert処理へ接続済みである。
+Track管理はschema v5 aggregate codecを正本にし、Undo/Redo、SQLite autosave、`.ctsproj.json`へrole、Audio metadata、take folder、routingを含めて保存する。Audio Trackはproduction追加・再生・非破壊編集、stereo Busはproduction追加・routing・insert処理へ接続済みである。
 
-### 5.8 Project schema v4 aggregate boundary
+### 5.8 Project schema v5 aggregate boundary
 
-- current schemaは4。v1のinert `aliasOf`を音を変えず除去するv1→v2、role / musical-time map / AudioAsset metadata / AutomationLaneを加えるv2→v3、全non-MasterをMasterへ直結する明示`audioRouting`を加えるv3→v4を順にpure migrationする。
+- current schemaは5。v1のinert `aliasOf`を音を変えず除去するv1→v2、role / musical-time map / AudioAsset metadata / AutomationLaneを加えるv2→v3、全non-MasterをMasterへ直結する明示`audioRouting`を加えるv3→v4、空の`audioTakeFolders`を加えるv4→v5を順にpure migrationする。
 - `lengthBeats`、`tempoMap`、`timeSignatureMap`を時間の正本にし、`bpm` / `timeSignature` / `lengthBars`は旧consumer用mirrorとして検証する。project-modelはcompiled immutable indexからbeat↔seconds、bar↔beatを変換する。
 - v2→v3は保存順で最初の正規化済みChord / Chords / コード、Bass、Melody instrument Trackだけを学習roleへ移す。TypeScriptとRustはECMAScript `String#trim`相当（BOMを含みNEXT LINEを含まない）を共有する。legacy audio参照は決定的な`unresolved` AudioAssetへ保持し、raw object全体の既存IDと衝突しないmigration IDを使う。
 - AutomationLaneはnon-Master Trackのvolume / panだけを対象にし、point前はTrack scalar、point間はhold / linearで評価する。lookahead windowはhalf-openを保つが、曲末の最終windowだけexact end pointを含め、release / insert tailへ終値を維持する。beat-linearなlinear区間はtempo change beatごとに補間値commandへ分割し、seconds-linearなWeb Audio `linearRampToValueAtTime`と同じ曲線にする。同じbeatのlane point / tempo change / window endは1 commandへ決定的にまとめ、loop境界だけは前cycleの終値と次cycleのhold resetをこの順で残す。ライブとoffline WAVは同じcommand plannerとProject snapshotのtempo change列を使い、Master targetはTypeScript / Rust両境界で拒否する。
 - production lane editorはProject point列を正本のまま保持し、viewport内と選択pointだけを決定的に最大400 native controlへ投影する。curve segmentはhold / linear / jump別の最大3 SVG pathへ集約し、transportの30 Hz playhead購読は専用leaf componentへ隔離する。pointer previewはこのbounded controlだけを動かし、Project curveとhistoryはpointerupまで変更しない。
 - `compileAudioRouting`は全non-Masterのexact 1 outputとsendをstable DAGへ正規化する。output/send合わせて1,024 edge、sourceごと16 sendを上限とし、無効・gain 0のsendもcycle検査へ含める。live / WAVは同じcompiled planからTrack graphを未接続で全確保した後にedgeを接続し、途中失敗時は全nodeをrollbackする。channel基礎node、insert、live meter、route edge、Master meterを合計するstatic node preflightは4,096を上限とし、起動 / WAVでは最初のAudioNode前、再生中のeffect変更では既存channelを1つも更新する前に再検査する。上限超過またはlive insert再構築失敗では採用済みProjectをUndo可能なまま残し、旧session全体を破棄してresource-limitを表示する。互換性のためsource main pathはvoice→audibility gate→pre tap→fader→insert→pan→post tapを維持し、pre-sendはfader / insert前、post-sendはpan後から取る。Bus soloは関係する上流・下流edgeだけを開き、上流sourceの無関係なMaster直通edgeを開かない。
 - `ready` AudioAssetはchecksumとdecode前metadata、Audio Clipはasset IDとframe単位のsource range / fade / gainを持つ。AutomationLaneはTrack volume / pan target、point、hold / linear補間を持ち、同じcommand resolverをlive schedulerとoffline WAVへ接続する。
-- TypeScript codecとRust native persistence境界はcanonical schema v4 JSONを同じrequired-field / unknown-field / routing DAG条件で受理・migrationする。binaryはJSONへ埋め込まず、checksum / byte lengthで別のcontent-addressed repositoryを参照する。
+- TypeScript codecとRust native persistence境界はcanonical schema v5 JSONを同じrequired-field / unknown-field / routing DAG / take-comp相関条件で受理・migrationする。binaryはJSONへ埋め込まず、checksum / byte lengthで別のcontent-addressed repositoryを参照する。
 
-schema v4 aggregateとAudio Asset repositoryは正本を分離する。Project JSONは編集意味、routing、content identityを保持し、repositoryはimmutable binaryを保持する。Audio Clipのproduction配置・再生・trim / gain / fade / loop / split / duplicate / deleteは実装済みである。Automationはvolume / panのproduction lane editorからlive/offline schedulingまで接続済みである。read / bypassとwrite / touch / latch、Master、insert / send / tempo automation、modulationは後続である。
+schema v5 aggregateとAudio Asset repositoryは正本を分離する。Project JSONは編集意味、take comp、routing、content identityを保持し、repositoryはimmutable binaryを保持する。Audio Clipのproduction配置・再生・trim / gain / fade / loop / split / duplicate / deleteと、既存Clipからのtake grouping / comp範囲編集は実装済みである。Automationはvolume / panのproduction lane editorからlive/offline schedulingまで接続済みである。read / bypassとwrite / touch / latch、Master、insert / send / tempo automation、modulationは後続である。
 
 #### 5.8.1 Automation lane editing transaction
 
@@ -1467,7 +1497,7 @@ schema v4 aggregateとAudio Asset repositoryは正本を分離する。Project J
 2. project-modelのpublic mutationはsource Projectをcanonical codecで先に検査し、non-Master target、曲内beat、target別value範囲、`hold | linear`、同一lane内のbeat衝突、lane / point上限をno-throwのtyped resultで検査する。最初のpointでtarget laneを遅延作成し、全Project entityと衝突しないlane / point IDを同じ予約集合から発行する。更新後はbeat昇順へ並べ、最後のpoint削除またはclearでは空laneを除去する。
 3. 候補Project全体もcanonical codecを通過した場合だけStudio actionが開始時のProject参照へcompare-and-swapする。成功したadd / update / remove / clearは各1 Project change、Undo 1回、save revision 1回で、semantic no-opは元Project参照を返し、stale snapshot、busy operation、invalid source / candidateではProject、history、revision、selection、transportを変更しない。
 4. 採用されたlane編集はsession snapshotを無効化するため、active playbackを1回停止して有限なplayheadを保つ。次のplayback requestが新Projectからautomation commandを再構築する。no-opと拒否ではsessionへ触れない。
-5. snapは入力正規化でありschema fieldを追加しない。保存されるのは既存schema v4のtarget、point ID、beat、value、interpolationだけで、SQLite autosaveと`.ctsproj.json`の既存exact roundtripを使う。live lookahead、transport loop、可変tempo分割、offline WAVは既存の共通resolverをそのまま使うため、Editor固有のcurve evaluatorを別の音声正本にしない。
+5. snapは入力正規化でありschema fieldを追加しない。保存されるのはschema v4で導入されたtarget、point ID、beat、value、interpolationだけで、current schema v5のSQLite autosaveと`.ctsproj.json` exact roundtripを使う。live lookahead、transport loop、可変tempo分割、offline WAVは既存の共通resolverをそのまま使うため、Editor固有のcurve evaluatorを別の音声正本にしない。
 6. 現行runtimeはlaneが存在すれば常時読み出す。read / bypass stateとwrite / touch / latch captureは先行するhidden fieldを持たず、Master、insert / send / tempo parameter、MIDI CC / LFO modulationもこのtransactionの対象外とする。
 
 #### 5.8.2 Tempo / 拍子map editing transaction
@@ -1476,7 +1506,7 @@ schema v4 aggregateとAudio Asset repositoryは正本を分離する。Project J
 2. project-modelのpublic mutationはsource Projectをcanonical codecで先に検査し、有限な曲内beat、BPM 20〜300、拍子1〜32 / 分母2・4・8・16、map上限、global ID、厳密昇順、同beat衝突をno-throwのtyped resultで検査する。新規追加と移動先は`0 <= beat < lengthBeats`、拍子eventの追加・移動はさらに直前segmentの小節境界に限定する。canonical sourceで既に`beat === lengthBeats`にあるeventだけは、同じbeatでの値更新 / no-op、曲内への移動、削除を互換操作として許す。
 3. 拍子候補は後続eventを含む全segmentと`lengthBeats`終端をcompileし、全てが小節境界になる場合だけ`lengthBars`を再導出する。終端exactの拍子eventは長さ0の最終segmentとしてcanonical validatorと同じく許容し、他のmap eventを更新・削除した候補も再計算できるようにする。先頭eventの値を変えた候補では`bpm` / `timeSignature` mirrorも同じimmutable candidate内で更新する。
 4. candidate全体がcanonical codecを通過した時だけStudio actionが開始時Project参照へcompare-and-swapする。成功したadd / update / move / deleteは各1 Project change、Undo 1回、save revision 1回で、semantic no-op、stale snapshot、busy operation、invalid source / candidateではProject、history、revision、selection、transportを変更しない。
-5. 採用されたmap変更は再生session snapshotを停止し、有限なplayheadを保持する。次のplayback / metronome / WAV / MIDI / timelineは既存のcompiled musical-time indexを再構築するため、Editor固有の変換器を作らない。schema versionと保存形式はv4のままである。
+5. 採用されたmap変更は再生session snapshotを停止し、有限なplayheadを保持する。次のplayback / metronome / WAV / MIDI / timelineは既存のcompiled musical-time indexを再構築するため、Editor固有の変換器を作らない。map entity自体はschema v4から変えず、current schema v5へそのまま保存する。
 6. 連続tempo ramp、音声からのtempo追従、AutomationLaneのtempo targetは別の品質gateとし、このtransactionに予約fieldを先行追加しない。
 
 ### 5.9 Audio Track import / content-addressed transaction（Batch 5）
@@ -1504,7 +1534,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 5. Workletは`currentFrame`基準のabsolute first frameと単調sequenceをchunkへ付け、render quantum途中の開始・終了をsliceする。main threadは連続frame / sequence、最大frame、context generationを検査し、不連続なら保存しない。借用Contextは閉じず、鼻歌解析などのstandalone captureだけが自身のContextを閉じる。captureと48 kHz PCM16 WAV canonicalizeは最大60秒、1〜2 channel、dry capture、monitor初期OFF、permission cancel後のlate stream破棄、resource settlementまでのlease所有を維持する。
 6. 録音開始clockへ、capture first frameとruntime-onlyの補正値を結合する。推定modeはinput track latency、`AudioContext.baseLatency / outputLatency`、Master `DynamicsCompressor`の既知6 ms look-aheadを合算する。実測modeはexact input ID、Context generation、sample rateが一致する`RecordingLatencyCalibrationProfile.latencyFrames`で推定合計全体を置き換え、どのmodeでも最後に-500〜+500 msのmanual offsetだけを加算する。profile不一致時に推定modeへ黙ってfallbackしない。可変tempoのseconds↔beat正本で配置し、補正結果がbeat 0未満ならcanonical sample rateでsource先頭をceil trimする。mode、profile、手動値はProject / historyへ保存しない。
 7. canonical bytesとchecksum receiptをcontent-addressed repositoryへ確定してから、開始時snapshotとexact recording tokenをCASする。`new-track`はAudioAsset / Track / Audio Clip / output routeを作り、`existing-audio-track`は対象Trackのmixer / effects / routingを変えずAudioAssetと補正済みsource rangeのAudio Clipだけを追記する。どちらも1回のdomain mutation、selection更新、Undo 1回としてcommitする。
-8. permission / device-ended / context世代変更 / clock不連続 / capture arm / cancel / canonicalize / store失敗、stale snapshot、target消失、revoked tokenではProject / history / revision / selectionを変更しない。保存後CAS拒否のorphan bytesは許容するが、欠損bytesを参照するmetadataを作らない。loop recording、再生中の任意punch、長時間streaming、cycle take / lane / compは後続境界である。
+8. permission / device-ended / context世代変更 / clock不連続 / capture arm / cancel / canonicalize / store失敗、stale snapshot、target消失、revoked tokenではProject / history / revision / selectionを変更しない。保存後CAS拒否のorphan bytesは許容するが、欠損bytesを参照するmetadataを作らない。既存Audio Clipのtake grouping / comp編集は別transactionで提供する。loop recording、再生中の任意punch、長時間streaming、cycle captureからの自動take生成は後続境界である。
 
 ### 5.10.1 Physical loopback recording-latency calibration
 
@@ -1513,7 +1543,18 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 3. 取得PCMはsilenceとclippingを先に検査する。各burstについて送出した既知系列と入力を、lag 0から500 ms相当frameまで整数sample単位の正規化相互相関で走査する。sub-sample補間は行わない。複数burstのpeak位置が一貫し、一意性と固定confidence gateを満たす時だけlagを`latencyFrames`として採用する。同率または近接する競合peak、burst間で不一致なpeak、低confidenceはambiguousとして拒否する。
 4. 校正は`システム既定`では開始せず、明示選択したopaque `inputDeviceId`をrequestへ固定する。解析の直前と結果公開の直前にinput、Context generation、sample rateを再検証する。途中のdevice / context変化、silence、clipping、ambiguous、low confidence、500 ms窓外、cancelはfail closedとする。通常のcancel / 解析失敗は既存profileを上書きせず、入力選択または`devicechange`は進行中の校正を中止して旧profileも破棄する。成功時だけexact `inputDeviceId / contextGeneration / sampleRate / latencyFrames / confidence`を持つ単一runtime profileへatomicに置き換える。
 5. app rootはdialog lifecycleや録音phaseと独立して`devicechange`を購読し、future profileを即時破棄する。通常takeは開始時のmode / profile object / manual offsetをimmutableに所有し、clock bind前にruntime policyが変わればfail closed、bind後は現在takeの配置値を変えず次回takeだけを無効化する。exact input選択の変更でもprofileを破棄し、以前の入力へ戻しても自動再利用しない。Web Audioは安定したoutput identityを公開しないため、出力device、audio driver、buffer設定を変更した利用者へ再校正を明示する。Context generationまたはsample rateが変わった旧profileも適用しない。profileはProject codec / history / revision / autosave / SQLite / Asset repository / `.ctsproj.json`へ投影しない。
-6. 実測modeの録音配置はprofileの`latencyFrames / sampleRate`を唯一の自動補正値とし、hostのinput track latency、`baseLatency`、`outputLatency`、limiter look-aheadを重ねない。runtime-only manual offsetは実測値の後にだけ加える。物理校正は長時間streaming、任意punch、cycle take / lane / comping、複数I/O routingを実装済みにしない。
+6. 実測modeの録音配置はprofileの`latencyFrames / sampleRate`を唯一の自動補正値とし、hostのinput track latency、`baseLatency`、`outputLatency`、limiter look-aheadを重ねない。runtime-only manual offsetは実測値の後にだけ加える。物理校正は長時間streaming、任意punch、cycle capture、複数I/O routingを実装済みにしない。
+
+### 5.11 Audio take / comp transaction（Batch 6c-1）
+
+1. grouping commandは開始時Project snapshotとAudio Clip ID列だけを受け取り、同一Audio Track・同一`startBeat / lengthBeats`、非loop、ready assetのClipを2件以上要求する。compiled tempo mapで各Clipのtimeline windowをsource frameへ写し、1 frame以内に全folder rangeを覆う候補だけをtakeへ変換する。同じAudio Track・`startBeat / lengthBeats` windowにはfolderを1件だけ許し、既存folderがあれば新規groupではなくlater-add transactionへ送る。元ClipはTrackから除去するが、asset ID、source window、fade、gainは値として保持しbinaryを変更しない。
+2. folder / take / comp segment IDはProject全entityとの予約集合から発行する。初期compは先頭takeの全range 1件で、後から一致Clipをtakeへ追加しても現在のcompを変更しない。Track削除はfolderをcascade除去し、Track複製はfolder / take / segmentをfresh IDへ張り替えてassetだけを共有する。asset metadata GCはAudio Clipとtakeの両参照をrootにする。
+3. range paintは選択takeとfolder-local half-open範囲を受け、既存segmentを分割・置換して隣接同takeをmergeする。境界移動は左右segmentのidentityを保ったまま最小1/960拍を確保する。未使用takeだけを削除でき、folderは最低2 takeを維持する。候補はgapless / sorted / exact cover、take range内、segment 4,096件以下をcanonical codecで再検証する。
+4. Studio actionは開始時Project参照へのCASを通し、accepted group / add / range paint / boundary move / unused take deleteを各1 Project change、Undo 1回、save revision 1回にする。semantic no-op、pointer cancel / Escape、recording / save operation fence、stale snapshot、asset issue、codec拒否ではProject / history / revision / playbackを変えない。
+5. accepted topology / comp選択変更はactive playback sessionを停止して有限なplayheadを保持する。選択folder / take、pointer preview、Inspector draft、focusはruntime-onlyである。reload後はschema v5のfolderを復元し、次のplayとWAVが同じpure `AudioClipPlaybackIndex`へ正規化する。
+6. plannerはcomp segmentごとに選択takeだけをvirtual Audio Clip regionへ変換する。source offsetはcompiled tempo mapとtake source windowから求める。異なるtakeの境界では`crossfadeMs / 2`ずつ両側へsource handle内で延長し、独立したlinear splice envelopeを掛ける。persist済みtake fadeはtake-local秒数を保ち、短いcomp sliceへ合わせて伸縮せずtruncateする。構造化source identityで通常Clipとcomp occurrenceのID衝突を防ぐ。
+7. MIDI exportはaudio takeをMIDI eventへ投影しない。ただしv5 aggregateの独立hardening境界としてfolder / ready asset / source frame / comp exact-coverを検証し、壊れた参照を`invalid-project`として拒否する。
+8. cycle recording / loop pass capture、再生中の任意punch、MIDI take / comp、複数入力、複数の名前付きcomp、flatten / bounceはこのtransactionの完了条件に含めない。
 
 ## 6. Audio実装方針
 
@@ -1534,7 +1575,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 ### 6.1.1 Audio Asset preflight / Audio Clip voice
 
-- `AudioAssetPlaybackCache`はschema v4の`ready` assetだけを受理し、repository readの前後で128 MiB objectのlength / SHA-256を照合する。再生対象のraw preflightとdecoded AudioBuffer cacheは各256 MiBを上限とし、decode cache keyへchecksumとtarget AudioContext sample rateを含める
+- `AudioAssetPlaybackCache`はcurrent schema v5の`ready` assetだけを受理し、repository readの前後で128 MiB objectのlength / SHA-256を照合する。再生対象のraw preflightとdecoded AudioBuffer cacheは各256 MiBを上限とし、decode cache keyへchecksumとtarget AudioContext sample rateを含める
 - live開始はユーザーgesture内でAudioContextの生成 / resumeを開始した後、対象Audio Asset全件のpreflight完了を待つ。preflight前にTrackGraph、source、schedulerを生成しない。offline WAVはOfflineAudioContext生成前に同じasset preflightを完了する。missing / changed / unavailable / decode / resource-limitは型付きに返し、partial再生や部分WAVを作らない
 - playable Audio Clip region indexはProject snapshotごとに開始秒でsortし、prefix maximum endを持つ。liveの25ms tickはこのindexをrange queryし、全Clipを再収集しない。index region、1 planning window、WAVのMIDI / drum / chord eventとAudio source planの合計は各10,000件をhard capとする。region超過はlive Track graph生成前に拒否する。live window超過はそのscheduler境界で当該windowを部分scheduleせずsessionを中断するため、後続windowで初めて超過した場合は以前のwindowが再生済みになり得る。WAVの全曲plan超過は`OfflineAudioContext`生成前に拒否する
 - liveはユーザーgesture内でcontext activationを開始し、実sample rate取得後に未使用decoded LRUを解放してから、resolver I/O / TrackGraph / source生成前のcombined preflightを行う。active / in-flight decoded cacheは保持量として残し、resolve/hash peakを`rawTotal + 2 × largestRaw + retainedDecoded`、decode peakを`rawTotal + largestRaw decode copy + targetRateDecodedTotal + retainedDecoded`としてchecked加算する。両phaseの最大が384 MiBを越えればresolverを呼ばず`audio-resource-limit`にする
@@ -1547,7 +1588,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 - MVPで有効なMasterパラメータは`volume`だけとし、有限値を0.0〜2.0へ制限する。Master trackが複数あるprojectでは`project.tracks`配列の先頭にあるMasterだけを有効とし、後続Masterは音声へ影響させない。Master trackがないlegacy projectは1.0、`NaN` / `Infinity`など有効Masterの非有限値はfail-silentの0として解決する
 - Masterの`pan` / `mute` / `solo`はschema互換用に保持しても音声処理へ接続せず、MVP UIにも公開しない
-- ライブ再生とOfflineAudioContextによるWAV renderは、schema v4のcompiled routing DAGに従うTrack / Busのmain outputとpre/post-fader send→Master gain→limiterを共有する。ライブだけがメトロノームをMaster入力へ加え、Master gain直後へpost-fader UI meterを接続する。offline WAVにはメトロノームclickとUI meter / analyserを作らず、両経路は同じrouting planとMaster gain resolverを使って別経路でgainを重ねない
+- ライブ再生とOfflineAudioContextによるWAV renderは、current schema v5のcompiled routing DAGに従うTrack / Busのmain outputとpre/post-fader send→Master gain→limiterを共有する。ライブだけがメトロノームをMaster入力へ加え、Master gain直後へpost-fader UI meterを接続する。offline WAVにはメトロノームclickとUI meter / analyserを作らず、両経路は同じrouting planとMaster gain resolverを使って別経路でgainを重ねない
 - graph初期化時とoffline renderでは、Trackのmute / solo、各Track volumeおよび有効Master volumeをsample 0から確定gainへ設定し、既定gain 1.0の漏れを許さない。10ms平滑化は、再生中にTrack volume / mute / soloまたは有効Master volumeを更新した時だけ使う
 
 ### 6.1.3 Live meter ownership / offline export
@@ -1602,8 +1643,8 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 ### 7.1 現在の実装
 
-- Project schemaのcurrent versionは4。v1の`aliasOf`はruntime上の意味を持たず各Clip自身のpayloadが再生されていたため、v1→v2 migrationでは`aliasOf`だけを削除して独立Clipとして保持する。v2→v3はrole、tempo/signature map、AudioAsset / Automation metadataを決定的に加え、固定tempoの音とlegacy audio参照を失わない。v3→v4は全non-Masterへdirect-to-Master outputをexact 1件、sendを0件作る。TypeScript codecとRust native metadata境界は`v1 → v2 → v3 → v4`を順に適用し、canonical v4を保存する。
-- schema v4では`lengthBeats`とtempo / 拍子mapが正本で、`bpm` / `timeSignature` / `lengthBars`は検証対象のcompatibility mirrorである。Track roleは名前から独立した正本、AudioAssetは`ready` / `unresolved`のmetadata union、Automationはvolume / pan targetとpoint / interpolation、AudioRoutingはoutput / sendの非循環graphを持つ。
+- Project schemaのcurrent versionは5。v1の`aliasOf`はruntime上の意味を持たず各Clip自身のpayloadが再生されていたため、v1→v2 migrationでは`aliasOf`だけを削除して独立Clipとして保持する。v2→v3はrole、tempo/signature map、AudioAsset / Automation metadataを決定的に加え、固定tempoの音とlegacy audio参照を失わない。v3→v4は全non-Masterへdirect-to-Master outputをexact 1件、sendを0件作る。v4→v5は空の`audioTakeFolders`を加えて既存の音を変えない。TypeScript codecとRust native metadata境界は`v1 → v2 → v3 → v4 → v5`を順に適用し、canonical v5を保存する。
+- schema v5では`lengthBeats`とtempo / 拍子mapが正本で、`bpm` / `timeSignature` / `lengthBars`は検証対象のcompatibility mirrorである。Track roleは名前から独立した正本、AudioAssetは`ready` / `unresolved`のmetadata union、AudioTakeFolderはimmutable source windowとgapless comp、Automationはvolume / pan targetとpoint / interpolation、AudioRoutingはoutput / sendの非循環graphを持つ。
 - linked Clipのconsumerは共有`resolveClipContent`を使い、instanceのID / start / length / loopとsourceのnotes / drum payloadを合成する。編集はsourceへ、ライブ/WAV/MIDIの配置とdrum乱数identityはinstanceへ帰属させる。
 - codec / Rust保存境界は、非Master Clipの保存済みNote / DrumEventをlinked instance解決後に数える`resolved-stored` projectionを200,000件以下に制限する。これは従来の200,000 raw-item envelopeを狭めない互換上限であり、v1はinertな`aliasOf`を辿らず各Clip自身のpayloadを数え、派生Chord noteは含めない。複製候補もcommit前に同じ上限を検査する。
 
@@ -1622,7 +1663,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 MVPの正本はapp data directory内の`projects-v1.sqlite3`。Project集約はUI都合の正規化tableへ分解せず、`project-model` codecが生成したversioned canonical JSON snapshotとして保持する。ユーザーが持ち運ぶ交換形式は、codecで再検証する単一の`.ctsproj.json`ファイルであり、正本DBそのものやOS pathはrendererへ公開しない。
 
-schema v4のAudioAsset metadata、Audio Clip frame payload、AudioRoutingはcanonical JSON、音声binaryは別のapplication-owned content-addressed repositoryへ保存する。binaryはProject採用前に確定し、Project save / crash draft前に存在・length・checksumを再検証する。起動時staging recoveryとgeneration-aware GCでcrash後のpartial / orphanを整理する。下記はfutureのper-song bundle proposalであり、現行の`.ctsproj.json`へbinaryは同梱しない。
+schema v5のAudioAsset metadata、Audio Clip / Audio Take frame payload、AudioRoutingはcanonical JSON、音声binaryは別のapplication-owned content-addressed repositoryへ保存する。binaryはProject採用前に確定し、Project save / crash draft前に存在・length・checksumを再検証する。起動時staging recoveryとgeneration-aware GCでcrash後のpartial / orphanを整理する。下記はfutureのper-song bundle proposalであり、現行の`.ctsproj.json`へbinaryは同梱しない。
 
 ```text
 MySong.ctsproj/       # future proposal
@@ -1731,6 +1772,7 @@ MySong.ctsproj/       # future proposal
 | UserProgress | 学習進捗 |
 | ExerciseAttempt | 演習履歴 |
 | AudioAsset | Projectが参照する音声metadata。実binaryはchecksumをkeyにした別repositoryで保持 |
+| AudioTakeFolder / AudioTake / AudioCompSegment | 同一Audio Track・同一時間窓の非破壊take群と、実際に鳴らすgaplessな範囲選択 |
 | AudioRouting / AudioSend | non-Masterのmain outputとstereo Busへのpre/post-fader send |
 | AppSetting | 設定 |
 
@@ -1750,6 +1792,7 @@ export type Project = {
   tempoMap: TempoMapEvent[];
   timeSignatureMap: TimeSignatureMapEvent[];
   audioAssets: AudioAsset[];
+  audioTakeFolders: AudioTakeFolder[];
   automationLanes: AutomationLane[];
   audioRouting: AudioRouting;
   tracks: Track[];
@@ -1821,6 +1864,35 @@ export type AudioClip = Clip & {
   fadeInFrames: number;
   fadeOutFrames: number;
   gainDb: number;
+};
+
+export type AudioTake = {
+  id: string;
+  audioAssetId: string;
+  offsetBeats: number;
+  lengthBeats: number;
+  sourceStartFrame: number;
+  sourceFrameCount: number;
+  fadeInFrames: number;
+  fadeOutFrames: number;
+  gainDb: number;
+};
+
+export type AudioCompSegment = {
+  id: string;
+  takeId: string;
+  offsetBeats: number;
+  lengthBeats: number;
+};
+
+export type AudioTakeFolder = {
+  id: string;
+  trackId: string;
+  startBeat: number;
+  lengthBeats: number;
+  crossfadeMs: number;
+  takes: AudioTake[];
+  compSegments: AudioCompSegment[];
 };
 
 export type TempoMapEvent = {
@@ -1906,9 +1978,9 @@ export type ChordEvent = {
 };
 ```
 
-### 2.1 Project schema v4（current）
+### 2.1 Project schema v5（current）
 
-- `schemaVersion`のcurrent valueは`4`。decodeはversionごとにrequired field、unknown field、型、有限値、整数、範囲を厳密検証し、`v1 → v2 → v3 → v4`の順にpureかつ決定的にmigrationする。
+- `schemaVersion`のcurrent valueは`5`。decodeはversionごとにrequired field、unknown field、型、有限値、整数、範囲を厳密検証し、`v1 → v2 → v3 → v4 → v5`の順にpureかつ決定的にmigrationする。
 - v3では`Project.lengthBeats`を曲長の正本、`tempoMap` / `timeSignatureMap`を時間変換の正本とする。mapはbeat 0から始まり、IDを含む昇順event列として保存する。`bpm`、`timeSignature`、`lengthBars`は旧consumer用の互換mirrorであり、それぞれ先頭tempo、先頭拍子、拍子mapから算出した実小節数と一致しなければならない。
 - `compileMusicalTime`でimmutable indexを作り、`beatToSecondsAt` / `secondsToBeatAt` / `secondsBetweenBeats` / `barToBeatAt` / `beatToBarPosition`を共通変換境界とする。従来の固定tempo用`beatToSeconds(bpm)`は互換APIとして残す。
 - Trackの意味は`role`が正本であり、runtimeで名前から推測しない。`general`は予約名を含め自由に改名でき、改名でroleは変わらない。学習role Trackの削除は保護し、Track複製時のroleは`general`にする。
@@ -1917,9 +1989,10 @@ export type ChordEvent = {
 - `ready` AudioAssetはchecksum、元名、media type、byte / sample / channel / frame metadataを持つ。v3 audio Clipは`audioAssetId`、frame単位のsource range / fade、`gainDb`を必須とする。`ready`参照はaudio Trackに限り、asset範囲とfadeを検証する。`unresolved`参照はframe range / fadeを0とし、legacy dataを破壊しないためmigration後だけ非audio Track上にも残せる。
 - AutomationLaneはnon-Master Track volume / panをtargetとし、pointのbeat / valueと`hold` / `linear`補間を保存する。production lane editorは最初のpoint追加時にlaneを作り、pointの追加・編集・削除・全消去を保存する。live schedulerとoffline WAVは同じresolverでbase value、outbound補間、transport loop、可変tempoをAudioParam commandへ写す。read / bypassとwrite / touch / latch、Master、insert / send / tempo automation、modulationはschemaにもUIにも未実装である。
 - v3→v4は各non-Masterへ保存順のdirect-to-Master outputをexact 1件作り、sendを空にする。v4はoutput / sendを合わせたDAGを正本にし、Master発edge、自分自身、missing / non-Bus target、重複send、main outputと同じBusへのsend、cycleを拒否する。無効またはgain 0のsendもgraph edgeとしてcycle検査へ含める。
-- TypeScript codecとnative Rust境界は同じcanonical schema v4 JSONを検証・migration・保存する。AudioAsset binaryはJSONへ埋め込まず、checksum / byte lengthでapp-owned repositoryのimmutable objectを参照する。production Audio Track、Bus、routing、非破壊編集はこのv4 payloadを使用する。
+- v4→v5は`audioTakeFolders: []`を追加するだけで既存のAudio Clipと再生結果を変えない。v5はfolder / take / comp segmentをProject全体のID名前空間へ加え、Audio Track・ready asset・source frame・gapless compの相関制約を正本にする。
+- TypeScript codecとnative Rust境界は同じcanonical schema v5 JSONを検証・migration・保存する。AudioAsset binaryはJSONへ埋め込まず、checksum / byte lengthでapp-owned repositoryのimmutable objectを参照する。production Audio Track、take comp、Bus、routing、非破壊編集はこのv5 payloadを使用する。
 
-linked Clipのv2契約はv4でも次のとおり維持する。
+linked Clipのv2契約はv5でも次のとおり維持する。
 
 - v2の`aliasOf`はMIDI / Drum Clipだけが持てる。同じTrack・同じtype・同じ`lengthBeats`の非alias正本Clipを直接参照し、自己参照、dangling、別Track/type、chain/cycleを禁止する。
 - 正本だけが`notes`または`drumEvents` / `stepsPerBar` / `drumGroove`を所有する。aliasはこれらと`audioAssetId`を省略し、`id` / `trackId` / `type` / `startBeat` / `lengthBeats` / `loop` / `aliasOf`だけを保存する。
@@ -1998,11 +2071,11 @@ live drainの所有権はProject schemaではなく`PlaybackController`のtransi
 
 ### 2.6.1 Transient Audio Track recording
 
-Audio Track録音のpermission、countdown、入力level、monitor opt-in、単一Audio Trackの`armedAudioTrackId`、host既定を表す`null`またはopaqueな`preferredMicrophoneInputDeviceId`、`recordingLatencyCompensationMode`、整数`recordingLatencyAdjustmentMs`、開始時Project snapshot / playhead / exact targetを束ねる所有handle、shared AudioContext generation / anchor frame / request、Abort generation、raw Float32 PCM、encode進捗はruntime-onlyであり、Project codec / history / SQLite / `.ctsproj.json`へ保存しない。production境界は単一input、1〜2 channel、最大60秒、dry録音、monitor初期OFFである。Record ArmはTrack fieldではなく1件だけのrenderer stateで、Project切替または対象Audio Track消失時に解除する。入力IDは明示選択時だけ`deviceId: { exact: id }`へ渡し、`null`はhost既定とする。録音中のinput hot switchとtake laneをProject fieldとして先行追加しない。
+Audio Track録音のpermission、countdown、入力level、monitor opt-in、単一Audio Trackの`armedAudioTrackId`、host既定を表す`null`またはopaqueな`preferredMicrophoneInputDeviceId`、`recordingLatencyCompensationMode`、整数`recordingLatencyAdjustmentMs`、開始時Project snapshot / playhead / exact targetを束ねる所有handle、shared AudioContext generation / anchor frame / request、Abort generation、raw Float32 PCM、encode進捗はruntime-onlyであり、Project codec / history / SQLite / `.ctsproj.json`へ保存しない。production境界は単一input、1〜2 channel、最大60秒、dry録音、monitor初期OFFである。Record ArmはTrack fieldではなく1件だけのrenderer stateで、Project切替または対象Audio Track消失時に解除する。入力IDは明示選択時だけ`deviceId: { exact: id }`へ渡し、`null`はhost既定とする。録音中のinput hot switch、cycleごとの連続capture、録音完了時の自動take folder化はruntime / Project fieldとして先行追加しない。
 
 `RecordingLatencyCalibrationProfile`はexact `inputDeviceId / contextGeneration / sampleRate / latencyFrames / confidence`だけを持つrenderer runtime値である。`inputDeviceId`は校正時に`deviceId.exact`へ渡した空でないopaque IDで、`システム既定`を表す`null`はprofileへ採用しない。`contextGeneration`と`sampleRate`は測定に使ったapp-wide AudioContextのidentity、`latencyFrames`は0〜500 ms窓内の非負整数sample数、`confidence`は有限な0〜1とする。通常録音asset、Project entity、history snapshot、revision、autosave、SQLite、Audio Asset、browser storage、`.ctsproj.json`には保存しない。app-lifetimeの`devicechange`またはexact入力の変更ではfuture profileをoperation fence中でも破棄し、Context generationまたはsample rate不一致では適用不可とする。take所有handleは開始時のprofile objectを凍結するため、bind前の破棄はCAS不一致、bind後は現在take不変となる。output identityを安定取得できないため出力device / driver / buffer変更時の再校正は利用者の明示操作に委ねる。通常のcancel / 解析failureは直前のprofile値を保持するが、不一致profileを有効化しない。
 
-capture開始前に同じ所有handleがProject切替 / close token、Audio Track import / recordingのsingle-flight lease、開始時Project snapshot / playheadと`new-track`または`existing-audio-track` targetを同期取得する。既存active playbackは停止し、permissionと3秒countdown後にapp-wide AudioContext上の将来128-frame境界へcaptureと新しい伴奏再生をarmする。`MicrophonePcmCapture`は`contextGeneration / firstContextFrame / endContextFrameExclusive / inputLatencySeconds`を持ち、chunkのabsolute frameとsequenceを連続検査する。capture開始時に未使用のdecoded playback cacheを破棄し、残るactive cacheを含めてcaptureからcanonicalize / persistとcancel後に残るresample workのsettlementまで同じ384 MiB予約を同期resizeして所有する。permission待ちcancel後のlate streamはmicrophone内部tokenが停止・破棄まで所有し、PCM graphを作らない。GC未実施のworklet chunk 1組、連続source PCM、capture runtime overhead、real AudioBuffer copy、optional 48 kHz resample、PCM16 WAV、repository copyのphase peakをallocation前に検査する。高sample-rate / stereoで合算上限を超えるtakeはAudioBuffer作成前に拒否する。canonical WAV bytesとchecksum receiptを保存してからだけ、開始時snapshot / target / exact tokenと共有clockをCASし、可変tempoと選択した推定 / 実測 / 無補正値にmanual offsetを加えたlatencyから`startBeat / sourceStartFrame / sourceFrameCount`を決めて`ReadyAudioAsset`とAudio ClipをUndo 1回で採用する。実測modeはexact一致profileの`latencyFrames`でhost input / base / output / limiter推定全体を置き換える。新規targetではAudio Track / output routeも作り、既存targetではTrack / routingを変えずClipを追記する。permission / device loss / clock不連続 / context世代変更 / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProjectとhistoryを変更しない。保存済みbytesだけが孤児になる場合は許容し、欠損bytesを参照するmetadataは作らない。loop / punch、長時間streaming、take / compは未実装である。
+capture開始前に同じ所有handleがProject切替 / close token、Audio Track import / recordingのsingle-flight lease、開始時Project snapshot / playheadと`new-track`または`existing-audio-track` targetを同期取得する。既存active playbackは停止し、permissionと3秒countdown後にapp-wide AudioContext上の将来128-frame境界へcaptureと新しい伴奏再生をarmする。`MicrophonePcmCapture`は`contextGeneration / firstContextFrame / endContextFrameExclusive / inputLatencySeconds`を持ち、chunkのabsolute frameとsequenceを連続検査する。capture開始時に未使用のdecoded playback cacheを破棄し、残るactive cacheを含めてcaptureからcanonicalize / persistとcancel後に残るresample workのsettlementまで同じ384 MiB予約を同期resizeして所有する。permission待ちcancel後のlate streamはmicrophone内部tokenが停止・破棄まで所有し、PCM graphを作らない。GC未実施のworklet chunk 1組、連続source PCM、capture runtime overhead、real AudioBuffer copy、optional 48 kHz resample、PCM16 WAV、repository copyのphase peakをallocation前に検査する。高sample-rate / stereoで合算上限を超えるtakeはAudioBuffer作成前に拒否する。canonical WAV bytesとchecksum receiptを保存してからだけ、開始時snapshot / target / exact tokenと共有clockをCASし、可変tempoと選択した推定 / 実測 / 無補正値にmanual offsetを加えたlatencyから`startBeat / sourceStartFrame / sourceFrameCount`を決めて`ReadyAudioAsset`とAudio ClipをUndo 1回で採用する。実測modeはexact一致profileの`latencyFrames`でhost input / base / output / limiter推定全体を置き換える。新規targetではAudio Track / output routeも作り、既存targetではTrack / routingを変えずClipを追記する。permission / device loss / clock不連続 / context世代変更 / cancel / store失敗 / stale snapshot / target消失 / revoked tokenではProjectとhistoryを変更しない。保存済みbytesだけが孤児になる場合は許容し、欠損bytesを参照するmetadataは作らない。既存Audio Clipの手動take grouping / comp編集は別のschema v5 transactionで実装済みだが、loop / punch、長時間streaming、cycle captureからの自動take生成は未実装である。
 
 ### 2.6.2 Automation lane編集（schema v4）
 
@@ -2027,6 +2100,20 @@ production Editorが変更する正本は既存の`Project.tempoMap`と`Project.
 - add / update / move / deleteはimmutableなtyped resultで、semantic no-opとfailureは元Project参照を返す。成功だけが1 history snapshot / save revisionとなる
 - 選択event、Inspector draft、focus、timeline scroll、playback停止通知はruntime-onlyでProject / SQLite / `.ctsproj.json`へ保存しない
 - live / WAV / MIDI / metronome / 各timelineは保存済みmapを同じcompiled musical-time indexへ入力する。連続tempo ramp、audio follow、tempo automationの永続stateは未定義である
+
+### 2.6.4 Audio take / comp編集（schema v5）
+
+`Project.audioTakeFolders`は既存のAudio Clipを同一Track・同一timeline windowの代替takeへまとめた非破壊編集正本である。group時に元ClipはTrackから除去するが、各takeは同じready AudioAssetとimmutableなsource frame window / fade / gainを保持し、asset bytesを書き換えない。
+
+- folderは既存Audio Trackを参照し、曲内の`startBeat / lengthBeats`、0〜50 msの`crossfadeMs`、2〜128 take、1〜4,096 comp segmentを持つ。Project全体では最大1,024 folderとし、同じAudio Track・`startBeat / lengthBeats` windowには1 folderだけを許す
+- takeはfolder-localな`offsetBeats / lengthBeats`を持ち、ready assetの正のframe range、非負fade、-96〜+24 dB gainを保持する。comp segmentは同じfolder内のtakeを参照し、そのtakeが覆うhalf-open範囲だけを選べる
+- `compSegments`はoffset 0からfolder末尾まで厳密昇順・gapless・非overlapでexact coverする。隣接して同じtakeを選ぶsegmentは保存前にmergeし、dangling take、source overflow、未解決assetを拒否する
+- groupは同一Audio Track、同一start / length、非loop、ready asset、可変tempo上で1 frame以内に必要sourceを覆うClipを2件以上要求する。先頭takeを全rangeの初期compにし、後から一致Clipをtakeへ追加しても現在のcompを変えない
+- range paint、境界移動、未使用take削除はimmutable candidateをcanonical codecで検証し、採用された1 gestureだけをProject snapshot / Undo / save revision各1回にする。pointer preview、選択take / folder、focus、draftはruntime-onlyである
+- Track削除は所有folderをcascade除去し、Track複製はfolder / take / segmentへfresh IDを発行してassetを共有する。AudioAsset GCはAudio Clipだけでなく全take参照もrootとして数える
+- liveとoffline WAVはfolderを一時的なAudio regionへ正規化して既存Audio Clip plannerへ渡す。選択takeだけを鳴らし、spliceは`crossfadeMs`を境界中心に半分ずつ延長したlinear overlap、persist済みtake fadeはslice長へ再正規化せずtake-local時間のままtruncateする
+- MIDI exportはtake audioを出力しないが、壊れたv5 aggregateを無視せず独立validationで`invalid-project`として拒否する
+- cycle recording、任意punch、MIDI comping、複数入力、複数の名前付きcomp、flatten / bounceはschema / UIの対応済み範囲に含めない
 
 ### 2.7 Track管理とpreset（schema v4）
 
@@ -2135,6 +2222,7 @@ exact snapshotから特定projectらしいbytesだけを抜くと、snapshot che
 | ready AudioAsset | SHA-256はlowercase hex 64桁。対応media typeと正のbyte/sample/channel/frame metadataを持つ。production importは48 kHz / 1〜2ch PCM16 WAV、128 MiB以下 |
 | unresolved AudioAsset | `legacy-reference` / `missing-reference`だけ。参照Clipのsource range / fadeは0 |
 | ready Audio Clip | audio Track上でasset参照、frame rangeがasset内、fade合計がrange以下、gain -96〜+24 dB。loop中left trim / splitは禁止 |
+| Audio take folder | Project全体1,024以下、folderごとtake 2〜128・comp segment 1〜4,096。同じAudio Track / startBeat / lengthBeats windowは1 folderだけ。Audio Track / ready asset参照、source frame範囲、folder内take範囲、0〜50 ms crossfade、gapless exact-cover comp、隣接同take禁止 |
 | automation | Project全体で2,048 lane以下、1 laneあたり20,000 point以下。targetはnon-Master Trackのvolume/panでtargetごとに最大1 lane。point ID一意、beat厳密昇順・0〜曲末、volume valueは0〜2、pan valueは-1〜1、補間はoutboundのhold/linear |
 | note/drum events | 1クリップあたり20,000以下 |
 | drum resolution | 1〜128 steps/bar |
@@ -2395,7 +2483,7 @@ Output:
 |---|---|---|
 | theory-engine | unit | コード/スケール/度数判定の正確性 |
 | tutorial-engine | unit/integration | レッスン判定の再現性 |
-| project-model | unit/migration | schema v4の保存/読み込み、v1→v2→v3→v4移行、time map、role、AudioAsset / Automation / routing metadataの安全性 |
+| project-model | unit/migration | current schema v5の保存/読み込み、v1→v2→v3→v4→v5移行、time map、role、AudioAsset / Automation / routing、Audio take folder metadataの安全性 |
 | UI | component/e2e | 主要操作フロー |
 | audio | integration/golden | 再生イベント、レンダー結果 |
 | audio-assets | unit/integration/e2e | canonical 48 kHz PCM16、content-addressed保存、staging recovery / GC、欠落診断、Audio Clip live/WAV parity |
@@ -2514,11 +2602,28 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 期待結果:
 
 - 採用された各add / edit / move / deleteはUndo / save revision各1回、拒否 / no-opはProject / history / transportを変えない
-- tempo / 拍子mapは厳密昇順かつID一意で、`bpm` / `timeSignature` / `lengthBars` mirrorが正本と一致する。schemaVersionは4のままである
+- tempo / 拍子mapは厳密昇順かつID一意で、`bpm` / `timeSignature` / `lengthBars` mirrorが正本と一致する。current schemaVersionは5のままである
 - 拍子eventとProject終端は小節境界を保ち、invalid候補は日本語のinline alertで理由を説明する
 - active playbackはplayheadを保持して停止し、Undo / Redo、保存・再読込後も両mapとmirrorがexactに一致する
 - tab / event / Inspectorをkeyboardで操作でき、320pxではdocument横overflowがなくtimelineだけが内部scrollする
 - 連続tempo ramp、audio follow / Smart Tempo、tempo automationを実装済みと示すcontrolがない
+
+### E2E-006: Audio Take Folderで仕上がりを作る
+
+1. 同じAudio Track・同じ開始位置・同じ長さのready Audio Clipを2件以上用意し、1件を選択してAudio Clip Editorの「テイクにまとめる」を実行する
+2. Arrangerのtake folderを選択してEditorの「テイク編集」tabを開き、別takeの中間範囲をpointerと開始 / 終了beat formの両方で採用する
+3. comp境界を数値入力で移動し、未使用takeを削除する。pointer dragをEscape / cancelし、active playback中にも1操作を確定する
+4. Undo / Redo、保存・再読込、live再生、WAV書き出しを行う
+5. 320px viewportとkeyboard-onlyでfolder選択、tab、take、range form、境界、削除へ移動する
+
+期待結果:
+
+- group後は元Clipが重複再生されずArrangerにfolder 1件が表示され、先頭take全rangeを初期仕上がりにする。後から一致Clipを追加してもcompは変わらない
+- accepted group / paint / boundary / deleteは各1 Undo / save revision、pointer preview / Escape / no-op / invalid / busyはProject / history / revisionを変えない
+- compはgapless / sorted / exact cover、隣接同takeなしで、選択takeのsource範囲だけを鳴らす。liveとWAVのsource offset / gain / fade / centered crossfadeが一致する
+- active playback中のaccepted変更はplayheadを保持して停止し、次の再生から新compを使う。Undo / Redoと再読込でfolder / take / segment IDと音がexactに戻る
+- missing / changed / unavailable asset、録音 / 保存中、loop / window不一致、使用中take削除は説明付きで拒否し、曲を変更しない
+- 6つのARIA tabとpanel関係、native control、削除後focus、44px target、timelineのみ内部scrollを満たし、cycle recording / punch / MIDI comp / named comp / flattenを実装済みと示さない
 
 ## 5. 音声テスト
 
@@ -2596,11 +2701,11 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 
 | テスト | 必須検証 |
 |---|---|
-| Project exact roundtrip | schema v4の`.ctsproj.json`をcanonical codecでencode→decodeし、Track role、`lengthBeats`、tempo / 拍子map、AudioAsset、AutomationLane、Audio routing、Audio Clip frame payloadに加え、既存のTrack / Clip / loop / alias / preset / effects / groove / section / chord semanticsがexactに一致する |
+| Project exact roundtrip | current schema v5の`.ctsproj.json`をcanonical codecでencode→decodeし、Track role、`lengthBeats`、tempo / 拍子map、AudioAsset、AutomationLane、Audio routing、Audio Clip frame payload、`audioTakeFolders`のfolder / take / segment IDとrangeに加え、既存のTrack / Clip / loop / alias / preset / effects / groove / section / chord semanticsがexactに一致する |
 | Project schema v1→v2 migration | own payloadを持つv1 Clipへlegacy `aliasOf`を設定したfixtureをTypeScript codecとRust native migrationへ通し、v2 stepでは`aliasOf`だけが削除され、Clip / Note / DrumEvent ID、payload、配置、順序が一致する |
 | Project schema v2→v3 migration | 固定tempo / 拍子 / 曲長、名前variantと重複Chords / Bass / Melody Track、非空・空・欠落legacy audio参照、migration用prefixと衝突するraw IDを混在させる。保存順の最初だけが学習role、mapはbeat 0、mirrorsは一致、同一legacy参照は同一`unresolved` asset、欠落はClip別placeholder、frame fieldは0になり、入力を変えず同一bytesから同一v3を返す |
 | Project schema v3→v4 migration | v3の全non-Masterへ保存順を保ったdirect-to-Master outputをexact 1件ずつ作り、sendを空にする。同じv3 bytesからTypeScript / Rustが同じcanonical v4を返し、入力object / raw snapshot / provenanceを変更しない |
-| migration chain / native parity | v1 fixtureを`v1 → v2 → v3 → v4`へ通し、TypeScriptとRust native metadata境界が同じcanonical v4を受理する。Chord / Chords / コード、BOM / EM SPACE / NEXT LINEのtrim差、Master automation、parameter map、routing DAGを含む200,000 total-item境界も一致させる。unknown / required / null / non-finite / integer / range違反とfuture schemaを両方でfail closedし、移行元exact raw snapshotとprovenanceは保持する |
+| migration chain / native parity | v1 fixtureを`v1 → v2 → v3 → v4 → v5`へ通し、TypeScriptとRust native metadata境界が同じcanonical v5を受理する。v4→v5は必須`audioTakeFolders: []`だけを決定的に追加する。Chord / Chords / コード、BOM / EM SPACE / NEXT LINEのtrim差、Master automation、parameter map、routing DAG、Audio take folderを含む200,000 total-item境界も一致させる。unknown / required / null / non-finite / integer / range違反とfuture schemaを両方でfail closedし、移行元exact raw snapshotとprovenanceは保持する |
 | valid v3 linked persistence | MIDI / Drumそれぞれで同一Track・type・lengthの正本とpayloadlessな直接aliasを作り、canonical codec、SQLite save/reload、`.ctsproj.json` export/importを通してexact roundtripする。aliasのID / start / loop / `aliasOf`と正本だけのpayload ownershipを保持する |
 | musical-time map / mirrors | 複数tempo / 拍子eventでbeat↔seconds往復、区間duration、bar↔beat、変更境界、小数beatを許容誤差内で検証する。空map、beat 0欠落、非昇順、重複ID、曲外event、`bpm` / `timeSignature` / `lengthBars` mirror不一致を拒否する。beat 0だけの固定mapは旧固定計算と一致する |
 | AudioAsset metadata | `ready`のmedia type、lowercase SHA-256、byte/sample/channel/frame bounds、Audio Track参照、source range、fade合計、gainを検査する。`unresolved`はzero range/fadeでlegacy非audio Track上にも保持でき、dangling / duplicate ID / ready assetの非audio参照を拒否する。この行はmetadata codecだけを対象とし、binaryは下記の別gateで検証する |
@@ -2800,9 +2905,21 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - 未使用decoded cacheの開始前破棄、active cacheとGC未実施chunkを含む384 MiB planner、高sample-rate超過のallocation前拒否、capture開始からcancel後に残るresample work settlementまでのimport / record single-flight lease、permission cancel後のlate stream破棄、同一tick二重開始拒否、permission / device-ended / cancel / stale開始snapshot / playhead / target / revoked token / project switch / close拒否も自動検査する
 - 実測校正componentは通常録音と別wizardで、exact入力を選び、interfaceの出力→入力をケーブル接続する案内、スピーカー / マイクの空中loopback禁止、monitor強制OFF、固定低出力、PRBS複数burst、500 ms上限、cancelを確認する。成功だけがprofileをatomic置換し、失敗 / cancelは前回profileを保持する。出力identityを取得できない制約と、出力device / driver / buffer変更後の再校正案内も検査する
 - 録音配置は推定 / 実測 / 無補正の3modeを比較する。実測modeではexact一致profileのframe値がinput / base / output / limiter推定全体を置換し、手動offsetだけが後段で加算されること、不一致profileで推定へfallbackしないこと、可変tempo / beat 0 trimが同じであることをsample frame fixtureで検査する
-- 3OS実deviceでpermission、システム既定 / 明示device選択、`devicechange` / device loss、Record Arm先への追記、disk full、monitor feedback、close、再起動再生を確認する。shared AudioContextの伴奏同期と推定 / 実測 / 手動latency補正を有線・Bluetoothを分けて聴感 / 波形比較し、host申告値がない環境も確認する。実測はinterfaceの物理cable loopbackを使い、interface / driver mixerのDirect Monitor、hardware Loopback、同一outputへのreturnをOFFにして電気的feedbackがないこと、Project Master fader 0 / 1 / 2でも固定probe levelと測定値が一致することを確認する。OSごとに既知frame shiftとの誤差、silence / clip / ambiguity拒否、再校正案内を記録する。長時間streamingを閉じた後、cycle take / compingへ進む
+- 3OS実deviceでpermission、システム既定 / 明示device選択、`devicechange` / device loss、Record Arm先への追記、disk full、monitor feedback、close、再起動再生を確認する。shared AudioContextの伴奏同期と推定 / 実測 / 手動latency補正を有線・Bluetoothを分けて聴感 / 波形比較し、host申告値がない環境も確認する。実測はinterfaceの物理cable loopbackを使い、interface / driver mixerのDirect Monitor、hardware Loopback、同一outputへのreturnをOFFにして電気的feedbackがないこと、Project Master fader 0 / 1 / 2でも固定probe levelと測定値が一致することを確認する。OSごとに既知frame shiftとの誤差、silence / clip / ambiguity拒否、再校正案内を記録する。長時間streamingを閉じた後、cycle capture / punchへ進む
 
-### 7.10 Production Tempo / 拍子map editor regression gate
+### 7.10 Audio Take / Comp regression gate
+
+- project-model public APIでgroup / later add / range paint / boundary move / unused take deleteを検査する。同一Audio Track / window、非loop、ready asset、可変tempoの1-frame source coverage、folder 1,024 / take 128 / segment 4,096、global ID、throwing factory、source / candidate codecの境界±1を含める
+- schema v4→v5は`audioTakeFolders: []`だけを決定的に加え、TypeScript codecとRust native persistenceがrequired / unknown field、track / asset参照、same Audio Track / start / length windowのfolder一意性、safe frame、fade / gain、gapless exact cover、adjacent same take、save / reopen / protocol migrationを同じ条件で受理・拒否する。MIDI独立validatorもduplicate-windowを`invalid-project`で拒否する
+- groupは元Clipを除去して先頭take全rangeを初期compにし、later addはcompを保持する。Track duplicateはfolder / take / segment IDをfreshにしてassetを共有し、Track deleteはfolderをcascade除去する。asset GCはtake参照をrootにし、最後のClipだけを消しても使用中asset metadataを消さない
+- Studio actionはexact Project CAS、recording / save fence、asset issue、stale selectionを検査する。accepted 1 gesture = Project / history / revision各1、active playback停止と有限playhead保持、semantic no-op / pointer cancel / Escape / failureはProject / history / save / transport不変とする
+- plannerは通常Audio Clipとcompを同じindexへ正規化し、選択takeだけ、可変tempo source offset、0〜50 ms centered crossfade、source handle clamp、persist済みtake fadeのtake-local時間保持、独立splice envelope、通常Clipとのadversarial ID衝突、natural tailをlive / WAV共通fixtureで検査する
+- MIDI exportはvalid take folderの有無でMIDI bytesが同一であること、missing required field、dangling track / asset / take、source overflow、gap / overlap / adjacent同takeを`invalid-project`で拒否することをproject-modelとは独立したhardening testで確認する
+- 6つのARIA tab / panel、Audio Clipからの自動候補group、Arranger folder 1件表示、「仕上がり」row + take lane、local pointer preview、exact range form、boundary form、unused delete / focus recovery、disabled reasonをcomponent / E2Eで検査する
+- schema v5の保存・再読込、Undo / Redoでfolder / take / comp IDとaudible rangeをexact比較する。320pxではdocument横overflowを許さずtimelineだけを内部scrollさせ、native control / focus ring / 44px targetを確認する
+- cycle recording / punch / MIDI comp / multi-input / named comp / flattenがschema、UI、status文言に存在しないことをloss-boundary回帰にする
+
+### 7.11 Production Tempo / 拍子map editor regression gate
 
 - domain public APIで両mapのadd / update / move / delete、beat 0保護、BPM / 拍子範囲、strict order、同beat、曲末未満の新規追加 / 移動先、map上限、global ID、throwing ID factory、source / candidate codecを検査する。canonical sourceに既存の`beat === lengthBeats` eventがあるfixtureでは、位置据え置きのsemantic no-op / 値更新、曲内への移動、削除を許し、曲内eventの終端への移動は拒否する。failure / semantic no-opは元Project参照、成功はsource immutableとする
 - 拍子変更は先行segmentの小節境界、全後続event、`lengthBeats`終端を検査し、終端exact eventの長さ0最終segmentを許容した上で成功時だけ`lengthBars`を再導出する。終端eventを残した他eventのadd / update / removeも回帰し、先頭値変更時の`bpm` / `timeSignature` mirrorを同一候補で更新する

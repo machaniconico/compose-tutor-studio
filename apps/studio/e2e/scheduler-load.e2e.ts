@@ -63,6 +63,7 @@ function schedulerLoadProject(): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: trackId, destination: { type: 'master' } }],
@@ -125,6 +126,7 @@ function shortLoopDensityProject(noteCount: number): Project {
       denominator: 16,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: trackId, destination: { type: 'master' } }],

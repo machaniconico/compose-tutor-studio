@@ -43,12 +43,12 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 4;
+const PROJECT_SCHEMA_VERSION: u64 = 5;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
 const LEGACY_STORAGE_VERSION: u64 = 1;
-const LEGACY_MIGRATION_VERSION: u64 = 4;
+const LEGACY_MIGRATION_VERSION: u64 = 5;
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const APPLICATION_ID: i64 = 0x4354_5331; // "CTS1"
 const MAX_PROJECT_JSON_BYTES: usize = 16 * 1024 * 1024;
@@ -586,11 +586,47 @@ struct ProjectDto {
     audio_assets: Option<Vec<AudioAssetDto>>,
     automation_lanes: Option<Vec<AutomationLaneDto>>,
     audio_routing: Option<AudioRoutingDto>,
+    audio_take_folders: Option<Vec<AudioTakeFolderDto>>,
     tracks: Vec<TrackDto>,
     chord_track: Vec<ChordDto>,
     sections: Vec<SectionDto>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioTakeFolderDto {
+    id: String,
+    track_id: String,
+    start_beat: f64,
+    length_beats: f64,
+    crossfade_ms: f64,
+    takes: Vec<AudioTakeDto>,
+    comp_segments: Vec<AudioCompSegmentDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioTakeDto {
+    id: String,
+    audio_asset_id: String,
+    offset_beats: f64,
+    length_beats: f64,
+    source_start_frame: u64,
+    source_frame_count: u64,
+    fade_in_frames: u64,
+    fade_out_frames: u64,
+    gain_db: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioCompSegmentDto {
+    id: String,
+    take_id: String,
+    offset_beats: f64,
+    length_beats: f64,
 }
 
 #[derive(Deserialize)]
@@ -3387,6 +3423,7 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
             1 => migrate_project_value_v1_to_v2(project)?,
             2 => migrate_project_value_v2_to_v3(project)?,
             3 => migrate_project_value_v3_to_v4(project)?,
+            4 => migrate_project_value_v4_to_v5(project)?,
             _ => return None,
         };
         version += 1;
@@ -3459,6 +3496,10 @@ fn value_contains_v3_project_fields(project: &serde_json::Map<String, Value>) ->
 
 fn value_contains_v4_project_fields(project: &serde_json::Map<String, Value>) -> bool {
     project.contains_key("audioRouting")
+}
+
+fn value_contains_v5_project_fields(project: &serde_json::Map<String, Value>) -> bool {
+    project.contains_key("audioTakeFolders")
 }
 
 fn collect_value_ids(value: &Value, ids: &mut HashSet<String>) {
@@ -3676,6 +3717,20 @@ fn migrate_project_value_v3_to_v4(mut project: Value) -> Option<Value> {
         "audioRouting".to_owned(),
         serde_json::json!({ "outputs": outputs, "sends": [] }),
     );
+    Some(project)
+}
+
+/** v5 adds non-destructive take folders without changing existing playback. */
+fn migrate_project_value_v4_to_v5(mut project: Value) -> Option<Value> {
+    let project_record = project.as_object()?;
+    if project_record.get("schemaVersion").and_then(Value::as_u64) != Some(4)
+        || value_contains_v5_project_fields(project_record)
+    {
+        return None;
+    }
+    let project_record = project.as_object_mut()?;
+    project_record.insert("schemaVersion".to_owned(), Value::from(5));
+    project_record.insert("audioTakeFolders".to_owned(), Value::Array(Vec::new()));
     Some(project)
 }
 
@@ -7256,10 +7311,12 @@ fn validate_project_versioned_presence(
     let project = value.as_object().ok_or(GenerationIssue::Corrupt)?;
     let has_v3_fields = schema_version >= 3;
     let has_v4_fields = schema_version >= 4;
+    let has_v5_fields = schema_version >= 5;
     if V3_PROJECT_FIELDS
         .iter()
         .any(|key| project.contains_key(*key) != has_v3_fields)
         || project.contains_key("audioRouting") != has_v4_fields
+        || project.contains_key("audioTakeFolders") != has_v5_fields
     {
         return Err(GenerationIssue::Corrupt);
     }
@@ -7396,6 +7453,9 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
     const MAX_AUDIO_ASSETS: usize = 4_096;
     const MAX_AUTOMATION_LANES: usize = 2_048;
     const MAX_AUTOMATION_POINTS: usize = 20_000;
+    const MAX_AUDIO_TAKE_FOLDERS: usize = 1_024;
+    const MAX_AUDIO_TAKES_PER_FOLDER: usize = 128;
+    const MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER: usize = 4_096;
     if project_has_explicit_null_optionals(value) {
         return Err(GenerationIssue::Corrupt);
     }
@@ -7883,6 +7943,131 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
         }
     }
 
+    if project.schema_version >= 5 {
+        let audio_take_folders = project
+            .audio_take_folders
+            .as_deref()
+            .ok_or(GenerationIssue::Corrupt)?;
+        if audio_take_folders.len() > MAX_AUDIO_TAKE_FOLDERS {
+            return Err(GenerationIssue::Corrupt);
+        }
+        total_items = total_items
+            .checked_add(audio_take_folders.len())
+            .ok_or(GenerationIssue::Corrupt)?;
+        let mut audio_take_folder_windows = Vec::<(&str, f64, f64)>::new();
+        for folder in audio_take_folders {
+            if !valid_project_string(&folder.id, MAX_STRING_CHARS, false)
+                || !ids.insert(folder.id.as_str())
+                || !valid_project_string(&folder.track_id, MAX_STRING_CHARS, false)
+                || track_kinds_by_id.get(folder.track_id.as_str()) != Some(&"audio")
+                || !valid_timeline_span(
+                    folder.start_beat,
+                    folder.length_beats,
+                    project_length_beats,
+                    MIN_DURATION,
+                )
+                || !folder.crossfade_ms.is_finite()
+                || !(0.0..=50.0).contains(&folder.crossfade_ms)
+                || !(2..=MAX_AUDIO_TAKES_PER_FOLDER).contains(&folder.takes.len())
+                || !(1..=MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER).contains(&folder.comp_segments.len())
+                || audio_take_folder_windows
+                    .iter()
+                    .any(|(track_id, start_beat, length_beats)| {
+                        *track_id == folder.track_id.as_str()
+                            && same_beat(*start_beat, folder.start_beat)
+                            && same_beat(*length_beats, folder.length_beats)
+                    })
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+            audio_take_folder_windows.push((
+                folder.track_id.as_str(),
+                folder.start_beat,
+                folder.length_beats,
+            ));
+            total_items = total_items
+                .checked_add(folder.takes.len() + folder.comp_segments.len())
+                .ok_or(GenerationIssue::Corrupt)?;
+
+            let mut take_windows = HashMap::<&str, (f64, f64)>::new();
+            for take in &folder.takes {
+                let asset = audio_assets_by_id
+                    .get(take.audio_asset_id.as_str())
+                    .copied()
+                    .ok_or(GenerationIssue::Corrupt)?;
+                let AudioAssetDto::Ready { frame_count, .. } = asset else {
+                    return Err(GenerationIssue::Corrupt);
+                };
+                if !valid_project_string(&take.id, MAX_STRING_CHARS, false)
+                    || !ids.insert(take.id.as_str())
+                    || !valid_project_string(&take.audio_asset_id, MAX_STRING_CHARS, false)
+                    || !valid_timeline_span(
+                        take.offset_beats,
+                        take.length_beats,
+                        folder.length_beats,
+                        MIN_DURATION,
+                    )
+                    || take.source_start_frame > JS_MAX_SAFE_INTEGER
+                    || take.source_frame_count == 0
+                    || take.source_frame_count > JS_MAX_SAFE_INTEGER
+                    || take
+                        .source_start_frame
+                        .checked_add(take.source_frame_count)
+                        .is_none_or(|end| end > *frame_count)
+                    || take.fade_in_frames > JS_MAX_SAFE_INTEGER
+                    || take.fade_out_frames > JS_MAX_SAFE_INTEGER
+                    || take
+                        .fade_in_frames
+                        .checked_add(take.fade_out_frames)
+                        .is_none_or(|fade| fade > take.source_frame_count)
+                    || !take.gain_db.is_finite()
+                    || !(-96.0..=24.0).contains(&take.gain_db)
+                    || take_windows
+                        .insert(
+                            take.id.as_str(),
+                            (take.offset_beats, take.offset_beats + take.length_beats),
+                        )
+                        .is_some()
+                {
+                    return Err(GenerationIssue::Corrupt);
+                }
+            }
+
+            let mut expected_offset = 0.0;
+            let mut previous_take_id = None;
+            for segment in &folder.comp_segments {
+                let segment_end = segment.offset_beats + segment.length_beats;
+                let take_window = take_windows
+                    .get(segment.take_id.as_str())
+                    .copied()
+                    .ok_or(GenerationIssue::Corrupt)?;
+                if !valid_project_string(&segment.id, MAX_STRING_CHARS, false)
+                    || !ids.insert(segment.id.as_str())
+                    || !valid_project_string(&segment.take_id, MAX_STRING_CHARS, false)
+                    || !valid_timeline_span(
+                        segment.offset_beats,
+                        segment.length_beats,
+                        folder.length_beats,
+                        MIN_DURATION,
+                    )
+                    || !same_beat(segment.offset_beats, expected_offset)
+                    || previous_take_id == Some(segment.take_id.as_str())
+                    || segment.offset_beats < take_window.0
+                    || segment_end > take_window.1
+                {
+                    return Err(GenerationIssue::Corrupt);
+                }
+                expected_offset = segment_end;
+                previous_take_id = Some(segment.take_id.as_str());
+            }
+            if !same_beat(expected_offset, folder.length_beats) {
+                return Err(GenerationIssue::Corrupt);
+            }
+        }
+    } else if project.audio_take_folders.is_some() {
+        return Err(GenerationIssue::Corrupt);
+    }
+
     let mut clip_index = HashMap::new();
     for track in &project.tracks {
         for clip in &track.clips {
@@ -8203,6 +8388,7 @@ fn project_has_explicit_null_optionals(value: &Value) -> bool {
             "audioAssets",
             "automationLanes",
             "audioRouting",
+            "audioTakeFolders",
         ],
     ) {
         return true;
@@ -8305,6 +8491,10 @@ fn valid_number_map(value: Option<&HashMap<String, f64>>, max_chars: usize) -> b
 
 fn unit_interval(value: f64) -> bool {
     value.is_finite() && (0.0..=1.0).contains(&value)
+}
+
+fn same_beat(left: f64, right: f64) -> bool {
+    left.is_finite() && right.is_finite() && (left - right).abs() <= 1e-9
 }
 
 fn valid_timeline_span(start: f64, duration: f64, limit: f64, minimum: f64) -> bool {

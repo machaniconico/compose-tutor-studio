@@ -66,6 +66,7 @@ function routingProject(tracks: Track[], audioRouting: AudioRouting): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting,
     tracks,

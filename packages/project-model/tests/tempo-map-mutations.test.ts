@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CURRENT_SCHEMA_VERSION,
   addTempoMapEvent,
   addTimeSignatureMapEvent,
   createEmptyProject,
@@ -94,7 +95,7 @@ describe('tempo-map mutations', () => {
     expect(low.project).not.toBe(project);
     expect(low.project.bpm).toBe(20);
     expect(low.project.tempoMap[0]).toMatchObject({ id: anchorId, beat: 0, bpm: 20 });
-    expect(low.project.schemaVersion).toBe(4);
+    expect(low.project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(project).toEqual(before);
 
     const high = expectSuccess(updateTempoMapEvent(low.project, anchorId, { bpm: 300 }));
@@ -367,7 +368,7 @@ describe('time-signature-map mutations', () => {
     expect(result.project.timeSignature).toEqual([4, 4]);
     expect(result.project.lengthBeats).toBe(16);
     expect(result.project.lengthBars).toBe(5);
-    expect(result.project.schemaVersion).toBe(4);
+    expect(result.project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(kinds).toEqual(['time-signature']);
     expect(project).toEqual(before);
   });
@@ -400,7 +401,7 @@ describe('time-signature-map mutations', () => {
         denominator,
       });
       expect(result.project.lengthBars).toBe(lengthBars);
-      expect(result.project.schemaVersion).toBe(4);
+      expect(result.project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     },
   );
 

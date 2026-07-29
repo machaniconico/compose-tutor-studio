@@ -128,6 +128,7 @@ function project(track: Track): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: track.id, destination: { type: 'master' } }],

@@ -242,6 +242,11 @@ function allEntityIds(project: Project): Set<string> {
   for (const event of project.tempoMap) ids.add(event.id);
   for (const event of project.timeSignatureMap) ids.add(event.id);
   for (const asset of project.audioAssets) ids.add(asset.id);
+  for (const folder of project.audioTakeFolders) {
+    ids.add(folder.id);
+    for (const take of folder.takes) ids.add(take.id);
+    for (const segment of folder.compSegments) ids.add(segment.id);
+  }
   for (const lane of project.automationLanes) {
     ids.add(lane.id);
     for (const point of lane.points) ids.add(point.id);

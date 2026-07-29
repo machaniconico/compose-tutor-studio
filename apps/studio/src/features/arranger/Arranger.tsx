@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AudioClip, Clip, MusicalTimeIndex, Section, Track } from '@cts/project-model';
+import type {
+  AudioClip,
+  AudioTakeFolder,
+  Clip,
+  MusicalTimeIndex,
+  Section,
+  Track,
+} from '@cts/project-model';
 import {
   addSection,
   barToBeatAt,
@@ -67,6 +74,10 @@ function beatAtBarNumber(musicalTime: MusicalTimeIndex, barNumber: number): numb
   if (fraction === 0) return barStart;
   const barEnd = barToBeatAt(musicalTime, bar + 1);
   return barStart + (barEnd - barStart) * fraction;
+}
+
+function conciseBeat(beat: number): string {
+  return Number(beat.toFixed(3)).toString();
 }
 
 export type ClipBarRange = Readonly<{
@@ -205,9 +216,11 @@ export function Arranger() {
   const zoomX = useStore((s) => s.editor.zoomX);
   const applyProjectChange = useStore((s) => s.applyProjectChange);
   const selectedClipId = useStore((s) => s.editor.selectedClipId);
+  const selectedTakeFolderId = useStore((s) => s.editor.selectedTakeFolderId);
   const audioAssetIssues = useStore((s) => s.audioAssetIssues);
   const selectTrack = useStore((s) => s.selectTrack);
   const selectClip = useStore((s) => s.selectClip);
+  const selectTakeFolder = useStore((s) => s.selectTakeFolder);
   const setActiveView = useStore((s) => s.setActiveView);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -225,9 +238,18 @@ export function Arranger() {
   const ppb = pxPerBeat(zoomX);
   const laneWidth = project.lengthBeats * ppb;
   const clipTracks = project.tracks.filter(
-    (track) => track.type !== 'master' && track.clips.length > 0,
+    (track) => (
+      track.type !== 'master'
+      && (
+        track.clips.length > 0
+        || project.audioTakeFolders.some((folder) => folder.trackId === track.id)
+      )
+    ),
   );
   const selected = locateClip(project.tracks, selectedClipId);
+  const selectedTakeFolder = project.audioTakeFolders.find(
+    (folder) => folder.id === selectedTakeFolderId,
+  ) ?? null;
 
   useEffect(() => {
     setClipNotice((current) =>
@@ -294,6 +316,17 @@ export function Arranger() {
     selectTrack(track.id);
     selectClip(clip.id);
     setClipNotice(null);
+  };
+
+  const selectArrangerTakeFolder = (
+    track: Track,
+    folder: AudioTakeFolder,
+    openEditor: boolean,
+  ): void => {
+    selectTrack(track.id);
+    selectTakeFolder(folder.id);
+    setClipNotice(null);
+    if (openEditor) setActiveView('comping');
   };
 
   const duplicateSelected = (linked: boolean): void => {
@@ -514,6 +547,41 @@ export function Arranger() {
                   </button>
                   );
                 })}
+                {project.audioTakeFolders
+                  .filter((folder) => folder.trackId === track.id)
+                  .map((folder, index) => {
+                    const hasAssetIssue = folder.takes.some((take) => {
+                      const asset = project.audioAssets.find(
+                        (candidate) => candidate.id === take.audioAssetId,
+                      ) ?? null;
+                      const issue = asset ? audioAssetIssues[asset.id] ?? null : null;
+                      return audioAssetStatusLabel(asset, issue) !== '音声素材を確認済み';
+                    });
+                    return (
+                      <button
+                        type="button"
+                        key={folder.id}
+                        data-take-folder-id={folder.id}
+                        className={`arranger__clip is-audio is-take-folder${selectedTakeFolderId === folder.id ? ' is-selected' : ''}${hasAssetIssue ? ' has-asset-issue' : ''}`}
+                        style={{
+                          left: folder.startBeat * ppb,
+                          width: folder.lengthBeats * ppb,
+                        }}
+                        aria-pressed={selectedTakeFolderId === folder.id}
+                        aria-label={`${track.name}、テイクフォルダ${index + 1}、${folder.takes.length}テイク、${beatAsBarNumber(musicalTime, folder.startBeat).toFixed(1)}小節から${(beatAsBarNumber(musicalTime, folder.startBeat + folder.lengthBeats) - beatAsBarNumber(musicalTime, folder.startBeat)).toFixed(1)}小節${hasAssetIssue ? '、音声素材を確認してください' : ''}`}
+                        onClick={() => selectArrangerTakeFolder(track, folder, false)}
+                        onDoubleClick={() => selectArrangerTakeFolder(track, folder, true)}
+                      >
+                        <span title={`${conciseBeat(folder.startBeat)}–${conciseBeat(
+                          folder.startBeat + folder.lengthBeats,
+                        )}拍`}>
+                          Comp · {folder.takes.length}テイク · {conciseBeat(
+                            folder.startBeat,
+                          )}–{conciseBeat(folder.startBeat + folder.lengthBeats)}拍
+                        </span>
+                      </button>
+                    );
+                  })}
               </div>
             </div>
           ))}
@@ -532,7 +600,21 @@ export function Arranger() {
               : null
           }
           musicalTime={musicalTime}
+          trackId={selected.track.id}
         />
+      ) : selectedTakeFolder ? (
+        <section className="arranger__clip-editor" aria-label="選択テイクフォルダ">
+          <div className="arranger__clip-summary">
+            <strong>
+              {project.tracks.find((track) => track.id === selectedTakeFolder.trackId)?.name
+                ?? 'Audio Track'}
+            </strong>
+            <span>{selectedTakeFolder.takes.length}テイクの仕上がり</span>
+          </div>
+          <button type="button" onClick={() => setActiveView('comping')}>
+            テイク編集を開く
+          </button>
+        </section>
       ) : selected ? (
         <ClipEditor
           key={selected.clip.id}

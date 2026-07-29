@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   CURRENT_SCHEMA_VERSION,
+  MAX_PROJECT_STRING_LENGTH,
+  MAX_PROJECT_TIMELINE_BEATS,
+  MAX_PROJECT_TOTAL_ITEMS,
+  MIN_EVENT_DURATION_BEATS,
   validateProject,
   type AudioClip,
+  type AudioTakeFolder,
   type Project,
   type ReadyAudioAsset,
   type Track,
@@ -56,6 +61,7 @@ function projectWithLoop(lengthBeats: number): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: 'lead', destination: { type: 'master' } }],
@@ -146,6 +152,65 @@ function addReadyAudioFixture(project: Project): ReadyAudioFixture {
     destination: { type: 'master' },
   });
   return { track, clip, asset };
+}
+
+type ReadyAudioTakeFolderFixture = Readonly<{
+  project: Project;
+  track: Track;
+  asset: ReadyAudioAsset;
+  folder: AudioTakeFolder;
+}>;
+
+function addReadyAudioTakeFolderFixture(project: Project): ReadyAudioTakeFolderFixture {
+  const { track, asset } = addReadyAudioFixture(project);
+  track.clips = [];
+  const folder: AudioTakeFolder = {
+    id: 'take-folder-1',
+    trackId: track.id,
+    startBeat: 0,
+    lengthBeats: 4,
+    crossfadeMs: 5,
+    takes: [
+      {
+        id: 'take-1',
+        audioAssetId: asset.id,
+        offsetBeats: 0,
+        lengthBeats: 4,
+        sourceStartFrame: 0,
+        sourceFrameCount: 96_000,
+        fadeInFrames: 480,
+        fadeOutFrames: 960,
+        gainDb: -3,
+      },
+      {
+        id: 'take-2',
+        audioAssetId: asset.id,
+        offsetBeats: 0,
+        lengthBeats: 4,
+        sourceStartFrame: 0,
+        sourceFrameCount: 96_000,
+        fadeInFrames: 240,
+        fadeOutFrames: 480,
+        gainDb: 0,
+      },
+    ],
+    compSegments: [
+      {
+        id: 'comp-segment-1',
+        takeId: 'take-1',
+        offsetBeats: 0,
+        lengthBeats: 2,
+      },
+      {
+        id: 'comp-segment-2',
+        takeId: 'take-2',
+        offsetBeats: 2,
+        lengthBeats: 2,
+      },
+    ],
+  };
+  project.audioTakeFolders.push(folder);
+  return { project, track, asset, folder };
 }
 
 type MidiTextField = 'project title' | 'track name' | 'chord marker';
@@ -596,6 +661,256 @@ describe('bounded MIDI project export', () => {
     const parsed = parseMidiFile(result.bytes);
     expect(parsed.tracks.some((track) => track.name === 'Audio')).toBe(false);
     expect(parsed.tracks.filter((track) => track.notes.length > 0)).toHaveLength(1);
+  });
+
+  it('strictly validates but deliberately omits a valid Audio take folder', () => {
+    const project = projectWithLoop(4);
+    addReadyAudioTakeFolderFixture(project);
+
+    expect(validateProject(project).ok).toBe(true);
+    const result = projectToMidiResult(project);
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.bytes).toEqual(projectToMidi(projectWithLoop(4)));
+    const parsed = parseMidiFile(result.bytes);
+    expect(parsed.tracks.some((track) => track.name === 'Audio')).toBe(false);
+    expect(parsed.tracks.filter((track) => track.notes.length > 0)).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      label: 'a dangling take asset',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.takes[0]!.audioAssetId = 'missing-asset';
+      },
+    },
+    {
+      label: 'a dangling comp-segment take',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.compSegments[0]!.takeId = 'missing-take';
+      },
+    },
+    {
+      label: 'a gap between comp segments',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.compSegments[1]!.offsetBeats = 2.25;
+        folder.compSegments[1]!.lengthBeats = 1.75;
+      },
+    },
+    {
+      label: 'overlapping comp segments',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.compSegments[0]!.lengthBeats = 2.25;
+      },
+    },
+    {
+      label: 'a source range beyond its asset',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.takes[0]!.sourceStartFrame = 1;
+      },
+    },
+    {
+      label: 'duplicate Audio take data ids',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.compSegments[0]!.id = folder.takes[0]!.id;
+      },
+    },
+    {
+      label: 'an id colliding with another project domain',
+      mutate: ({ folder, track }: ReadyAudioTakeFolderFixture) => {
+        folder.id = track.id;
+      },
+    },
+    {
+      label: 'adjacent segments selecting the same take',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.compSegments[1]!.takeId = folder.compSegments[0]!.takeId;
+      },
+    },
+    {
+      label: 'an instrument-track folder reference',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.trackId = 'lead';
+      },
+    },
+    {
+      label: 'a folder duration below one tick',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.lengthBeats = MIN_EVENT_DURATION_BEATS / 2;
+      },
+    },
+    {
+      label: 'a take duration below one tick',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.takes[0]!.lengthBeats = MIN_EVENT_DURATION_BEATS / 2;
+      },
+    },
+    {
+      label: 'a comp duration below one tick',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.compSegments[0]!.lengthBeats = MIN_EVENT_DURATION_BEATS / 2;
+        folder.compSegments[1]!.offsetBeats = MIN_EVENT_DURATION_BEATS / 2;
+        folder.compSegments[1]!.lengthBeats =
+          folder.lengthBeats - MIN_EVENT_DURATION_BEATS / 2;
+      },
+    },
+    {
+      label: 'a folder duration above the project timeline limit',
+      mutate: ({ project, folder }: ReadyAudioTakeFolderFixture) => {
+        project.lengthBeats = MAX_PROJECT_TIMELINE_BEATS + 1;
+        folder.lengthBeats = MAX_PROJECT_TIMELINE_BEATS + 1;
+      },
+    },
+    {
+      label: 'an overlong take id',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.takes[0]!.id = 't'.repeat(MAX_PROJECT_STRING_LENGTH + 1);
+      },
+    },
+    {
+      label: 'an overlong asset reference',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        folder.takes[0]!.audioAssetId =
+          'a'.repeat(MAX_PROJECT_STRING_LENGTH + 1);
+      },
+    },
+    {
+      label: 'a missing nested required field',
+      mutate: ({ folder }: ReadyAudioTakeFolderFixture) => {
+        delete (
+          folder.takes[0] as unknown as Partial<Record<'gainDb', unknown>>
+        ).gainDb;
+      },
+    },
+  ])('rejects Audio take folder data with $label', ({ mutate }) => {
+    const project = projectWithLoop(4);
+    const fixture = addReadyAudioTakeFolderFixture(project);
+    mutate(fixture);
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
+  });
+
+  it('requires audioTakeFolders on a current-schema export payload', () => {
+    const project = projectWithLoop(4);
+    project.schemaVersion = CURRENT_SCHEMA_VERSION;
+    delete (
+      project as unknown as Partial<Record<'audioTakeFolders', unknown>>
+    ).audioTakeFolders;
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-project' }),
+    });
+  });
+
+  it('rejects an Audio take folder start beyond the shared timeline bound', () => {
+    const project = projectWithLoop(4);
+    const { folder } = addReadyAudioTakeFolderFixture(project);
+    project.lengthBeats = MAX_PROJECT_TIMELINE_BEATS + 2;
+    folder.startBeat = MAX_PROJECT_TIMELINE_BEATS + 1;
+    folder.lengthBeats = 1;
+    for (const take of folder.takes) take.lengthBeats = 1;
+    folder.compSegments = [{
+      id: folder.compSegments[0]!.id,
+      takeId: folder.takes[0]!.id,
+      offsetBeats: 0,
+      lengthBeats: 1,
+    }];
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: 'invalid-project',
+        message: expect.stringContaining(
+          `startBeat must be in 0..${MAX_PROJECT_TIMELINE_BEATS}`,
+        ),
+      }),
+    });
+  });
+
+  it('rejects duplicate Audio take folders on the same track and window', () => {
+    const project = projectWithLoop(4);
+    const { folder } = addReadyAudioTakeFolderFixture(project);
+    const duplicate = structuredClone(folder);
+    duplicate.id = 'take-folder-duplicate-window';
+    duplicate.takes = duplicate.takes.map((take, index) => ({
+      ...take,
+      id: `duplicate-window-take-${index}`,
+    }));
+    duplicate.compSegments = duplicate.compSegments.map((segment, index) => ({
+      ...segment,
+      id: `duplicate-window-segment-${index}`,
+      takeId: `duplicate-window-take-${index}`,
+    }));
+    project.audioTakeFolders.push(duplicate);
+
+    expect(projectToMidiResult(project)).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: 'invalid-project',
+        message: expect.stringContaining(
+          'same track and timeline window',
+        ),
+      }),
+    });
+  });
+
+  it('preflights the aggregate Audio take subtree at the codec nested-item boundary', () => {
+    const sparseTakeProject = (segmentTotal: number): Project => {
+      const project = projectWithLoop(4);
+      const { track } = addReadyAudioFixture(project);
+      track.clips = [];
+      const folderCount = 49;
+      const segmentCounts = Array.from(
+        { length: folderCount },
+        (_, index) => (
+          index < folderCount - 1
+            ? 4_096
+            : segmentTotal - (folderCount - 1) * 4_096
+        ),
+      );
+      project.audioTakeFolders = segmentCounts.map((segmentCount, index) => ({
+        id: `budget-folder-${index}`,
+        trackId: track.id,
+        startBeat: 0,
+        lengthBeats: 4,
+        crossfadeMs: 0,
+        takes: Array(2),
+        compSegments: Array(segmentCount),
+      })) as unknown as Project['audioTakeFolders'];
+      return project;
+    };
+    const folderAndTakeItems = 49 + 49 * 2;
+    const exactSegmentItems = MAX_PROJECT_TOTAL_ITEMS - folderAndTakeItems;
+
+    const exactBoundary = projectToMidiResult(
+      sparseTakeProject(exactSegmentItems),
+    );
+    expect(exactBoundary).toMatchObject({
+      ok: false,
+      error: {
+        code: 'invalid-project',
+        message: expect.not.stringContaining('nested items'),
+      },
+    });
+
+    const overBoundary = projectToMidiResult(
+      sparseTakeProject(exactSegmentItems + 1),
+    );
+    expect(overBoundary).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: 'invalid-project',
+        message: expect.stringContaining(
+          `exceeds ${MAX_PROJECT_TOTAL_ITEMS} nested items`,
+        ),
+        limit: MAX_PROJECT_TOTAL_ITEMS,
+        observed: MAX_PROJECT_TOTAL_ITEMS + 1,
+      }),
+    });
   });
 
   it('accepts a zero-range unresolved audio clip on a legacy instrument track', () => {

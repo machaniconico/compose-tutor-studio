@@ -31,6 +31,7 @@ function drumOnlyProject(grooveSeed: number): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{

@@ -69,6 +69,7 @@ function project(tracks: Track[], chordTrack: ChordEvent[] = []): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: tracks

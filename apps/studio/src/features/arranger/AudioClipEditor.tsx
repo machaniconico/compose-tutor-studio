@@ -7,7 +7,7 @@ import {
   type MusicalTimeIndex,
   type ReadyAudioAsset,
 } from '@cts/project-model';
-import type { AudioAssetRuntimeIssue } from '../../state/store';
+import { useStore, type AudioAssetRuntimeIssue } from '../../state/store';
 import {
   deleteStudioAudioClip,
   duplicateStudioAudioClip,
@@ -22,6 +22,12 @@ import {
   type StudioAudioClipCommandResult,
 } from '../../state/audioTrackActions';
 import { pushToast } from '../../state/tutorialBridge';
+import {
+  addStudioAudioClipToTakeFolder,
+  groupSelectedStudioAudioClipIntoTakeFolder,
+  matchingAudioClipIdsForTakeFolder,
+  studioCompingErrorMessage,
+} from '../../state/compingActions';
 import { audioAssetPresentationStatus } from '../audioTrack/audioAssetPresentation';
 
 type AudioClipEditorProps = Readonly<{
@@ -30,6 +36,7 @@ type AudioClipEditorProps = Readonly<{
   asset: AudioAsset | null;
   issue: AudioAssetRuntimeIssue | null;
   musicalTime: MusicalTimeIndex;
+  trackId: string;
 }>;
 
 type EditorStatus = Readonly<{
@@ -195,10 +202,18 @@ export function AudioClipEditor({
   asset,
   issue,
   musicalTime,
+  trackId,
 }: AudioClipEditorProps) {
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const helpId = useId();
+  const compingHelpId = useId();
+  const project = useStore((state) => state.project);
+  const projectOperationBusy = useStore((state) => state.projectOperationBusy);
+  const audioRecordingOperationId = useStore((state) => state.audioRecordingOperationId);
+  const savePhase = useStore((state) => state.saveState.phase);
+  const audioAssetIssues = useStore((state) => state.audioAssetIssues);
+  const selectedTakeFolderId = useStore((state) => state.editor.selectedTakeFolderId);
   const persisted = readyAsset(asset);
   const availability = audioAssetPresentationStatus(asset, issue);
   const recoveryGuidance = audioAssetRecoveryGuidance(asset, issue);
@@ -211,6 +226,61 @@ export function AudioClipEditor({
   const sourceSeconds = clip.sourceFrameCount / sampleRate;
   const assetSeconds = persisted ? persisted.frameCount / persisted.sampleRate : null;
   const editable = persisted !== null && !availability.problem;
+  const matchingClipIds = matchingAudioClipIdsForTakeFolder(project, clip.id);
+  const matchingFolder = project.audioTakeFolders.find(
+    (folder) => (
+      folder.id === selectedTakeFolderId
+      && folder.trackId === trackId
+      && folder.startBeat === clip.startBeat
+      && folder.lengthBeats === clip.lengthBeats
+    ),
+  ) ?? project.audioTakeFolders.find(
+    (folder) => (
+      folder.trackId === trackId
+      && folder.startBeat === clip.startBeat
+      && folder.lengthBeats === clip.lengthBeats
+    ),
+  );
+  const matchingAssetProblem = matchingClipIds.some((clipId) => {
+    const candidate = project.tracks
+      .find((track) => track.id === trackId)
+      ?.clips.find((item) => item.id === clipId);
+    if (
+      candidate?.type !== 'audio'
+      || typeof candidate.audioAssetId !== 'string'
+    ) return true;
+    const candidateAsset = project.audioAssets.find(
+      (item) => item.id === candidate.audioAssetId,
+    );
+    return candidateAsset?.availability !== 'ready'
+      || audioAssetIssues[candidate.audioAssetId] !== undefined;
+  });
+  const compingDisabledReason = projectOperationBusy
+    ? 'プロジェクトを切り替え中のため、テイクを変更できません。'
+    : audioRecordingOperationId !== null
+      ? '録音中または録音素材の保存中のため、テイクを変更できません。'
+      : savePhase === 'pending'
+        ? 'プロジェクトを保存中のため、完了後にテイクを変更してください。'
+        : !editable || matchingAssetProblem
+          ? '音声素材を確認できないため、テイクを変更できません。'
+          : null;
+  const groupDisabledReason = compingDisabledReason
+    ?? (
+      matchingFolder
+        ? 'この区間には既存のテイクフォルダーがあります。「既存テイクへ追加」を使ってください。'
+        : null
+    )
+    ?? (
+      matchingClipIds.length < 2
+        ? '同じトラック・位置・長さのオーディオクリップが2つ以上必要です。'
+        : null
+    );
+  const addDisabledReason = compingDisabledReason
+    ?? (
+      matchingClipIds.includes(clip.id)
+        ? null
+        : 'このクリップはループ中か、フォルダー全区間を満たす音声が残っていないため追加できません。'
+    );
 
   useEffect(() => setSplitDraft(conciseNumber(splitBar)), [clip.id, splitBar]);
 
@@ -337,6 +407,65 @@ export function AudioClipEditor({
       <p id={helpId} className="arranger__timing-hint">
         配置開始は素材を変えずに移動します。左右トリムは元ファイルを変更せず、使う範囲だけを調整します。現在の素材範囲は{sourceSeconds.toFixed(2)}秒です。
       </p>
+
+      <div className="audio-clip-editor__comping">
+        <div>
+          <strong>テイク編集</strong>
+          <small>
+            同じ区間の録音をまとめ、使う範囲だけを切り替えます。元の音声は変更しません。
+          </small>
+        </div>
+        <div role="group" aria-label="テイク編集への追加">
+          <button
+            type="button"
+            disabled={groupDisabledReason !== null}
+            aria-describedby={compingHelpId}
+            onClick={() => {
+              const result = groupSelectedStudioAudioClipIntoTakeFolder(clip.id);
+              if (!result.ok) {
+                setStatus({ kind: 'error', message: studioCompingErrorMessage(result.code) });
+                return;
+              }
+              pushToast('同じ区間のクリップをテイクにまとめました。', 'success');
+            }}
+          >
+            同じ区間をテイク化
+          </button>
+          {matchingFolder ? (
+            <button
+              type="button"
+              disabled={addDisabledReason !== null}
+              aria-describedby={compingHelpId}
+              onClick={() => {
+                const result = addStudioAudioClipToTakeFolder(matchingFolder.id, clip.id);
+                if (!result.ok) {
+                  setStatus({ kind: 'error', message: studioCompingErrorMessage(result.code) });
+                  return;
+                }
+                setStatus({
+                  kind: 'status',
+                  message: result.changed
+                    ? '既存のテイクフォルダへ追加しました。仕上がりは変更していません。'
+                    : '値は変更されていません。',
+                });
+              }}
+            >
+              既存テイクへ追加
+            </button>
+          ) : null}
+        </div>
+        <p id={compingHelpId}>
+          {matchingFolder
+            ? (
+              addDisabledReason
+              ?? 'このクリップを既存のテイクフォルダーへ追加できます。'
+            )
+            : (
+              groupDisabledReason
+              ?? `${matchingClipIds.length}個の同一区間クリップをまとめられます。`
+            )}
+        </p>
+      </div>
 
       <label className="arranger__loop-toggle">
         <input
