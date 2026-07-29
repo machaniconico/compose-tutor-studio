@@ -232,6 +232,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 - 8小節のコード進行に対して、ドラム、ベース、メロディを作成できる
 - レッスンの開始、判定、完了、進捗保存ができる
 - MIDI/WAVを書き出せる
+- 選択した楽器・ドラム・Audio Trackを、保存済みmute/soloを無視しつつ到達可能な下流Bus、send、effects、automation、Master音量込みの単一WAVとして書き出せる。Bus/Master stem、batch、range、bit depth、MP3/M4A、加算再構成は対象外とする
 - 利用許諾のあるステレオ音源から、ローカル処理でカラオケ用WAVを作成できる
 - instrument / drum / Audio / Bus Trackの管理と音色・routing変更が、Master保護、schema v4学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
 - Audio Trackへ取り込んだ音声を非破壊編集でき、live再生とWAVが同じsource range / gain / fade / loopを使う。欠落・変更されたbinaryは別素材へ黙って置換せず、Project metadataを保持して説明する
@@ -740,6 +741,13 @@ channel 9の1候補は、全noteが次の条件をすべて満たす場合だけ
 - 秒位置は確定時点のcompiled tempo mapでclip-local quarter-note beatへ変換する。beat 0だけの固定mapも同じ経路で従来の固定BPM計算と一致する。量子化で同時刻へ畳み込まれた単音候補はconfidenceが高い1件だけを残し、clip終端でdurationをclampする
 - 「メロディクリップへ反映」の明示操作まではProject / history / revision / autosaveを変更しない。確定は対象clipの既存notesを置換する1回のProject changeとし、Undo 1回で全体を戻す。成功後は対象Track / ClipとPiano Rollを選択する
 - 入力は単音のマイク録音または録音済みfileを対象とする。表示と編集はMIDI化前のtransient候補だけに作用し、元音声を破壊編集しない。polyphonic transcription、歌詞認識、formant補正、AudioWarp / VariAudio / Flex Pitch相当の音声修復は未対応としてUIとgap matrixに明示する
+
+### 14. 選択Track WAV solo bounce
+
+- 選択対象はinstrument / drum / audioだけとし、未選択・欠落・Master・Busはresolver、resource reservation、OfflineAudioContextより前に拒否する
+- source projectionは全Track identityを保ち、未選択clipを除外する。選択Trackのlinked canonical sourceとAudioTakeFolder全体を保持し、他Track folderは除外する。選択clip／takeの素材metadataが欠落またはunresolvedならresource reservationとOfflineAudioContextより前に失敗し、無音／部分WAVを成功扱いしない
+- original routingを1回compileし、選択sourceからenabledかつpositive-gainのoutput/sendで到達するBus closureを、graph、automation scheduler、tail plannerへ同一値で渡す
+- full mixの既定契約とPCM bytesは変更しない
 
 ---
 
@@ -1282,6 +1290,12 @@ Chord Track のコンテキスト内操作:
 - 単一文字ショートカットは対応コントロールへフォーカスがある間だけ有効にする。無効化・再割当なしで画面全体へ適用しない
 - `Cmd/Ctrl+S` の保存操作と混同せず、スケールスナップへフォーカス中の修飾キーなし `S` だけを切替に使う
 
+### 7.2 選択Track WAV
+
+- Exportには選択Track名と対応type（楽器・ドラム・Audio）を表示する。未選択・Master・Busは具体的理由付きで無効化する
+- 保存済みmute/soloをbounce viewだけで無視すること、下流Bus/send/effects/automationを含むこと、個別WAVの加算では元mixを再現しないことを明示する
+- filenameはProject名とTrack名を別々にsanitizeし、制御文字と不正Unicodeを除いて`Project - Track.wav`とする
+
 ---
 
 # 05. 技術アーキテクチャ
@@ -1807,6 +1821,10 @@ MySong.ctsproj/       # future proposal
 | Portable Project bundle | `.ctsproj.json`はmetadata only | content manifest、zip-slip/size検証、deduplicate import、atomic adoptionを別Batchで定義 |
 
 デスクトップシェル、test隔離、署名前条件の詳細は`docs/12_desktop_shell.md`を参照する。
+
+### 選択Track WAV renderer
+
+full-mixとselected Trackは同じoffline renderer、export operation lock、lease handoffを使う。selected scopeはoriginal Projectからroutingを一度だけcompileし、pure downstream mixを`buildTrackGraphs`と`planAudioTail`へ供給する。schedule、asset preflight、decode lease、resource estimateはsource-only transient Project、graphとautomationはimmutableなoriginal Projectを参照する。schema、Rust command、permission、persistenceは変更しない。
 
 ---
 
@@ -3085,6 +3103,14 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 自動native E2Eは、実WebViewで保存・process再起動復元を行った後、予測不能な曲名への最新編集について現在revisionの`保護済み`表示と1秒未満の実測を確認する。その直後に、親harnessが直接spawnしたexact child PIDだけへ`SIGKILL`を送り、同じ隔離SQLiteからその曲名をexact復元する。復旧後のunique titleを通常保存し、二度目の再起動でもそのtitle、保存一覧1件、回復branchなしを検査する。別シナリオでは`native-test`限定の外部token要求から実`window.close()` / `CloseRequested`を発行し、renderer claim、durable flush、Rust repository close、process終了後の再起動で最新編集が復元し、さらに再保存できることを検査する。続けてUIへ確認語句を入力して全消去を実行する。現在のWebViewへ置いたonboarding、tutorial、native recovery namespace、local/session storageのsentinelが空になること、SQLite familyとmarkerが消えること、app data外のsentinelが変わらないこと、native close handoffでtest serverが停止することを検査する。さらに正しいchecksumのmarkerへ、保存済みSQLite database一式または単独sidecarを外部から組み合わせ、WebDriverを登録しない実binaryが起動時に再開・終了することと、最後の再起動で旧title・保存一覧が戻らないことを検査する。
 
 ただし自動testのWebViewはproduction profileを汚さないincognito data storeである。production profileのcache/cookie残存、複雑なfuture/unreadable/archive/branch全組合せ、外部export実fileは、上記3OS release candidate手動QAを省略できない。
+
+### 選択Track WAV回帰
+
+- full-mix characterizationのbyte lengthとSHA-256をorigin/main baselineと一致させる
+- null / missing / Master / Busがresolver・reservation・OfflineAudioContext前に失敗し、Projectがdeep-equalであることを確認する
+- MIDI / Drum / Audio、linked source、AudioTakeFolder全体、unrelated asset/event/automation除外、selected resource-limitをpure projectionとactual PCMで確認する。選択clip／takeのmissing/unresolved素材は外部処理前に失敗し、無音／部分WAVを公開しない
+- muted source、soloed unrelated Track/Bus、muted nested downstream Bus、disabled/zero/pre/post send、nested effect tail、automation、Master volumeについてbounce mixとoriginal不変性を確認する
+- web/nativeのsuccess/cancel/failureとdialog close/reopenでoperation lockとlease releaseがexactly onceであることを確認する
 
 ---
 

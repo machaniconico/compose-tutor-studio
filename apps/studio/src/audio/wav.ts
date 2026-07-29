@@ -11,6 +11,7 @@ import {
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   ScheduleEventLimitError,
+  type CompiledAudioRoutingPlan,
   type Project,
 } from '@cts/project-model';
 import {
@@ -46,7 +47,10 @@ import { buildScheduleEvents, type SchedulePayload } from './events';
 import {
   assertRoutingGraphNodeBudget,
   buildTrackGraphs,
+  clampVolume,
   resolveAudioRoutingMix,
+  audioRoutingEdgeKey,
+  type ResolvedAudioRoutingMix,
   type TrackGraph,
 } from './graph';
 import { buildMasterBus } from './masterBus';
@@ -59,7 +63,7 @@ import {
 } from './scheduler';
 import { createNoiseBuffer, DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
-import { planAudioTail } from './tail';
+import { planAudioTail, type AudioTailRoutingState } from './tail';
 
 /** Render sample rate (Hz). */
 export const RENDER_SAMPLE_RATE = 44100;
@@ -110,6 +114,7 @@ export function planWavRender(
   project: Project,
   resolvedEvents: readonly ScheduledEvent[] = buildWavScheduleEvents(project),
   audioClipPlans: readonly AudioClipPlaybackPlan[] = buildWavAudioClipPlans(project),
+  suppliedRoutingState?: AudioTailRoutingState,
 ): WavRenderPlan {
   assertWavSourceOccurrenceBudget(resolvedEvents, audioClipPlans);
   const { tempo } = createProjectMusicalTime(project);
@@ -122,6 +127,7 @@ export function planWavRender(
     lengthBeats,
     RENDER_SAMPLE_RATE,
     audioTailSources(audioClipPlans, tempo, 0),
+    suppliedRoutingState,
   );
   const totalSeconds = tail.totalSeconds;
   const frames = Math.max(1, Math.ceil(totalSeconds * RENDER_SAMPLE_RATE));
@@ -440,6 +446,149 @@ export type WavRenderOptions = Readonly<{
   signal?: AbortSignal;
 }>;
 
+export type WavRenderScope =
+  | Readonly<{ kind: 'mix' }>
+  | Readonly<{ kind: 'selected-track'; trackId: string | null }>;
+
+export class WavRenderScopeError extends Error {
+  readonly code = 'invalid-render-scope' as const;
+
+  constructor(readonly reason: 'no-selection' | 'missing-track' | 'unsupported-track') {
+    super(
+      reason === 'no-selection'
+        ? 'Select an Instrument, Drum, or Audio Track to export.'
+        : reason === 'missing-track'
+          ? 'The selected Track no longer exists.'
+          : 'Master and Bus Tracks cannot be exported as selected-Track WAV files.',
+    );
+    this.name = 'WavRenderScopeError';
+  }
+}
+
+/**
+ * Build the source-only Project used by scheduling, asset resolution and
+ * resource accounting. The original snapshot and every retained nested value
+ * remain immutable.
+ */
+export function resolveWavRenderProject(
+  project: Project,
+  scope: WavRenderScope,
+): Project {
+  if (scope.kind === 'mix') return project;
+  if (scope.trackId === null) throw new WavRenderScopeError('no-selection');
+  const selected = project.tracks.find((track) => track.id === scope.trackId);
+  if (!selected) throw new WavRenderScopeError('missing-track');
+  if (!['instrument', 'drum', 'audio'].includes(selected.type)) {
+    throw new WavRenderScopeError('unsupported-track');
+  }
+  if (selected.type === 'audio') {
+    assertSelectedAudioSourcesAvailable(project, selected.id);
+  }
+  return {
+    ...project,
+    tracks: project.tracks.map((track) => {
+      if (track.id === selected.id) return track;
+      return {
+        ...track,
+        clips: [],
+        ...(track.role === 'learning.chords' ? { role: 'general' as const } : {}),
+      };
+    }),
+    audioTakeFolders: project.audioTakeFolders.filter(
+      (folder) => folder.trackId === selected.id,
+    ),
+  };
+}
+
+/**
+ * Audio planners intentionally ignore unresolved legacy metadata so old
+ * Projects can still open. A selected-Track export must instead fail before
+ * resource reservation or rendering; silently producing a partial/silent WAV
+ * would misrepresent the Track.
+ */
+function assertSelectedAudioSourcesAvailable(
+  project: Project,
+  trackId: string,
+): void {
+  const assetsById = new Map(project.audioAssets.map((asset) => [asset.id, asset]));
+  const referencedAssetIds: string[] = [];
+  const selected = project.tracks.find((track) => track.id === trackId);
+  for (const clip of selected?.clips ?? []) {
+    if (clip.type !== 'audio') continue;
+    if (!clip.audioAssetId) {
+      throw new AudioAssetPlaybackError(
+        'asset-missing',
+        null,
+        'The selected Audio Clip has no source asset.',
+      );
+    }
+    referencedAssetIds.push(clip.audioAssetId);
+  }
+  for (const folder of project.audioTakeFolders) {
+    if (folder.trackId !== trackId) continue;
+    for (const take of folder.takes) referencedAssetIds.push(take.audioAssetId);
+  }
+  for (const assetId of new Set(referencedAssetIds)) {
+    const asset = assetsById.get(assetId);
+    if (!asset) {
+      throw new AudioAssetPlaybackError(
+        'asset-missing',
+        assetId,
+        'The selected Audio source metadata is missing.',
+      );
+    }
+    if (asset.availability !== 'ready') {
+      throw new AudioAssetPlaybackError(
+        'asset-unavailable',
+        assetId,
+        'The selected Audio source is unavailable. Relink it before export.',
+      );
+    }
+  }
+}
+
+/** Resolve the selected source's enabled, positive-gain downstream closure. */
+export function resolveSelectedTrackRoutingMix(
+  project: Project,
+  trackId: string,
+  plan: CompiledAudioRoutingPlan,
+): ResolvedAudioRoutingMix {
+  const sends = new Map(project.audioRouting.sends.map((send) => [send.id, send]));
+  const audibleChannelIds = new Set<string>([trackId]);
+  const activeEdgeIds = new Set<string>();
+  const edgeGains = new Map<string, number>();
+  const pending = [trackId];
+  while (pending.length > 0) {
+    const sourceId = pending.shift();
+    if (!sourceId) continue;
+    for (const edge of plan.edges) {
+      if (edge.sourceTrackId !== sourceId) continue;
+      const gain = edge.kind === 'output'
+        ? 1
+        : (() => {
+            const send = sends.get(edge.sendId);
+            return send?.enabled === true ? clampVolume(send.gain) : 0;
+          })();
+      if (gain <= 0) continue;
+      const key = audioRoutingEdgeKey(edge);
+      activeEdgeIds.add(key);
+      edgeGains.set(key, gain);
+      if (
+        edge.destination.type === 'bus'
+        && !audibleChannelIds.has(edge.destination.trackId)
+      ) {
+        audibleChannelIds.add(edge.destination.trackId);
+        pending.push(edge.destination.trackId);
+      }
+    }
+  }
+  for (const edge of plan.edges) {
+    const key = audioRoutingEdgeKey(edge);
+    if (!edgeGains.has(key)) edgeGains.set(key, 0);
+  }
+  return { audibleChannelIds, activeEdgeIds, edgeGains };
+}
+
 /**
  * A rendered WAV and its process-wide memory reservation.
  *
@@ -463,9 +612,6 @@ export async function renderProjectToWav(
   project: Project,
   options: WavRenderOptions = {},
 ): Promise<WavRenderLease> {
-  const events = buildWavScheduleEvents(project);
-  const audioClipPlans = buildWavAudioClipPlans(project);
-  const plan = planWavRender(project, events, audioClipPlans);
   const compiledRouting = compileAudioRouting(project);
   if (!compiledRouting.ok) {
     const first = compiledRouting.errors[0];
@@ -474,6 +620,54 @@ export async function renderProjectToWav(
     );
   }
   const routingPlan = compiledRouting.plan;
+  const routingMix = resolveAudioRoutingMix(project, routingPlan);
+  return renderWavWithRouting(project, project, routingPlan, routingMix, options);
+}
+
+export async function renderSelectedTrackToWav(
+  project: Project,
+  trackId: string | null,
+  options: WavRenderOptions = {},
+): Promise<WavRenderLease> {
+  const sourceProject = resolveWavRenderProject(project, {
+    kind: 'selected-track',
+    trackId,
+  });
+  const compiledRouting = compileAudioRouting(project);
+  if (!compiledRouting.ok) {
+    const first = compiledRouting.errors[0];
+    throw new Error(
+      `Audio routing is invalid.${first ? ` ${first.path}: ${first.message}` : ''}`,
+    );
+  }
+  const routingMix = resolveSelectedTrackRoutingMix(
+    project,
+    trackId as string,
+    compiledRouting.plan,
+  );
+  return renderWavWithRouting(
+    project,
+    sourceProject,
+    compiledRouting.plan,
+    routingMix,
+    options,
+  );
+}
+
+async function renderWavWithRouting(
+  project: Project,
+  sourceProject: Project,
+  routingPlan: CompiledAudioRoutingPlan,
+  routingMix: ResolvedAudioRoutingMix,
+  options: WavRenderOptions,
+): Promise<WavRenderLease> {
+  const events = buildWavScheduleEvents(sourceProject);
+  const audioClipPlans = buildWavAudioClipPlans(sourceProject);
+  const plan = planWavRender(project, events, audioClipPlans, {
+    plan: routingPlan,
+    audibleChannelIds: routingMix.audibleChannelIds,
+    activeEdgeIds: routingMix.activeEdgeIds,
+  });
   assertRoutingGraphNodeBudget(project, routingPlan, 'disabled');
   const { index: musicalTime, tempo } = createProjectMusicalTime(project);
   const audioAssetCache = options.audioAssetCache ?? getAudioAssetPlaybackCache();
@@ -486,11 +680,11 @@ export async function renderProjectToWav(
   // so the platform save handoff remains covered too.
   const estimatedPeakBytes = assertWavProjectCombinedResourceBudget(
     plan,
-    project,
+    sourceProject,
     audioAssetCache.retainedDecodedBytes,
   );
   const resourceReservation = reserveProjectAudioAssetResourceBudget(
-    project,
+    sourceProject,
     estimatedPeakBytes,
   );
   let reservationTransferred = false;
@@ -498,7 +692,7 @@ export async function renderProjectToWav(
   try {
     // Byte existence, length/checksum and decoded-memory budgets are verified
     // before allocating an OfflineAudioContext or output graph.
-    let preparedAudio = await preflightProjectAudioAssets(project, {
+    let preparedAudio = await preflightProjectAudioAssets(sourceProject, {
       ...(options.audioAssetResolver !== undefined
         ? { resolver: options.audioAssetResolver }
         : {}),
@@ -551,11 +745,13 @@ export async function renderProjectToWav(
         0,
         'disabled',
         routingPlan,
+        routingMix,
       );
-      const audibleTrackIds = resolveAudioRoutingMix(project, routingPlan).audibleChannelIds;
+      const audibleTrackIds = routingMix.audibleChannelIds;
       const tracksById = new Map(project.tracks.map((track) => [track.id, track]));
       const tempoChangeBeats = project.tempoMap.slice(1).map((event) => event.beat);
       for (const lane of project.automationLanes) {
+        if (!audibleTrackIds.has(lane.target.trackId)) continue;
         const track = tracksById.get(lane.target.trackId);
         const graph = graphs.get(lane.target.trackId);
         if (!track || !graph) continue;

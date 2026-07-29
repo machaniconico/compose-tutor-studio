@@ -494,3 +494,10 @@ channel 9の1候補は、全noteが次の条件をすべて満たす場合だけ
 - 秒位置は確定時点のcompiled tempo mapでclip-local quarter-note beatへ変換する。beat 0だけの固定mapも同じ経路で従来の固定BPM計算と一致する。量子化で同時刻へ畳み込まれた単音候補はconfidenceが高い1件だけを残し、clip終端でdurationをclampする
 - 「メロディクリップへ反映」の明示操作まではProject / history / revision / autosaveを変更しない。確定は対象clipの既存notesを置換する1回のProject changeとし、Undo 1回で全体を戻す。成功後は対象Track / ClipとPiano Rollを選択する
 - 入力は単音のマイク録音または録音済みfileを対象とする。表示と編集はMIDI化前のtransient候補だけに作用し、元音声を破壊編集しない。polyphonic transcription、歌詞認識、formant補正、AudioWarp / VariAudio / Flex Pitch相当の音声修復は未対応としてUIとgap matrixに明示する
+
+### 14. 選択Track WAV solo bounce
+
+- 選択対象はinstrument / drum / audioだけとし、未選択・欠落・Master・Busはresolver、resource reservation、OfflineAudioContextより前に拒否する
+- source projectionは全Track identityを保ち、未選択clipを除外する。選択Trackのlinked canonical sourceとAudioTakeFolder全体を保持し、他Track folderは除外する。選択clip／takeの素材metadataが欠落またはunresolvedならresource reservationとOfflineAudioContextより前に失敗し、無音／部分WAVを成功扱いしない
+- original routingを1回compileし、選択sourceからenabledかつpositive-gainのoutput/sendで到達するBus closureを、graph、automation scheduler、tail plannerへ同一値で渡す
+- full mixの既定契約とPCM bytesは変更しない

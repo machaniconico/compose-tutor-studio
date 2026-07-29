@@ -106,6 +106,67 @@ describe('track management UI', () => {
     expect(html).toContain('同じ端末の素材保存領域');
   });
 
+  it('explains and scopes selected-Track WAV bounce', () => {
+    const html = renderToStaticMarkup(
+      <ExportMenuContent
+        onDone={() => undefined}
+        activeOperation={null}
+        beginOperation={() => true}
+        finishOperation={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('選択トラックをWAV');
+    expect(html).toContain('選択中: Chords');
+    expect(html).toContain('楽器・ドラム・オーディオに対応');
+    expect(html).toContain('保存済みのミュート／ソロは無視');
+    expect(html).toContain('下流Bus、センド、エフェクト、オートメーション込み');
+    expect(html).toContain('個別WAVを加算しても元のミックスを再現するものではありません');
+  });
+
+  it('labels only the WAV operation that currently owns the shared export lock', () => {
+    const mixHtml = renderToStaticMarkup(
+      <ExportMenuContent
+        onDone={() => undefined}
+        activeOperation="wav-export"
+        beginOperation={() => false}
+        finishOperation={() => undefined}
+      />,
+    );
+    expect(mixHtml).toContain('>書き出し中…</button>');
+    expect(mixHtml).toContain('>選択トラックをWAV</button>');
+    expect(mixHtml).not.toContain('選択トラックを書き出し中…');
+
+    const trackHtml = renderToStaticMarkup(
+      <ExportMenuContent
+        onDone={() => undefined}
+        activeOperation="track-wav-export"
+        beginOperation={() => false}
+        finishOperation={() => undefined}
+      />,
+    );
+    expect(trackHtml).toContain('>WAVエクスポート</button>');
+    expect(trackHtml).toContain('>選択トラックを書き出し中…</button>');
+    expect(trackHtml).not.toContain('>書き出し中…</button>');
+  });
+
+  it('disables Master selected-Track WAV bounce with a concrete reason', () => {
+    const master = useStore.getState().project.tracks.find((track) => track.type === 'master');
+    useStore.getState().selectTrack(master?.id ?? null);
+    Object.assign(useStore.getInitialState(), useStore.getState());
+    const html = renderToStaticMarkup(
+      <ExportMenuContent
+        onDone={() => undefined}
+        activeOperation={null}
+        beginOperation={() => true}
+        finishOperation={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('Masterは選択トラックWAVの対象外です');
+    expect(html).toMatch(/disabled=""[^>]*title="Masterは選択トラックWAVの対象外です。"/);
+  });
+
   it('shows source identity and a changed warning for a selected Audio Track', () => {
     const asset: ReadyAudioAsset = {
       id: 'asset-ui-audio',

@@ -879,6 +879,7 @@ export function buildTrackGraphs(
   when: number,
   metering: 'live' | 'disabled',
   suppliedPlan?: CompiledAudioRoutingPlan,
+  suppliedMix?: ResolvedAudioRoutingMix,
 ): Map<string, TrackGraph> {
   const legacyTracks = Array.isArray(source) ? source : null;
   const project = legacyTracks ? null : source as Project;
@@ -887,7 +888,9 @@ export function buildTrackGraphs(
   if (project && plan) assertRoutingGraphNodeBudget(project, plan, metering);
   const graphs = new Map<string, TrackGraph>();
   const legacyAudible = project ? null : computeAudibleTracks(tracks);
-  const routingMix = project && plan ? resolveAudioRoutingMix(project, plan) : null;
+  const routingMix = project && plan
+    ? (suppliedMix ?? resolveAudioRoutingMix(project, plan))
+    : null;
   if (metering === 'live') {
     installMasterMeter(
       ctx,

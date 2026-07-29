@@ -538,3 +538,11 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 自動native E2Eは、実WebViewで保存・process再起動復元を行った後、予測不能な曲名への最新編集について現在revisionの`保護済み`表示と1秒未満の実測を確認する。その直後に、親harnessが直接spawnしたexact child PIDだけへ`SIGKILL`を送り、同じ隔離SQLiteからその曲名をexact復元する。復旧後のunique titleを通常保存し、二度目の再起動でもそのtitle、保存一覧1件、回復branchなしを検査する。別シナリオでは`native-test`限定の外部token要求から実`window.close()` / `CloseRequested`を発行し、renderer claim、durable flush、Rust repository close、process終了後の再起動で最新編集が復元し、さらに再保存できることを検査する。続けてUIへ確認語句を入力して全消去を実行する。現在のWebViewへ置いたonboarding、tutorial、native recovery namespace、local/session storageのsentinelが空になること、SQLite familyとmarkerが消えること、app data外のsentinelが変わらないこと、native close handoffでtest serverが停止することを検査する。さらに正しいchecksumのmarkerへ、保存済みSQLite database一式または単独sidecarを外部から組み合わせ、WebDriverを登録しない実binaryが起動時に再開・終了することと、最後の再起動で旧title・保存一覧が戻らないことを検査する。
 
 ただし自動testのWebViewはproduction profileを汚さないincognito data storeである。production profileのcache/cookie残存、複雑なfuture/unreadable/archive/branch全組合せ、外部export実fileは、上記3OS release candidate手動QAを省略できない。
+
+### 選択Track WAV回帰
+
+- full-mix characterizationのbyte lengthとSHA-256をorigin/main baselineと一致させる
+- null / missing / Master / Busがresolver・reservation・OfflineAudioContext前に失敗し、Projectがdeep-equalであることを確認する
+- MIDI / Drum / Audio、linked source、AudioTakeFolder全体、unrelated asset/event/automation除外、selected resource-limitをpure projectionとactual PCMで確認する。選択clip／takeのmissing/unresolved素材は外部処理前に失敗し、無音／部分WAVを公開しない
+- muted source、soloed unrelated Track/Bus、muted nested downstream Bus、disabled/zero/pre/post send、nested effect tail、automation、Master volumeについてbounce mixとoriginal不変性を確認する
+- web/nativeのsuccess/cancel/failureとdialog close/reopenでoperation lockとlease releaseがexactly onceであることを確認する

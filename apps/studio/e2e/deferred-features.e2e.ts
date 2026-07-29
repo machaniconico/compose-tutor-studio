@@ -125,4 +125,52 @@ test('keeps the export lock while its deferred dialog is closed and reopened', a
       .__ctsWavGate.release?.();
   });
   await expect(exportDialog.getByRole('button', { name: 'WAVエクスポート' })).toBeEnabled();
+
+  await exportDialog.getByRole('button', { name: '選択トラックをWAV' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __ctsWavGate: { starts: number } }).__ctsWavGate
+            .starts,
+      ),
+    )
+    .toBe(2);
+  await expect(
+    exportDialog.getByRole('button', { name: '選択トラックを書き出し中…' }),
+  ).toBeDisabled();
+  await expect(exportDialog.getByRole('button', { name: 'WAVエクスポート' })).toBeDisabled();
+
+  await exportDialog.getByRole('button', { name: '閉じる' }).click();
+  await expect(exportDialog).toBeHidden();
+  await openExport.click();
+  exportDialog = page.getByRole('dialog', {
+    name: '書き出し / 読み込み',
+    exact: true,
+  });
+  const pendingTrackWav = exportDialog.getByRole('button', {
+    name: '選択トラックを書き出し中…',
+  });
+  await expect(pendingTrackWav).toBeDisabled();
+  const lockedMixWav = exportDialog.getByRole('button', { name: 'WAVエクスポート' });
+  await expect(lockedMixWav).toBeDisabled();
+
+  await lockedMixWav.evaluate((button: HTMLButtonElement) => button.click());
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __ctsWavGate: { starts: number } }).__ctsWavGate
+            .starts,
+      ),
+    )
+    .toBe(2);
+
+  await page.evaluate(() => {
+    (window as unknown as { __ctsWavGate: { release: (() => void) | null } })
+      .__ctsWavGate.release?.();
+  });
+  await expect(
+    exportDialog.getByRole('button', { name: '選択トラックをWAV' }),
+  ).toBeEnabled();
 });

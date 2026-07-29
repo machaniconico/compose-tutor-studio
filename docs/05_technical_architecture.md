@@ -521,3 +521,7 @@ MySong.ctsproj/       # future proposal
 | Portable Project bundle | `.ctsproj.json`はmetadata only | content manifest、zip-slip/size検証、deduplicate import、atomic adoptionを別Batchで定義 |
 
 デスクトップシェル、test隔離、署名前条件の詳細は`docs/12_desktop_shell.md`を参照する。
+
+### 選択Track WAV renderer
+
+full-mixとselected Trackは同じoffline renderer、export operation lock、lease handoffを使う。selected scopeはoriginal Projectからroutingを一度だけcompileし、pure downstream mixを`buildTrackGraphs`と`planAudioTail`へ供給する。schedule、asset preflight、decode lease、resource estimateはsource-only transient Project、graphとautomationはimmutableなoriginal Projectを参照する。schema、Rust command、permission、persistenceは変更しない。
