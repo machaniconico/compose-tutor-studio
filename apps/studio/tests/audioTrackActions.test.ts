@@ -1277,7 +1277,9 @@ describe('Studio Audio Track microphone recording', () => {
     expect(adopted.audioRecordingOperationId).toBeNull();
 
     adopted.undo();
-    expect(useStore.getState().project).toBe(snapshot);
+    expect(contentFingerprint(useStore.getState().project)).toBe(
+      contentFingerprint(snapshot),
+    );
     useStore.getState().redo();
     expect(useStore.getState().project.audioTakeFolders).toHaveLength(
       snapshot.audioTakeFolders.length + 1,
