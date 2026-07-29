@@ -223,7 +223,11 @@ describe('synchronized recording playback runtime races', () => {
         positionBeat: 2,
       },
     }));
-    const armCapture = vi.fn(async () => undefined);
+    const armCapture = vi.fn(async (
+      _context: AudioContext,
+      _startFrame: number,
+      _contextGeneration: number,
+    ) => undefined);
     const onFiniteCycleComplete = vi.fn();
     const resultPromise = startSynchronizedRecordingPlayback({
       operationId,
@@ -289,7 +293,11 @@ describe('synchronized recording playback runtime races', () => {
         positionBeat: 2,
       },
     }));
-    const armCapture = vi.fn(async () => undefined);
+    const armCapture = vi.fn(async (
+      _context: AudioContext,
+      _startFrame: number,
+      _contextGeneration: number,
+    ) => undefined);
     const onFiniteCycleComplete = vi.fn();
     const resultPromise = startSynchronizedRecordingPlayback({
       operationId,

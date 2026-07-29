@@ -329,7 +329,18 @@ export function studioCompingErrorMessage(
     case 'operation-busy':
       return '録音または保存などの処理中です。完了してからテイクを変更してください。';
     case 'asset-unavailable':
+    case 'audio-asset-not-ready':
       return '音声素材を確認できないため、テイクを変更していません。素材を再リンクまたは復旧してください。';
+    case 'audio-asset-limit':
+      return 'このプロジェクトの音声素材上限に達しました。不要な音声素材を整理してください。';
+    case 'track-limit':
+      return 'このプロジェクトのトラック上限に達しました。不要なトラックを整理してください。';
+    case 'track-not-found':
+      return '録音先のオーディオトラックが見つかりません。最新の状態を確認してください。';
+    case 'unsupported-track-type':
+      return '録音テイクをまとめられるのはオーディオトラックだけです。';
+    case 'invalid-track-name':
+      return 'オーディオトラック名を短い文字列で入力してください。';
     case 'commit-rejected':
       return '別の変更が先に反映されたため、テイクは変更していません。最新の状態でやり直してください。';
     case 'unexpected':

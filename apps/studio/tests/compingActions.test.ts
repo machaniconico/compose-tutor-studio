@@ -80,6 +80,17 @@ beforeEach(async () => {
 });
 
 describe('studio Audio comping commands', () => {
+  it.each([
+    ['audio-asset-not-ready', '音声素材を確認できないため、テイクを変更していません。素材を再リンクまたは復旧してください。'],
+    ['audio-asset-limit', 'このプロジェクトの音声素材上限に達しました。不要な音声素材を整理してください。'],
+    ['track-limit', 'このプロジェクトのトラック上限に達しました。不要なトラックを整理してください。'],
+    ['track-not-found', '録音先のオーディオトラックが見つかりません。最新の状態を確認してください。'],
+    ['unsupported-track-type', '録音テイクをまとめられるのはオーディオトラックだけです。'],
+    ['invalid-track-name', 'オーディオトラック名を短い文字列で入力してください。'],
+  ] as const)('explains the recorded-take error %s', (code, expected) => {
+    expect(actions.studioCompingErrorMessage(code)).toBe(expected);
+  });
+
   it('groups matching clips as one saved Undo step and stops active playback', () => {
     const state = useStore.getState();
     const track = state.project.tracks.find(
