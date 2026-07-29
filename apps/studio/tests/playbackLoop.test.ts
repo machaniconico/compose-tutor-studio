@@ -25,6 +25,7 @@ import {
   shouldRefreshAudioAssetIssuesAfterFailure,
   startSynchronizedRecordingPlayback,
   stopSynchronizedRecordingPlayback,
+  synchronizedRecordingCycleEndBeat,
 } from '../src/audio/playback';
 import { AudioRoutingGraphError } from '../src/audio/graph';
 import { useStore } from '../src/state/store';
@@ -89,6 +90,14 @@ describe('synchronized recording playback boundary', () => {
     expect(Number.isSafeInteger(frame)).toBe(true);
     expect(frame % AUDIO_RENDER_QUANTUM_FRAMES).toBe(0);
     expect(frame).toBeGreaterThan(Math.ceil(currentTime * sampleRate));
+  });
+
+  it('plans a finite unwrapped right boundary without changing loop phase bounds', () => {
+    expect(synchronizedRecordingCycleEndBeat({
+      loopStartBeat: 2,
+      loopEndBeat: 6,
+      passCount: 3,
+    })).toBe(14);
   });
 
   it('rejects aborted, stale and looped starts before mutating transport', async () => {
@@ -157,6 +166,48 @@ describe('synchronized recording playback boundary', () => {
       });
     } finally {
       useStore.setState({ transport: original.transport });
+    }
+  });
+
+  it('fails closed for malformed or transport-mismatched finite cycles', async () => {
+    const original = useStore.getState();
+    try {
+      useStore.setState({
+        audioRecordingOperationId: 91,
+        transport: {
+          ...original.transport,
+          phase: 'stopped',
+          loopEnabled: true,
+          loopStartBeat: 2,
+          loopEndBeat: 6,
+        },
+      });
+      const shared = {
+        operationId: 91,
+        projectSnapshot: original.project,
+        startBeat: 2,
+        signal: new AbortController().signal,
+        armCapture: async () => undefined,
+      } as const;
+
+      await expect(startSynchronizedRecordingPlayback({
+        ...shared,
+        cycle: { loopStartBeat: 2, loopEndBeat: 6, passCount: 1 },
+      })).rejects.toMatchObject({ code: 'invalid-start' });
+      await expect(startSynchronizedRecordingPlayback({
+        ...shared,
+        cycle: { loopStartBeat: 2, loopEndBeat: 5, passCount: 2 },
+      })).rejects.toMatchObject({ code: 'stale-request' });
+      await expect(startSynchronizedRecordingPlayback({
+        ...shared,
+        cycle: { loopStartBeat: 2, loopEndBeat: 6, passCount: 2 },
+      })).rejects.toMatchObject({ code: 'bridge-unavailable' });
+    } finally {
+      useStore.setState({
+        project: original.project,
+        transport: original.transport,
+        audioRecordingOperationId: original.audioRecordingOperationId,
+      });
     }
   });
 });

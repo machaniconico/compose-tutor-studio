@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_AUDIO_TAKES_PER_FOLDER,
   addAudioClipToTakeFolder,
   appendAudioTrackClip,
   createAudioTrackClip,
   createEmptyProject,
   compileMusicalTime,
+  createRecordedAudioTakeFolder,
   deleteAudioClip,
   deleteUnusedAudioTake,
   duplicateTrack,
@@ -34,6 +36,15 @@ function readyAsset(index: number): ReadyAudioAsset {
     sampleRate: 48_000,
     channelCount: 2,
     frameCount: 192_000,
+  };
+}
+
+function recordedAsset(index: number, frameCount = 96_000): ReadyAudioAsset {
+  return {
+    ...readyAsset(index),
+    id: `recorded-asset-${index}`,
+    originalName: `Recorded Take ${index}.wav`,
+    frameCount,
   };
 }
 
@@ -320,6 +331,220 @@ describe('Audio take grouping and adding', () => {
         message: expect.stringContaining('Only one Audio take folder'),
       }),
     ]));
+  });
+});
+
+describe('recorded Audio take-folder adoption', () => {
+  it('atomically appends ordered ready assets and a full first-take comp to an existing track', () => {
+    const fixture = audioFixture(2);
+    const trackBefore = fixture.project.tracks.find(
+      (track) => track.id === fixture.trackId,
+    )!;
+    const clipsBefore = trackBefore.clips;
+    const routingBefore = fixture.project.audioRouting;
+    const before = structuredClone(fixture.project);
+    const assets = [recordedAsset(11), recordedAsset(12)];
+    const result = createRecordedAudioTakeFolder(fixture.project, {
+      target: { kind: 'existing-audio-track', trackId: fixture.trackId },
+      assets,
+      startBeat: 4,
+      lengthBeats: 4,
+      idFactory: sequenceFactory('recorded-existing'),
+    }, clock);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(fixture.project).toEqual(before);
+    expect(result.trackId).toBe(fixture.trackId);
+    expect(result.audioAssetIds).toEqual(assets.map((asset) => asset.id));
+    expect(result.project.tracks).toBe(fixture.project.tracks);
+    expect(result.project.tracks.find((track) => track.id === fixture.trackId))
+      .toBe(trackBefore);
+    expect(trackBefore.clips).toBe(clipsBefore);
+    expect(result.project.audioRouting).toBe(routingBefore);
+    expect(result.project.audioAssets.slice(-2)).toEqual(assets);
+
+    const folder = result.project.audioTakeFolders.at(-1)!;
+    expect(folder).toMatchObject({
+      id: 'folder-recorded-existing-1',
+      trackId: fixture.trackId,
+      startBeat: 4,
+      lengthBeats: 4,
+      crossfadeMs: 5,
+    });
+    expect(folder.takes).toEqual([
+      expect.objectContaining({
+        id: 'take-recorded-existing-2',
+        audioAssetId: assets[0]!.id,
+        offsetBeats: 0,
+        lengthBeats: 4,
+        sourceStartFrame: 0,
+        sourceFrameCount: 96_000,
+      }),
+      expect.objectContaining({
+        id: 'take-recorded-existing-3',
+        audioAssetId: assets[1]!.id,
+      }),
+    ]);
+    expect(folder.compSegments).toEqual([{
+      id: 'segment-recorded-existing-4',
+      takeId: folder.takes[0]!.id,
+      offsetBeats: 0,
+      lengthBeats: 4,
+    }]);
+    expect(validateProject(result.project).ok).toBe(true);
+    expect(encodeProjectJson(result.project).ok).toBe(true);
+  });
+
+  it('creates exactly one empty Audio Track and one Master output for a new target', () => {
+    const project = createEmptyProject({ clock });
+    const tracksBefore = project.tracks;
+    const outputsBefore = project.audioRouting.outputs;
+    const assets = [recordedAsset(21), recordedAsset(22), recordedAsset(23)];
+    const result = createRecordedAudioTakeFolder(project, {
+      target: { kind: 'new-track', trackName: '  Lead cycles  ' },
+      assets,
+      startBeat: 0,
+      lengthBeats: 4,
+      idFactory: sequenceFactory('recorded-new'),
+    }, clock);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.trackId).toBe('track-recorded-new-1');
+    const masterIndex = result.project.tracks.findIndex((track) => track.type === 'master');
+    const track = result.project.tracks[masterIndex - 1]!;
+    expect(track).toEqual({
+      id: 'track-recorded-new-1',
+      name: 'Lead cycles',
+      type: 'audio',
+      role: 'general',
+      clips: [],
+      volume: 1,
+      pan: 0,
+      mute: false,
+      solo: false,
+      effects: [],
+    });
+    expect(result.project.tracks.filter((candidate) => !tracksBefore.includes(candidate)))
+      .toEqual([track]);
+    expect(result.project.audioRouting.outputs.slice(0, outputsBefore.length))
+      .toEqual(outputsBefore);
+    expect(result.project.audioRouting.outputs.at(-1)).toEqual({
+      sourceTrackId: track.id,
+      destination: { type: 'master' },
+    });
+    expect(result.project.audioTakeFolders[0]).toMatchObject({
+      id: 'folder-recorded-new-2',
+      trackId: track.id,
+      takes: [
+        { id: 'take-recorded-new-3', audioAssetId: assets[0]!.id },
+        { id: 'take-recorded-new-4', audioAssetId: assets[1]!.id },
+        { id: 'take-recorded-new-5', audioAssetId: assets[2]!.id },
+      ],
+      compSegments: [{
+        id: 'segment-recorded-new-6',
+        takeId: 'take-recorded-new-3',
+      }],
+    });
+    expect(result.project.tracks.flatMap((candidate) => candidate.clips).some(
+      (clip) => assets.some((asset) => asset.id === clip.audioAssetId),
+    )).toBe(false);
+    expect(validateProject(result.project).ok).toBe(true);
+  });
+
+  it('rejects invalid assets, targets, ranges, names, limits, and ids without mutation', () => {
+    const fixture = audioFixture(2);
+    const before = structuredClone(fixture.project);
+    const validInput = {
+      target: { kind: 'existing-audio-track' as const, trackId: fixture.trackId },
+      assets: [recordedAsset(31), recordedAsset(32)],
+      startBeat: 0,
+      lengthBeats: 4,
+    };
+    const failures = [
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        assets: [recordedAsset(31)],
+      }),
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        assets: Array.from(
+          { length: MAX_AUDIO_TAKES_PER_FOLDER + 1 },
+          (_, index) => recordedAsset(1_000 + index),
+        ),
+      }),
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        assets: [recordedAsset(31, 95_998), recordedAsset(32)],
+      }),
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        assets: [recordedAsset(31), recordedAsset(31)],
+      }),
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        target: { kind: 'existing-audio-track', trackId: 'missing-track' },
+      }),
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        target: {
+          kind: 'existing-audio-track',
+          trackId: fixture.project.tracks[0]!.id,
+        },
+      }),
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        startBeat: fixture.project.lengthBeats,
+      }),
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        target: { kind: 'new-track', trackName: '   ' },
+      }),
+      createRecordedAudioTakeFolder(fixture.project, {
+        ...validInput,
+        idFactory: () => fixture.project.id,
+      }),
+    ];
+
+    expect(failures.map((result) => result.ok ? 'ok' : result.error.code)).toEqual([
+      'take-limit',
+      'take-limit',
+      'audio-asset-not-ready',
+      'duplicate-id',
+      'track-not-found',
+      'unsupported-track-type',
+      'invalid-range',
+      'invalid-track-name',
+      'duplicate-id',
+    ]);
+    expect(fixture.project).toEqual(before);
+  });
+
+  it('accepts one-frame source rounding tolerance and rejects a second folder on the same window', () => {
+    const fixture = audioFixture(2);
+    const oneFrameShort = createRecordedAudioTakeFolder(fixture.project, {
+      target: { kind: 'existing-audio-track', trackId: fixture.trackId },
+      assets: [recordedAsset(41, 95_999), recordedAsset(42, 95_999)],
+      startBeat: 0,
+      lengthBeats: 4,
+      idFactory: sequenceFactory('recorded-tolerance'),
+    }, clock);
+    expect(oneFrameShort.ok).toBe(true);
+    if (!oneFrameShort.ok) return;
+
+    const second = createRecordedAudioTakeFolder(oneFrameShort.project, {
+      target: { kind: 'existing-audio-track', trackId: fixture.trackId },
+      assets: [recordedAsset(43), recordedAsset(44)],
+      startBeat: 0,
+      lengthBeats: 4,
+      idFactory: sequenceFactory('recorded-duplicate-window'),
+    }, clock);
+    expectFailure(second, 'ineligible-clip');
+    expect(oneFrameShort.project.audioTakeFolders).toHaveLength(1);
+    expect(oneFrameShort.project.audioAssets.some(
+      (asset) => asset.id === 'recorded-asset-43',
+    )).toBe(false);
   });
 });
 

@@ -1158,6 +1158,189 @@ describe('Studio Audio Track microphone recording', () => {
     expect(getReservedHeavyAudioResourceBytes()).toBe(0);
   });
 
+  it('adopts an exact fixed-pass cycle as one take folder and one Undo step', async () => {
+    const state = useStore.getState();
+    expect(state.setRecordingLatencyCompensationMode('off')).toBe(true);
+    expect(state.setLoopRange(4, 8)).toBe(true);
+    const snapshot = useStore.getState().project;
+    const historyBefore = useStore.getState().past.length;
+    const ownership = actions.beginStudioAudioTrackRecording({
+      target: { kind: 'new-track', trackName: 'Cycle Lead' },
+      cyclePassCount: 3,
+    });
+    expect(ownership).toMatchObject({
+      ok: true,
+      startBeat: 4,
+      cycle: { loopStartBeat: 4, loopEndBeat: 8, passCount: 3 },
+    });
+    if (!ownership.ok || ownership.cycle === null) {
+      throw new Error(ownership.ok ? 'cycle missing' : ownership.code);
+    }
+    const context = {
+      sampleRate: 48_000,
+      baseLatency: 0,
+      outputLatency: 0,
+    } as AudioContext;
+    expect(actions.prepareStudioAudioTrackCycleCapture(ownership.handle, {
+      context,
+      contextGeneration: 7,
+      inputLatencySeconds: null,
+    })).toEqual({
+      ok: true,
+      cycle: ownership.cycle,
+      effectiveCaptureFrameCount: 288_000,
+      durationSeconds: 6,
+    });
+    const requestId = useStore.getState().startAudioRecordingPlayback(
+      ownership.handle.operationId,
+      ownership.startBeat,
+      ownership.cycle,
+    );
+    if (requestId === null) throw new Error('cycle playback request missing');
+    useStore.getState().confirmPlaybackStarted(requestId);
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, {
+      context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: 4,
+      tempo: {},
+      requestId,
+      projectSnapshot: snapshot,
+      cycle: ownership.cycle,
+      cycleEndBeat: 16,
+    } as Parameters<typeof actions.bindStudioAudioTrackRecordingToPlayback>[1])).toBe(true);
+
+    const passLengths: number[] = [];
+    let assetIndex = 0;
+    const result = await actions.recordStudioAudioTrack({
+      recordingHandle: ownership.handle,
+      capture: {
+        ...microphoneCaptureShape(288_000),
+        stopReason: 'duration-limit',
+        contextGeneration: 7,
+        firstContextFrame: 96_000,
+        endContextFrameExclusive: 384_000,
+      },
+      fileName: 'Lead Cycle.wav',
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer: (capture) => {
+        passLengths.push(capture.length);
+        return audioBufferShape(capture.length, capture.sampleRate);
+      },
+      canonicalize: async () => canonicalResult(),
+      createAssetId: () => `asset-cycle-${++assetIndex}`,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      trackName: 'Cycle Lead',
+      takeCount: 3,
+      audioAssetIds: ['asset-cycle-1', 'asset-cycle-2', 'asset-cycle-3'],
+    });
+    if (!result.ok || !('folderId' in result)) throw new Error(
+      result.ok ? 'take folder missing' : result.code,
+    );
+    expect(passLengths).toEqual([96_000, 96_000, 96_000]);
+    const adopted = useStore.getState();
+    const folder = adopted.project.audioTakeFolders.find(
+      (candidate) => candidate.id === result.folderId,
+    );
+    const track = adopted.project.tracks.find(
+      (candidate) => candidate.id === result.trackId,
+    );
+    if (!folder) throw new Error('adopted cycle folder missing');
+    expect(folder).toMatchObject({
+      trackId: result.trackId,
+      startBeat: 4,
+      lengthBeats: 4,
+    });
+    expect(folder.takes.map((take) => take.audioAssetId)).toEqual(
+      result.audioAssetIds,
+    );
+    expect(folder.compSegments).toEqual([
+      expect.objectContaining({
+        takeId: folder.takes[0]?.id,
+        offsetBeats: 0,
+        lengthBeats: 4,
+      }),
+    ]);
+    expect(track).toMatchObject({ type: 'audio', clips: [] });
+    expect(adopted.editor).toMatchObject({
+      activeView: 'comping',
+      selectedTrackId: result.trackId,
+      selectedClipId: null,
+      selectedTakeFolderId: result.folderId,
+    });
+    expect(adopted.past).toHaveLength(historyBefore + 1);
+    expect(adopted.audioRecordingOperationId).toBeNull();
+
+    adopted.undo();
+    expect(useStore.getState().project).toBe(snapshot);
+    useStore.getState().redo();
+    expect(useStore.getState().project.audioTakeFolders).toHaveLength(
+      snapshot.audioTakeFolders.length + 1,
+    );
+  });
+
+  it('discards a manually stopped partial cycle before allocation or project adoption', async () => {
+    expect(useStore.getState().setRecordingLatencyCompensationMode('off')).toBe(true);
+    expect(useStore.getState().setLoopRange(4, 8)).toBe(true);
+    const snapshot = useStore.getState().project;
+    const ownership = actions.beginStudioAudioTrackRecording({ cyclePassCount: 2 });
+    if (!ownership.ok || ownership.cycle === null) {
+      throw new Error(ownership.ok ? 'cycle missing' : ownership.code);
+    }
+    const context = {
+      sampleRate: 48_000,
+      baseLatency: 0,
+      outputLatency: 0,
+    } as AudioContext;
+    expect(actions.prepareStudioAudioTrackCycleCapture(ownership.handle, {
+      context,
+      contextGeneration: 7,
+      inputLatencySeconds: null,
+    }).ok).toBe(true);
+    const requestId = useStore.getState().startAudioRecordingPlayback(
+      ownership.handle.operationId,
+      ownership.startBeat,
+      ownership.cycle,
+    );
+    if (requestId === null) throw new Error('cycle playback request missing');
+    useStore.getState().confirmPlaybackStarted(requestId);
+    expect(actions.bindStudioAudioTrackRecordingToPlayback(ownership.handle, {
+      context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      anchorContextFrame: 96_000,
+      anchorBeat: 4,
+      tempo: {},
+      requestId,
+      projectSnapshot: snapshot,
+      cycle: ownership.cycle,
+      cycleEndBeat: 12,
+    } as Parameters<typeof actions.bindStudioAudioTrackRecordingToPlayback>[1])).toBe(true);
+    const createAudioBuffer = vi.fn(() => audioBufferShape(96_000, 48_000));
+
+    await expect(actions.recordStudioAudioTrack({
+      recordingHandle: ownership.handle,
+      capture: {
+        ...microphoneCaptureShape(192_000),
+        contextGeneration: 7,
+        firstContextFrame: 96_000,
+        endContextFrameExclusive: 288_000,
+      },
+    }, {
+      repository: new MemoryAudioAssetRepository(),
+      createAudioBuffer,
+      canonicalize: async () => canonicalResult(),
+    })).resolves.toEqual({ ok: false, code: 'recording-alignment-failed' });
+    expect(createAudioBuffer).not.toHaveBeenCalled();
+    expect(useStore.getState().project).toBe(snapshot);
+    expect(useStore.getState().audioRecordingOperationId).toBeNull();
+  });
+
   it('counts stale capture chunks and rejects a 192 kHz stereo worst case before AudioBuffer allocation', () => {
     const worstCase = microphoneCaptureShape(60 * 192_000, 192_000, 2);
     expect(() => actions.planStudioAudioRecordingResources(worstCase))

@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type Ref } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type Ref,
+} from 'react';
 import { useStore, type TransportState } from '../../state/store';
 import {
   beatToBarPosition,
   compileMusicalTime,
+  MIN_EVENT_DURATION_BEATS,
   type MusicalTimeIndex,
   type MusicalKey,
   type ScaleName,
@@ -17,6 +25,7 @@ import { SaveControl } from './SaveControl';
 import { studioRuntime } from '../../platform/runtime';
 import { pushToast } from '../../state/tutorialBridge';
 import { AudioTrackRecordingDialog } from '../audioTrack/AudioTrackRecordingDialog';
+import { Dialog } from '../common/Dialog';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -55,6 +64,205 @@ export function formatMusicalPosition(
   const quarterNotesPerNotatedBeat = 4 / denominator;
   const beatInMeasure = Math.floor(position.beatInBar / quarterNotesPerNotatedBeat) + 1;
   return `${position.bar + 1}.${beatInMeasure}`;
+}
+
+export function formatLoopRangeSummary(
+  musicalTime: MusicalTimeIndex,
+  startBeat: number,
+  endBeat: number,
+): string {
+  return `${formatMusicalPosition(musicalTime, startBeat)}–${formatMusicalPosition(
+    musicalTime,
+    endBeat,
+  )}`;
+}
+
+type LoopRangeDraftValidation =
+  | Readonly<{ ok: true; startBeat: number; endBeat: number }>
+  | Readonly<{ ok: false; error: string }>;
+
+export function validateLoopRangeDraft(
+  startValue: string,
+  endValue: string,
+  projectLength: number,
+): LoopRangeDraftValidation {
+  if (startValue.trim() === '' || endValue.trim() === '') {
+    return { ok: false, error: '開始拍と終了拍を入力してください。' };
+  }
+  const startBeat = Number(startValue);
+  const endBeat = Number(endValue);
+  if (!Number.isFinite(startBeat) || !Number.isFinite(endBeat)) {
+    return { ok: false, error: '拍位置は数値で入力してください。' };
+  }
+  if (
+    !Number.isFinite(projectLength)
+    || projectLength <= 0
+    || startBeat < 0
+    || startBeat > projectLength
+    || endBeat < 0
+    || endBeat > projectLength
+  ) {
+    return { ok: false, error: `範囲は0〜${projectLength}拍の中で指定してください。` };
+  }
+  if (endBeat <= startBeat) {
+    return { ok: false, error: '終了拍は開始拍より後にしてください。' };
+  }
+  if (endBeat - startBeat < MIN_EVENT_DURATION_BEATS) {
+    return { ok: false, error: 'ループ範囲が短すぎます。' };
+  }
+  return { ok: true, startBeat, endBeat };
+}
+
+function editableLoopRange(
+  startBeat: number,
+  endBeat: number,
+  projectLength: number,
+): Readonly<{ startBeat: number; endBeat: number }> {
+  if (
+    Number.isFinite(startBeat)
+    && Number.isFinite(endBeat)
+    && startBeat >= 0
+    && endBeat <= projectLength
+    && endBeat - startBeat >= MIN_EVENT_DURATION_BEATS
+  ) {
+    return { startBeat, endBeat };
+  }
+  return { startBeat: 0, endBeat: projectLength };
+}
+
+type LoopRangeControlProps = {
+  enabled: boolean;
+  expanded: boolean;
+  disabled: boolean;
+  summary: string;
+  onToggle: () => void;
+  onEdit: () => void;
+};
+
+/** Compact toolbar affordance: state toggle plus a readable, non-editing summary. */
+export function LoopRangeControl({
+  enabled,
+  expanded,
+  disabled,
+  summary,
+  onToggle,
+  onEdit,
+}: LoopRangeControlProps) {
+  return (
+    <div className="transport-bar__loop-control" role="group" aria-label="ループ再生">
+      <button
+        type="button"
+        className={enabled ? 'is-active transport-bar__loop-toggle' : 'transport-bar__loop-toggle'}
+        aria-pressed={enabled}
+        disabled={disabled}
+        onClick={onToggle}
+      >
+        ループ
+      </button>
+      <button
+        type="button"
+        className="transport-bar__loop-range"
+        aria-haspopup="dialog"
+        aria-expanded={expanded}
+        aria-label={`ループ範囲を編集。現在 ${summary}`}
+        disabled={disabled}
+        onClick={onEdit}
+      >
+        <span>範囲</span>
+        <output>{summary}</output>
+      </button>
+    </div>
+  );
+}
+
+type LoopRangeEditorProps = {
+  projectLength: number;
+  startValue: string;
+  endValue: string;
+  error: string | null;
+  onStartValueChange: (value: string) => void;
+  onEndValueChange: (value: string) => void;
+  onSave: () => void;
+  onClose: () => void;
+};
+
+export function LoopRangeEditor({
+  projectLength,
+  startValue,
+  endValue,
+  error,
+  onStartValueChange,
+  onEndValueChange,
+  onSave,
+  onClose,
+}: LoopRangeEditorProps) {
+  const describedBy = error
+    ? 'loop-range-help loop-range-error'
+    : 'loop-range-help';
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    onSave();
+  };
+
+  return (
+    <form className="loop-range-editor" onSubmit={submit}>
+      <p id="loop-range-help" className="loop-range-editor__help">
+        曲の中で繰り返す開始拍と終了拍を指定します（全長 {projectLength}拍）。
+      </p>
+      <div className="loop-range-editor__fields">
+        <label htmlFor="loop-range-start">
+          開始拍
+          <input
+            id="loop-range-start"
+            type="number"
+            min={0}
+            max={projectLength}
+            step={MIN_EVENT_DURATION_BEATS}
+            value={startValue}
+            aria-describedby={describedBy}
+            aria-invalid={error !== null}
+            data-modal-initial-focus
+            onChange={(event) => onStartValueChange(event.target.value)}
+          />
+        </label>
+        <label htmlFor="loop-range-end">
+          終了拍
+          <input
+            id="loop-range-end"
+            type="number"
+            min={0}
+            max={projectLength}
+            step={MIN_EVENT_DURATION_BEATS}
+            value={endValue}
+            aria-describedby={describedBy}
+            aria-invalid={error !== null}
+            onChange={(event) => onEndValueChange(event.target.value)}
+          />
+        </label>
+      </div>
+      {error ? (
+        <p id="loop-range-error" className="loop-range-editor__error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="loop-range-editor__actions">
+        <button type="button" onClick={onClose}>
+          キャンセル
+        </button>
+        <button type="submit" className="loop-range-editor__save">
+          範囲を設定
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function LoopRangeDialog(props: LoopRangeEditorProps) {
+  return (
+    <Dialog title="ループ範囲" className="dialog--loop-range" onClose={props.onClose}>
+      <LoopRangeEditor {...props} />
+    </Dialog>
+  );
 }
 
 /** Render the async playback lifecycle independently from the rest of the bar. */
@@ -125,6 +333,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const isActive = transport.phase !== 'stopped';
   const play = useStore((s) => s.play);
   const stop = useStore((s) => s.stop);
+  const setLoopRange = useStore((s) => s.setLoopRange);
   const toggleLoop = useStore((s) => s.toggleLoop);
   const toggleMetronome = useStore((s) => s.toggleMetronome);
   const setBpm = useStore((s) => s.setBpm);
@@ -143,6 +352,11 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const emergencyExportLock = useRef(false);
   const [emergencyExportBusy, setEmergencyExportBusy] = useState(false);
   const [recordingOpen, setRecordingOpen] = useState(false);
+  const [loopRangeDraft, setLoopRangeDraft] = useState<{
+    startValue: string;
+    endValue: string;
+  } | null>(null);
+  const [loopRangeError, setLoopRangeError] = useState<string | null>(null);
   const recordingControlsLocked = audioRecordingOperationId !== null;
 
   // Connect the store to the audio engine once. The bridge confirms the
@@ -164,6 +378,48 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const recordingTargetLabel = armedAudioTrack
     ? `録音先: ${armedAudioTrack.name}`
     : '録音先: 新しいオーディオトラック';
+  const currentLoopRange = editableLoopRange(
+    transport.loopStartBeat,
+    transport.loopEndBeat,
+    project.lengthBeats,
+  );
+  const loopRangeSummary = formatLoopRangeSummary(
+    musicalTime,
+    currentLoopRange.startBeat,
+    currentLoopRange.endBeat,
+  );
+  const openLoopRangeEditor = (): void => {
+    setLoopRangeError(null);
+    setLoopRangeDraft({
+      startValue: String(currentLoopRange.startBeat),
+      endValue: String(currentLoopRange.endBeat),
+    });
+  };
+  const closeLoopRangeEditor = (): void => {
+    setLoopRangeDraft(null);
+    setLoopRangeError(null);
+  };
+  const saveLoopRange = (): void => {
+    if (!loopRangeDraft) return;
+    const result = validateLoopRangeDraft(
+      loopRangeDraft.startValue,
+      loopRangeDraft.endValue,
+      project.lengthBeats,
+    );
+    if (!result.ok) {
+      setLoopRangeError(result.error);
+      return;
+    }
+    if (!setLoopRange(result.startBeat, result.endBeat)) {
+      setLoopRangeError(
+        audioRecordingOperationId !== null
+          ? '録音中はループ範囲を変更できません。'
+          : 'ループ範囲を設定できませんでした。曲の長さを確認してください。',
+      );
+      return;
+    }
+    closeLoopRangeEditor();
+  };
   const exportEmergencyBackup = async () => {
     if (emergencyExportLock.current) return;
     emergencyExportLock.current = true;
@@ -244,15 +500,14 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           先頭へ
         </button>
 
-        <button
-          type="button"
-          className={transport.loopEnabled ? 'is-active' : ''}
-          aria-pressed={transport.loopEnabled}
+        <LoopRangeControl
+          enabled={transport.loopEnabled}
+          expanded={loopRangeDraft !== null}
           disabled={recordingControlsLocked}
-          onClick={() => toggleLoop()}
-        >
-          ループ
-        </button>
+          summary={loopRangeSummary}
+          onToggle={toggleLoop}
+          onEdit={openLoopRangeEditor}
+        />
 
         <button
           type="button"
@@ -345,6 +600,24 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           {...(armedAudioTrack ? { targetTrackId: armedAudioTrack.id } : {})}
           onClose={() => setRecordingOpen(false)}
           onCreated={() => setRecordingOpen(false)}
+        />
+      ) : null}
+      {loopRangeDraft ? (
+        <LoopRangeDialog
+          projectLength={project.lengthBeats}
+          startValue={loopRangeDraft.startValue}
+          endValue={loopRangeDraft.endValue}
+          error={loopRangeError}
+          onStartValueChange={(startValue) => {
+            setLoopRangeError(null);
+            setLoopRangeDraft((draft) => draft ? { ...draft, startValue } : draft);
+          }}
+          onEndValueChange={(endValue) => {
+            setLoopRangeError(null);
+            setLoopRangeDraft((draft) => draft ? { ...draft, endValue } : draft);
+          }}
+          onSave={saveLoopRange}
+          onClose={closeLoopRangeEditor}
         />
       ) : null}
     </>

@@ -1,10 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { isValidElement, type ReactElement, type ReactNode } from 'react';
+import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { compileMusicalTime } from '@cts/project-model';
+import {
+  compileMusicalTime,
+  MIN_EVENT_DURATION_BEATS,
+} from '@cts/project-model';
 import {
   formatMusicalPosition,
+  formatLoopRangeSummary,
+  LoopRangeControl,
+  LoopRangeDialog,
+  LoopRangeEditor,
   PlaybackLifecycleControl,
+  validateLoopRangeDraft,
 } from '../src/features/transport/TransportBar';
+import { Dialog } from '../src/features/common/Dialog';
 import type { TransportState } from '../src/state/store';
 
 const stopped: TransportState = {
@@ -27,6 +37,29 @@ function renderTransport(transport: TransportState): string {
       onStop={() => undefined}
     />,
   );
+}
+
+type ElementProps = {
+  children?: ReactNode;
+  type?: string;
+  onClick?: () => void;
+  onSubmit?: (event: { preventDefault: () => void }) => void;
+};
+
+function findElement(
+  node: ReactNode,
+  predicate: (element: ReactElement<ElementProps>) => boolean,
+): ReactElement<ElementProps> | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElement(child, predicate);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!isValidElement<ElementProps>(node)) return null;
+  if (predicate(node)) return node;
+  return findElement(node.props.children, predicate);
 }
 
 describe('TransportBar playback lifecycle', () => {
@@ -86,6 +119,101 @@ describe('TransportBar playback lifecycle', () => {
     expect(html).toContain(expected);
     expect(html).toContain('編集内容はそのままです');
     expect(html).not.toContain('出力先と端末の音量');
+  });
+});
+
+describe('TransportBar loop range', () => {
+  const musicalTime = compileMusicalTime({
+    lengthBeats: 8,
+    tempoMap: [{ id: 'tempo', beat: 0, bpm: 120 }],
+    timeSignatureMap: [{ id: 'signature', beat: 0, numerator: 4, denominator: 4 }],
+  });
+
+  it('keeps a compact readable range summary outside the dialog', () => {
+    expect(formatLoopRangeSummary(musicalTime, 0, 4)).toBe('1.1–2.1');
+    const html = renderToStaticMarkup(
+      <LoopRangeControl
+        enabled
+        expanded={false}
+        disabled={false}
+        summary="1.1–2.1"
+        onToggle={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('class="transport-bar__loop-control"');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('1.1–2.1');
+    expect(html).not.toContain('type="number"');
+  });
+
+  it('renders labelled exact fields, inline errors, and shared modal semantics', () => {
+    const onClose = vi.fn();
+    const tree = LoopRangeDialog({
+      projectLength: 8,
+      startValue: '2',
+      endValue: '6',
+      error: '終了拍は開始拍より後にしてください。',
+      onStartValueChange: () => undefined,
+      onEndValueChange: () => undefined,
+      onSave: () => undefined,
+      onClose,
+    });
+    expect(tree.type).toBe(Dialog);
+    tree.props.onClose();
+    expect(onClose).toHaveBeenCalledOnce();
+
+    const html = renderToStaticMarkup(tree);
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('>開始拍<');
+    expect(html).toContain('>終了拍<');
+    expect(html).toContain(`step="${MIN_EVENT_DURATION_BEATS}"`);
+    expect(html).toContain('data-modal-initial-focus="true"');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('終了拍は開始拍より後にしてください。');
+    expect(html).toContain('>キャンセル</button>');
+    expect(html).toContain('>範囲を設定</button>');
+  });
+
+  it('routes Cancel and submit through the controlled editor actions', () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn();
+    const tree = LoopRangeEditor({
+      projectLength: 8,
+      startValue: '2',
+      endValue: '6',
+      error: null,
+      onStartValueChange: () => undefined,
+      onEndValueChange: () => undefined,
+      onSave,
+      onClose,
+    });
+    const cancel = findElement(tree, (element) => element.props.children === 'キャンセル');
+    const form = findElement(tree, (element) => element.type === 'form');
+    expect(cancel).not.toBeNull();
+    expect(form).not.toBeNull();
+
+    cancel?.props.onClick?.();
+    const preventDefault = vi.fn();
+    form?.props.onSubmit?.({ preventDefault });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onSave).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['', '4', '開始拍と終了拍を入力してください。'],
+    ['nope', '4', '拍位置は数値で入力してください。'],
+    ['-1', '4', '範囲は0〜8拍の中で指定してください。'],
+    ['0', '9', '範囲は0〜8拍の中で指定してください。'],
+    ['4', '4', '終了拍は開始拍より後にしてください。'],
+    ['2', String(2 + MIN_EVENT_DURATION_BEATS / 2), 'ループ範囲が短すぎます。'],
+  ])('explains invalid draft %s..%s beside the fields', (start, end, message) => {
+    expect(validateLoopRangeDraft(start, end, 8)).toEqual({ ok: false, error: message });
   });
 });
 

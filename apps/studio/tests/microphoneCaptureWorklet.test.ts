@@ -140,6 +140,23 @@ describe('microphone capture worklet protocol', () => {
     }]);
   });
 
+  it('keeps an effective finite-cycle capture on the existing one-arm protocol', async () => {
+    const { port } = await createProcessor();
+    port.send({ type: 'arm', startFrame: 128, maximumFrames: 4_800 });
+    port.send({ type: 'arm', startFrame: 128, maximumFrames: 4_000 });
+
+    expect(postedMessages(port, 'armed')).toEqual([{
+      type: 'armed',
+      startFrame: 128,
+      endFrameExclusive: 4_928,
+      observedFrame: 0,
+    }]);
+    expect(postedMessages(port, 'error')).toEqual([{
+      type: 'error',
+      code: 'invalid-arm',
+    }]);
+  });
+
   it('numbers contiguous absolute-frame chunks monotonically across render quanta', async () => {
     const { processor, port } = await createProcessor({
       chunkFrames: 64,

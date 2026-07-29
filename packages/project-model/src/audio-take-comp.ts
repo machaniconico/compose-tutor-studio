@@ -2,6 +2,8 @@
 // rearrange persistable metadata; decoding and binary asset ownership remain
 // outside this package.
 
+import type { Clock } from './clock';
+import { nowIso, systemClock } from './clock';
 import { makeId } from './ids';
 import {
   MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
@@ -24,14 +26,25 @@ import type {
   ReadyAudioAsset,
   Track,
 } from './types';
+import {
+  MAX_AUDIO_ASSETS,
+  MAX_PROJECT_TRACKS,
+} from './validation';
 
 export const DEFAULT_AUDIO_TAKE_CROSSFADE_MS = 5;
+export const MAX_RECORDED_AUDIO_TRACK_NAME_CODE_POINTS = 128;
 
-export type AudioTakeCompEntityIdKind = 'folder' | 'take' | 'segment';
+export type AudioTakeCompEntityIdKind = 'track' | 'folder' | 'take' | 'segment';
 export type AudioTakeCompIdFactory = (kind: AudioTakeCompEntityIdKind) => string;
 
 export type AudioTakeCompMutationErrorCode =
   | 'project-not-adoptable'
+  | 'audio-asset-not-ready'
+  | 'audio-asset-limit'
+  | 'track-limit'
+  | 'track-not-found'
+  | 'unsupported-track-type'
+  | 'invalid-track-name'
   | 'folder-limit'
   | 'take-limit'
   | 'segment-limit'
@@ -69,6 +82,30 @@ export type AudioTakeCompMutationSuccess = Readonly<{
 
 export type AudioTakeCompMutationResult =
   | AudioTakeCompMutationSuccess
+  | AudioTakeCompMutationFailure;
+
+export type RecordedAudioTakeFolderTarget =
+  | Readonly<{ kind: 'new-track'; trackName?: string }>
+  | Readonly<{ kind: 'existing-audio-track'; trackId: string }>;
+
+export type CreateRecordedAudioTakeFolderInput = Readonly<{
+  target: RecordedAudioTakeFolderTarget;
+  assets: readonly ReadyAudioAsset[];
+  startBeat: number;
+  lengthBeats: number;
+  crossfadeMs?: number;
+  idFactory?: AudioTakeCompIdFactory;
+}>;
+
+export type CreateRecordedAudioTakeFolderSuccess = Readonly<
+  AudioTakeCompMutationSuccess & {
+    trackId: string;
+    audioAssetIds: readonly string[];
+  }
+>;
+
+export type CreateRecordedAudioTakeFolderResult =
+  | CreateRecordedAudioTakeFolderSuccess
   | AudioTakeCompMutationFailure;
 
 export type GroupAudioClipsIntoTakeFolderOptions = Readonly<{
@@ -150,10 +187,10 @@ function codecFailure(project: Project): AudioTakeCompMutationFailure | null {
   );
 }
 
-function runMutation(
+function runMutation<Success extends AudioTakeCompMutationSuccess>(
   project: Project,
-  build: () => AudioTakeCompMutationResult,
-): AudioTakeCompMutationResult {
+  build: () => Success | AudioTakeCompMutationFailure,
+): Success | AudioTakeCompMutationFailure {
   try {
     const inputFailure = codecFailure(project);
     if (inputFailure) return inputFailure;
@@ -305,6 +342,253 @@ function locateFolder(
 ): AudioTakeFolder | AudioTakeCompMutationFailure {
   const folder = project.audioTakeFolders.find((candidate) => candidate.id === folderId);
   return folder ?? failure('folder-not-found', `Audio take folder not found: ${folderId}`);
+}
+
+function codePoints(value: string): string[] {
+  return Array.from(value);
+}
+
+function normalizedRecordedTrackName(value: string): string | null {
+  const trimmed = value.trim();
+  if (
+    trimmed.length === 0
+    || codePoints(trimmed).length > MAX_RECORDED_AUDIO_TRACK_NAME_CODE_POINTS
+    || trimmed.length > MAX_PROJECT_STRING_LENGTH
+  ) {
+    return null;
+  }
+  return trimmed;
+}
+
+function readyAssetCoversWindow(
+  project: Project,
+  asset: ReadyAudioAsset,
+  startBeat: number,
+  lengthBeats: number,
+): boolean {
+  const musicalTime = compileMusicalTime(project);
+  const requiredFrames = secondsBetweenBeats(
+    musicalTime,
+    startBeat,
+    startBeat + lengthBeats,
+  ) * asset.sampleRate;
+  return Number.isFinite(requiredFrames)
+    && requiredFrames > 0
+    && asset.frameCount + 1 >= requiredFrames;
+}
+
+/**
+ * Atomically adopt one ready asset per completed cycle pass and create the
+ * matching take folder directly. No transient Audio Clips are persisted.
+ */
+export function createRecordedAudioTakeFolder(
+  project: Project,
+  input: CreateRecordedAudioTakeFolderInput,
+  clock: Clock = systemClock,
+): CreateRecordedAudioTakeFolderResult {
+  return runMutation(project, () => {
+    if (
+      input.assets.length < 2
+      || input.assets.length > MAX_AUDIO_TAKES_PER_FOLDER
+    ) {
+      return failure(
+        'take-limit',
+        `Cycle recording requires between 2 and ${MAX_AUDIO_TAKES_PER_FOLDER} ready assets.`,
+      );
+    }
+    if (
+      project.audioAssets.length + input.assets.length > MAX_AUDIO_ASSETS
+    ) {
+      return failure(
+        'audio-asset-limit',
+        `A project can contain at most ${MAX_AUDIO_ASSETS} audio assets.`,
+      );
+    }
+    if (project.audioTakeFolders.length >= MAX_AUDIO_TAKE_FOLDERS) {
+      return failure(
+        'folder-limit',
+        `A project can contain at most ${MAX_AUDIO_TAKE_FOLDERS} Audio take folders.`,
+      );
+    }
+    if (
+      !Number.isFinite(input.startBeat)
+      || !Number.isFinite(input.lengthBeats)
+      || input.startBeat < 0
+      || input.lengthBeats < MIN_EVENT_DURATION_BEATS
+      || input.startBeat + input.lengthBeats > project.lengthBeats
+    ) {
+      return failure(
+        'invalid-range',
+        'The recorded take folder must use a non-empty window inside the project timeline.',
+      );
+    }
+    const crossfadeMs = input.crossfadeMs ?? DEFAULT_AUDIO_TAKE_CROSSFADE_MS;
+    if (!Number.isFinite(crossfadeMs) || crossfadeMs < 0 || crossfadeMs > 50) {
+      return failure('invalid-crossfade', 'Audio take crossfade must be between 0 and 50 ms.');
+    }
+
+    let targetTrack: Track | undefined;
+    let trackName: string | undefined;
+    if (input.target.kind === 'existing-audio-track') {
+      const targetTrackId = input.target.trackId;
+      targetTrack = project.tracks.find((track) => track.id === targetTrackId);
+      if (targetTrack === undefined) {
+        return failure('track-not-found', `Audio Track not found: ${targetTrackId}`);
+      }
+      if (targetTrack.type !== 'audio') {
+        return failure(
+          'unsupported-track-type',
+          'Recorded Audio take folders require an Audio Track.',
+        );
+      }
+    } else {
+      if (project.tracks.length >= MAX_PROJECT_TRACKS) {
+        return failure(
+          'track-limit',
+          `A project can contain at most ${MAX_PROJECT_TRACKS} tracks.`,
+        );
+      }
+      trackName = normalizedRecordedTrackName(
+        input.target.trackName ?? 'Cycle Recording',
+      ) ?? undefined;
+      if (trackName === undefined) {
+        return failure(
+          'invalid-track-name',
+          `Audio Track names must contain text and be at most ${MAX_RECORDED_AUDIO_TRACK_NAME_CODE_POINTS} Unicode characters.`,
+        );
+      }
+    }
+
+    const prospectiveTrackId = targetTrack?.id;
+    if (
+      prospectiveTrackId !== undefined
+      && project.audioTakeFolders.some((folder) => (
+        folder.trackId === prospectiveTrackId
+        && sameBeat(folder.startBeat, input.startBeat)
+        && sameBeat(folder.lengthBeats, input.lengthBeats)
+      ))
+    ) {
+      return failure(
+        'ineligible-clip',
+        'This Audio track and timeline window already has a take folder.',
+      );
+    }
+
+    const reserved = collectProjectEntityIds(project);
+    for (const asset of input.assets) {
+      if (
+        asset.availability !== 'ready'
+        || typeof asset.id !== 'string'
+        || asset.id.length === 0
+        || asset.id.length > MAX_PROJECT_STRING_LENGTH
+        || !Number.isSafeInteger(asset.frameCount)
+        || asset.frameCount <= 0
+        || !Number.isSafeInteger(asset.sampleRate)
+        || asset.sampleRate <= 0
+        || !readyAssetCoversWindow(
+          project,
+          asset,
+          input.startBeat,
+          input.lengthBeats,
+        )
+      ) {
+        return failure(
+          'audio-asset-not-ready',
+          'Every recorded take requires a valid ready asset covering the cycle window.',
+        );
+      }
+      if (reserved.has(asset.id)) {
+        return failure('duplicate-id', `The AudioAsset id already exists: ${asset.id}`);
+      }
+      reserved.add(asset.id);
+    }
+
+    const idFactory = input.idFactory ?? defaultIdFactory;
+    if (targetTrack === undefined) {
+      const trackId = allocateId('track', idFactory, reserved);
+      if (!trackId.ok) return trackId;
+      targetTrack = {
+        id: trackId.id,
+        name: trackName!,
+        type: 'audio',
+        role: 'general',
+        clips: [],
+        volume: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        effects: [],
+      };
+    }
+    const folderId = allocateId('folder', idFactory, reserved);
+    if (!folderId.ok) return folderId;
+    const takes: AudioTake[] = [];
+    for (const asset of input.assets) {
+      const takeId = allocateId('take', idFactory, reserved);
+      if (!takeId.ok) return takeId;
+      takes.push({
+        id: takeId.id,
+        audioAssetId: asset.id,
+        offsetBeats: 0,
+        lengthBeats: input.lengthBeats,
+        sourceStartFrame: 0,
+        sourceFrameCount: asset.frameCount,
+        fadeInFrames: 0,
+        fadeOutFrames: 0,
+        gainDb: 0,
+      });
+    }
+    const segmentId = allocateId('segment', idFactory, reserved);
+    if (!segmentId.ok) return segmentId;
+    const folder: AudioTakeFolder = {
+      id: folderId.id,
+      trackId: targetTrack.id,
+      startBeat: input.startBeat,
+      lengthBeats: input.lengthBeats,
+      crossfadeMs,
+      takes,
+      compSegments: [{
+        id: segmentId.id,
+        takeId: takes[0]!.id,
+        offsetBeats: 0,
+        lengthBeats: input.lengthBeats,
+      }],
+    };
+
+    const creatingTrack = input.target.kind === 'new-track';
+    const masterIndex = project.tracks.findIndex((track) => track.type === 'master');
+    const insertionIndex = masterIndex === -1 ? project.tracks.length : masterIndex;
+    const candidate: Project = {
+      ...project,
+      audioAssets: [...project.audioAssets, ...input.assets],
+      audioTakeFolders: [...project.audioTakeFolders, folder],
+      tracks: creatingTrack
+        ? [
+            ...project.tracks.slice(0, insertionIndex),
+            targetTrack,
+            ...project.tracks.slice(insertionIndex),
+          ]
+        : project.tracks,
+      audioRouting: creatingTrack
+        ? {
+            ...project.audioRouting,
+            outputs: [
+              ...project.audioRouting.outputs,
+              { sourceTrackId: targetTrack.id, destination: { type: 'master' } },
+            ],
+          }
+        : project.audioRouting,
+      updatedAt: nowIso(clock),
+    };
+    return {
+      ok: true,
+      project: candidate,
+      changed: true,
+      folderId: folder.id,
+      trackId: targetTrack.id,
+      audioAssetIds: Object.freeze(input.assets.map((asset) => asset.id)),
+    };
+  });
 }
 
 export function groupAudioClipsIntoTakeFolder(

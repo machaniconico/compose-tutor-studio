@@ -17,6 +17,7 @@ const hookState = vi.hoisted(() => ({
 const actionMocks = vi.hoisted(() => ({
   handle: { operationId: 41 },
   begin: vi.fn(),
+  prepareCycle: vi.fn(),
   bind: vi.fn(),
   discard: vi.fn(),
   beginCalibration: vi.fn(),
@@ -115,6 +116,7 @@ vi.mock('../src/state/audioTrackActions', () => ({
   commitStudioRecordingLatencyCalibration: actionMocks.commitCalibration,
   discardStudioAudioTrackRecording: actionMocks.discard,
   discardStudioRecordingLatencyCalibration: actionMocks.discardCalibration,
+  prepareStudioAudioTrackCycleCapture: actionMocks.prepareCycle,
   recordStudioAudioTrack: actionMocks.record,
   studioAudioActionErrorMessage: (code: string) => `action:${code}`,
 }));
@@ -129,7 +131,12 @@ import { useStore } from '../src/state/store';
 type ElementProps = {
   children?: ReactNode;
   onClick?: () => void;
+  onChange?: (event: { currentTarget: { value: string } }) => void;
   disabled?: boolean;
+  id?: string;
+  value?: unknown;
+  min?: unknown;
+  max?: unknown;
   closeDisabled?: boolean;
   busy?: boolean;
   role?: string;
@@ -199,6 +206,13 @@ beforeEach(() => {
     handle: actionMocks.handle,
     startBeat: 4,
     playbackStopped: true,
+    cycle: null,
+  });
+  actionMocks.prepareCycle.mockReturnValue({
+    ok: true,
+    cycle: { loopStartBeat: 0, loopEndBeat: 4, passCount: 3 },
+    effectiveCaptureFrameCount: 288_960,
+    durationSeconds: 6.02,
   });
   actionMocks.record.mockResolvedValue({ ok: false, code: 'cancelled' });
   actionMocks.bind.mockReturnValue(true);
@@ -238,6 +252,15 @@ beforeEach(() => {
     recordingLatencyCalibration: null,
     recordingLatencyCompensationMode: 'estimated',
     preferredMicrophoneInputDeviceId: null,
+    transport: {
+      ...useStore.getState().transport,
+      phase: 'stopped',
+      isPlaying: false,
+      positionBeat: 0,
+      loopEnabled: false,
+      loopStartBeat: 0,
+      loopEndBeat: 4,
+    },
   });
 });
 
@@ -358,6 +381,110 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
       actionMocks.handle,
       expect.objectContaining({ requestId: 42, anchorContextFrame: 96_000 }),
     );
+  });
+
+  it('offers a bounded fixed-pass cycle when the transport loop is enabled', async () => {
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        loopEnabled: true,
+        loopStartBeat: 0,
+        loopEndBeat: 4,
+      },
+    });
+    actionMocks.begin.mockReturnValue({
+      ok: true,
+      handle: actionMocks.handle,
+      startBeat: 0,
+      playbackStopped: false,
+      cycle: { loopStartBeat: 0, loopEndBeat: 4, passCount: 3 },
+    });
+    microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
+
+    const tree = renderDialog();
+    const passInput = findElement(
+      tree,
+      (element) => element.type === 'input'
+        && element.props.id === 'audio-track-recording-cycle-pass-count',
+    );
+
+    expect(passInput?.props.min).toBe(2);
+    expect(passInput?.props.value).toBe(3);
+    expect(textContent(tree)).toContain('完了後に各周を編集可能なテイクとしてまとめます');
+    expect(textContent(tree)).toContain('途中停止・キャンセルでは全テイクを破棄');
+
+    button(tree, '3テイクを録音').props.onClick?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(actionMocks.begin).toHaveBeenCalledWith({
+      target: { kind: 'new-track', trackName: 'Lead Take' },
+      cyclePassCount: 3,
+    });
+  });
+
+  it('freezes the cycle plan before playback and arms its exact capture frames', async () => {
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        loopEnabled: true,
+        loopStartBeat: 0,
+        loopEndBeat: 4,
+      },
+    });
+    const cycle = { loopStartBeat: 0, loopEndBeat: 4, passCount: 3 };
+    actionMocks.begin.mockReturnValue({
+      ok: true,
+      handle: actionMocks.handle,
+      startBeat: 0,
+      playbackStopped: false,
+      cycle,
+    });
+    actionMocks.prepareCycle.mockReturnValue({
+      ok: true,
+      cycle,
+      effectiveCaptureFrameCount: 288_960,
+      durationSeconds: 6.02,
+    });
+    microphoneMocks.start.mockReturnValue(new Promise(() => undefined));
+    const tree = renderDialog();
+
+    button(tree, '3テイクを録音').props.onClick?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const captureOptions = microphoneMocks.start.mock.calls[0]?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    const synchronize = captureOptions?.synchronize;
+    if (typeof synchronize !== 'function') throw new Error('synchronizer missing');
+    const armAtFrame = vi.fn(async () => undefined);
+    await synchronize({
+      context: audioMocks.context,
+      contextGeneration: 7,
+      sampleRate: 48_000,
+      inputLatencySeconds: 0.01,
+      renderQuantumSize: 128,
+      earliestStartFrame: 90_000,
+      armAtFrame,
+    });
+
+    expect(actionMocks.prepareCycle).toHaveBeenCalledWith(actionMocks.handle, {
+      context: audioMocks.context,
+      contextGeneration: 7,
+      inputLatencySeconds: 0.01,
+    });
+    expect(audioMocks.startPlayback).toHaveBeenCalledWith(expect.objectContaining({
+      startBeat: 0,
+      cycle,
+      onFiniteCycleComplete: expect.any(Function),
+    }));
+    const playbackOptions = audioMocks.startPlayback.mock.calls[0]?.[0];
+    if (!playbackOptions || typeof playbackOptions.armCapture !== 'function') {
+      throw new Error('playback arm callback missing');
+    }
+    await playbackOptions.armCapture(audioMocks.context, 96_000, 7);
+    expect(armAtFrame).toHaveBeenCalledWith(96_000, 288_960);
   });
 
   it('labels automatic latency as an estimate and explains manual direction', () => {
@@ -759,6 +886,111 @@ describe('AudioTrackRecordingDialog interaction boundaries', () => {
     expect(audioMocks.stopPlayback).toHaveBeenCalledOnce();
     expect(audioMocks.stopPlayback).toHaveBeenCalledWith(42);
     expect(tree.props.closeDisabled).toBe(true);
+  });
+
+  it('never offers partial-save semantics while a cycle is recording', () => {
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        loopEnabled: true,
+        loopStartBeat: 0,
+        loopEndBeat: 4,
+      },
+    });
+    const stop = vi.fn(async () => undefined);
+    const cancel = vi.fn();
+    const refs: Array<{ current: unknown }> = [];
+    refs[5] = {
+      current: {
+        stop,
+        cancel,
+        elapsedSeconds: () => 1,
+      },
+    };
+    refs[19] = {
+      current: { loopStartBeat: 0, loopEndBeat: 4, passCount: 3 },
+    };
+    const tree = renderDialog('recording', refs);
+
+    expect(textContent(tree)).not.toContain('録音を終了して保存');
+    button(tree, 'サイクル録音を中止して破棄').props.onClick?.();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('waits for the capture tail after the finite cycle boundary but cancels on manual transport stop', () => {
+    const cycle = { loopStartBeat: 0, loopEndBeat: 4, passCount: 3 };
+    const naturalStop = vi.fn(async () => undefined);
+    const naturalCancel = vi.fn();
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        phase: 'playing',
+        isPlaying: true,
+        positionBeat: 3,
+        loopEnabled: true,
+        loopStartBeat: 0,
+        loopEndBeat: 4,
+      },
+    });
+    const naturalRefs: Array<{ current: unknown }> = [];
+    naturalRefs[5] = {
+      current: {
+        stop: naturalStop,
+        cancel: naturalCancel,
+        elapsedSeconds: () => 60,
+      },
+    };
+    naturalRefs[3] = { current: 42 };
+    naturalRefs[19] = { current: cycle };
+    naturalRefs[21] = { current: 42 };
+    renderDialog('recording', naturalRefs);
+    const naturalLifecycle = hookState.effects.at(-1)?.();
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        phase: 'stopped',
+        isPlaying: false,
+        positionBeat: 0,
+      },
+    });
+
+    expect(naturalStop).not.toHaveBeenCalled();
+    expect(naturalCancel).not.toHaveBeenCalled();
+    if (typeof naturalLifecycle === 'function') naturalLifecycle();
+
+    const manualCancel = vi.fn();
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        phase: 'playing',
+        isPlaying: true,
+        positionBeat: 1,
+      },
+    });
+    const manualRefs: Array<{ current: unknown }> = [];
+    manualRefs[5] = {
+      current: {
+        stop: vi.fn(async () => undefined),
+        cancel: manualCancel,
+        elapsedSeconds: () => 0.5,
+      },
+    };
+    manualRefs[19] = { current: cycle };
+    renderDialog('recording', manualRefs);
+    const manualLifecycle = hookState.effects.at(-1)?.();
+    useStore.setState({
+      transport: {
+        ...useStore.getState().transport,
+        phase: 'stopped',
+        isPlaying: false,
+        positionBeat: 1,
+      },
+    });
+
+    expect(manualCancel).toHaveBeenCalledOnce();
+    if (typeof manualLifecycle === 'function') manualLifecycle();
   });
 
   it('reports the latency mode frozen by the take instead of a stale local selection', async () => {
