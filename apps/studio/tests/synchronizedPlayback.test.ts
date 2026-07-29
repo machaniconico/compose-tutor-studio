@@ -213,6 +213,180 @@ describe('synchronized recording playback runtime races', () => {
     expect(assetHarness.release).toHaveBeenCalledOnce();
   });
 
+  it('hard-stops finite cycle playback at the requested right boundary', async () => {
+    useStore.setState((state) => ({
+      transport: {
+        ...state.transport,
+        loopEnabled: true,
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        positionBeat: 2,
+      },
+    }));
+    const armCapture = vi.fn(async (
+      _context: AudioContext,
+      _startFrame: number,
+      _contextGeneration: number,
+    ) => undefined);
+    const onFiniteCycleComplete = vi.fn();
+    const resultPromise = startSynchronizedRecordingPlayback({
+      operationId,
+      projectSnapshot: project,
+      startBeat: 2,
+      cycle: {
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        passCount: 2,
+      },
+      onFiniteCycleComplete,
+      signal: new AbortController().signal,
+      armCapture,
+    });
+    await flushMicrotasks();
+    const [, anchorFrame] = armCapture.mock.calls[0]!;
+    engineHarness.currentTime = anchorFrame / engineHarness.context.sampleRate;
+    await vi.advanceTimersByTimeAsync(10);
+    const clock = await resultPromise;
+
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'playing',
+      loopEnabled: true,
+      loopStartBeat: 2,
+      loopEndBeat: 4,
+      playbackRequestId: clock.requestId,
+    });
+    expect(clock).toMatchObject({
+      anchorBeat: 2,
+      cycle: {
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        passCount: 2,
+      },
+      cycleEndBeat: 6,
+    });
+    expect(onFiniteCycleComplete).not.toHaveBeenCalled();
+
+    // The empty project defaults to 120 BPM. Two 2-beat passes end two
+    // seconds after the synchronized anchor on the scheduler's raw beat axis.
+    engineHarness.currentTime = anchorFrame / engineHarness.context.sampleRate + 2;
+    await vi.advanceTimersByTimeAsync(25);
+
+    expect(armCapture).toHaveBeenCalledOnce();
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      loopEnabled: true,
+    });
+    expect(useStore.getState().transport.playbackRequestId).not.toBe(clock.requestId);
+    expect(onFiniteCycleComplete).toHaveBeenCalledOnce();
+    expect(onFiniteCycleComplete).toHaveBeenCalledWith(clock.requestId);
+    expect(assetHarness.release).toHaveBeenCalledOnce();
+  });
+
+  it('does not report finite-cycle completion for a manual stop', async () => {
+    useStore.setState((state) => ({
+      transport: {
+        ...state.transport,
+        loopEnabled: true,
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        positionBeat: 2,
+      },
+    }));
+    const armCapture = vi.fn(async (
+      _context: AudioContext,
+      _startFrame: number,
+      _contextGeneration: number,
+    ) => undefined);
+    const onFiniteCycleComplete = vi.fn();
+    const resultPromise = startSynchronizedRecordingPlayback({
+      operationId,
+      projectSnapshot: project,
+      startBeat: 2,
+      cycle: {
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        passCount: 2,
+      },
+      onFiniteCycleComplete,
+      signal: new AbortController().signal,
+      armCapture,
+    });
+    await flushMicrotasks();
+    const [, anchorFrame] = armCapture.mock.calls[0]!;
+    engineHarness.currentTime = anchorFrame / engineHarness.context.sampleRate;
+    await vi.advanceTimersByTimeAsync(10);
+    const clock = await resultPromise;
+
+    expect(stopSynchronizedRecordingPlayback(clock.requestId)).toBe(true);
+    expect(onFiniteCycleComplete).not.toHaveBeenCalled();
+    expect(useStore.getState().transport.phase).toBe('stopped');
+  });
+
+  it('rejects a frozen cycle when its loop or AudioContext generation changes during arm', async () => {
+    useStore.setState((state) => ({
+      transport: {
+        ...state.transport,
+        loopEnabled: true,
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        positionBeat: 2,
+      },
+    }));
+    const loopArm = deferred<void>();
+    const loopAttempt = startSynchronizedRecordingPlayback({
+      operationId,
+      projectSnapshot: project,
+      startBeat: 2,
+      cycle: {
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        passCount: 2,
+      },
+      signal: new AbortController().signal,
+      armCapture: () => loopArm.promise,
+    });
+    await flushMicrotasks();
+    useStore.setState((state) => ({
+      transport: { ...state.transport, loopEndBeat: 5 },
+    }));
+    loopArm.resolve(undefined);
+    await expect(loopAttempt).rejects.toMatchObject({ code: 'stale-request' });
+    await flushMicrotasks();
+    expect(assetHarness.release).toHaveBeenCalledOnce();
+
+    assetHarness.release.mockClear();
+    useStore.setState((state) => ({
+      transport: {
+        ...state.transport,
+        phase: 'stopped',
+        loopEnabled: true,
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        positionBeat: 2,
+      },
+    }));
+    const contextArm = deferred<void>();
+    const contextAttempt = startSynchronizedRecordingPlayback({
+      operationId,
+      projectSnapshot: project,
+      startBeat: 2,
+      cycle: {
+        loopStartBeat: 2,
+        loopEndBeat: 4,
+        passCount: 2,
+      },
+      signal: new AbortController().signal,
+      armCapture: () => contextArm.promise,
+    });
+    await flushMicrotasks();
+    engineHarness.generation += 1;
+    contextArm.resolve(undefined);
+    await expect(contextAttempt).rejects.toMatchObject({ code: 'context-changed' });
+    await flushMicrotasks();
+    expect(assetHarness.release).toHaveBeenCalledOnce();
+  });
+
   it('aborts a never-settling capture arm and releases the decoded lease', async () => {
     const abortController = new AbortController();
     const armCapture = vi.fn(() => new Promise<void>(() => undefined));

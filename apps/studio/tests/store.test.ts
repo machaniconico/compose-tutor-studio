@@ -3,6 +3,7 @@ import type { AppEvent } from '@cts/tutorial-engine';
 import {
   MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS,
   createAudioTrackClip,
+  createRecordedAudioTakeFolder,
   duplicateClip,
   findClip,
   resolveClipContent,
@@ -65,6 +66,44 @@ function createRecordingAdditionFixture(snapshot: Project, suffix: string) {
   const created = createAudioTrackClip(snapshot, asset, {
     trackName: `Recording ${suffix}`,
     idFactory: (kind) => `${kind}-recording-${suffix}`,
+  });
+  if (!created.ok) throw new Error(created.error.code);
+  return created;
+}
+
+function createCycleRecordingAdditionFixture(
+  snapshot: Project,
+  suffix: string,
+  target: Readonly<
+    { kind: 'new-track' }
+    | { kind: 'existing-audio-track'; trackId: string }
+  > = { kind: 'new-track' },
+  takeCount = 3,
+) {
+  const assets = Array.from({ length: takeCount }, (_, index): ReadyAudioAsset => ({
+    id: `asset-cycle-${suffix}-${index + 1}`,
+    availability: 'ready',
+    checksumSha256: `${(index + 1).toString(16)}`.repeat(64),
+    originalName: `${suffix}-${index + 1}.wav`,
+    mediaType: 'audio/wav',
+    byteLength: 192_044,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount: 96_000,
+  }));
+  const idCounts = new Map<string, number>();
+  const created = createRecordedAudioTakeFolder(snapshot, {
+    assets,
+    startBeat: 0,
+    lengthBeats: 4,
+    target: target.kind === 'new-track'
+      ? { kind: 'new-track', trackName: `Cycle ${suffix}` }
+      : target,
+    idFactory: (kind) => {
+      const count = (idCounts.get(kind) ?? 0) + 1;
+      idCounts.set(kind, count);
+      return `${kind}-cycle-${suffix}-${count}`;
+    },
   });
   if (!created.ok) throw new Error(created.error.code);
   return created;
@@ -294,6 +333,173 @@ describe('microphone recording lifecycle fence', () => {
     useStore.getState().undo();
     const undone = useStore.getState().project;
     expect({ ...undone, updatedAt: before.project.updatedAt }).toEqual(before.project);
+  });
+
+  it('commits one complete cycle folder to an existing Audio Track as one Undo step', () => {
+    const audioTrackId = addAudioTrackFixture('cycle-existing');
+    const before = useStore.getState();
+    const operationId = before.tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createCycleRecordingAdditionFixture(
+      before.project,
+      'existing-commit',
+      { kind: 'existing-audio-track', trackId: audioTrackId },
+    );
+
+    expect(useStore.getState().applyVerifiedCycleRecordingAddition({
+      operationId,
+      expectedSnapshot: before.project,
+      verifiedAudioAssetIds: addition.audioAssetIds,
+      folderId: addition.folderId,
+      nextProject: addition.project,
+    })).toBe(true);
+    const committed = useStore.getState();
+    expect(committed.project.audioTakeFolders.at(-1)?.id).toBe(addition.folderId);
+    expect(committed.project.audioTakeFolders.at(-1)?.takes.map(
+      (take) => take.audioAssetId,
+    )).toEqual(addition.audioAssetIds);
+    expect(committed.project.tracks).toEqual(addition.project.tracks);
+    expect(committed.past).toHaveLength(before.past.length + 1);
+    expect(committed.saveState.revision).toBe(before.saveState.revision + 1);
+
+    committed.finishAudioRecordingOperation(operationId);
+    useStore.getState().undo();
+    expect({
+      ...useStore.getState().project,
+      updatedAt: before.project.updatedAt,
+    }).toEqual(before.project);
+  });
+
+  it('commits a complete cycle folder with one empty Audio Track before Master', () => {
+    const before = useStore.getState();
+    const operationId = before.tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createCycleRecordingAdditionFixture(before.project, 'new-commit');
+    const masterIndex = before.project.tracks.findIndex((track) => track.type === 'master');
+
+    expect(useStore.getState().applyVerifiedCycleRecordingAddition({
+      operationId,
+      expectedSnapshot: before.project,
+      verifiedAudioAssetIds: addition.audioAssetIds,
+      folderId: addition.folderId,
+      nextProject: addition.project,
+    })).toBe(true);
+    const committed = useStore.getState();
+    expect(committed.project.tracks[masterIndex]).toMatchObject({
+      type: 'audio',
+      clips: [],
+    });
+    expect(committed.project.tracks[masterIndex + 1]).toBe(before.project.tracks[masterIndex]);
+    expect(committed.project.audioRouting.outputs.at(-1)).toEqual({
+      sourceTrackId: addition.trackId,
+      destination: { type: 'master' },
+    });
+    expect(committed.past).toHaveLength(before.past.length + 1);
+    expect(committed.saveState.revision).toBe(before.saveState.revision + 1);
+
+    committed.finishAudioRecordingOperation(operationId);
+  });
+
+  it('rejects partial or reordered verified cycle asset ids', () => {
+    const snapshot = useStore.getState().project;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createCycleRecordingAdditionFixture(snapshot, 'asset-order');
+
+    try {
+      expect(useStore.getState().applyVerifiedCycleRecordingAddition({
+        operationId,
+        expectedSnapshot: snapshot,
+        verifiedAudioAssetIds: addition.audioAssetIds.slice(0, 2),
+        folderId: addition.folderId,
+        nextProject: addition.project,
+      })).toBe(false);
+      expect(useStore.getState().applyVerifiedCycleRecordingAddition({
+        operationId,
+        expectedSnapshot: snapshot,
+        verifiedAudioAssetIds: [...addition.audioAssetIds].reverse(),
+        folderId: addition.folderId,
+        nextProject: addition.project,
+      })).toBe(false);
+      expect(useStore.getState().project).toBe(snapshot);
+    } finally {
+      useStore.getState().finishAudioRecordingOperation(operationId);
+    }
+  });
+
+  it('rejects a reordered or invalid cycle take folder', () => {
+    const snapshot = useStore.getState().project;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createCycleRecordingAdditionFixture(snapshot, 'folder-tamper');
+    const folder = addition.project.audioTakeFolders.at(-1);
+    if (folder === undefined) throw new Error('take folder missing');
+    const reorderedProject: Project = {
+      ...addition.project,
+      audioTakeFolders: [
+        ...addition.project.audioTakeFolders.slice(0, -1),
+        { ...folder, takes: [...folder.takes].reverse() },
+      ],
+    };
+    const invalidCompProject: Project = {
+      ...addition.project,
+      audioTakeFolders: [
+        ...addition.project.audioTakeFolders.slice(0, -1),
+        {
+          ...folder,
+          compSegments: folder.compSegments.map((segment) => ({
+            ...segment,
+            lengthBeats: segment.lengthBeats / 2,
+          })),
+        },
+      ],
+    };
+
+    try {
+      for (const nextProject of [reorderedProject, invalidCompProject]) {
+        expect(useStore.getState().applyVerifiedCycleRecordingAddition({
+          operationId,
+          expectedSnapshot: snapshot,
+          verifiedAudioAssetIds: addition.audioAssetIds,
+          folderId: addition.folderId,
+          nextProject,
+        })).toBe(false);
+      }
+      expect(useStore.getState().project).toBe(snapshot);
+    } finally {
+      useStore.getState().finishAudioRecordingOperation(operationId);
+    }
+  });
+
+  it('rejects stale cycle ownership and makes a successful callback one-shot', () => {
+    const snapshot = useStore.getState().project;
+    const operationId = useStore.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('recording token missing');
+    const addition = createCycleRecordingAdditionFixture(snapshot, 'cycle-replay');
+    const exactAddition = {
+      operationId,
+      expectedSnapshot: snapshot,
+      verifiedAudioAssetIds: addition.audioAssetIds,
+      folderId: addition.folderId,
+      nextProject: addition.project,
+    };
+
+    expect(useStore.getState().applyVerifiedCycleRecordingAddition({
+      ...exactAddition,
+      operationId: operationId + 1,
+    })).toBe(false);
+    expect(useStore.getState().applyVerifiedCycleRecordingAddition({
+      ...exactAddition,
+      expectedSnapshot: { ...snapshot },
+    })).toBe(false);
+    expect(useStore.getState().applyVerifiedCycleRecordingAddition(exactAddition)).toBe(true);
+    const committed = useStore.getState().project;
+    expect(useStore.getState().applyVerifiedCycleRecordingAddition(exactAddition)).toBe(false);
+    expect(useStore.getState().project).toBe(committed);
+
+    useStore.getState().finishAudioRecordingOperation(operationId);
+    expect(useStore.getState().applyVerifiedCycleRecordingAddition(exactAddition)).toBe(false);
+    expect(useStore.getState().project).toBe(committed);
   });
 });
 

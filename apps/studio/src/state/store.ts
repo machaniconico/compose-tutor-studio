@@ -20,6 +20,8 @@ import {
   decodeProject,
   encodeProjectJson,
   findClip as findProjectClip,
+  MAX_AUDIO_TAKES_PER_FOLDER,
+  MIN_EVENT_DURATION_BEATS,
   resolveClipContent,
   type ChordEvent,
   type DrumEvent,
@@ -118,6 +120,12 @@ export type TransportState = {
   metronome: boolean;
 };
 
+export type AudioRecordingCyclePlayback = Readonly<{
+  loopStartBeat: number;
+  loopEndBeat: number;
+  passCount: number;
+}>;
+
 export type EditorState = {
   activeView: EditorView;
   selectedTrackId: string | null;
@@ -213,6 +221,14 @@ export type VerifiedRecordingAudioAssetAddition = Readonly<{
   nextProject: Project;
 }>;
 
+export type VerifiedCycleRecordingAddition = Readonly<{
+  operationId: number;
+  expectedSnapshot: Project;
+  verifiedAudioAssetIds: readonly string[];
+  folderId: string;
+  nextProject: Project;
+}>;
+
 export type StoreState = {
   project: Project;
   transport: TransportState;
@@ -256,6 +272,10 @@ export type StoreState = {
   /** Commit exactly one recording-owned asset/clip addition against its frozen snapshot. */
   applyVerifiedRecordingAudioAssetAddition: (
     addition: VerifiedRecordingAudioAssetAddition,
+  ) => boolean;
+  /** Commit one complete cycle-recording take folder against its frozen snapshot. */
+  applyVerifiedCycleRecordingAddition: (
+    addition: VerifiedCycleRecordingAddition,
   ) => boolean;
 
   // project metadata actions
@@ -309,7 +329,11 @@ export type StoreState = {
    * Start the exact playback generation paired with an owned microphone take.
    * Returns its request id, or null when the operation/position is no longer valid.
    */
-  startAudioRecordingPlayback: (operationId: number, startBeat: number) => number | null;
+  startAudioRecordingPlayback: (
+    operationId: number,
+    startBeat: number,
+    cycle?: AudioRecordingCyclePlayback,
+  ) => number | null;
   /** Confirm an audio start only when it still belongs to the active request. */
   confirmPlaybackStarted: (requestId: number) => void;
   /** Reject a failed audio start only when it still belongs to the active request. */
@@ -333,6 +357,8 @@ export type StoreState = {
    */
   stop: (reset?: boolean) => void;
   setPosition: (beat: number) => void;
+  /** Adopt an exact scheduler-safe runtime loop and enable it without touching Project/history. */
+  setLoopRange: (startBeat: number, endBeat: number) => boolean;
   toggleLoop: () => void;
   toggleMetronome: () => void;
 
@@ -435,6 +461,22 @@ function safeLoopBounds(
   return safeEnd > safeStart
     ? { startBeat: safeStart, endBeat: safeEnd }
     : { startBeat: 0, endBeat: projectLength };
+}
+
+function isExactLoopRangeValid(
+  startBeat: number,
+  endBeat: number,
+  projectLength: number,
+): boolean {
+  return (
+    Number.isFinite(startBeat)
+    && Number.isFinite(endBeat)
+    && Number.isFinite(projectLength)
+    && projectLength > 0
+    && startBeat >= 0
+    && endBeat <= projectLength
+    && endBeat - startBeat >= MIN_EVENT_DURATION_BEATS
+  );
 }
 
 function numberRecordsEqual(
@@ -813,6 +855,13 @@ const RECORDING_PROJECT_MUTABLE_KEYS = new Set([
   'lengthBeats',
   'updatedAt',
 ]);
+const CYCLE_RECORDING_PROJECT_MUTABLE_KEYS = new Set([
+  'audioAssets',
+  'audioTakeFolders',
+  'tracks',
+  'audioRouting',
+  'updatedAt',
+]);
 const TRACK_CLIP_KEY = new Set(['clips']);
 const ROUTING_OUTPUTS_KEY = new Set(['outputs']);
 
@@ -846,6 +895,157 @@ function hasVerifiedReadyAudioAssetAppend(
     && current.audioAssets.every((asset, index) => next.audioAssets[index] === asset)
     && next.audioAssets.at(-1)?.id === verifiedAudioAssetId
     && next.audioAssets.at(-1)?.availability === 'ready';
+}
+
+function hasVerifiedReadyAudioAssetBatchAppend(
+  current: Project,
+  next: Project,
+  verifiedAudioAssetIds: readonly string[],
+): boolean {
+  if (
+    verifiedAudioAssetIds.length < 2
+    || verifiedAudioAssetIds.length > MAX_AUDIO_TAKES_PER_FOLDER
+    || new Set(verifiedAudioAssetIds).size !== verifiedAudioAssetIds.length
+    || next.audioAssets.length !== current.audioAssets.length + verifiedAudioAssetIds.length
+    || !current.audioAssets.every((asset, index) => next.audioAssets[index] === asset)
+  ) {
+    return false;
+  }
+  return verifiedAudioAssetIds.every((assetId, index) => {
+    const asset = next.audioAssets[current.audioAssets.length + index];
+    return asset?.id === assetId && asset.availability === 'ready';
+  });
+}
+
+function isCompleteCycleTakeFolder(
+  current: Project,
+  next: Project,
+  folderId: string,
+  verifiedAudioAssetIds: readonly string[],
+): boolean {
+  if (
+    next.audioTakeFolders.length !== current.audioTakeFolders.length + 1
+    || !current.audioTakeFolders.every(
+      (folder, index) => next.audioTakeFolders[index] === folder,
+    )
+  ) {
+    return false;
+  }
+  const folder = next.audioTakeFolders.at(-1);
+  if (
+    folder?.id !== folderId
+    || !Number.isFinite(folder.startBeat)
+    || !Number.isFinite(folder.lengthBeats)
+    || folder.lengthBeats <= 0
+    || folder.takes.length !== verifiedAudioAssetIds.length
+    || !folder.takes.every((take, index) => (
+      take.audioAssetId === verifiedAudioAssetIds[index]
+      && take.offsetBeats === 0
+      && take.lengthBeats === folder.lengthBeats
+      && Number.isSafeInteger(take.sourceStartFrame)
+      && take.sourceStartFrame >= 0
+      && Number.isSafeInteger(take.sourceFrameCount)
+      && take.sourceFrameCount > 0
+    ))
+    || folder.compSegments.length < 1
+  ) {
+    return false;
+  }
+
+  const takesById = new Map(folder.takes.map((take) => [take.id, take]));
+  let expectedOffset = 0;
+  let previousTakeId: string | undefined;
+  for (const segment of folder.compSegments) {
+    const take = takesById.get(segment.takeId);
+    if (
+      take === undefined
+      || segment.takeId === previousTakeId
+      || segment.offsetBeats !== expectedOffset
+      || !Number.isFinite(segment.lengthBeats)
+      || segment.lengthBeats <= 0
+      || segment.offsetBeats < take.offsetBeats
+      || segment.offsetBeats + segment.lengthBeats > take.offsetBeats + take.lengthBeats
+    ) {
+      return false;
+    }
+    expectedOffset = segment.offsetBeats + segment.lengthBeats;
+    previousTakeId = segment.takeId;
+  }
+  return expectedOffset === folder.lengthBeats;
+}
+
+function isExistingTrackCycleRecordingAddition(
+  current: Project,
+  next: Project,
+  folderId: string,
+): boolean {
+  if (next.tracks !== current.tracks || next.audioRouting !== current.audioRouting) {
+    return false;
+  }
+  const folder = next.audioTakeFolders.find((candidate) => candidate.id === folderId);
+  return folder !== undefined
+    && current.tracks.some(
+      (track) => track.id === folder.trackId && track.type === 'audio',
+    );
+}
+
+function isNewTrackCycleRecordingAddition(
+  current: Project,
+  next: Project,
+  folderId: string,
+): boolean {
+  if (next.tracks.length !== current.tracks.length + 1) return false;
+  const masterIndex = current.tracks.findIndex((track) => track.type === 'master');
+  if (
+    masterIndex < 0
+    || !current.tracks.slice(0, masterIndex).every(
+      (track, index) => next.tracks[index] === track,
+    )
+    || !current.tracks.slice(masterIndex).every(
+      (track, index) => next.tracks[masterIndex + index + 1] === track,
+    )
+  ) {
+    return false;
+  }
+  const addedTrack = next.tracks[masterIndex];
+  const folder = next.audioTakeFolders.find((candidate) => candidate.id === folderId);
+  if (
+    addedTrack?.type !== 'audio'
+    || addedTrack.clips.length !== 0
+    || folder?.trackId !== addedTrack.id
+  ) {
+    return false;
+  }
+  if (
+    !sameOwnPropertiesExcept(current.audioRouting, next.audioRouting, ROUTING_OUTPUTS_KEY)
+    || next.audioRouting.outputs.length !== current.audioRouting.outputs.length + 1
+    || !current.audioRouting.outputs.every(
+      (route, index) => next.audioRouting.outputs[index] === route,
+    )
+  ) {
+    return false;
+  }
+  const addedOutput = next.audioRouting.outputs.at(-1);
+  return addedOutput?.sourceTrackId === addedTrack.id
+    && addedOutput.destination.type === 'master';
+}
+
+function isVerifiedCycleRecordingAddition(
+  current: Project,
+  next: Project,
+  verifiedAudioAssetIds: readonly string[],
+  folderId: string,
+): boolean {
+  return next !== current
+    && sameOwnPropertiesExcept(current, next, CYCLE_RECORDING_PROJECT_MUTABLE_KEYS)
+    && next.lengthBars === current.lengthBars
+    && next.lengthBeats === current.lengthBeats
+    && hasVerifiedReadyAudioAssetBatchAppend(current, next, verifiedAudioAssetIds)
+    && isCompleteCycleTakeFolder(current, next, folderId, verifiedAudioAssetIds)
+    && (
+      isExistingTrackCycleRecordingAddition(current, next, folderId)
+      || isNewTrackCycleRecordingAddition(current, next, folderId)
+    );
 }
 
 function isExistingTrackRecordingAddition(
@@ -1720,7 +1920,7 @@ export function createStudioStore(
   /** Apply an immutable project change: bump updatedAt, push history, save. */
   const commitProject = (
     next: Project,
-    verifiedAddedAudioAssetId?: string,
+    verifiedAddedAudioAssetIds?: string | readonly string[],
     recordingAuthorization?: Readonly<{
       operationId: number;
       expectedSnapshot: Project;
@@ -1740,10 +1940,12 @@ export function createStudioStore(
       return false;
     }
     const current = stateAtCommit.project;
-    if (next === current) return verifiedAddedAudioAssetId === undefined;
-    const verifiedAddition = verifiedAddedAudioAssetId !== undefined
-      && hasVerifiedReadyAudioAssetAppend(current, next, verifiedAddedAudioAssetId);
-    if (verifiedAddedAudioAssetId !== undefined && !verifiedAddition) return false;
+    if (next === current) return verifiedAddedAudioAssetIds === undefined;
+    const verifiedAddition = typeof verifiedAddedAudioAssetIds === 'string'
+      ? hasVerifiedReadyAudioAssetAppend(current, next, verifiedAddedAudioAssetIds)
+      : verifiedAddedAudioAssetIds !== undefined
+        && hasVerifiedReadyAudioAssetBatchAppend(current, next, verifiedAddedAudioAssetIds);
+    if (verifiedAddedAudioAssetIds !== undefined && !verifiedAddition) return false;
     const stamped: Project = { ...next, updatedAt: nowIso() };
     const encoded = encodeProjectJson(stamped);
     if (!encoded.ok) {
@@ -1833,6 +2035,29 @@ export function createStudioStore(
       return commitProject(
         addition.nextProject,
         addition.verifiedAudioAssetId,
+        {
+          operationId: addition.operationId,
+          expectedSnapshot: addition.expectedSnapshot,
+        },
+      );
+    },
+    applyVerifiedCycleRecordingAddition: (addition) => {
+      const state = get();
+      if (
+        state.audioRecordingOperationId !== addition.operationId
+        || state.project !== addition.expectedSnapshot
+        || !isVerifiedCycleRecordingAddition(
+          addition.expectedSnapshot,
+          addition.nextProject,
+          addition.verifiedAudioAssetIds,
+          addition.folderId,
+        )
+      ) {
+        return false;
+      }
+      return commitProject(
+        addition.nextProject,
+        addition.verifiedAudioAssetIds,
         {
           operationId: addition.operationId,
           expectedSnapshot: addition.expectedSnapshot,
@@ -2132,14 +2357,29 @@ export function createStudioStore(
         },
       });
     },
-    startAudioRecordingPlayback: (operationId, startBeat) => {
+    startAudioRecordingPlayback: (operationId, startBeat, cycle) => {
       const state = get();
       const projectLength = transportProjectLengthBeats(state.project);
+      const oneShotIntentValid = cycle === undefined && !state.transport.loopEnabled;
+      const cycleIntentValid = cycle !== undefined
+        && cycle !== null
+        && state.transport.loopEnabled
+        && Number.isSafeInteger(cycle.passCount)
+        && cycle.passCount >= 2
+        && cycle.passCount <= MAX_AUDIO_TAKES_PER_FOLDER
+        && isExactLoopRangeValid(
+          cycle.loopStartBeat,
+          cycle.loopEndBeat,
+          projectLength,
+        )
+        && cycle.loopStartBeat === state.transport.loopStartBeat
+        && cycle.loopEndBeat === state.transport.loopEndBeat
+        && startBeat === cycle.loopStartBeat;
       if (
         state.projectOperationBusy
         || state.audioRecordingOperationId !== operationId
         || state.transport.phase !== 'stopped'
-        || state.transport.loopEnabled
+        || (!oneShotIntentValid && !cycleIntentValid)
         || !Number.isFinite(startBeat)
         || startBeat < 0
         || startBeat >= projectLength
@@ -2255,6 +2495,42 @@ export function createStudioStore(
         };
       }),
     setPosition: (beat) => set((s) => ({ transport: { ...s.transport, positionBeat: beat } })),
+    setLoopRange: (startBeat, endBeat) => {
+      const state = get();
+      const projectLength = transportProjectLengthBeats(state.project);
+      if (
+        state.audioRecordingOperationId !== null
+        || !isExactLoopRangeValid(startBeat, endBeat, projectLength)
+      ) {
+        return false;
+      }
+
+      const supersedesPlayback = state.transport.phase !== 'stopped';
+      const safePosition = safeTransportPosition(
+        state.transport.positionBeat,
+        projectLength,
+      );
+      const positionBeat =
+        safePosition >= startBeat && safePosition < endBeat
+          ? safePosition
+          : startBeat;
+      set({
+        transport: {
+          ...state.transport,
+          phase: supersedesPlayback ? 'starting' : state.transport.phase,
+          isPlaying: supersedesPlayback ? false : state.transport.isPlaying,
+          playbackRequestId: supersedesPlayback
+            ? state.transport.playbackRequestId + 1
+            : state.transport.playbackRequestId,
+          audioIssue: supersedesPlayback ? null : state.transport.audioIssue,
+          positionBeat,
+          loopEnabled: true,
+          loopStartBeat: startBeat,
+          loopEndBeat: endBeat,
+        },
+      });
+      return true;
+    },
     toggleLoop: () =>
       set((s) => {
         if (s.audioRecordingOperationId !== null) return s;

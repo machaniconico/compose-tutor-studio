@@ -4,10 +4,11 @@ import {
   MAX_PROJECT_LENGTH_BARS,
   MAX_TIME_SIGNATURE_NUMERATOR,
   MAX_PROJECT_VALIDATION_ERRORS,
+  createRecordedAudioTakeFolder,
   createEmptyProject,
   validateProject,
 } from '../src/index';
-import type { Project } from '../src/index';
+import type { Project, ReadyAudioAsset } from '../src/index';
 
 const clock = () => new Date('2026-06-11T00:00:00.000Z');
 
@@ -130,6 +131,44 @@ describe('validateProject', () => {
     project.tracks[0]!.clips[0]!.trackId = 'nonexistent';
     const result = validateProject(project);
     expect(result.errors.some((e) => e.path.endsWith('.trackId'))).toBe(true);
+  });
+
+  it('validates the audible frame coverage of take sources with one-frame tolerance', () => {
+    const asset = (index: number): ReadyAudioAsset => ({
+      id: `validation-recorded-asset-${index}`,
+      availability: 'ready',
+      checksumSha256: index.toString(16).padStart(64, '0'),
+      originalName: `Take ${index}.wav`,
+      mediaType: 'audio/wav',
+      byteLength: 192_044,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 96_000,
+    });
+    const adopted = createRecordedAudioTakeFolder(baseProject(), {
+      target: { kind: 'new-track' },
+      assets: [asset(1), asset(2)],
+      startBeat: 0,
+      lengthBeats: 4,
+      idFactory: (() => {
+        let index = 0;
+        return (kind) => `${kind}-validation-recorded-${++index}`;
+      })(),
+    }, clock);
+    expect(adopted.ok).toBe(true);
+    if (!adopted.ok) return;
+
+    const oneFrameShort = structuredClone(adopted.project);
+    oneFrameShort.audioTakeFolders[0]!.takes[0]!.sourceFrameCount = 95_999;
+    expect(validateProject(oneFrameShort).ok).toBe(true);
+
+    oneFrameShort.audioTakeFolders[0]!.takes[0]!.sourceFrameCount = 95_998;
+    expect(validateProject(oneFrameShort).errors).toContainEqual(
+      expect.objectContaining({
+        path: 'audioTakeFolders[0].takes[0].sourceFrameCount',
+        message: expect.stringContaining('one frame'),
+      }),
+    );
   });
 
   it('caps project dimensions that directly expand UI grids', () => {

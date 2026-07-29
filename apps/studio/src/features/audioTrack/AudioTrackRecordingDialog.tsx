@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  compileMusicalTime,
+  MAX_AUDIO_TAKES_PER_FOLDER,
+  secondsBetweenBeats,
+} from '@cts/project-model';
+import {
   MAX_MICROPHONE_CAPTURE_SECONDS,
+  MIN_MICROPHONE_CAPTURE_SECONDS,
   MicrophoneCaptureError,
   startMicrophoneCapture,
   type MicrophoneCaptureSession,
@@ -28,9 +34,11 @@ import {
   commitStudioRecordingLatencyCalibration,
   discardStudioAudioTrackRecording,
   discardStudioRecordingLatencyCalibration,
+  prepareStudioAudioTrackCycleCapture,
   recordStudioAudioTrack,
   studioAudioActionErrorMessage,
   type StudioAudioActionErrorCode,
+  type StudioAudioCycleRecording,
   type StudioAudioTrackRecordingHandle,
   type StudioRecordingLatencyCalibrationHandle,
 } from '../../state/audioTrackActions';
@@ -76,6 +84,17 @@ function formatElapsed(seconds: number): string {
   const bounded = Math.max(0, Math.min(MAX_MICROPHONE_CAPTURE_SECONDS, Math.floor(seconds)));
   const minutes = Math.floor(bounded / 60);
   return `${minutes}:${String(bounded % 60).padStart(2, '0')}`;
+}
+
+function formatCycleDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '計算できません';
+  if (seconds < 10) return `${seconds.toFixed(1)}秒`;
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded % 60;
+  return minutes > 0
+    ? `${minutes}分${remainingSeconds > 0 ? `${remainingSeconds}秒` : ''}`
+    : `${rounded}秒`;
 }
 
 function awaitAudioActivationOrCancel<T>(
@@ -162,7 +181,7 @@ function recordingLatencyCalibrationFailureMessage(error: unknown): string {
   }
 }
 
-/** Record one dry, bounded take to a frozen new or existing Audio Track target. */
+/** Record one dry take or one atomic fixed-pass cycle to a frozen Audio Track target. */
 export function AudioTrackRecordingDialog({
   trackName,
   targetTrackId,
@@ -196,6 +215,9 @@ export function AudioTrackRecordingDialog({
   const [calibrationCountdown, setCalibrationCountdown] = useState(3);
   const [calibrationStatus, setCalibrationStatus] = useState<string | null>(null);
   const [calibrationError, setCalibrationError] = useState<string | null>(null);
+  // Appended after the established state slots because interaction tests freeze
+  // selected setup values by hook index.
+  const [cyclePassCount, setCyclePassCount] = useState(3);
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
   const recordingHandleRef = useRef<StudioAudioTrackRecordingHandle | null>(null);
@@ -217,6 +239,9 @@ export function AudioTrackRecordingDialog({
   const calibrationStepFocusRef = useRef<HTMLButtonElement>(null);
   const activeTakeLatencyModeRef =
     useRef<RecordingLatencyCompensationMode | null>(null);
+  const activeCycleRef = useRef<StudioAudioCycleRecording | null>(null);
+  const cycleTransportInterruptedRef = useRef(false);
+  const completedCyclePlaybackRequestIdRef = useRef<number | null>(null);
 
   const discardRecordingOwnership = (): void => {
     const handle = recordingHandleRef.current;
@@ -241,11 +266,21 @@ export function AudioTrackRecordingDialog({
   const finishCaptureError = (caught: unknown, generation: number): void => {
     captureStopRequestedRef.current = true;
     activeTakeLatencyModeRef.current = null;
+    activeCycleRef.current = null;
+    completedCyclePlaybackRequestIdRef.current = null;
     stopPairedPlayback();
     discardRecordingOwnership();
     if (!mountedRef.current || generation !== generationRef.current) return;
     abortRef.current = null;
     sessionRef.current = null;
+    if (cycleTransportInterruptedRef.current) {
+      cycleTransportInterruptedRef.current = false;
+      setError('伴奏が途中で停止したため、サイクル録音を破棄しました。');
+      setStatus('途中までのテイクは保存していません。もう一度最初から録音できます。');
+      setLevel(0);
+      setPhase('error');
+      return;
+    }
     if (
       cancelRequestedRef.current
       && caught instanceof MicrophoneCaptureError
@@ -264,6 +299,7 @@ export function AudioTrackRecordingDialog({
     capture: MicrophonePcmCapture,
     generation: number,
   ): Promise<void> => {
+    const finalizedCycle = activeCycleRef.current;
     stopPairedPlayback();
     if (!mountedRef.current || generation !== generationRef.current) {
       discardRecordingOwnership();
@@ -273,7 +309,11 @@ export function AudioTrackRecordingDialog({
     sessionRef.current = null;
     setPhase('processing');
     setProgress(0);
-    setStatus('録音を48 kHzのWAVへ変換しています…');
+    setStatus(
+      finalizedCycle
+        ? `${finalizedCycle.passCount}テイクを48 kHzのWAVへ変換しています…`
+        : '録音を48 kHzのWAVへ変換しています…',
+    );
     const controller = new AbortController();
     abortRef.current = controller;
     const recordingHandle = recordingHandleRef.current;
@@ -295,9 +335,13 @@ export function AudioTrackRecordingDialog({
           if (!mountedRef.current || generation !== generationRef.current) return;
           setProgress(Math.round(Math.max(0, Math.min(1, next.fraction)) * 100));
           setStatus(
-            next.phase === 'resampling'
-              ? '録音を48 kHzへ変換しています…'
-              : 'プロジェクト用WAVを作成しています…',
+            finalizedCycle
+              ? next.phase === 'resampling'
+                ? `${finalizedCycle.passCount}テイクを48 kHzへ変換しています…`
+                : `${finalizedCycle.passCount}テイクのプロジェクト用WAVを作成しています…`
+              : next.phase === 'resampling'
+                ? '録音を48 kHzへ変換しています…'
+                : 'プロジェクト用WAVを作成しています…',
           );
         },
       });
@@ -324,7 +368,9 @@ export function AudioTrackRecordingDialog({
             ? ''
             : ' 手動の録音位置補正を適用しました。';
       pushToast(
-        `「${result.trackName}」へ録音を保存し、伴奏と同期した位置へ配置しました。${compensation}${deduplicated}`,
+        'takeCount' in result
+          ? `「${result.trackName}」へ${result.takeCount}テイクを保存し、テイクフォルダを作成しました。${compensation}${deduplicated}`
+          : `「${result.trackName}」へ録音を保存し、伴奏と同期した位置へ配置しました。${compensation}${deduplicated}`,
         'success',
       );
       onCreated(result.trackId);
@@ -345,6 +391,9 @@ export function AudioTrackRecordingDialog({
       else setPhase('error');
     } finally {
       activeTakeLatencyModeRef.current = null;
+      activeCycleRef.current = null;
+      cycleTransportInterruptedRef.current = false;
+      completedCyclePlaybackRequestIdRef.current = null;
       finalizingRef.current = false;
       abortRef.current = null;
     }
@@ -452,6 +501,9 @@ export function AudioTrackRecordingDialog({
       || (phase !== 'idle' && phase !== 'error')
     ) return;
     activeTakeLatencyModeRef.current = null;
+    activeCycleRef.current = null;
+    cycleTransportInterruptedRef.current = false;
+    completedCyclePlaybackRequestIdRef.current = null;
     const frozenLatencyAdjustmentMs = Number(latencyAdjustmentText);
     if (
       !Number.isSafeInteger(frozenLatencyAdjustmentMs)
@@ -467,10 +519,12 @@ export function AudioTrackRecordingDialog({
     const frozenInputDeviceId = selectedInputDeviceId;
     const frozenLatencyCompensationMode =
       useStore.getState().recordingLatencyCompensationMode;
+    const cycleRequested = useStore.getState().transport.loopEnabled;
     const ownership = beginStudioAudioTrackRecording({
       target: targetTrackId === undefined
         ? { kind: 'new-track', trackName }
         : { kind: 'existing-audio-track', trackId: targetTrackId },
+      ...(cycleRequested ? { cyclePassCount: effectiveCyclePassCount } : {}),
     });
     if (!ownership.ok) {
       setError(recordingBeginFailureMessage(ownership.code));
@@ -480,6 +534,7 @@ export function AudioTrackRecordingDialog({
     }
     recordingHandleRef.current = ownership.handle;
     activeTakeLatencyModeRef.current = frozenLatencyCompensationMode;
+    activeCycleRef.current = ownership.cycle ?? null;
     const projectSnapshot = useStore.getState().project;
     const engineActivation = getAudioEngine().ensureContext();
     void engineActivation.catch(() => undefined);
@@ -537,6 +592,7 @@ export function AudioTrackRecordingDialog({
         synchronize: async ({
           context,
           contextGeneration,
+          inputLatencySeconds,
           armAtFrame,
         }) => {
           if (
@@ -545,11 +601,29 @@ export function AudioTrackRecordingDialog({
           ) {
             throw new MicrophoneCaptureError('synchronization-failed');
           }
+          const preparedCycle = ownership.cycle === null
+            ? null
+            : prepareStudioAudioTrackCycleCapture(ownership.handle, {
+                context,
+                contextGeneration,
+                inputLatencySeconds,
+              });
+          if (preparedCycle !== null && !preparedCycle.ok) {
+            throw new MicrophoneCaptureError('synchronization-failed');
+          }
           const clock = await startSynchronizedRecordingPlayback({
             operationId: ownership.handle.operationId,
             projectSnapshot,
             startBeat: ownership.startBeat,
             signal: controller.signal,
+            ...(preparedCycle === null ? {} : { cycle: preparedCycle.cycle }),
+            ...(preparedCycle === null
+              ? {}
+              : {
+                  onFiniteCycleComplete: (requestId: number) => {
+                    completedCyclePlaybackRequestIdRef.current = requestId;
+                  },
+                }),
             armCapture: async (playbackContext, startFrame, playbackGeneration) => {
               if (
                 playbackContext !== context
@@ -557,7 +631,14 @@ export function AudioTrackRecordingDialog({
               ) {
                 throw new MicrophoneCaptureError('synchronization-failed');
               }
-              await armAtFrame(startFrame);
+              if (preparedCycle === null) {
+                await armAtFrame(startFrame);
+              } else {
+                await armAtFrame(
+                  startFrame,
+                  preparedCycle.effectiveCaptureFrameCount,
+                );
+              }
             },
           });
           synchronizedPlaybackRequestIdRef.current = clock.requestId;
@@ -596,10 +677,29 @@ export function AudioTrackRecordingDialog({
           stopPairedPlayback();
           if (cancelRequestedRef.current) {
             activeTakeLatencyModeRef.current = null;
+            activeCycleRef.current = null;
+            completedCyclePlaybackRequestIdRef.current = null;
             discardRecordingOwnership();
             if (mountedRef.current && generation === generationRef.current) {
               sessionRef.current = null;
               onClose();
+            }
+            return;
+          }
+          if (
+            activeCycleRef.current !== null
+            && capture.stopReason !== 'duration-limit'
+          ) {
+            activeTakeLatencyModeRef.current = null;
+            activeCycleRef.current = null;
+            completedCyclePlaybackRequestIdRef.current = null;
+            discardRecordingOwnership();
+            if (mountedRef.current && generation === generationRef.current) {
+              sessionRef.current = null;
+              setError('サイクル録音が予定テイク数まで完了しなかったため、録音を破棄しました。');
+              setStatus('途中までのテイクは保存していません。');
+              setLevel(0);
+              setPhase('error');
             }
             return;
           }
@@ -614,9 +714,25 @@ export function AudioTrackRecordingDialog({
         || transport.phase !== 'playing'
         || transport.playbackRequestId !== pairedRequestId
       ) {
-        captureStopRequestedRef.current = true;
-        setPhase('stopping');
-        void session.stop().catch(() => undefined);
+        const completedFinitePlayback = ownership.cycle !== null
+          && transport.phase === 'stopped'
+          && pairedRequestId !== null
+          && completedCyclePlaybackRequestIdRef.current === pairedRequestId;
+        if (completedFinitePlayback) {
+          // A very short finite cycle may have reached its Nth right boundary
+          // while the microphone session promise was settling. Its positive
+          // input-latency tail must still complete at the exact armed frame.
+          setPhase('recording');
+        } else if (ownership.cycle !== null) {
+          cycleTransportInterruptedRef.current = true;
+          captureStopRequestedRef.current = true;
+          setPhase('stopping');
+          session.cancel();
+        } else {
+          captureStopRequestedRef.current = true;
+          setPhase('stopping');
+          void session.stop().catch(() => undefined);
+        }
       } else {
         setPhase('recording');
       }
@@ -653,6 +769,12 @@ export function AudioTrackRecordingDialog({
 
   const stopRecording = (): void => {
     if (phase !== 'recording' || !sessionRef.current) return;
+    if (activeCycleRef.current !== null) {
+      // A finite cycle is atomic: a user stop never adopts the completed
+      // prefix because that would silently create fewer takes than requested.
+      cancelRecording();
+      return;
+    }
     captureStopRequestedRef.current = true;
     setPhase('stopping');
     stopPairedPlayback();
@@ -764,6 +886,24 @@ export function AudioTrackRecordingDialog({
         && !captureStopRequestedRef.current
         && !finalizingRef.current
       ) {
+        if (activeCycleRef.current !== null) {
+          const reachedFinalBoundary =
+            synchronizedPlaybackRequestIdRef.current !== null
+            && completedCyclePlaybackRequestIdRef.current
+              === synchronizedPlaybackRequestIdRef.current;
+          if (reachedFinalBoundary) {
+            // Finite cycle playback naturally rewinds at the Nth right
+            // boundary. Capture can extend beyond it by the frozen positive
+            // input-latency tail, so do not stop the microphone here.
+            return;
+          }
+          cycleTransportInterruptedRef.current = true;
+          captureStopRequestedRef.current = true;
+          setPhase('stopping');
+          sessionRef.current.cancel();
+          stopPairedPlayback();
+          return;
+        }
         captureStopRequestedRef.current = true;
         setPhase('stopping');
         void sessionRef.current.stop().catch(() => undefined);
@@ -778,6 +918,8 @@ export function AudioTrackRecordingDialog({
       calibrationAbortRef.current?.abort();
       sessionRef.current?.cancel();
       activeTakeLatencyModeRef.current = null;
+      activeCycleRef.current = null;
+      completedCyclePlaybackRequestIdRef.current = null;
       stopPairedPlayback();
       // Permission/capture owns browser resources until its promise settles.
       // Its existing success/error callback releases the opaque lease after
@@ -801,6 +943,61 @@ export function AudioTrackRecordingDialog({
   const recordingTarget = targetTrackId === undefined
     ? '新しいオーディオトラック'
     : `既存トラック「${trackName}」`;
+  const currentState = useStore.getState();
+  const recordingCycleEnabled = currentState.transport.loopEnabled;
+  let cyclePassDurationSeconds: number | null = null;
+  if (recordingCycleEnabled) {
+    try {
+      const duration = secondsBetweenBeats(
+        compileMusicalTime(currentState.project),
+        currentState.transport.loopStartBeat,
+        currentState.transport.loopEndBeat,
+      );
+      if (Number.isFinite(duration) && duration > 0) {
+        cyclePassDurationSeconds = duration;
+      }
+    } catch {
+      cyclePassDurationSeconds = null;
+    }
+  }
+  const maximumCyclePassCount = cyclePassDurationSeconds === null
+    ? 0
+    : Math.min(
+        MAX_AUDIO_TAKES_PER_FOLDER,
+        Math.floor(MAX_MICROPHONE_CAPTURE_SECONDS / cyclePassDurationSeconds),
+      );
+  const requiredMinimumCyclePassCount = cyclePassDurationSeconds === null
+    ? 2
+    : Math.max(
+        2,
+        Math.ceil(MIN_MICROPHONE_CAPTURE_SECONDS / cyclePassDurationSeconds),
+      );
+  const minimumCyclePassCount = Math.min(
+    MAX_AUDIO_TAKES_PER_FOLDER,
+    requiredMinimumCyclePassCount,
+  );
+  const cycleConfigurationValid = !recordingCycleEnabled
+    || maximumCyclePassCount >= requiredMinimumCyclePassCount;
+  const effectiveCyclePassCount = recordingCycleEnabled
+    ? Math.min(
+        Math.max(minimumCyclePassCount, maximumCyclePassCount),
+        Math.max(minimumCyclePassCount, cyclePassCount),
+      )
+    : cyclePassCount;
+  const totalCycleDurationSeconds = cyclePassDurationSeconds === null
+    ? null
+    : cyclePassDurationSeconds * effectiveCyclePassCount;
+  const activeCycle = activeCycleRef.current;
+  const activeCyclePassDurationSeconds = activeCycle === null
+    ? null
+    : cyclePassDurationSeconds;
+  const activeCyclePassNumber = activeCycle === null
+    || activeCyclePassDurationSeconds === null
+    ? null
+    : Math.min(
+        activeCycle.passCount,
+        Math.floor(elapsedSeconds / activeCyclePassDurationSeconds) + 1,
+      );
   const activeCalibration = useStore.getState().recordingLatencyCalibration;
   const selectedInputLabel = selectedInputDeviceId === null
     ? 'システム既定の入力'
@@ -926,7 +1123,10 @@ export function AudioTrackRecordingDialog({
     >
       <div className="audio-track-recording">
         <p className="audio-track-recording__lead">
-          最大60秒の音声を端末内だけで録音します。3秒のカウント後、準備が整い次第、現在位置から伴奏と録音を同時に始め、{recordingTarget}へ配置します。
+          最大60秒の音声を端末内だけで録音します。3秒のカウント後、準備が整い次第、
+          {recordingCycleEnabled
+            ? 'ループ左端から伴奏と録音を同時に始め、指定回数をテイクフォルダへまとめます。'
+            : `現在位置から伴奏と録音を同時に始め、${recordingTarget}へ配置します。`}
         </p>
 
         {phase === 'idle' || phase === 'error' ? (
@@ -1062,7 +1262,47 @@ export function AudioTrackRecordingDialog({
                 <small>初期値はOFFです。ONにする場合は、ハウリングを防ぐためヘッドホンを使用してください。</small>
               </span>
             </label>
-            <p>録音音声はエフェクトを通さないドライ音です。ループ録音は現在未対応です。</p>
+            {recordingCycleEnabled ? (
+              <fieldset className="audio-track-recording__latency">
+                <legend>サイクル録音</legend>
+                <label htmlFor="audio-track-recording-cycle-pass-count">
+                  テイク数
+                </label>
+                <input
+                  id="audio-track-recording-cycle-pass-count"
+                  type="number"
+                  min={minimumCyclePassCount}
+                  max={Math.max(minimumCyclePassCount, maximumCyclePassCount)}
+                  step={1}
+                  value={effectiveCyclePassCount}
+                  aria-describedby="audio-track-recording-cycle-help"
+                  disabled={!cycleConfigurationValid}
+                  onChange={(event) => {
+                    const next = Number(event.currentTarget.value);
+                    if (!Number.isSafeInteger(next)) return;
+                    setCyclePassCount(
+                      Math.min(
+                        Math.max(minimumCyclePassCount, maximumCyclePassCount),
+                        Math.max(minimumCyclePassCount, next),
+                      ),
+                    );
+                  }}
+                />
+                <small id="audio-track-recording-cycle-help">
+                  {cycleConfigurationValid && totalCycleDurationSeconds !== null
+                    ? `ループ ${currentState.transport.loopStartBeat}〜${currentState.transport.loopEndBeat}拍を`
+                      + `${effectiveCyclePassCount}回（約${formatCycleDuration(totalCycleDurationSeconds)}）録音します。`
+                      + ' 完了後に各周を編集可能なテイクとしてまとめます。'
+                    : 'このループ範囲では、2〜128テイクかつ合計0.5〜60秒の録音条件を満たせません。範囲を調整してください。'}
+                </small>
+              </fieldset>
+            ) : null}
+            <p>
+              録音音声はエフェクトを通さないドライ音です。
+              {recordingCycleEnabled
+                ? ' 途中停止・キャンセルでは全テイクを破棄し、指定回数を完走した場合だけ保存します。'
+                : ''}
+            </p>
             {status ? <p className="audio-track-recording__status" role="status">{status}</p> : null}
             {error ? <p className="track-management__error" role="alert">{error}</p> : null}
             <div className="audio-track-recording__actions">
@@ -1071,9 +1311,14 @@ export function AudioTrackRecordingDialog({
                 type="button"
                 className="track-management__primary"
                 data-modal-initial-focus
+                disabled={!cycleConfigurationValid}
                 onClick={() => void beginRecording()}
               >
-                {phase === 'error' ? 'マイクを再試行' : '録音を開始'}
+                {phase === 'error'
+                  ? 'マイクを再試行'
+                  : recordingCycleEnabled
+                    ? `${effectiveCyclePassCount}テイクを録音`
+                    : '録音を開始'}
               </button>
               {onBack ? <button type="button" onClick={onBack}>録音方法へ戻る</button> : null}
               <button type="button" onClick={onClose}>キャンセル</button>
@@ -1093,7 +1338,10 @@ export function AudioTrackRecordingDialog({
             <p className="audio-track-recording__countdown" role="status" aria-live="assertive">
               録音開始まで{countdown}秒
             </p>
-            <p>カウントのあと、伴奏と録音を同じオーディオ時計で開始します。</p>
+            <p>
+              カウントのあと、伴奏と録音を同じオーディオ時計で開始します。
+              {activeCycle ? ` ${activeCycle.passCount}テイクを連続録音します。` : ''}
+            </p>
             <button ref={cancelButtonRef} type="button" onClick={cancelRecording}>キャンセル</button>
           </>
         ) : null}
@@ -1101,7 +1349,10 @@ export function AudioTrackRecordingDialog({
         {phase === 'preparing' ? (
           <>
             <p role="status" aria-live="polite">伴奏と録音を同期する準備をしています…</p>
-            <p>準備ができ次第、同じオーディオ時計で開始します。</p>
+            <p>
+              準備ができ次第、同じオーディオ時計で開始します。
+              {activeCycle ? ' ループ境界と各テイクの長さを固定しています。' : ''}
+            </p>
             <button ref={cancelButtonRef} type="button" onClick={cancelRecording}>キャンセル</button>
           </>
         ) : null}
@@ -1110,10 +1361,21 @@ export function AudioTrackRecordingDialog({
           <>
             <p className="audio-track-recording__state" role="status" aria-live="polite">
               <span aria-hidden="true" className="audio-track-recording__indicator" />
-              {phase === 'recording' ? '録音中・伴奏再生中' : '録音と伴奏を終了しています…'}
+              {phase === 'recording'
+                ? activeCycle
+                  ? totalCycleDurationSeconds !== null
+                    && elapsedSeconds >= totalCycleDurationSeconds
+                    ? '最終テイクの入力遅延を収録中'
+                    : `サイクル録音中・テイク ${activeCyclePassNumber ?? 1}/${activeCycle.passCount}`
+                  : '録音中・伴奏再生中'
+                : activeCycle
+                  ? 'サイクル録音を破棄しています…'
+                  : '録音と伴奏を終了しています…'}
             </p>
             <p className="audio-track-recording__time" role="timer" aria-label="録音時間">
-              {formatElapsed(elapsedSeconds)} / 1:00
+              {formatElapsed(elapsedSeconds)} / {activeCycle && totalCycleDurationSeconds !== null
+                ? formatCycleDuration(totalCycleDurationSeconds)
+                : '1:00'}
             </p>
             <div
               className="audio-track-recording__meter"
@@ -1136,11 +1398,13 @@ export function AudioTrackRecordingDialog({
                 disabled={phase !== 'recording'}
                 onClick={stopRecording}
               >
-                録音を終了して保存
+                {activeCycle ? 'サイクル録音を中止して破棄' : '録音を終了して保存'}
               </button>
-              <button type="button" disabled={phase === 'stopping'} onClick={cancelRecording}>
-                録音を破棄
-              </button>
+              {!activeCycle ? (
+                <button type="button" disabled={phase === 'stopping'} onClick={cancelRecording}>
+                  録音を破棄
+                </button>
+              ) : null}
             </div>
           </>
         ) : null}

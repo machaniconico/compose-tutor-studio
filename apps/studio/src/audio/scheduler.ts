@@ -1108,7 +1108,7 @@ export type SchedulerOptions = {
 /**
  * Lookahead scheduler. Drives playback of a fixed list of beat-stamped events
  * against the audio clock, honoring an optional loop region and stopping at the
- * project end when looping is off.
+ * finite unwrapped end when supplied. Ordinary loops pass Infinity.
  */
 export class Scheduler {
   private readonly clock: ClockFn;
@@ -1155,7 +1155,7 @@ export class Scheduler {
    * @param tempo      fixed tempo or a precompiled beat/time mapping
    * @param startBeat  playhead start position in beats
    * @param loop       loop region, or null for one-shot playback
-   * @param endBeat    project end (stop point when loop is off)
+   * @param endBeat    unwrapped stop point, or Infinity for an ordinary loop
    */
   start(
     events: readonly ScheduledEvent[],
@@ -1297,8 +1297,9 @@ export class Scheduler {
       this.anchorTime,
     );
 
-    // Stop-at-end: clamp the horizon to the project end when not looping.
-    const effectiveHorizon = this.loop ? horizonBeat : Math.min(horizonBeat, this.endBeat);
+    // A finite end is also meaningful for recording-only cycle playback. The
+    // ordinary transport loop continues to pass Infinity and remains unbounded.
+    const effectiveHorizon = Math.min(horizonBeat, this.endBeat);
 
     // A throttled timer or resumed device may wake after the prior frontier.
     // Past AudioContext times cannot be recovered faithfully and scheduling
@@ -1319,12 +1320,11 @@ export class Scheduler {
     }
     this.scheduledBeat = Math.max(this.scheduledBeat, effectiveHorizon);
 
-    // End handling (loop off): once the playhead itself has reached the end.
-    if (!this.loop && this.scheduledBeat >= this.endBeat) {
-      if (playheadBeat >= this.endBeat) {
-        this.stop();
-        this.onEnd?.();
-      }
+    // End handling: one-shot playback and explicitly finite loops both stop at
+    // the unwrapped end. Infinite transport loops never satisfy this boundary.
+    if (this.scheduledBeat >= this.endBeat && playheadBeat >= this.endBeat) {
+      this.stop();
+      this.onEnd?.();
     }
   }
 }

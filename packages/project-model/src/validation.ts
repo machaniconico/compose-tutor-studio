@@ -7,6 +7,7 @@ import {
   compileMusicalTime,
   projectDrumStep,
   projectLengthBeats as projectTimelineLengthBeats,
+  secondsBetweenBeats,
 } from './time';
 import type { Project } from './types';
 import { CURRENT_SCHEMA_VERSION } from './factories';
@@ -386,6 +387,15 @@ export function validateProject(project: Project): ValidationResult {
     push(error.path, error.message);
   }
 
+  let musicalTimeIndex: ReturnType<typeof compileMusicalTime> | null = null;
+  if (tempoMapValid && signatureSegmentsValid) {
+    try {
+      musicalTimeIndex = compileMusicalTime(project);
+    } catch {
+      // Map-specific errors above are more actionable than a derived-index error.
+    }
+  }
+
   if (project.audioTakeFolders.length > MAX_AUDIO_TAKE_FOLDERS) {
     push(
       'audioTakeFolders',
@@ -507,6 +517,37 @@ export function validateProject(project: Project): ValidationResult {
       ) {
         push(`${takePath}.sourceFrameCount`, 'Audio take source range must fit within the asset');
       }
+      if (
+        asset?.availability === 'ready'
+        && musicalTimeIndex !== null
+        && Number.isFinite(folder.startBeat)
+        && folder.startBeat >= 0
+        && Number.isFinite(take.offsetBeats)
+        && take.offsetBeats >= 0
+        && Number.isFinite(take.lengthBeats)
+        && take.lengthBeats >= MIN_EVENT_DURATION_BEATS
+        && folder.startBeat + take.offsetBeats + take.lengthBeats
+          <= musicalTimeIndex.lengthBeats
+        && Number.isSafeInteger(take.sourceFrameCount)
+        && take.sourceFrameCount > 0
+      ) {
+        const takeStartBeat = folder.startBeat + take.offsetBeats;
+        const requiredFrames = secondsBetweenBeats(
+          musicalTimeIndex,
+          takeStartBeat,
+          takeStartBeat + take.lengthBeats,
+        ) * asset.sampleRate;
+        if (
+          Number.isFinite(requiredFrames)
+          && requiredFrames > 0
+          && take.sourceFrameCount + 1 < requiredFrames
+        ) {
+          push(
+            `${takePath}.sourceFrameCount`,
+            'Audio take source must cover its timeline window within one frame of rounding tolerance',
+          );
+        }
+      }
       for (const field of ['fadeInFrames', 'fadeOutFrames'] as const) {
         if (!Number.isSafeInteger(take[field]) || take[field] < 0) {
           push(`${takePath}.${field}`, `${field} must be a non-negative safe integer`);
@@ -622,15 +663,6 @@ export function validateProject(project: Project): ValidationResult {
       }
     });
   });
-
-  let musicalTimeIndex: ReturnType<typeof compileMusicalTime> | null = null;
-  if (tempoMapValid && signatureSegmentsValid) {
-    try {
-      musicalTimeIndex = compileMusicalTime(project);
-    } catch {
-      // Map-specific errors above are more actionable than a derived-index error.
-    }
-  }
 
   const clipsById = new Map<string, { clip: Project['tracks'][number]['clips'][number]; trackId: string }>();
   for (const track of project.tracks) {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryProjectRepository } from '@cts/project-persistence';
-import { beatsPerBar } from '@cts/project-model';
+import {
+  beatsPerBar,
+  MAX_AUDIO_TAKES_PER_FOLDER,
+  MIN_EVENT_DURATION_BEATS,
+} from '@cts/project-model';
 import type { AppEvent } from '@cts/tutorial-engine';
 import { subscribeAppEvents } from '../src/state/appEvents';
 import { createDefaultProject } from '../src/state/defaultProject';
@@ -867,6 +871,139 @@ describe('transport playback lifecycle', () => {
       loopEndBeat: 6,
       positionBeat: 6,
     });
+  });
+
+  it('adopts only an exact in-project loop range and keeps runtime changes out of history', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const before = store.getState();
+    store.getState().setPosition(7);
+
+    expect(store.getState().setLoopRange(2, 6)).toBe(true);
+
+    expect(store.getState().transport).toMatchObject({
+      phase: 'stopped',
+      isPlaying: false,
+      playbackRequestId: before.transport.playbackRequestId,
+      loopEnabled: true,
+      loopStartBeat: 2,
+      loopEndBeat: 6,
+      positionBeat: 2,
+    });
+    expect(store.getState().project).toBe(before.project);
+    expect(store.getState().past).toBe(before.past);
+    expect(store.getState().future).toBe(before.future);
+  });
+
+  it.each([
+    [Number.NaN, 4],
+    [0, Number.POSITIVE_INFINITY],
+    [-1, 4],
+    [0, 33],
+    [4, 4],
+    [5, 4],
+    [2, 2 + MIN_EVENT_DURATION_BEATS / 2],
+  ])('rejects an invalid loop range (%s, %s) without changing transport', (startBeat, endBeat) => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const before = store.getState().transport;
+
+    expect(store.getState().setLoopRange(startBeat, endBeat)).toBe(false);
+    expect(store.getState().transport).toBe(before);
+  });
+
+  it('supersedes active playback and restarts at the new loop start when outside the range', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    store.getState().setPosition(7);
+    store.getState().play();
+    const requestId = store.getState().transport.playbackRequestId;
+    store.getState().confirmPlaybackStarted(requestId);
+    store.setState((state) => ({
+      transport: { ...state.transport, audioIssue: 'interrupted' },
+    }));
+
+    expect(store.getState().setLoopRange(2, 6)).toBe(true);
+    expect(store.getState().transport).toMatchObject({
+      phase: 'starting',
+      isPlaying: false,
+      playbackRequestId: requestId + 1,
+      audioIssue: null,
+      loopEnabled: true,
+      loopStartBeat: 2,
+      loopEndBeat: 6,
+      positionBeat: 2,
+    });
+  });
+
+  it('rejects loop-range changes while a recording operation owns transport', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const operationId = store.getState().tryBeginAudioRecordingOperation();
+    expect(operationId).not.toBeNull();
+    const before = store.getState().transport;
+
+    expect(store.getState().setLoopRange(2, 6)).toBe(false);
+    expect(store.getState().transport).toBe(before);
+  });
+
+  it('keeps one-shot recording loop-off and accepts only an exact finite cycle intent', () => {
+    const oneShot = createStudioStore(new MemoryProjectRepository());
+    const oneShotOperationId = oneShot.getState().tryBeginAudioRecordingOperation();
+    if (oneShotOperationId === null) throw new Error('recording ownership fixture missing');
+    expect(oneShot.getState().startAudioRecordingPlayback(oneShotOperationId, 1)).not.toBeNull();
+
+    const cycle = createStudioStore(new MemoryProjectRepository());
+    expect(cycle.getState().setLoopRange(2, 6)).toBe(true);
+    const cycleOperationId = cycle.getState().tryBeginAudioRecordingOperation();
+    if (cycleOperationId === null) throw new Error('cycle recording ownership fixture missing');
+    expect(cycle.getState().startAudioRecordingPlayback(cycleOperationId, 2, {
+      loopStartBeat: 2,
+      loopEndBeat: 6,
+      passCount: 3,
+    })).not.toBeNull();
+    expect(cycle.getState().transport).toMatchObject({
+      phase: 'starting',
+      positionBeat: 2,
+      loopEnabled: true,
+      loopStartBeat: 2,
+      loopEndBeat: 6,
+    });
+  });
+
+  it.each([
+    [{ loopStartBeat: 2, loopEndBeat: 6, passCount: 1 }, 2],
+    [{ loopStartBeat: 2, loopEndBeat: 6, passCount: 2.5 }, 2],
+    [{ loopStartBeat: 2, loopEndBeat: 6, passCount: MAX_AUDIO_TAKES_PER_FOLDER + 1 }, 2],
+    [{ loopStartBeat: 1, loopEndBeat: 6, passCount: 2 }, 2],
+    [{ loopStartBeat: 2, loopEndBeat: 7, passCount: 2 }, 2],
+    [{ loopStartBeat: 2, loopEndBeat: 6, passCount: 2 }, 3],
+  ])('rejects mismatched cycle recording intent %# without changing transport', (cycle, startBeat) => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    expect(store.getState().setLoopRange(2, 6)).toBe(true);
+    const operationId = store.getState().tryBeginAudioRecordingOperation();
+    if (operationId === null) throw new Error('cycle recording ownership fixture missing');
+    const before = store.getState().transport;
+
+    expect(store.getState().startAudioRecordingPlayback(operationId, startBeat, cycle)).toBeNull();
+    expect(store.getState().transport).toBe(before);
+  });
+
+  it('rejects a one-shot intent while loop is enabled and a cycle intent while loop is disabled', () => {
+    const loopOn = createStudioStore(new MemoryProjectRepository());
+    expect(loopOn.getState().setLoopRange(2, 6)).toBe(true);
+    const loopOnOperationId = loopOn.getState().tryBeginAudioRecordingOperation();
+    if (loopOnOperationId === null) throw new Error('loop-on ownership fixture missing');
+    const loopOnBefore = loopOn.getState().transport;
+    expect(loopOn.getState().startAudioRecordingPlayback(loopOnOperationId, 2)).toBeNull();
+    expect(loopOn.getState().transport).toBe(loopOnBefore);
+
+    const loopOff = createStudioStore(new MemoryProjectRepository());
+    const loopOffOperationId = loopOff.getState().tryBeginAudioRecordingOperation();
+    if (loopOffOperationId === null) throw new Error('loop-off ownership fixture missing');
+    const loopOffBefore = loopOff.getState().transport;
+    expect(loopOff.getState().startAudioRecordingPlayback(loopOffOperationId, 2, {
+      loopStartBeat: 2,
+      loopEndBeat: 6,
+      passCount: 2,
+    })).toBeNull();
+    expect(loopOff.getState().transport).toBe(loopOffBefore);
   });
 
   it('supersedes starting and playing generations when the loop setting changes', () => {

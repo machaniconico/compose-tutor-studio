@@ -62,6 +62,9 @@ test('keeps the primary editor usable at the Tauri minimum window size', async (
   await mixer.getByRole('slider', { name: 'Chords 音量', exact: true }).focus();
   await page.setViewportSize({ width: 1_024, height: 640 });
   await expect(page.getByRole('button', { name: 'カラオケ用音源を作る' })).toBeVisible();
+  const loopRangeEditor = page.getByRole('button', { name: /ループ範囲を編集/ });
+  await expect(loopRangeEditor).toBeVisible();
+  await expect(loopRangeEditor).toBeInViewport();
   const expand = mixer.getByRole('button', { name: 'ミキサーを開く', exact: true });
   await expect(expand).toBeFocused();
   await expect(expand).toHaveAttribute('aria-expanded', 'false');

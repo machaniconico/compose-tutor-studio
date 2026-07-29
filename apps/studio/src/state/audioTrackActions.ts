@@ -1,5 +1,6 @@
 import {
   appendAudioTrackClip,
+  createRecordedAudioTakeFolder,
   createAudioTrackClip,
   deleteAudioClip,
   duplicateAudioClip,
@@ -18,6 +19,8 @@ import {
   compileMusicalTime,
   secondsBetweenBeats,
   MAX_AUDIO_ASSETS,
+  MAX_AUDIO_TAKE_FOLDERS,
+  MAX_AUDIO_TAKES_PER_FOLDER,
   MAX_CLIPS_PER_TRACK,
   MAX_PROJECT_TRACKS,
 } from '@cts/project-model';
@@ -35,6 +38,11 @@ import {
   type SynchronizedRecordingPlaybackClock,
 } from '../audio/playback';
 import { planSynchronizedRecordingPlacement } from '../audio/recordingAlignment';
+import {
+  planCycleRecording,
+  type CycleRecordingPassWindow,
+  type CycleRecordingPlan,
+} from '../audio/cycleRecording';
 import {
   AudioResourceReservationError,
   MAX_HEAVY_AUDIO_RESOURCE_BYTES,
@@ -96,6 +104,9 @@ export type StudioAudioActionErrorCode =
   | 'canonicalize-failed'
   | 'asset-store-failed'
   | 'transport-loop-enabled'
+  | 'cycle-recording-invalid'
+  | 'take-folder-limit'
+  | 'take-limit'
   | 'recording-window-too-short'
   | 'recording-alignment-failed'
   | 'commit-rejected';
@@ -152,6 +163,8 @@ export type StudioAudioTrackRecordingTarget =
 
 export type BeginStudioAudioTrackRecordingOptions = Readonly<{
   target?: StudioAudioTrackRecordingTarget;
+  /** Omit for the existing one-shot path. Requires an enabled explicit loop. */
+  cyclePassCount?: number;
 }>;
 
 export type RecordStudioAudioTrackDependencies = Readonly<{
@@ -161,7 +174,23 @@ export type RecordStudioAudioTrackDependencies = Readonly<{
   createAssetId?: () => string;
 }>;
 
-export type RecordStudioAudioTrackResult = ImportStudioAudioTrackResult;
+export type RecordStudioAudioTrackResult =
+  | Extract<ImportStudioAudioTrackResult, { ok: true }>
+  | Readonly<{
+      ok: true;
+      changed: true;
+      trackId: string;
+      trackName: string;
+      folderId: string;
+      audioAssetIds: readonly string[];
+      takeCount: number;
+      deduplicated: boolean;
+      playbackStopped: boolean;
+      /** Absent on a cycle result; retained as optional for source compatibility. */
+      clipId?: undefined;
+      audioAssetId?: undefined;
+    }>
+  | Readonly<{ ok: false; code: StudioAudioActionErrorCode }>;
 
 export type ImportStudioAudioTrackDependencies = Readonly<{
   repository?: AudioAssetRepository;
@@ -290,12 +319,26 @@ export type StudioAudioTrackRecordingHandle = Readonly<{
   [studioAudioTrackRecordingHandleBrand]: true;
 }>;
 
+export type StudioAudioCycleRecording = Readonly<{
+  loopStartBeat: number;
+  loopEndBeat: number;
+  passCount: number;
+}>;
+
+type PreparedStudioAudioCycleRecording = Readonly<{
+  contextGeneration: number;
+  inputLatencySeconds: number;
+  plan: CycleRecordingPlan;
+}>;
+
 type StudioAudioTrackRecordingOwnership = {
   lease: AudioTrackImportLease;
   snapshot: Project;
   operationId: number;
   startBeat: number;
   target: StudioAudioTrackRecordingTarget;
+  cycle: StudioAudioCycleRecording | null;
+  preparedCycle: PreparedStudioAudioCycleRecording | null;
   playbackStopped: boolean;
   latencyPolicy: Readonly<{
     compensationMode: RecordingLatencyCompensationMode;
@@ -317,6 +360,7 @@ type StudioAudioTrackRecordingSynchronization = Readonly<{
   manualAdjustmentMs: number;
   estimatedPlaybackLatencySeconds: number;
   calibratedRoundTripLatencySeconds: number | null;
+  cyclePlan: CycleRecordingPlan | null;
 }>;
 
 const studioAudioTrackRecordingOwnership = new WeakMap<
@@ -379,6 +423,7 @@ export type BeginStudioAudioTrackRecordingResult =
       handle: StudioAudioTrackRecordingHandle;
       startBeat: number;
       playbackStopped: boolean;
+      cycle: StudioAudioCycleRecording | null;
     }>
   | Readonly<{
       ok: false;
@@ -392,6 +437,9 @@ export type BeginStudioAudioTrackRecordingResult =
         | 'track-limit'
         | 'clip-limit'
         | 'transport-loop-enabled'
+        | 'cycle-recording-invalid'
+        | 'take-folder-limit'
+        | 'take-limit'
         | 'recording-window-too-short';
     }>;
 
@@ -400,12 +448,47 @@ type BeginStudioAudioTrackRecordingFailure = Extract<
   { ok: false }
 >;
 
+export type PrepareStudioAudioTrackCycleCaptureResult =
+  | Readonly<{
+      ok: true;
+      cycle: StudioAudioCycleRecording;
+      effectiveCaptureFrameCount: number;
+      durationSeconds: number;
+    }>
+  | Readonly<{
+      ok: false;
+      code: 'commit-rejected' | 'recording-alignment-failed';
+    }>;
+
+export type PrepareStudioAudioTrackCycleCaptureInput = Readonly<{
+  context: AudioContext;
+  contextGeneration: number;
+  /** Frozen input-track estimate supplied by the microphone graph. */
+  inputLatencySeconds: number | null;
+}>;
+
 function recordingTargetPreflight(
   project: Project,
   target: StudioAudioTrackRecordingTarget,
+  options: Readonly<{
+    audioAssetCount: number;
+    createsClip: boolean;
+    createsTakeFolder: boolean;
+  }> = {
+    audioAssetCount: 1,
+    createsClip: true,
+    createsTakeFolder: false,
+  },
 ): BeginStudioAudioTrackRecordingFailure | null {
-  if (project.audioAssets.length >= MAX_AUDIO_ASSETS) {
+  if (
+    !Number.isSafeInteger(options.audioAssetCount)
+    || options.audioAssetCount <= 0
+    || project.audioAssets.length + options.audioAssetCount > MAX_AUDIO_ASSETS
+  ) {
     return { ok: false, code: 'audio-asset-limit' };
+  }
+  if (options.createsTakeFolder && project.audioTakeFolders.length >= MAX_AUDIO_TAKE_FOLDERS) {
+    return { ok: false, code: 'take-folder-limit' };
   }
   if (target.kind === 'new-track') {
     return project.tracks.length >= MAX_PROJECT_TRACKS
@@ -415,7 +498,7 @@ function recordingTargetPreflight(
   const track = project.tracks.find((candidate) => candidate.id === target.trackId);
   if (!track) return { ok: false, code: 'track-not-found' };
   if (track.type !== 'audio') return { ok: false, code: 'unsupported-track-type' };
-  return track.clips.length >= MAX_CLIPS_PER_TRACK
+  return options.createsClip && track.clips.length >= MAX_CLIPS_PER_TRACK
     ? { ok: false, code: 'clip-limit' }
     : null;
 }
@@ -563,28 +646,86 @@ export function beginStudioAudioTrackRecording(
           ? { trackName: requestedTarget.trackName }
           : {}),
       });
-  const preflight = recordingTargetPreflight(snapshot, target);
-  if (preflight) return preflight;
-  if (state.transport.loopEnabled) {
-    return { ok: false, code: 'transport-loop-enabled' };
+  let cycle: StudioAudioCycleRecording | null = null;
+  let startBeat: number;
+  if (options.cyclePassCount === undefined) {
+    if (state.transport.loopEnabled) {
+      return { ok: false, code: 'transport-loop-enabled' };
+    }
+    startBeat = state.transport.positionBeat;
+  } else {
+    const passCount = options.cyclePassCount;
+    const loopStartBeat = state.transport.loopStartBeat;
+    const loopEndBeat = state.transport.loopEndBeat;
+    if (
+      !state.transport.loopEnabled
+      || !Number.isSafeInteger(passCount)
+      || passCount < 2
+      || passCount > MAX_AUDIO_TAKES_PER_FOLDER
+      || !Number.isFinite(loopStartBeat)
+      || !Number.isFinite(loopEndBeat)
+      || loopStartBeat < 0
+      || loopEndBeat <= loopStartBeat
+      || loopEndBeat > snapshot.lengthBeats
+    ) {
+      return { ok: false, code: 'cycle-recording-invalid' };
+    }
+    cycle = Object.freeze({ loopStartBeat, loopEndBeat, passCount });
+    startBeat = loopStartBeat;
   }
-  const startBeat = state.transport.positionBeat;
+  const preflight = recordingTargetPreflight(snapshot, target, {
+    audioAssetCount: cycle?.passCount ?? 1,
+    createsClip: cycle === null,
+    createsTakeFolder: cycle !== null,
+  });
+  if (preflight) return preflight;
   try {
-    const remainingSeconds = secondsBetweenBeats(
-      compileMusicalTime(snapshot),
-      startBeat,
-      snapshot.lengthBeats,
-    );
+    const musicalTime = compileMusicalTime(snapshot);
+    const availableSeconds = cycle === null
+      ? secondsBetweenBeats(musicalTime, startBeat, snapshot.lengthBeats)
+      : secondsBetweenBeats(
+          musicalTime,
+          cycle.loopStartBeat,
+          cycle.loopEndBeat,
+        ) * cycle.passCount;
     if (
       !Number.isFinite(startBeat)
+      || !Number.isFinite(availableSeconds)
       || startBeat < 0
       || startBeat >= snapshot.lengthBeats
-      || remainingSeconds < MIN_MICROPHONE_CAPTURE_SECONDS
+      || availableSeconds < MIN_MICROPHONE_CAPTURE_SECONDS
+      || (
+        cycle !== null
+        && (
+          availableSeconds > MAX_MICROPHONE_CAPTURE_SECONDS
+          || (
+            target.kind === 'existing-audio-track'
+            && snapshot.audioTakeFolders.some((folder) => (
+              folder.trackId === target.trackId
+              && Math.abs(folder.startBeat - cycle.loopStartBeat) <= 1e-9
+              && Math.abs(
+                folder.lengthBeats
+                  - (cycle.loopEndBeat - cycle.loopStartBeat),
+              ) <= 1e-9
+            ))
+          )
+        )
+      )
     ) {
-      return { ok: false, code: 'recording-window-too-short' };
+      return {
+        ok: false,
+        code: availableSeconds < MIN_MICROPHONE_CAPTURE_SECONDS
+          ? 'recording-window-too-short'
+          : 'cycle-recording-invalid',
+      };
     }
   } catch {
-    return { ok: false, code: 'recording-window-too-short' };
+    return {
+      ok: false,
+      code: cycle === null
+        ? 'recording-window-too-short'
+        : 'cycle-recording-invalid',
+    };
   }
 
   const lease = tryAcquireAudioTrackImportLease();
@@ -619,6 +760,8 @@ export function beginStudioAudioTrackRecording(
     operationId,
     startBeat,
     target,
+    cycle,
+    preparedCycle: null,
     playbackStopped,
     latencyPolicy: Object.freeze({
       compensationMode: state.recordingLatencyCompensationMode,
@@ -629,7 +772,7 @@ export function beginStudioAudioTrackRecording(
     finalizing: false,
     finished: false,
   });
-  return { ok: true, handle, startBeat, playbackStopped };
+  return { ok: true, handle, startBeat, playbackStopped, cycle };
 }
 
 function finiteNonNegativeLatency(value: unknown): number {
@@ -659,6 +802,105 @@ export function estimateStudioRecordingPlaybackLatencySeconds(
     // Older Web Audio hosts may not expose an output-device estimate.
   }
   return baseLatency + outputLatency + MASTER_LIMITER_LOOKAHEAD_SECONDS;
+}
+
+/**
+ * Freeze the frame-exact finite-cycle plan before either playback or capture
+ * starts. This is deliberately separate from begin(): only the shared
+ * AudioContext can supply the real sample rate and device-latency snapshot.
+ */
+export function prepareStudioAudioTrackCycleCapture(
+  handle: StudioAudioTrackRecordingHandle,
+  input: PrepareStudioAudioTrackCycleCaptureInput,
+): PrepareStudioAudioTrackCycleCaptureResult {
+  const ownership = studioAudioTrackRecordingOwnership.get(handle);
+  const state = useStore.getState();
+  if (
+    !ownership
+    || ownership.finished
+    || ownership.finalizing
+    || ownership.cycle === null
+    || ownership.preparedCycle !== null
+    || ownership.synchronization !== null
+    || ownership.lease !== activeAudioTrackImportLease
+    || state.project !== ownership.snapshot
+    || state.audioRecordingOperationId !== ownership.operationId
+    || state.transport.phase !== 'stopped'
+    || !Number.isSafeInteger(input.contextGeneration)
+    || input.contextGeneration <= 0
+    || !Number.isSafeInteger(input.context.sampleRate)
+    || input.context.sampleRate <= 0
+  ) {
+    return { ok: false, code: 'commit-rejected' };
+  }
+
+  const {
+    compensationMode,
+    calibration,
+    manualAdjustmentMs,
+  } = ownership.latencyPolicy;
+  const inputLatencySeconds = finiteNonNegativeLatency(input.inputLatencySeconds);
+  let automaticLatencySeconds: number;
+  if (compensationMode === 'calibrated') {
+    if (
+      calibration === null
+      || calibration.inputDeviceId !== state.preferredMicrophoneInputDeviceId
+      || calibration.contextGeneration !== input.contextGeneration
+      || calibration.sampleRate !== input.context.sampleRate
+      || !Number.isSafeInteger(calibration.latencyFrames)
+      || calibration.latencyFrames < 0
+      || calibration.latencyFrames
+        > calibration.sampleRate * MAX_RECORDING_LATENCY_CALIBRATION_SECONDS
+    ) {
+      return { ok: false, code: 'recording-alignment-failed' };
+    }
+    automaticLatencySeconds = calibration.latencyFrames / calibration.sampleRate;
+  } else if (compensationMode === 'estimated') {
+    automaticLatencySeconds = estimateStudioRecordingPlaybackLatencySeconds(
+      input.context,
+    ) + inputLatencySeconds;
+  } else if (compensationMode === 'off') {
+    automaticLatencySeconds = 0;
+  } else {
+    return { ok: false, code: 'recording-alignment-failed' };
+  }
+  if (
+    !Number.isSafeInteger(manualAdjustmentMs)
+    || manualAdjustmentMs < MIN_RECORDING_LATENCY_ADJUSTMENT_MS
+    || manualAdjustmentMs > MAX_RECORDING_LATENCY_ADJUSTMENT_MS
+  ) {
+    return { ok: false, code: 'recording-alignment-failed' };
+  }
+
+  let planned: ReturnType<typeof planCycleRecording>;
+  try {
+    planned = planCycleRecording({
+      musicalTime: compileMusicalTime(ownership.snapshot),
+      loopStartBeat: ownership.cycle.loopStartBeat,
+      loopEndBeat: ownership.cycle.loopEndBeat,
+      passCount: ownership.cycle.passCount,
+      sampleRate: input.context.sampleRate,
+      latencyCompensationSeconds:
+        automaticLatencySeconds + manualAdjustmentMs / 1_000,
+    });
+  } catch {
+    return { ok: false, code: 'recording-alignment-failed' };
+  }
+  if (!planned.ok) {
+    return { ok: false, code: 'recording-alignment-failed' };
+  }
+  ownership.preparedCycle = Object.freeze({
+    contextGeneration: input.contextGeneration,
+    inputLatencySeconds,
+    plan: planned.plan,
+  });
+  return {
+    ok: true,
+    cycle: ownership.cycle,
+    effectiveCaptureFrameCount: planned.plan.effectiveCaptureFrameCount,
+    durationSeconds:
+      planned.plan.effectiveCaptureFrameCount / planned.plan.sampleRate,
+  };
 }
 
 /**
@@ -692,6 +934,25 @@ export function bindStudioAudioTrackRecordingToPlayback(
     || clock.anchorContextFrame < 0
     || !Number.isSafeInteger(clock.requestId)
     || clock.requestId < 0
+    || (
+      ownership.cycle === null
+        ? ownership.preparedCycle !== null
+          || clock.cycle !== undefined
+          || clock.cycleEndBeat !== undefined
+        : ownership.preparedCycle === null
+          || ownership.preparedCycle.contextGeneration !== clock.contextGeneration
+          || ownership.preparedCycle.plan.sampleRate !== clock.sampleRate
+          || clock.cycle === undefined
+          || clock.cycle.loopStartBeat !== ownership.cycle.loopStartBeat
+          || clock.cycle.loopEndBeat !== ownership.cycle.loopEndBeat
+          || clock.cycle.passCount !== ownership.cycle.passCount
+          || clock.cycleEndBeat !== (
+            ownership.cycle.loopStartBeat
+              + (
+                ownership.cycle.loopEndBeat - ownership.cycle.loopStartBeat
+              ) * ownership.cycle.passCount
+          )
+    )
   ) {
     return false;
   }
@@ -729,6 +990,28 @@ export function bindStudioAudioTrackRecordingToPlayback(
   ) {
     return false;
   }
+  const estimatedPlaybackLatencySeconds =
+    estimateStudioRecordingPlaybackLatencySeconds(clock.context);
+  if (ownership.preparedCycle !== null) {
+    const automaticLatencySeconds = compensationMode === 'calibrated'
+      ? calibration!.latencyFrames / calibration!.sampleRate
+      : compensationMode === 'estimated'
+        ? estimatedPlaybackLatencySeconds + ownership.preparedCycle.inputLatencySeconds
+        : 0;
+    const reboundLatencyFrames = Math.round(
+      (
+        automaticLatencySeconds
+        + manualAdjustmentMs / 1_000
+      ) * clock.sampleRate,
+    );
+    if (
+      !Number.isSafeInteger(reboundLatencyFrames)
+      || reboundLatencyFrames
+        !== ownership.preparedCycle.plan.latencyCompensationFrames
+    ) {
+      return false;
+    }
+  }
   ownership.synchronization = Object.freeze({
     contextGeneration: clock.contextGeneration,
     sampleRate: clock.sampleRate,
@@ -737,13 +1020,12 @@ export function bindStudioAudioTrackRecordingToPlayback(
     requestId: clock.requestId,
     compensationMode,
     manualAdjustmentMs,
-    estimatedPlaybackLatencySeconds: estimateStudioRecordingPlaybackLatencySeconds(
-      clock.context,
-    ),
+    estimatedPlaybackLatencySeconds,
     calibratedRoundTripLatencySeconds:
       compensationMode === 'calibrated' && calibration !== null
         ? calibration.latencyFrames / calibration.sampleRate
         : null,
+    cyclePlan: ownership.preparedCycle?.plan ?? null,
   });
   return true;
 }
@@ -1252,6 +1534,72 @@ function createRecordingAudioBuffer(capture: MicrophonePcmCapture): AudioBuffer 
   }
 }
 
+/**
+ * Materialize one compensated pass without allowing samples from an adjacent
+ * lap to leak into it. Positive compensation trims the pass source window;
+ * negative compensation prepends explicit zeroes.
+ */
+export function createCycleRecordingPassCapture(
+  capture: MicrophonePcmCapture,
+  pass: CycleRecordingPassWindow,
+): MicrophonePcmCapture {
+  if (
+    !Number.isSafeInteger(pass.outputFrameCount)
+    || pass.outputFrameCount <= 0
+    || !Number.isSafeInteger(pass.leadingSilenceFrames)
+    || pass.leadingSilenceFrames < 0
+    || !Number.isSafeInteger(pass.captureSourceStartFrame)
+    || !Number.isSafeInteger(pass.captureSourceEndFrameExclusive)
+    || pass.captureSourceStartFrame < 0
+    || pass.captureSourceEndFrameExclusive > capture.length
+    || pass.captureSourceEndFrameExclusive <= pass.captureSourceStartFrame
+    || pass.captureSourceFrameCount
+      !== pass.captureSourceEndFrameExclusive - pass.captureSourceStartFrame
+    || pass.outputFrameCount
+      !== pass.leadingSilenceFrames + pass.captureSourceFrameCount
+  ) {
+    throw new CanonicalAudioAssetError('invalid-audio');
+  }
+
+  const channels = Array.from(
+    { length: capture.numberOfChannels },
+    (_, channel) => {
+      const source = capture.getChannelData(channel);
+      if (source.length !== capture.length) {
+        throw new CanonicalAudioAssetError('invalid-audio');
+      }
+      const output = new Float32Array(pass.outputFrameCount);
+      output.set(
+        source.subarray(
+          pass.captureSourceStartFrame,
+          pass.captureSourceEndFrameExclusive,
+        ),
+        pass.leadingSilenceFrames,
+      );
+      return output;
+    },
+  );
+  const firstContextFrame = capture.firstContextFrame + pass.cycleStartFrame;
+  return Object.freeze({
+    numberOfChannels: capture.numberOfChannels,
+    length: pass.outputFrameCount,
+    sampleRate: capture.sampleRate,
+    durationSeconds: pass.outputFrameCount / capture.sampleRate,
+    stopReason: capture.stopReason,
+    contextGeneration: capture.contextGeneration,
+    firstContextFrame,
+    endContextFrameExclusive: firstContextFrame + pass.outputFrameCount,
+    inputLatencySeconds: capture.inputLatencySeconds,
+    getChannelData: (channel: number): Float32Array => {
+      const data = channels[channel];
+      if (data === undefined) {
+        throw new CanonicalAudioAssetError('invalid-audio');
+      }
+      return data;
+    },
+  });
+}
+
 function mutationFailureCode(
   result: Exclude<AudioClipMutationResult | SplitAudioClipResult, { ok: true }>,
 ): StudioAudioActionErrorCode {
@@ -1561,6 +1909,196 @@ export async function importStudioAudioTrack(
   }
 }
 
+function cycleTakeFileName(
+  fileName: string | undefined,
+  passIndex: number,
+): string {
+  const normalized = normalizedAssetName(fileName ?? 'cycle-recording.wav');
+  const extensionIndex = normalized.lastIndexOf('.');
+  const stem = extensionIndex > 0
+    ? normalized.slice(0, extensionIndex)
+    : normalized;
+  return `${stem}-take-${String(passIndex + 1).padStart(2, '0')}.wav`;
+}
+
+function cycleTakeMutationFailureCode(
+  code: string,
+): StudioAudioActionErrorCode {
+  if (code === 'folder-limit') return 'take-folder-limit';
+  if (code === 'take-limit') return 'take-limit';
+  if (
+    code === 'audio-asset-limit'
+    || code === 'track-limit'
+    || code === 'track-not-found'
+    || code === 'unsupported-track-type'
+    || code === 'id-factory-failed'
+  ) {
+    return code;
+  }
+  return 'commit-rejected';
+}
+
+async function recordStudioAudioCycleWithLease(
+  input: RecordStudioAudioTrackInput,
+  dependencies: RecordStudioAudioTrackDependencies,
+  ownership: StudioAudioTrackRecordingOwnership,
+  synchronization: StudioAudioTrackRecordingSynchronization & Readonly<{
+    cyclePlan: CycleRecordingPlan;
+  }>,
+): Promise<RecordStudioAudioTrackResult> {
+  const {
+    lease,
+    snapshot,
+    operationId,
+    target,
+    cycle,
+    preparedCycle,
+    playbackStopped,
+  } = ownership;
+  if (
+    cycle === null
+    || preparedCycle === null
+    || input.capture.stopReason !== 'duration-limit'
+    || input.capture.contextGeneration !== synchronization.contextGeneration
+    || input.capture.sampleRate !== synchronization.sampleRate
+    || input.capture.firstContextFrame !== synchronization.anchorContextFrame
+    || input.capture.length !== synchronization.cyclePlan.effectiveCaptureFrameCount
+    || input.capture.endContextFrameExclusive
+      !== input.capture.firstContextFrame + input.capture.length
+    || finiteNonNegativeLatency(input.capture.inputLatencySeconds)
+      !== preparedCycle.inputLatencySeconds
+  ) {
+    return importFailed('recording-alignment-failed');
+  }
+
+  const signal = input.signal ?? new AbortController().signal;
+  const canonicalize = dependencies.canonicalize ?? canonicalizeAudioAsset;
+  const repository = dependencies.repository ?? studioRuntime.audioAssets;
+  const createAudioBuffer = dependencies.createAudioBuffer ?? createRecordingAudioBuffer;
+  const assets: ReadyAudioAsset[] = [];
+  const receipts: AudioAssetStoreReceipt[] = [];
+
+  try {
+    throwIfCancelled(signal);
+    // Keep the full continuous capture plus the worst conversion envelope
+    // reserved while passes are materialized and persisted sequentially.
+    const resourcePlan = planStudioAudioRecordingResources(input.capture);
+    const audioAssetCache = getAudioAssetPlaybackCache();
+    audioAssetCache.clearUnused();
+    const reservationBytes = checkedHeavyAudioResourceTotal([
+      resourcePlan.peakBytes,
+      audioAssetCache.retainedDecodedBytes,
+    ]);
+    if (lease.resourceReservation) lease.resourceReservation.resize(reservationBytes);
+    else lease.resourceReservation = reserveHeavyAudioResources(reservationBytes);
+
+    for (const pass of synchronization.cyclePlan.passes) {
+      throwIfCancelled(signal);
+      const source = createAudioBuffer(
+        createCycleRecordingPassCapture(input.capture, pass),
+      );
+      const canonical = await canonicalize(source, {
+        signal,
+        ...(input.onProgress
+          ? {
+              onProgress: (progress: CanonicalAudioAssetProgress) => {
+                input.onProgress?.({
+                  phase: progress.phase,
+                  fraction: Math.min(
+                    1,
+                    (pass.passIndex + progress.fraction)
+                      / synchronization.cyclePlan.passCount,
+                  ),
+                });
+              },
+            }
+          : {}),
+        onResampleJob: (job) => trackAudioTrackImportWork(lease, job.settled),
+      });
+      throwIfCancelled(signal);
+      const receipt = await storeAudioAssetBytes(repository, canonical.bytes);
+      throwIfCancelled(signal);
+      const assetId = (dependencies.createAssetId ?? (() => uid('audio-asset')))();
+      assets.push({
+        id: assetId,
+        availability: 'ready',
+        checksumSha256: receipt.checksumSha256,
+        originalName: cycleTakeFileName(input.fileName, pass.passIndex),
+        mediaType: 'audio/wav',
+        byteLength: receipt.byteLength,
+        sampleRate: canonical.sampleRate,
+        channelCount: canonical.channelCount,
+        frameCount: canonical.frameCount,
+      });
+      receipts.push(receipt);
+    }
+  } catch (error) {
+    return importFailed(recordingErrorCode(error, signal));
+  }
+
+  const latest = useStore.getState();
+  if (
+    latest.projectOperationBusy
+    || latest.project !== snapshot
+    || latest.audioRecordingOperationId !== operationId
+    || assets.length !== cycle.passCount
+  ) {
+    return importFailed('commit-rejected');
+  }
+  const requestedTrackName = target.kind === 'new-track'
+    ? target.trackName ?? input.trackName
+    : undefined;
+  const mutationTarget = target.kind === 'new-track'
+    ? {
+        kind: 'new-track' as const,
+        ...(requestedTrackName !== undefined
+          ? { trackName: requestedTrackName }
+          : {}),
+      }
+    : target;
+  const mutation = createRecordedAudioTakeFolder(snapshot, {
+    target: mutationTarget,
+    assets,
+    startBeat: cycle.loopStartBeat,
+    lengthBeats: cycle.loopEndBeat - cycle.loopStartBeat,
+  });
+  if (!mutation.ok) {
+    return importFailed(cycleTakeMutationFailureCode(mutation.error.code));
+  }
+  const committed = latest.applyVerifiedCycleRecordingAddition({
+    operationId,
+    expectedSnapshot: snapshot,
+    verifiedAudioAssetIds: mutation.audioAssetIds,
+    folderId: mutation.folderId,
+    nextProject: mutation.project,
+  });
+  if (!committed || useStore.getState().project === snapshot) {
+    return importFailed('commit-rejected');
+  }
+  const adopted = useStore.getState();
+  const track = adopted.project.tracks.find(
+    (candidate) => candidate.id === mutation.trackId,
+  );
+  if (!track) return importFailed('commit-rejected');
+  adopted.selectTrack(mutation.trackId);
+  adopted.selectClip(null);
+  adopted.selectTakeFolder(mutation.folderId);
+  adopted.selectChord(null);
+  adopted.selectNotes([]);
+  adopted.setActiveView('comping');
+  return {
+    ok: true,
+    changed: true,
+    trackId: mutation.trackId,
+    trackName: track.name,
+    folderId: mutation.folderId,
+    audioAssetIds: mutation.audioAssetIds,
+    takeCount: mutation.audioAssetIds.length,
+    deduplicated: receipts.every((receipt) => receipt.deduplicated),
+    playbackStopped,
+  };
+}
+
 async function recordStudioAudioTrackWithLease(
   input: RecordStudioAudioTrackInput,
   dependencies: RecordStudioAudioTrackDependencies,
@@ -1580,6 +2118,13 @@ async function recordStudioAudioTrackWithLease(
     startingState.projectOperationBusy
     || startingState.project !== snapshot
     || startingState.audioRecordingOperationId !== operationId
+    || (
+      ownership.cycle === null
+        ? synchronization?.cyclePlan !== null
+          && synchronization?.cyclePlan !== undefined
+        : synchronization?.cyclePlan === null
+          || synchronization?.cyclePlan === undefined
+    )
   ) {
     return importFailed('commit-rejected');
   }
@@ -1597,6 +2142,16 @@ async function recordStudioAudioTrackWithLease(
     )
   ) {
     return importFailed('recording-alignment-failed');
+  }
+  if (synchronization?.cyclePlan !== null && synchronization?.cyclePlan !== undefined) {
+    return recordStudioAudioCycleWithLease(
+      input,
+      dependencies,
+      ownership,
+      synchronization as StudioAudioTrackRecordingSynchronization & Readonly<{
+        cyclePlan: CycleRecordingPlan;
+      }>,
+    );
   }
   const signal = input.signal ?? new AbortController().signal;
   const canonicalize = dependencies.canonicalize ?? canonicalizeAudioAsset;
@@ -1818,7 +2373,13 @@ export function studioAudioActionErrorMessage(code: StudioAudioActionErrorCode):
     case 'clip-limit':
       return 'このトラックにはこれ以上クリップを追加できません。';
     case 'transport-loop-enabled':
-      return 'ループ録音はテイク機能の追加後に対応します。いったんループをオフにして録音してください。';
+      return 'ループONではサイクル録音として開始してください。通常の1テイク録音はループをOFFにします。';
+    case 'cycle-recording-invalid':
+      return 'サイクル録音の範囲またはテイク数を使用できません。ループ範囲と合計0.5〜60秒の設定を確認してください。';
+    case 'take-folder-limit':
+      return 'このプロジェクトのテイクフォルダ数が上限に達しています。不要なテイクフォルダを整理してください。';
+    case 'take-limit':
+      return '1つのテイクフォルダへ保存できるテイク数は2〜128です。テイク数を減らしてください。';
     case 'recording-window-too-short':
       return '現在位置から曲末までが短すぎます。0.5秒以上手前へ移動してから録音してください。';
     case 'recording-alignment-failed':

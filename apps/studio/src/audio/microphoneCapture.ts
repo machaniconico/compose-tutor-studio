@@ -117,11 +117,17 @@ export type MicrophoneCaptureSynchronization = Readonly<{
   context: AudioContext;
   contextGeneration: number;
   sampleRate: number;
+  /** Input-track latency frozen before the one-shot capture arm. */
+  inputLatencySeconds: number | null;
   renderQuantumSize: number;
   /** Future, render-quantum-aligned candidate. The coordinator may choose a later frame. */
   earliestStartFrame: number;
-  /** Arms the Worklet once and resolves only after its rendering-thread acknowledgement. */
-  armAtFrame: (startFrame: number) => Promise<void>;
+  /**
+   * Arms the Worklet once and resolves only after its rendering-thread acknowledgement.
+   * The optional frame count may reduce this session's reserved maximum, but never
+   * increase it, so a finite cycle can include only its planned positive latency tail.
+   */
+  armAtFrame: (startFrame: number, effectiveMaximumFrames?: number) => Promise<void>;
 }>;
 
 export type StartMicrophoneCaptureOptions = Readonly<{
@@ -727,6 +733,7 @@ export async function startMicrophoneCapture(
     let automaticTimer: ReturnType<typeof setTimeout> | null = null;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let armedStartFrame: number | null = null;
+    let armedMaximumFrames: number | null = null;
     const startedAt = platform.now();
     let resolveResult!: (capture: MicrophonePcmCapture) => void;
     let rejectResult!: (error: MicrophoneCaptureError) => void;
@@ -857,8 +864,9 @@ export async function startMicrophoneCapture(
       onArmed(armed): void {
         if (
           armedStartFrame === null
+          || armedMaximumFrames === null
           || armed.startFrame !== armedStartFrame
-          || armed.endFrameExclusive !== armedStartFrame + maximumFrames
+          || armed.endFrameExclusive !== armedStartFrame + armedMaximumFrames
         ) {
           settleError(new MicrophoneCaptureError('synchronization-failed'));
           return;
@@ -899,7 +907,10 @@ export async function startMicrophoneCapture(
           return;
         }
         const frameCount = nextChannels[0]?.length ?? 0;
-        const acceptedFrames = Math.min(frameCount, maximumFrames - totalFrames);
+        const acceptedFrames = Math.min(
+          frameCount,
+          (armedMaximumFrames ?? 0) - totalFrames,
+        );
         if (acceptedFrames > 0) {
           if (firstContextFrame === null) firstContextFrame = timing.firstContextFrame;
           chunks.push(
@@ -916,7 +927,9 @@ export async function startMicrophoneCapture(
             // Presentation callbacks cannot break capture ownership or cleanup.
           }
         }
-        if (totalFrames >= maximumFrames) requestStop('duration-limit');
+        if (armedMaximumFrames !== null && totalFrames >= armedMaximumFrames) {
+          requestStop('duration-limit');
+        }
       },
       onStopped(stopped): void {
         if (state !== 'recording' && state !== 'stopping') return;
@@ -976,7 +989,10 @@ export async function startMicrophoneCapture(
       void failure.catch(() => undefined);
       return failure;
     };
-    const armAtFrame = (startFrame: number): Promise<void> => {
+    const armAtFrame = (
+      startFrame: number,
+      effectiveMaximumFrames: number = maximumFrames,
+    ): Promise<void> => {
       if (armCalled) {
         const error = new MicrophoneCaptureError('synchronization-failed');
         armFailure = error;
@@ -986,7 +1002,10 @@ export async function startMicrophoneCapture(
       if (
         !safeContextFrame(startFrame)
         || startFrame < earliestStartFrame
-        || !Number.isSafeInteger(startFrame + maximumFrames)
+        || !Number.isSafeInteger(effectiveMaximumFrames)
+        || effectiveMaximumFrames <= 0
+        || effectiveMaximumFrames > maximumFrames
+        || !Number.isSafeInteger(startFrame + effectiveMaximumFrames)
       ) {
         const error = new MicrophoneCaptureError('synchronization-failed');
         armFailure = error;
@@ -994,8 +1013,9 @@ export async function startMicrophoneCapture(
         return armAttempt;
       }
       armedStartFrame = startFrame;
+      armedMaximumFrames = effectiveMaximumFrames;
       try {
-        graph?.arm(startFrame, maximumFrames);
+        graph?.arm(startFrame, effectiveMaximumFrames);
       } catch {
         const error = new MicrophoneCaptureError('worklet-failed');
         armFailure = error;
@@ -1013,6 +1033,7 @@ export async function startMicrophoneCapture(
             context,
             contextGeneration,
             sampleRate: context.sampleRate,
+            inputLatencySeconds,
             renderQuantumSize: ready.renderQuantumSize,
             earliestStartFrame,
             armAtFrame,
@@ -1032,7 +1053,7 @@ export async function startMicrophoneCapture(
     } else {
       await awaitSetupOrCancel(armAtFrame(earliestStartFrame), options.signal);
     }
-    if (armedStartFrame === null) {
+    if (armedStartFrame === null || armedMaximumFrames === null) {
       throw new MicrophoneCaptureError('synchronization-failed');
     }
     const watchdogCurrentFrame = Number.isFinite(context.currentTime)
@@ -1044,16 +1065,20 @@ export async function startMicrophoneCapture(
     );
     automaticTimer = platform.setTimer(
       () => requestStop('duration-limit'),
-      (secondsUntilArm + maxDurationSeconds) * 1_000 + FLUSH_TIMEOUT_MS,
+      (
+        secondsUntilArm
+        + armedMaximumFrames / context.sampleRate
+      ) * 1_000 + FLUSH_TIMEOUT_MS,
     );
     setupSettled = true;
+    const effectiveMaxDurationSeconds = armedMaximumFrames / context.sampleRate;
 
     return {
       startedAt,
-      maxDurationSeconds,
+      maxDurationSeconds: effectiveMaxDurationSeconds,
       result,
       elapsedSeconds: () => Math.min(
-        maxDurationSeconds,
+        effectiveMaxDurationSeconds,
         Math.max(
           0,
           armedStartFrame === null || context === null || !Number.isFinite(context.currentTime)

@@ -327,6 +327,68 @@ describe('Scheduler explicit future anchor', () => {
   });
 });
 
+describe('Scheduler finite loop boundary', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('schedules only the requested loop passes and ends once at the unwrapped boundary', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const fired: unknown[] = [];
+    const windows: Array<{ startBeat: number; endBeat: number }> = [];
+    const onEnd = vi.fn();
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: (events) => fired.push(...events.map((event) => event.payload)),
+      onScheduleWindow: (window) => windows.push(window),
+      onEnd,
+      tickMs: 25,
+      lookaheadS: 3.1,
+    });
+
+    scheduler.start(
+      [{ beat: 2, payload: 'loop-start' }],
+      120,
+      2,
+      { startBeat: 2, endBeat: 4 },
+      8,
+    );
+
+    expect(fired).toEqual(['loop-start', 'loop-start', 'loop-start']);
+    expect(windows).toEqual([{ startBeat: 2, endBeat: 8 }]);
+    expect(scheduler.isRunning).toBe(true);
+
+    now = 3;
+    vi.advanceTimersByTime(25);
+    vi.advanceTimersByTime(100);
+
+    expect(onEnd).toHaveBeenCalledOnce();
+    expect(scheduler.isRunning).toBe(false);
+  });
+
+  it('keeps the ordinary Infinity loop running', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const onEnd = vi.fn();
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: () => undefined,
+      onEnd,
+      tickMs: 25,
+      lookaheadS: 0.1,
+    });
+
+    scheduler.start([], 120, 2, { startBeat: 2, endBeat: 4 }, Infinity);
+    now = 30;
+    vi.advanceTimersByTime(25);
+
+    expect(scheduler.isRunning).toBe(true);
+    expect(onEnd).not.toHaveBeenCalled();
+    scheduler.stop();
+  });
+});
+
 describe('Scheduler delayed tick recovery', () => {
   afterEach(() => {
     vi.useRealTimers();

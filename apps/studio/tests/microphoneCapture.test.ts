@@ -360,6 +360,7 @@ describe('microphone capture support and ownership', () => {
         context,
         contextGeneration,
         sampleRate,
+        inputLatencySeconds,
         renderQuantumSize,
         earliestStartFrame,
         armAtFrame,
@@ -367,6 +368,7 @@ describe('microphone capture support and ownership', () => {
         expect(context).toBe(harness.context);
         expect(contextGeneration).toBe(42);
         expect(sampleRate).toBe(8_000);
+        expect(inputLatencySeconds).toBe(0.0125);
         expect(renderQuantumSize).toBe(128);
         expect(earliestStartFrame % renderQuantumSize).toBe(0);
         chosenStartFrame = earliestStartFrame + 17;
@@ -386,6 +388,62 @@ describe('microphone capture support and ownership', () => {
       endContextFrameExclusive: chosenStartFrame + 4_000,
       inputLatencySeconds: 0.0125,
     });
+    expect(harness.close).not.toHaveBeenCalled();
+  });
+
+  it('arms one exact effective frame count inside the reserved capture maximum', async () => {
+    const harness = createHarness({
+      audioTracks: [new FakeAudioTrack(1, 0.025)],
+    });
+    const effectiveMaximumFrames = 4_800;
+    const session = await beginCapture(harness, {
+      borrowedAudioContext: {
+        context: harness.context,
+        contextGeneration: 43,
+      },
+      synchronize: async ({
+        inputLatencySeconds,
+        earliestStartFrame,
+        armAtFrame,
+      }) => {
+        expect(inputLatencySeconds).toBe(0.025);
+        await armAtFrame(earliestStartFrame, effectiveMaximumFrames);
+      },
+    });
+
+    expect(harness.arm).toHaveBeenCalledOnce();
+    expect(harness.arm).toHaveBeenCalledWith(
+      harness.armedStartFrame,
+      effectiveMaximumFrames,
+    );
+    expect(session.maxDurationSeconds).toBe(0.6);
+    harness.emitChunk([new Float32Array(effectiveMaximumFrames).fill(0.2)]);
+    harness.emitFlushed(
+      'duration-limit',
+      harness.armedStartFrame + effectiveMaximumFrames,
+    );
+
+    await expect(session.result).resolves.toMatchObject({
+      length: effectiveMaximumFrames,
+      durationSeconds: 0.6,
+      stopReason: 'duration-limit',
+      contextGeneration: 43,
+      endContextFrameExclusive: harness.armedStartFrame + effectiveMaximumFrames,
+    });
+  });
+
+  it('rejects an effective arm that exceeds the reserved frame maximum', async () => {
+    const harness = createHarness();
+    await expect(beginCapture(harness, {
+      borrowedAudioContext: {
+        context: harness.context,
+        contextGeneration: 44,
+      },
+      synchronize: async ({ earliestStartFrame, armAtFrame }) => {
+        await armAtFrame(earliestStartFrame, 8_001);
+      },
+    })).rejects.toMatchObject({ code: 'synchronization-failed' });
+    expect(harness.arm).not.toHaveBeenCalled();
     expect(harness.close).not.toHaveBeenCalled();
   });
 

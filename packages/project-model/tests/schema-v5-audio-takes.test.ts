@@ -264,6 +264,26 @@ describe('schema-v5 Audio take folders', () => {
     }
   });
 
+  it('requires variable-tempo take source duration with exactly one frame of tolerance', () => {
+    const project = projectWithFolder();
+    project.tempoMap.push({
+      id: 'schema-v5-variable-tempo',
+      beat: 2,
+      bpm: 60,
+    });
+    project.audioTakeFolders[0]!.takes.forEach((take) => {
+      take.sourceFrameCount = 143_999;
+    });
+
+    expect(validateProject(project).ok).toBe(true);
+
+    project.audioTakeFolders[0]!.takes[0]!.sourceFrameCount = 143_998;
+    expect(validateProject(project).errors).toContainEqual(expect.objectContaining({
+      path: 'audioTakeFolders[0].takes[0].sourceFrameCount',
+      message: expect.stringContaining('one frame'),
+    }));
+  });
+
   it('includes folder, take, and segment ids in project-wide duplicate detection', () => {
     const project = projectWithFolder();
     project.audioTakeFolders[0]!.takes[0]!.id = project.id;
