@@ -321,6 +321,7 @@ describe('schema-v3 audio and automation', () => {
     const target = project.tracks[0]!;
     project.automationLanes = [{
       id: 'volume-lane',
+      bypassed: false,
       target: { type: 'track-volume', trackId: target.id },
       points: [
         { id: 'volume-point-a', beat: 2, value: 0.5, interpolation: 'hold' },
@@ -346,6 +347,7 @@ describe('schema-v3 audio and automation', () => {
     if (!master) throw new Error('Master fixture missing');
     project.automationLanes = [{
       id: 'master-volume-lane',
+      bypassed: false,
       target: { type: 'track-volume', trackId: master.id },
       points: [{ id: 'master-volume-point', beat: 0, value: 0.5, interpolation: 'hold' }],
     }];
@@ -378,6 +380,7 @@ describe('schema-v3 musical time maps', () => {
     ];
     project.automationLanes = [{
       id: 'map-aware-pan',
+      bypassed: false,
       target: { type: 'track-pan', trackId: project.tracks[0]!.id },
       points: [{ id: 'map-aware-pan-point', beat: 9, value: -0.25, interpolation: 'linear' }],
     }];

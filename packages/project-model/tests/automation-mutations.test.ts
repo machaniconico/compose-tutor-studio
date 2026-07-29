@@ -80,6 +80,7 @@ describe('automation mutations', () => {
     expect(result.project).not.toBe(project);
     expect(result.project.automationLanes).toEqual([{
       id: 'automation-lane-a',
+      bypassed: false,
       target: { type: 'track-volume', trackId },
       points: [{
         id: 'automation-point-a',
@@ -436,6 +437,7 @@ describe('automation mutations', () => {
       ...project,
       automationLanes: [{
         id: 'capacity-lane',
+        bypassed: false,
         target: { type: 'track-volume', trackId },
         points,
       }],
@@ -460,6 +462,7 @@ describe('automation mutations', () => {
       ...project,
       automationLanes: [{
         id: 'invalid-lane',
+        bypassed: false,
         target: { type: 'track-volume', trackId },
         points: [
           { id: 'point-late', beat: 2, value: 1, interpolation: 'linear' },

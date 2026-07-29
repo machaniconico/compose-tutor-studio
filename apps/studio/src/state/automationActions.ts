@@ -2,6 +2,7 @@ import {
   addAutomationPoint,
   clearAutomationLane,
   removeAutomationPoint,
+  setAutomationLaneBypassed,
   updateAutomationPoint,
   type AddAutomationPointInput,
   type AutomationMutationErrorCode,
@@ -10,6 +11,7 @@ import {
   type Project,
   type UpdateAutomationPointPatch,
 } from '@cts/project-model';
+import { stopRuntimePlaybackAudio } from '../audio/playback';
 import { useStore } from './store';
 
 export type StudioAutomationErrorCode =
@@ -30,6 +32,14 @@ export type StudioAutomationCommandResult =
       playbackStopped: boolean;
     }>
   | Readonly<{ ok: false; code: StudioAutomationErrorCode }>;
+
+export type StudioAutomationRuntimeDependencies = Readonly<{
+  stopRuntimePlaybackAudio: () => void;
+}>;
+
+const DEFAULT_RUNTIME_DEPENDENCIES: StudioAutomationRuntimeDependencies = {
+  stopRuntimePlaybackAudio,
+};
 
 function failed(code: StudioAutomationErrorCode): StudioAutomationCommandResult {
   return { ok: false, code };
@@ -126,6 +136,20 @@ export function clearStudioAutomationLane(
   return runAutomationCommand((project) => clearAutomationLane(project, laneId));
 }
 
+export function setStudioAutomationLaneBypassed(
+  laneId: string,
+  bypassed: boolean,
+  dependencies: StudioAutomationRuntimeDependencies = DEFAULT_RUNTIME_DEPENDENCIES,
+): StudioAutomationCommandResult {
+  const result = runAutomationCommand((project) => (
+    setAutomationLaneBypassed(project, laneId, bypassed)
+  ));
+  if (result.ok && result.changed) {
+    dependencies.stopRuntimePlaybackAudio();
+  }
+  return result;
+}
+
 export function studioAutomationErrorMessage(
   code: StudioAutomationErrorCode,
 ): string {
@@ -144,6 +168,8 @@ export function studioAutomationErrorMessage(
       return 'ポイントの値が範囲外です。音量は0〜200%、パンは左100〜右100に設定してください。';
     case 'invalid-interpolation':
       return '変化方法を設定できませんでした。「なめらかに変化」または「値を保つ」を選択してください。';
+    case 'invalid-bypassed':
+      return 'Read / Bypassの状態を設定できませんでした。現在のレーンを確認して、もう一度お試しください。';
     case 'point-beat-conflict':
       return '同じ位置に別のポイントがあります。位置をずらすか、既存ポイントを編集してください。';
     case 'lane-limit':

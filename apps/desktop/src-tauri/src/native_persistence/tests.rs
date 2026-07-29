@@ -353,6 +353,17 @@ fn schema_v5_audio_take_project_value() -> Value {
     project
 }
 
+fn schema_v6_automation_bypass_project_value() -> Value {
+    let mut project = schema_v5_audio_take_project_value();
+    project["schemaVersion"] = json!(6);
+    for lane in project["automationLanes"].as_array_mut().unwrap() {
+        lane.as_object_mut()
+            .unwrap()
+            .insert("bypassed".to_owned(), json!(true));
+    }
+    project
+}
+
 fn schema_v4_routing_limit_project_value() -> Value {
     let mut project = schema_v4_routing_project_value();
     {
@@ -895,6 +906,109 @@ fn native_v4_to_v5_audio_take_migration_is_strict_and_deterministic() {
     let mut smuggled = source;
     smuggled["audioTakeFolders"] = json!([]);
     assert!(migrate_project_value_v4_to_v5(smuggled).is_none());
+}
+
+#[test]
+fn native_v5_to_v6_automation_bypass_migration_is_pure_strict_and_proven() {
+    let source = schema_v5_audio_take_project_value();
+    let migrated = migrate_project_value_v5_to_v6(source.clone()).expect("v5 migrates");
+    let mut expected = source.clone();
+    expected["schemaVersion"] = json!(6);
+    for lane in expected["automationLanes"].as_array_mut().unwrap() {
+        lane.as_object_mut()
+            .unwrap()
+            .insert("bypassed".to_owned(), json!(false));
+    }
+    assert_eq!(migrated, expected);
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&migrated).unwrap()
+    ));
+    assert!(legacy_project_matches_migrated(
+        &serde_json::to_string(&source).unwrap(),
+        &serde_json::to_string(&migrated).unwrap(),
+    ));
+
+    let mut smuggled = source;
+    smuggled["automationLanes"][0]["bypassed"] = json!(false);
+    assert!(migrate_project_value_v5_to_v6(smuggled).is_none());
+
+    let v1 = serde_json::from_str::<Value>(&project_json("legacy-v1-v6", "Legacy proof chain", 1))
+        .unwrap();
+    let through_all_versions =
+        migrate_project_for_legacy_proof(v1.clone(), 6).expect("v1 migrates through v6");
+    assert_eq!(through_all_versions["schemaVersion"], 6);
+    assert_eq!(through_all_versions["audioTakeFolders"], json!([]));
+    assert_eq!(through_all_versions["automationLanes"], json!([]));
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&through_all_versions).unwrap()
+    ));
+    assert!(legacy_project_matches_migrated(
+        &serde_json::to_string(&v1).unwrap(),
+        &serde_json::to_string(&through_all_versions).unwrap(),
+    ));
+}
+
+#[test]
+fn native_schema_v6_automation_bypass_presence_and_type_are_exact() {
+    let fixture = schema_v6_automation_bypass_project_value();
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&fixture).unwrap()
+    ));
+    let canonical =
+        canonical_project_for_validation(fixture.clone()).expect("v6 fixture is canonical");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&canonical.json).unwrap(),
+        fixture
+    );
+
+    let mut cases = Vec::<(&str, Value)>::new();
+    let mut missing = fixture.clone();
+    missing["automationLanes"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("bypassed");
+    cases.push(("missing bypassed", missing));
+
+    let mut explicit_null = fixture.clone();
+    explicit_null["automationLanes"][0]["bypassed"] = Value::Null;
+    cases.push(("null bypassed", explicit_null));
+
+    let mut wrong_type = fixture.clone();
+    wrong_type["automationLanes"][0]["bypassed"] = json!("false");
+    cases.push(("non-boolean bypassed", wrong_type));
+
+    let mut unknown = fixture.clone();
+    unknown["automationLanes"][0]["unknown"] = json!(false);
+    cases.push(("unknown lane field", unknown));
+
+    for (name, project) in cases {
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&project).unwrap()),
+            "must reject {name}"
+        );
+    }
+
+    for (version, mut legacy) in [
+        (3, schema_v3_project_value()),
+        (4, schema_v4_routing_project_value()),
+        (5, schema_v5_audio_take_project_value()),
+    ] {
+        assert!(
+            validate_project_file_json(&serde_json::to_vec(&legacy).unwrap()),
+            "schema v{version} remains valid without bypassed"
+        );
+        legacy["automationLanes"][0]["bypassed"] = json!(false);
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&legacy).unwrap()),
+            "schema v{version} must reject v6-field smuggling"
+        );
+    }
+
+    let mut future = fixture;
+    future["schemaVersion"] = json!(7);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&future).unwrap()
+    ));
 }
 
 #[test]
@@ -1864,6 +1978,55 @@ fn schema_v5_audio_take_project_round_trips_through_save_and_reopen() {
         project
     );
     assert!(!loaded.recovered);
+}
+
+#[test]
+fn schema_v6_automation_bypass_recovers_exact_crash_draft_after_reopen() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("projects.sqlite3");
+    let repository = NativeRepository::new(path.clone());
+    repository.initialize().expect("repository initializes");
+    let fixture_bytes = vec![0u8; 4096];
+    repository
+        .store_audio_asset(
+            audio_asset_sha256(&fixture_bytes),
+            fixture_bytes.len(),
+            fixture_bytes,
+        )
+        .expect("schema-v6 audio asset stores before project metadata");
+    let mut project = schema_v6_automation_bypass_project_value();
+    project["id"] = json!("schema-v6-project");
+    project["title"] = json!("Schema v6 Automation Bypass");
+    let project_json = serde_json::to_string(&project).unwrap();
+
+    repository
+        .stage_crash_draft(CrashDraftRequestDto {
+            project_id: "schema-v6-project".to_owned(),
+            project_json,
+            activation_id: "activation-v6".to_owned(),
+            revision: 1,
+            write_id: "write-v6-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("schema-v6 crash draft stages");
+    repository.close().expect("repository closes");
+
+    let reopened = NativeRepository::new(path);
+    reopened.initialize().expect("repository reopens");
+    let loaded = reopened
+        .load("schema-v6-project".to_owned())
+        .expect("schema-v6 project loads")
+        .expect("schema-v6 project exists");
+    assert_eq!(
+        serde_json::from_str::<Value>(&loaded.project_json).unwrap(),
+        project
+    );
+    assert!(loaded.recovered);
+    assert_eq!(
+        loaded.recovery_reason,
+        Some(ProjectRecoveryReason::InterruptedSave)
+    );
 }
 
 #[test]

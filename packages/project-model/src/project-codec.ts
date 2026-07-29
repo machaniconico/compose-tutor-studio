@@ -862,9 +862,13 @@ function decodeAutomationLane(
   value: unknown,
   path: string,
 ): AutomationLane {
-  const record = decoder.record(value, path, ['id', 'target', 'points']) ?? {};
+  const record = decoder.record(value, path, ['id', 'bypassed', 'target', 'points']) ?? {};
   return {
     id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    bypassed: decoder.boolean(
+      decoder.required(record, 'bypassed', `${path}.bypassed`),
+      `${path}.bypassed`,
+    ),
     target: decodeAutomationTarget(
       decoder,
       decoder.required(record, 'target', `${path}.target`),
@@ -876,6 +880,25 @@ function decodeAutomationLane(
       (item, itemPath) => decodeAutomationPoint(decoder, item, itemPath),
     ),
   };
+}
+
+function inspectLegacyAutomationLane(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): void {
+  const record = decoder.record(value, path, ['id', 'target', 'points']) ?? {};
+  decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`);
+  decodeAutomationTarget(
+    decoder,
+    decoder.required(record, 'target', `${path}.target`),
+    `${path}.target`,
+  );
+  decoder.array(
+    decoder.required(record, 'points', `${path}.points`),
+    `${path}.points`,
+    (item, itemPath) => decodeAutomationPoint(decoder, item, itemPath),
+  );
 }
 
 function decodeAudioRouteDestination(
@@ -1129,7 +1152,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
 /** Reject fields that were not part of the declared legacy transport shape. */
 function inspectLegacyProjectStructure(
   input: unknown,
-  schemaVersion: 1 | 2 | 3 | 4,
+  schemaVersion: 1 | 2 | 3 | 4 | 5,
 ): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
@@ -1145,6 +1168,7 @@ function inspectLegacyProjectStructure(
       ? ['lengthBeats', 'tempoMap', 'timeSignatureMap', 'audioAssets', 'automationLanes']
       : []),
     ...(schemaVersion >= 4 ? ['audioRouting'] : []),
+    ...(schemaVersion >= 5 ? ['audioTakeFolders'] : []),
     'tracks',
     'chordTrack',
     'sections',
@@ -1193,7 +1217,7 @@ function inspectLegacyProjectStructure(
     decoder.array(
       decoder.required(record, 'automationLanes', 'automationLanes'),
       'automationLanes',
-      (item, itemPath) => decodeAutomationLane(decoder, item, itemPath),
+      (item, itemPath) => inspectLegacyAutomationLane(decoder, item, itemPath),
     );
   }
   if (schemaVersion >= 4) {
@@ -1201,6 +1225,13 @@ function inspectLegacyProjectStructure(
       decoder,
       decoder.required(record, 'audioRouting', 'audioRouting'),
       'audioRouting',
+    );
+  }
+  if (schemaVersion >= 5) {
+    decoder.array(
+      decoder.required(record, 'audioTakeFolders', 'audioTakeFolders'),
+      'audioTakeFolders',
+      (item, itemPath) => decodeAudioTakeFolder(decoder, item, itemPath),
     );
   }
   decoder.array(
@@ -1290,7 +1321,10 @@ export function decodeProject(input: unknown): ProjectDecodeResult {
 
   let current: unknown = input;
   if (version.version < CURRENT_SCHEMA_VERSION) {
-    const legacyIssues = inspectLegacyProjectStructure(input, version.version as 1 | 2 | 3 | 4);
+    const legacyIssues = inspectLegacyProjectStructure(
+      input,
+      version.version as 1 | 2 | 3 | 4 | 5,
+    );
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };
     }

@@ -43,7 +43,7 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 5;
+const PROJECT_SCHEMA_VERSION: u64 = 6;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
@@ -838,6 +838,7 @@ struct AutomationLaneDto {
     id: String,
     target: AutomationTargetDto,
     points: Vec<AutomationPointDto>,
+    bypassed: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -3424,6 +3425,7 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
             2 => migrate_project_value_v2_to_v3(project)?,
             3 => migrate_project_value_v3_to_v4(project)?,
             4 => migrate_project_value_v4_to_v5(project)?,
+            5 => migrate_project_value_v5_to_v6(project)?,
             _ => return None,
         };
         version += 1;
@@ -3500,6 +3502,18 @@ fn value_contains_v4_project_fields(project: &serde_json::Map<String, Value>) ->
 
 fn value_contains_v5_project_fields(project: &serde_json::Map<String, Value>) -> bool {
     project.contains_key("audioTakeFolders")
+}
+
+fn value_contains_v6_project_fields(project: &serde_json::Map<String, Value>) -> bool {
+    project
+        .get("automationLanes")
+        .and_then(Value::as_array)
+        .is_some_and(|lanes| {
+            lanes.iter().any(|lane| {
+                lane.as_object()
+                    .is_some_and(|lane| lane.contains_key("bypassed"))
+            })
+        })
 }
 
 fn collect_value_ids(value: &Value, ids: &mut HashSet<String>) {
@@ -3731,6 +3745,23 @@ fn migrate_project_value_v4_to_v5(mut project: Value) -> Option<Value> {
     let project_record = project.as_object_mut()?;
     project_record.insert("schemaVersion".to_owned(), Value::from(5));
     project_record.insert("audioTakeFolders".to_owned(), Value::Array(Vec::new()));
+    Some(project)
+}
+
+/** v6 makes per-lane automation Read bypass explicit without changing sound. */
+fn migrate_project_value_v5_to_v6(mut project: Value) -> Option<Value> {
+    let project_record = project.as_object()?;
+    if project_record.get("schemaVersion").and_then(Value::as_u64) != Some(5)
+        || value_contains_v6_project_fields(project_record)
+    {
+        return None;
+    }
+    let project_record = project.as_object_mut()?;
+    for lane in project_record.get_mut("automationLanes")?.as_array_mut()? {
+        lane.as_object_mut()?
+            .insert("bypassed".to_owned(), Value::Bool(false));
+    }
+    project_record.insert("schemaVersion".to_owned(), Value::from(6));
     Some(project)
 }
 
@@ -7312,6 +7343,7 @@ fn validate_project_versioned_presence(
     let has_v3_fields = schema_version >= 3;
     let has_v4_fields = schema_version >= 4;
     let has_v5_fields = schema_version >= 5;
+    let has_v6_lane_fields = schema_version >= 6;
     if V3_PROJECT_FIELDS
         .iter()
         .any(|key| project.contains_key(*key) != has_v3_fields)
@@ -7319,6 +7351,20 @@ fn validate_project_versioned_presence(
         || project.contains_key("audioTakeFolders") != has_v5_fields
     {
         return Err(GenerationIssue::Corrupt);
+    }
+    if has_v3_fields {
+        let lanes = project
+            .get("automationLanes")
+            .and_then(Value::as_array)
+            .ok_or(GenerationIssue::Corrupt)?;
+        for lane in lanes {
+            let lane = lane.as_object().ok_or(GenerationIssue::Corrupt)?;
+            if lane.contains_key("bypassed") != has_v6_lane_fields
+                || (has_v6_lane_fields && lane.get("bypassed").and_then(Value::as_bool).is_none())
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+        }
     }
     let tracks = project
         .get("tracks")
@@ -7906,6 +7952,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
         for lane in automation_lanes {
             if !valid_project_string(&lane.id, MAX_STRING_CHARS, false)
                 || !ids.insert(lane.id.as_str())
+                || lane.bypassed.is_some() != (project.schema_version >= 6)
                 || !valid_project_string(&lane.target.track_id, MAX_STRING_CHARS, false)
                 || !track_ids.contains(lane.target.track_id.as_str())
                 || !matches!(lane.target.kind.as_str(), "track-volume" | "track-pan")

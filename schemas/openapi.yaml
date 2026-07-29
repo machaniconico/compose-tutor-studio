@@ -230,7 +230,7 @@ components:
     Project:
       type: object
       description: >-
-        Current schema-v5 aggregate. lengthBeats, tempoMap, and timeSignatureMap
+        Current schema-v6 aggregate. lengthBeats, tempoMap, and timeSignatureMap
         are the musical-time authority; bpm, timeSignature, and lengthBars are
         validated compatibility mirrors. audioRouting is one normalized,
         acyclic stereo graph shared by realtime playback and offline WAV
@@ -278,7 +278,7 @@ components:
           maxLength: 4096
         schemaVersion:
           type: integer
-          const: 5
+          const: 6
         title:
           type: string
           maxLength: 4096
@@ -630,7 +630,7 @@ components:
           minLength: 1
           maxLength: 4096
           description: >-
-            Linked-clip source id retained by current schema v5. MIDI/drum only;
+            Linked-clip source id retained by current schema v6. MIDI/drum only;
             the source must be
             a direct same-track, same-type non-alias clip of identical length.
             Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and
@@ -913,7 +913,7 @@ components:
     AutomationLane:
       type: object
       additionalProperties: false
-      required: [id, target, points]
+      required: [id, target, points, bypassed]
       properties:
         id:
           type: string
@@ -927,6 +927,11 @@ components:
           items:
             $ref: '#/components/schemas/AutomationPoint'
           description: Strictly beat-ascending.
+        bypassed:
+          type: boolean
+          description: >-
+            When true, playback and export ignore this curve and use the
+            target Track's persisted volume or pan value. Points remain intact.
     AutomationTarget:
       type: object
       additionalProperties: false

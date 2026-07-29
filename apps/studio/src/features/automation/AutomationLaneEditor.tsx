@@ -16,6 +16,7 @@ import {
   addStudioAutomationPoint,
   clearStudioAutomationLane,
   removeStudioAutomationPoint,
+  setStudioAutomationLaneBypassed,
   studioAutomationErrorMessage,
   updateStudioAutomationPoint,
 } from '../../state/automationActions';
@@ -442,6 +443,35 @@ export function AutomationLaneEditor() {
     });
   };
 
+  const toggleLaneBypassed = (): void => {
+    if (lane === null || disabled) return;
+    const nextBypassed = !lane.bypassed;
+    const result = setStudioAutomationLaneBypassed(lane.id, nextBypassed);
+    if (!result.ok) {
+      commandFailed(result);
+      return;
+    }
+    if (!result.changed) {
+      setNotice({
+        kind: 'status',
+        message: nextBypassed
+          ? 'オートメーションはすでにBypassです。点と曲線は変更されていません。'
+          : 'オートメーションはすでにReadです。点と曲線は変更されていません。',
+      });
+      return;
+    }
+    setNotice({
+      kind: 'status',
+      message: nextBypassed
+        ? `${AUTOMATION_TARGETS[targetType].shortLabel}オートメーションをBypassにしました。点と曲線は保持され、再生とWAV書き出しではトラックの現在の基準値を使います。${stoppedSuffix(
+            result.playbackStopped,
+          )}`
+        : `${AUTOMATION_TARGETS[targetType].shortLabel}オートメーションをReadにしました。保存している曲線を再生とWAV書き出しに反映します。${stoppedSuffix(
+            result.playbackStopped,
+          )}`,
+    });
+  };
+
   const commitDraft = (field: 'beat' | 'value'): void => {
     if (selectedPoint === null || draft === null) return;
     const dirty = field === 'beat' ? draft.dirtyBeat : draft.dirtyValue;
@@ -641,7 +671,13 @@ export function AutomationLaneEditor() {
   }
 
   return (
-    <section className="automation-lane" aria-labelledby="automation-lane-title">
+    <section
+      className={`automation-lane${lane?.bypassed ? ' is-bypassed' : ''}`}
+      data-automation-read-state={
+        lane === null ? 'empty' : lane.bypassed ? 'bypassed' : 'read'
+      }
+      aria-labelledby="automation-lane-title"
+    >
       <header className="automation-lane__header">
         <div>
           <p className="automation-lane__eyebrow">選択トラック</p>
@@ -730,6 +766,40 @@ export function AutomationLaneEditor() {
         </span>
       </div>
 
+      <div
+        className={`automation-lane__read-mode${
+          lane?.bypassed ? ' is-bypassed' : ''
+        }`}
+      >
+        {lane ? (
+          <>
+            <button
+              type="button"
+              className={`automation-lane__read-toggle ${
+                lane.bypassed ? 'is-bypassed' : 'is-read'
+              }`}
+              data-automation-read-toggle="true"
+              aria-pressed={lane.bypassed}
+              aria-describedby="automation-lane-read-description"
+              disabled={disabled}
+              onClick={toggleLaneBypassed}
+            >
+              {lane.bypassed ? 'Bypass' : 'Read'}
+            </button>
+            <p id="automation-lane-read-description">
+              <strong>{lane.bypassed ? 'Bypass中。' : 'Read中。'}</strong>{' '}
+              {lane.bypassed
+                ? '曲線と点は保持され、再生とWAV書き出しではトラックの現在の基準値を使います。点はそのまま編集できます。'
+                : '曲線を再生とWAV書き出しに反映します。Bypassに切り替えても点は削除されません。'}
+            </p>
+          </>
+        ) : (
+          <p id="automation-lane-read-description">
+            最初の点を追加すると、Readが有効なレーンを作成します。
+          </p>
+        )}
+      </div>
+
       {clearConfirmationOpen && lane && lane.points.length > 0 ? (
         <div
           id="automation-lane-clear-confirmation"
@@ -789,7 +859,7 @@ export function AutomationLaneEditor() {
           className="automation-lane__timeline"
           role="group"
           aria-label={`${AUTOMATION_TARGETS[targetType].label}オートメーションレーン`}
-          aria-describedby="automation-lane-help"
+          aria-describedby="automation-lane-help automation-lane-read-description"
           tabIndex={lane?.points.length ? -1 : 0}
           style={{
             width: `${canvasWidth}px`,
@@ -1107,7 +1177,10 @@ export function AutomationLaneEditor() {
         aria-live="polite"
         aria-atomic="true"
       >
-        {notice?.message ?? '変更内容はプロジェクトに保存され、再生とWAV書き出しに反映されます。'}
+        {notice?.message
+          ?? (lane?.bypassed
+            ? 'Bypass中も点の変更は保存されますが、再生とWAV書き出しではトラックの現在の基準値を使います。'
+            : '変更内容はプロジェクトに保存され、再生とWAV書き出しに反映されます。')}
       </p>
     </section>
   );

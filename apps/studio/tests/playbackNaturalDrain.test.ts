@@ -10,7 +10,13 @@ import {
   beginRuntimeNaturalDrain,
   planRuntimeAudioTail,
   restoreRuntimeMaster,
+  stopRuntimePlaybackForProjectTopologyChange,
 } from '../src/audio/playback';
+import {
+  PlaybackController,
+  type PlaybackRequestState,
+  type PlaybackSessionHandlers,
+} from '../src/audio/playbackController';
 import type { ScheduledEvent } from '../src/audio/scheduler';
 import { FINAL_TAIL_FADE_SECONDS } from '../src/audio/tail';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from '../src/audio/masterBus';
@@ -101,6 +107,69 @@ function project(track: Track): Project {
     createdAt: 'now',
     updatedAt: 'now',
   };
+}
+
+function projectWithAutomation(
+  points: Project['automationLanes'][number]['points'],
+  bypassed = false,
+): Project {
+  const base = project(instrumentTrack());
+  return {
+    ...base,
+    automationLanes: [{
+      id: 'automation-volume',
+      target: {
+        type: 'track-volume',
+        trackId: 'instrument',
+      },
+      bypassed,
+      points,
+    }],
+  };
+}
+
+async function createDrainingController(): Promise<{
+  controller: PlaybackController<{
+    dispose: ReturnType<typeof vi.fn>;
+    beginNaturalDrain: (onComplete: () => void) => void;
+  }>;
+  dispose: ReturnType<typeof vi.fn>;
+  completeDrain: () => void;
+}> {
+  let state: PlaybackRequestState = { phase: 'starting', requestId: 41 };
+  let callbacks!: PlaybackSessionHandlers;
+  let completeDrain!: () => void;
+  const dispose = vi.fn();
+  const session = {
+    dispose,
+    beginNaturalDrain: (onComplete: () => void) => {
+      completeDrain = onComplete;
+    },
+  };
+  const controller = new PlaybackController<typeof session>({
+    getRequestState: () => state,
+    createSession: async (_requestId, handlers) => {
+      callbacks = handlers;
+      return session;
+    },
+    confirmStarted: (requestId) => {
+      state = { phase: 'playing', requestId };
+    },
+    failStart: vi.fn(),
+    finish: (requestId) => {
+      state = { phase: 'stopped', requestId: requestId + 1 };
+      controller.reconcile(state);
+    },
+    interrupt: vi.fn(),
+  });
+
+  controller.requestStart(41);
+  await Promise.resolve();
+  await Promise.resolve();
+  callbacks.onEnd();
+  expect(state.phase).toBe('stopped');
+  expect(dispose).not.toHaveBeenCalled();
+  return { controller, dispose, completeDrain };
 }
 
 function finalNote(): ScheduledEvent {
@@ -287,6 +356,69 @@ describe('beginRuntimeNaturalDrain', () => {
     expect(setValueAtTime.mock.calls[0]?.[0]).toBe(0.42);
     expect(setValueAtTime.mock.calls[0]?.[1]).toBeCloseTo(10.944, 10);
     expect(setValueAtTime).toHaveBeenNthCalledWith(2, 0.65, 10.1);
+  });
+});
+
+describe('Project topology changes during natural drain', () => {
+  const pointA = {
+    id: 'point-a',
+    beat: 0,
+    value: 0.5,
+    interpolation: 'linear' as const,
+  };
+  const pointB = {
+    id: 'point-b',
+    beat: 2,
+    value: 0.75,
+    interpolation: 'hold' as const,
+  };
+  const withoutLane = project(instrumentTrack());
+  const withOnePoint = projectWithAutomation([pointA]);
+  const withTwoPoints = projectWithAutomation([pointA, pointB]);
+  const withUpdatedPoint = projectWithAutomation([
+    { ...pointA, value: 0.25 },
+    pointB,
+  ]);
+  const bypassed = projectWithAutomation([pointA], true);
+
+  it.each([
+    ['add', withoutLane, withOnePoint],
+    ['update', withTwoPoints, withUpdatedPoint],
+    ['remove', withTwoPoints, withOnePoint],
+    ['clear', withOnePoint, withoutLane],
+    ['bypass', withOnePoint, bypassed],
+    ['bypass undo/redo', bypassed, withOnePoint],
+  ])('disposes an obsolete drain after automation %s', async (_name, before, after) => {
+    const { controller, dispose, completeDrain } = await createDrainingController();
+
+    expect(
+      stopRuntimePlaybackForProjectTopologyChange(
+        before,
+        after,
+        () => controller.stop(),
+      ),
+    ).toBe(true);
+    expect(dispose).toHaveBeenCalledOnce();
+
+    completeDrain();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a drain for a Project edit outside playback topology', async () => {
+    const { controller, dispose, completeDrain } = await createDrainingController();
+    const renamed = { ...withoutLane, title: 'Renamed while draining' };
+
+    expect(
+      stopRuntimePlaybackForProjectTopologyChange(
+        withoutLane,
+        renamed,
+        () => controller.stop(),
+      ),
+    ).toBe(false);
+    expect(dispose).not.toHaveBeenCalled();
+
+    completeDrain();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 });
 
