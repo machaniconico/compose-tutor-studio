@@ -30,6 +30,7 @@ function project(tracks: Track[], chordTrack: ChordEvent[] = []): Project {
     tempoMap: [{ id: 'tempo-1', beat: 0, bpm: 120 }],
     timeSignatureMap: [{ id: 'signature-1', beat: 0, numerator: 4, denominator: 4 }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: tracks

@@ -9,7 +9,15 @@ import {
   compileDrumStepProjector,
   compileMusicalTime,
   countMidiClipNoteOccurrences,
+  CURRENT_SCHEMA_VERSION,
+  MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
+  MAX_AUDIO_TAKE_FOLDERS,
+  MAX_AUDIO_TAKES_PER_FOLDER,
   MAX_DRUM_STEPS_PER_BAR,
+  MAX_PROJECT_STRING_LENGTH,
+  MAX_PROJECT_TIMELINE_BEATS,
+  MAX_PROJECT_TOTAL_ITEMS,
+  MIN_EVENT_DURATION_BEATS,
   projectDrumStep,
   realizeChordTrack,
   resolveClipContent,
@@ -77,6 +85,38 @@ const READY_AUDIO_ASSET_FIELDS = [
   'frameCount',
 ] as const;
 const AUDIO_MEDIA_TYPES = new Set(['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac']);
+const AUDIO_TAKE_FOLDER_SCHEMA_VERSION = 5;
+const AUDIO_COMP_BEAT_EPSILON = 1e-9;
+const AUDIO_TAKE_FOLDER_FIELDS = [
+  'id',
+  'trackId',
+  'startBeat',
+  'lengthBeats',
+  'crossfadeMs',
+  'takes',
+  'compSegments',
+] as const;
+const AUDIO_TAKE_FIELDS = [
+  'id',
+  'audioAssetId',
+  'offsetBeats',
+  'lengthBeats',
+  'sourceStartFrame',
+  'sourceFrameCount',
+  'fadeInFrames',
+  'fadeOutFrames',
+  'gainDb',
+] as const;
+const AUDIO_COMP_SEGMENT_FIELDS = [
+  'id',
+  'takeId',
+  'offsetBeats',
+  'lengthBeats',
+] as const;
+type AudioTakeFolderExportRecord = Record<string, unknown> & Readonly<{
+  takes: unknown[];
+  compSegments: unknown[];
+}>;
 
 export type MidiExportErrorCode =
   | 'invalid-options'
@@ -326,6 +366,59 @@ function requirePositiveSafeInteger(value: unknown, label: string): number {
   return value as number;
 }
 
+function requireExactRecord(
+  value: unknown,
+  fields: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    exportFailure('invalid-project', `${label} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  for (const field of fields) {
+    if (!hasOwn(record, field) || record[field] === undefined) {
+      exportFailure('invalid-project', `${label} requires ${field}`);
+    }
+  }
+  const unexpectedField = Object.keys(record).find((field) => !fields.includes(field));
+  if (unexpectedField !== undefined) {
+    exportFailure('invalid-project', `${label} has unsupported field ${unexpectedField}`);
+  }
+  return record;
+}
+
+function requireNonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    exportFailure('invalid-project', `${label} must be a non-empty string`);
+  }
+  if (value.length > MAX_PROJECT_STRING_LENGTH) {
+    exportFailure(
+      'invalid-project',
+      `${label} must contain at most ${MAX_PROJECT_STRING_LENGTH} characters`,
+      { limit: MAX_PROJECT_STRING_LENGTH, observed: value.length },
+    );
+  }
+  return value;
+}
+
+function requireFiniteNumber(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    exportFailure('invalid-project', `${label} must be a finite number`);
+  }
+  return value;
+}
+
+function requireSafeInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value)) {
+    exportFailure('invalid-project', `${label} must be a safe integer`);
+  }
+  return value as number;
+}
+
+function sameAudioCompBeat(left: number, right: number): boolean {
+  return Math.abs(left - right) <= AUDIO_COMP_BEAT_EPSILON;
+}
+
 function validateExportAudioAssets(project: Project): ReadonlyMap<string, AudioAsset> {
   const rawAssets = (project as Partial<Pick<Project, 'audioAssets'>>).audioAssets;
   if (rawAssets === undefined) return new Map();
@@ -476,6 +569,363 @@ function validateExportAudioClip(
 }
 
 /**
+ * Validate v5 Audio take data independently at the MIDI export boundary.
+ * Audio take folders are intentionally not projected into SMF, but accepting
+ * malformed discarded data would let export report success for a corrupt
+ * current-schema project.
+ */
+function validateExportAudioTakeFolders(
+  project: Project,
+  audioAssets: ReadonlyMap<string, AudioAsset>,
+): void {
+  const rawFolders = (
+    project as Partial<Pick<Project, 'audioTakeFolders'>>
+  ).audioTakeFolders;
+  if (rawFolders === undefined) {
+    // Pre-v5 projects are still supported by the MIDI compatibility path.
+    if (
+      project.schemaVersion === CURRENT_SCHEMA_VERSION
+      && CURRENT_SCHEMA_VERSION >= AUDIO_TAKE_FOLDER_SCHEMA_VERSION
+    ) {
+      exportFailure('invalid-project', 'audioTakeFolders is required by the current schema');
+    }
+    return;
+  }
+  if (!Array.isArray(rawFolders)) {
+    exportFailure('invalid-project', 'audioTakeFolders must be an array');
+  }
+  if (rawFolders.length > MAX_AUDIO_TAKE_FOLDERS) {
+    exportFailure(
+      'invalid-project',
+      `audioTakeFolders must contain at most ${MAX_AUDIO_TAKE_FOLDERS} items`,
+      { limit: MAX_AUDIO_TAKE_FOLDERS, observed: rawFolders.length },
+    );
+  }
+
+  /*
+   * Bound the whole take subtree before walking any take or segment object.
+   * Per-folder limits alone would otherwise permit more than four million
+   * nested entries across 1,024 folders.
+   */
+  const folderRecords: AudioTakeFolderExportRecord[] = [];
+  let takeNestedItems = rawFolders.length;
+  for (const [folderIndex, rawFolder] of rawFolders.entries()) {
+    const label = `audioTakeFolders[${folderIndex}]`;
+    const folder = requireExactRecord(rawFolder, AUDIO_TAKE_FOLDER_FIELDS, label);
+    if (!Array.isArray(folder.takes)) {
+      exportFailure('invalid-project', `${label} takes must be an array`);
+    }
+    if (
+      folder.takes.length < 2
+      || folder.takes.length > MAX_AUDIO_TAKES_PER_FOLDER
+    ) {
+      exportFailure(
+        'invalid-project',
+        `${label} must contain 2..${MAX_AUDIO_TAKES_PER_FOLDER} takes`,
+        { limit: MAX_AUDIO_TAKES_PER_FOLDER, observed: folder.takes.length },
+      );
+    }
+    if (!Array.isArray(folder.compSegments)) {
+      exportFailure('invalid-project', `${label} compSegments must be an array`);
+    }
+    if (
+      folder.compSegments.length < 1
+      || folder.compSegments.length > MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER
+    ) {
+      exportFailure(
+        'invalid-project',
+        `${label} must contain 1..${MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER} comp segments`,
+        {
+          limit: MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
+          observed: folder.compSegments.length,
+        },
+      );
+    }
+    const folderNestedItems = folder.takes.length + folder.compSegments.length;
+    if (folderNestedItems > MAX_PROJECT_TOTAL_ITEMS - takeNestedItems) {
+      exportFailure(
+        'invalid-project',
+        `audioTakeFolders exceeds ${MAX_PROJECT_TOTAL_ITEMS} nested items`,
+        {
+          limit: MAX_PROJECT_TOTAL_ITEMS,
+          observed: takeNestedItems + folderNestedItems,
+        },
+      );
+    }
+    takeNestedItems += folderNestedItems;
+    folderRecords.push(folder as AudioTakeFolderExportRecord);
+  }
+
+  // Project ids are globally unique in schema v5. Seed the registry from the
+  // rest of the project so new Audio take ids cannot collide across domains.
+  const claimedIds = new Set<string>();
+  const reserveId = (value: unknown): void => {
+    if (typeof value === 'string' && value.length > 0) claimedIds.add(value);
+  };
+  const reserveItemIds = (value: unknown): void => {
+    if (!Array.isArray(value)) return;
+    for (const item of value) {
+      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+        reserveId((item as Record<string, unknown>).id);
+      }
+    }
+  };
+  reserveId(project.id);
+  reserveItemIds((project as Partial<Pick<Project, 'tempoMap'>>).tempoMap);
+  reserveItemIds(
+    (project as Partial<Pick<Project, 'timeSignatureMap'>>).timeSignatureMap,
+  );
+  reserveItemIds(project.audioAssets);
+  reserveItemIds(project.tracks);
+  reserveItemIds(project.chordTrack);
+  reserveItemIds(project.sections);
+  const rawAutomationLanes = (
+    project as Partial<Pick<Project, 'automationLanes'>>
+  ).automationLanes;
+  reserveItemIds(rawAutomationLanes);
+  reserveItemIds(project.audioRouting?.sends);
+  for (const track of project.tracks) {
+    reserveItemIds(track.effects);
+    reserveItemIds(track.clips);
+    if (Array.isArray(track.clips)) {
+      for (const clip of track.clips) {
+        reserveItemIds(clip.notes);
+        reserveItemIds(clip.drumEvents);
+      }
+    }
+  }
+  if (Array.isArray(rawAutomationLanes)) {
+    for (const lane of rawAutomationLanes) reserveItemIds(lane.points);
+  }
+
+  const claimId = (value: unknown, label: string): string => {
+    const id = requireNonEmptyString(value, label);
+    if (claimedIds.has(id)) {
+      exportFailure('invalid-project', `audio take data id ${id} must be unique`);
+    }
+    claimedIds.add(id);
+    return id;
+  };
+
+  const folderWindows: Array<Readonly<{
+    trackId: string;
+    startBeat: number;
+    lengthBeats: number;
+  }>> = [];
+  for (const [folderIndex, folder] of folderRecords.entries()) {
+    const label = `audioTakeFolders[${folderIndex}]`;
+    claimId(folder.id, `${label} id`);
+
+    const trackId = requireNonEmptyString(folder.trackId, `${label} trackId`);
+    const track = project.tracks.find((candidate) => candidate.id === trackId);
+    if (track === undefined) {
+      exportFailure('invalid-project', `${label} references missing track ${trackId}`);
+    }
+    if (track.type !== 'audio') {
+      exportFailure('invalid-project', `${label} must belong to an audio track`);
+    }
+
+    const startBeat = requireFiniteNumber(folder.startBeat, `${label} startBeat`);
+    const lengthBeats = requireFiniteNumber(folder.lengthBeats, `${label} lengthBeats`);
+    if (startBeat < 0 || startBeat > MAX_PROJECT_TIMELINE_BEATS) {
+      exportFailure(
+        'invalid-project',
+        `${label} startBeat must be in 0..${MAX_PROJECT_TIMELINE_BEATS}`,
+      );
+    }
+    if (
+      lengthBeats < MIN_EVENT_DURATION_BEATS
+      || lengthBeats > MAX_PROJECT_TIMELINE_BEATS
+    ) {
+      exportFailure(
+        'invalid-project',
+        `${label} lengthBeats must be in ${MIN_EVENT_DURATION_BEATS}..${MAX_PROJECT_TIMELINE_BEATS}`,
+      );
+    }
+    const folderEndBeat = startBeat + lengthBeats;
+    if (
+      !Number.isFinite(project.lengthBeats)
+      || !Number.isFinite(folderEndBeat)
+      || folderEndBeat > project.lengthBeats
+    ) {
+      exportFailure('invalid-project', `${label} must end within the project timeline`);
+    }
+    if (folderWindows.some((window) => (
+      window.trackId === trackId
+      && sameAudioCompBeat(window.startBeat, startBeat)
+      && sameAudioCompBeat(window.lengthBeats, lengthBeats)
+    ))) {
+      exportFailure(
+        'invalid-project',
+        `${label} duplicates an Audio take folder on the same track and timeline window`,
+      );
+    }
+    folderWindows.push({ trackId, startBeat, lengthBeats });
+
+    const crossfadeMs = requireFiniteNumber(folder.crossfadeMs, `${label} crossfadeMs`);
+    if (crossfadeMs < 0 || crossfadeMs > 50) {
+      exportFailure('invalid-project', `${label} crossfadeMs must be in 0..50`);
+    }
+    const takeWindows = new Map<
+      string,
+      Readonly<{ offsetBeats: number; lengthBeats: number }>
+    >();
+    for (const [takeIndex, rawTake] of folder.takes.entries()) {
+      const takeLabel = `${label}.takes[${takeIndex}]`;
+      const take = requireExactRecord(rawTake, AUDIO_TAKE_FIELDS, takeLabel);
+      const takeId = claimId(take.id, `${takeLabel} id`);
+      const audioAssetId = requireNonEmptyString(
+        take.audioAssetId,
+        `${takeLabel} audioAssetId`,
+      );
+      const asset = audioAssets.get(audioAssetId);
+      if (asset === undefined) {
+        exportFailure(
+          'invalid-project',
+          `${takeLabel} references missing asset ${audioAssetId}`,
+        );
+      }
+      if (asset.availability !== 'ready') {
+        exportFailure('invalid-project', `${takeLabel} requires a ready audio asset`);
+      }
+
+      const offsetBeats = requireFiniteNumber(take.offsetBeats, `${takeLabel} offsetBeats`);
+      const takeLengthBeats = requireFiniteNumber(
+        take.lengthBeats,
+        `${takeLabel} lengthBeats`,
+      );
+      if (offsetBeats < 0 || offsetBeats > lengthBeats) {
+        exportFailure('invalid-project', `${takeLabel} offset must fall within its folder`);
+      }
+      if (
+        takeLengthBeats < MIN_EVENT_DURATION_BEATS
+        || takeLengthBeats > MAX_PROJECT_TIMELINE_BEATS
+        || takeLengthBeats > lengthBeats
+        || !Number.isFinite(offsetBeats + takeLengthBeats)
+        || offsetBeats + takeLengthBeats > lengthBeats
+      ) {
+        exportFailure('invalid-project', `${takeLabel} range must fit within its folder`);
+      }
+
+      const sourceStartFrame = requireSafeInteger(
+        take.sourceStartFrame,
+        `${takeLabel} sourceStartFrame`,
+      );
+      const sourceFrameCount = requireSafeInteger(
+        take.sourceFrameCount,
+        `${takeLabel} sourceFrameCount`,
+      );
+      const fadeInFrames = requireSafeInteger(
+        take.fadeInFrames,
+        `${takeLabel} fadeInFrames`,
+      );
+      const fadeOutFrames = requireSafeInteger(
+        take.fadeOutFrames,
+        `${takeLabel} fadeOutFrames`,
+      );
+      if (sourceStartFrame < 0) {
+        exportFailure('invalid-project', `${takeLabel} sourceStartFrame must be non-negative`);
+      }
+      if (sourceFrameCount <= 0) {
+        exportFailure('invalid-project', `${takeLabel} sourceFrameCount must be positive`);
+      }
+      if (fadeInFrames < 0 || fadeOutFrames < 0) {
+        exportFailure('invalid-project', `${takeLabel} fades must be non-negative`);
+      }
+      // Subtraction avoids overflowing a malicious sourceStart + sourceCount.
+      if (
+        sourceFrameCount > asset.frameCount
+        || sourceStartFrame > asset.frameCount - sourceFrameCount
+      ) {
+        exportFailure('invalid-project', `${takeLabel} source range exceeds its asset`);
+      }
+      if (fadeInFrames > sourceFrameCount - fadeOutFrames) {
+        exportFailure('invalid-project', `${takeLabel} fades exceed its source range`);
+      }
+      const gainDb = requireFiniteNumber(take.gainDb, `${takeLabel} gainDb`);
+      if (gainDb < -96 || gainDb > 24) {
+        exportFailure('invalid-project', `${takeLabel} gainDb must be in -96..24`);
+      }
+      takeWindows.set(takeId, { offsetBeats, lengthBeats: takeLengthBeats });
+    }
+
+    let expectedOffsetBeats = 0;
+    let previousTakeId: string | undefined;
+    for (const [segmentIndex, rawSegment] of folder.compSegments.entries()) {
+      const segmentLabel = `${label}.compSegments[${segmentIndex}]`;
+      const segment = requireExactRecord(
+        rawSegment,
+        AUDIO_COMP_SEGMENT_FIELDS,
+        segmentLabel,
+      );
+      claimId(segment.id, `${segmentLabel} id`);
+      const takeId = requireNonEmptyString(segment.takeId, `${segmentLabel} takeId`);
+      const takeWindow = takeWindows.get(takeId);
+      if (takeWindow === undefined) {
+        exportFailure(
+          'invalid-project',
+          `${segmentLabel} references missing take ${takeId}`,
+        );
+      }
+      if (takeId === previousTakeId) {
+        exportFailure(
+          'invalid-project',
+          `${segmentLabel} must be merged with its adjacent same-take segment`,
+        );
+      }
+
+      const offsetBeats = requireFiniteNumber(
+        segment.offsetBeats,
+        `${segmentLabel} offsetBeats`,
+      );
+      const segmentLengthBeats = requireFiniteNumber(
+        segment.lengthBeats,
+        `${segmentLabel} lengthBeats`,
+      );
+      if (offsetBeats < 0) {
+        exportFailure('invalid-project', `${segmentLabel} offsetBeats must be non-negative`);
+      }
+      if (
+        segmentLengthBeats < MIN_EVENT_DURATION_BEATS
+        || segmentLengthBeats > MAX_PROJECT_TIMELINE_BEATS
+      ) {
+        exportFailure(
+          'invalid-project',
+          `${segmentLabel} lengthBeats must be in ${MIN_EVENT_DURATION_BEATS}..${MAX_PROJECT_TIMELINE_BEATS}`,
+        );
+      }
+      if (!sameAudioCompBeat(offsetBeats, expectedOffsetBeats)) {
+        exportFailure(
+          'invalid-project',
+          offsetBeats < expectedOffsetBeats
+            ? `${segmentLabel} overlaps or is not sorted`
+            : `${segmentLabel} leaves a gap or is not sorted`,
+        );
+      }
+      const segmentEndBeat = offsetBeats + segmentLengthBeats;
+      if (!Number.isFinite(segmentEndBeat) || segmentEndBeat > lengthBeats) {
+        exportFailure('invalid-project', `${segmentLabel} must fit within its folder`);
+      }
+      const takeEndBeat = takeWindow.offsetBeats + takeWindow.lengthBeats;
+      if (
+        offsetBeats < takeWindow.offsetBeats
+        || segmentEndBeat > takeEndBeat
+      ) {
+        exportFailure(
+          'invalid-project',
+          `${segmentLabel} must fit within its selected take`,
+        );
+      }
+      expectedOffsetBeats = segmentEndBeat;
+      previousTakeId = takeId;
+    }
+    if (!sameAudioCompBeat(expectedOffsetBeats, lengthBeats)) {
+      exportFailure('invalid-project', `${label} compSegments must exactly cover the folder`);
+    }
+  }
+}
+
+/**
  * Reject domain-invalid shapes before allocation or chord realization can
  * reinterpret them. Audio and automation clips are valid lossy projections:
  * they are deliberately omitted from MIDI, but their payload still has to
@@ -496,6 +946,7 @@ function validateExportProjectShape(project: Project): void {
   }
 
   const audioAssets = validateExportAudioAssets(project);
+  validateExportAudioTakeFolders(project, audioAssets);
   for (const track of project.tracks) {
     if (!Array.isArray(track.clips)) {
       exportFailure('invalid-project', `track ${track.id} clips must be an array`);

@@ -12,8 +12,11 @@ import {
   MAX_AUDIO_ASSET_COMBINED_ESTIMATED_BYTES,
   acquireProjectAudioBuffers,
   assertProjectAudioAssetCombinedResourceBudget,
+  estimateProjectAudioResources,
+  firstReferencedReadyAudioAssetId,
   getAudioAssetBytesResolver,
   preflightProjectAudioAssets,
+  projectHasReferencedReadyAudioAssets,
   setAudioAssetBytesResolver,
   sha256Hex,
   type AudioAssetBytesResolver,
@@ -74,6 +77,7 @@ function projectWithAsset(asset: ReadyAudioAsset): Project {
       denominator: 4,
     }],
     audioAssets: [asset],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [{ sourceTrackId: track.id, destination: { type: 'master' } }],
@@ -85,6 +89,49 @@ function projectWithAsset(asset: ReadyAudioAsset): Project {
     createdAt: 'now',
     updatedAt: 'now',
   };
+}
+
+function projectWithTakeFolder(asset: ReadyAudioAsset): Project {
+  const project = projectWithAsset(asset);
+  project.tracks[0]!.clips = [];
+  project.audioTakeFolders = [{
+    id: 'take-folder',
+    trackId: project.tracks[0]!.id,
+    startBeat: 0,
+    lengthBeats: 1,
+    crossfadeMs: 5,
+    takes: [
+      {
+        id: 'take-1',
+        audioAssetId: asset.id,
+        offsetBeats: 0,
+        lengthBeats: 1,
+        sourceStartFrame: 0,
+        sourceFrameCount: asset.frameCount,
+        fadeInFrames: 0,
+        fadeOutFrames: 0,
+        gainDb: 0,
+      },
+      {
+        id: 'take-2',
+        audioAssetId: asset.id,
+        offsetBeats: 0,
+        lengthBeats: 1,
+        sourceStartFrame: 0,
+        sourceFrameCount: asset.frameCount,
+        fadeInFrames: 0,
+        fadeOutFrames: 0,
+        gainDb: 0,
+      },
+    ],
+    compSegments: [{
+      id: 'comp-segment',
+      takeId: 'take-1',
+      offsetBeats: 0,
+      lengthBeats: 1,
+    }],
+  }];
+  return project;
 }
 
 async function fixture(bytes = Uint8Array.from([1, 2, 3, 4])) {
@@ -135,6 +182,31 @@ describe('audio asset resolver preflight', () => {
     expect(resolve).toHaveBeenCalledWith(asset);
     expect(prepared.assets[0]?.bytes).toEqual(bytes);
     expect(prepared.estimatedDecodedBytes).toBe(48_000 * 4);
+  });
+
+  it('prepares a ready asset referenced only by an Audio take folder', async () => {
+    const { asset, bytes } = await fixture();
+    const project = projectWithTakeFolder(asset);
+    const resolve = vi.fn(async () => bytes);
+
+    expect(projectHasReferencedReadyAudioAssets(project)).toBe(true);
+    expect(firstReferencedReadyAudioAssetId(project)).toBe(asset.id);
+    expect(estimateProjectAudioResources(project, 48_000)).toEqual({
+      rawBytes: bytes.byteLength,
+      largestRawAssetBytes: bytes.byteLength,
+      decodedBytes: 48_002 * Float32Array.BYTES_PER_ELEMENT,
+    });
+
+    const prepared = await preflightProjectAudioAssets(project, {
+      resolver: { resolve },
+      cache: new AudioAssetPlaybackCache(),
+      targetSampleRate: 48_000,
+    });
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledWith(asset);
+    expect(prepared.assets).toEqual([{ asset, bytes }]);
+    expect(prepared.estimatedDecodedBytes).toBe(48_000 * Float32Array.BYTES_PER_ELEMENT);
   });
 
   it('passes the combined gate for an ordinary short referenced asset', async () => {
@@ -458,6 +530,36 @@ describe('default audio asset resolver registration', () => {
 });
 
 describe('decoded audio asset leases', () => {
+  it('decodes a ready asset referenced only by an Audio take folder', async () => {
+    const { asset, bytes } = await fixture();
+    const cache = new AudioAssetPlaybackCache();
+    const prepared = await preflightProjectAudioAssets(
+      projectWithTakeFolder(asset),
+      {
+        resolver: { resolve: async () => bytes },
+        cache,
+      },
+    );
+    const decodeAudioData = vi.fn(async () => decodedBuffer({
+      sampleRate: 48_000,
+      length: 48_000,
+      duration: 1,
+    }));
+    const context = {
+      sampleRate: 48_000,
+      decodeAudioData,
+    } as unknown as BaseAudioContext;
+
+    const lease = await acquireProjectAudioBuffers(prepared, context, { cache });
+
+    expect(lease.buffersByAssetId.get(asset.id)).toMatchObject({
+      sampleRate: 48_000,
+      length: 48_000,
+    });
+    expect(decodeAudioData).toHaveBeenCalledTimes(1);
+    lease.release();
+  });
+
   it('decodes once per checksum/sample-rate and releases idempotently', async () => {
     const { project, bytes } = await fixture();
     const cache = new AudioAssetPlaybackCache();

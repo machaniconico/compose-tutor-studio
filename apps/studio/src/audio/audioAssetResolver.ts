@@ -571,6 +571,12 @@ function referencedReadyAudioAssets(project: Project): ReadyAudioAsset[] {
       if (asset?.availability === 'ready') referenced.set(asset.id, asset);
     }
   }
+  for (const folder of project.audioTakeFolders) {
+    for (const take of folder.takes) {
+      const asset = byId.get(take.audioAssetId);
+      if (asset?.availability === 'ready') referenced.set(asset.id, asset);
+    }
+  }
   return [...referenced.values()];
 }
 

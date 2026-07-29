@@ -217,6 +217,7 @@ export function createDefaultProject(title = '最初の1曲'): Project {
       denominator: 4,
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: tracks

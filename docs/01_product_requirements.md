@@ -59,6 +59,7 @@
 | US-012 | 作曲者として、曲に楽器・ドラム・音源・Busを足して音色と経路を整えたい | Must | production UIから安全に追加・複製・並べ替え・一般Track削除を行い、内蔵音色、main output、pre/post-fader sendを選んで保存・Undo・再生・WAVへ反映できる。schema v4では学習role Trackも改名できてroleを保持し、削除だけを保護する |
 | US-013 | 作曲者として、手元の音声を曲へ置いて非破壊編集したい | Must | WAV / MP3 / M4A / AACをAudio Trackへ読み込み、移動、左右trim、gain、fade、loop、split、独立複製、削除をUndo/Redoでき、live再生・WAV・再読込で同じ範囲を使う |
 | US-014 | 作曲者として、マイク入力を新規または既存のAudio Trackへ録音したい | Must | Audio Trackを1件だけ録音待機にでき、システム既定または列挙された入力を選び、最大60秒のdry録音を現在playheadから新しいClipとしてasset-firstで採用できる。成功はUndo 1回、失敗・cancelはProject不変とする |
+| US-015 | 作曲者として、同じ区間を複数回録った素材から良い部分をつないで仕上げたい | Must | 同一Audio Track・同一時間窓の既存Clipを非破壊take folderへまとめ、複数範囲を別takeへ切り替え、境界調整・未使用take削除・Undo/Redo・保存/再読込・live/WAVで同じcompを使える |
 
 ## 3. MVP機能範囲
 
@@ -80,6 +81,7 @@
 - Pattern/Clip: 1〜4小節単位の素材を組み合わせる
 - Track管理（部分実装）: instrument / drum / stereo Bus追加、音源fileからのAudio Track追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v4の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない。Folder / Stackは後続とする
 - Audio Clip: app-ownedな48 kHz mono/stereo PCM 16-bit WAVへ正規化し、移動、trim、gain、fade、loop、split、独立複製、削除を非破壊に行う。loop中は位相fieldがまだないためleft trimとsplitを無効にする
+- Audio Take Comp: 同一Audio Track・同一時間窓の既存非loop Clipをschema v5のtake folderへまとめ、範囲採用、境界移動、未使用take削除を1 gesture = 1 Undoで保存する。cycle captureからの自動take生成は後続とする
 
 ### 3.3 Learning
 
@@ -120,7 +122,7 @@
 | 楽譜エディタ | 実装量が大きい | MIDI編集が安定後 |
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
 | VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
-| punch / cycle take / comp / 実測latency校正 | 単一入力の伴奏同期録音と推定＋手動位置補正までは持つが、再生中の任意punch、長時間streaming、loopback実測、take laneはまだ持たない | 3OS実機で共有clockと推定補正を検証し、loopback校正、cycle take、非破壊compの順で進む |
+| punch / cycle capture / 複数入力 / named comp | 単一入力の伴奏同期録音、物理loopback実測校正、既存Audio Clipの手動take folder化と非破壊compまでは持つが、再生中の任意punch、長時間streaming、loop passごとの自動take生成、複数入力、複数の名前付きcomp / flattenは持たない | 3OS実機で共有clock・校正・手動compを検証し、長時間streamingと明示loop範囲の後にcycle captureを追加する |
 
 ## 5. 非機能要件
 
@@ -147,5 +149,6 @@
 - instrument / drum / Audio / Bus Trackの管理と音色・routing変更が、Master保護、schema v4学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
 - Audio Trackへ取り込んだ音声を非破壊編集でき、live再生とWAVが同じsource range / gain / fade / loopを使う。欠落・変更されたbinaryは別素材へ黙って置換せず、Project metadataを保持して説明する
 - システム既定または選択した単一マイクから、新規または録音待機中の既存Audio Trackへ録音できる。録音待機と入力deviceはProject保存・履歴を汚さず、採用したAsset / ClipだけをUndo 1回で戻せる
+- 既存Audio Clipを非破壊take folderへまとめ、2つ以上の範囲を別takeへ切り替え、境界・未使用takeを編集できる。Undo/Redo、保存・再読込、live/WAVが同じgapless compを使う
 - 主要ロジックにテストがある
 - 既存DAWのUIコピーではなく、独自デザインである

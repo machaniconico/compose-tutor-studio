@@ -283,6 +283,109 @@ describe('playback topology changes', () => {
     })).toBe(false);
   });
 
+  it('deeply compares Audio take folders, takes, and selected comp segments', () => {
+    const project = createDefaultProject();
+    const asset = {
+      id: 'asset-take-topology',
+      availability: 'ready' as const,
+      checksumSha256: 'c'.repeat(64),
+      originalName: 'take.wav',
+      mediaType: 'audio/wav' as const,
+      byteLength: 384_044,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 192_000,
+    };
+    const trackId = 'track-take-topology';
+    const withFolder = {
+      ...project,
+      audioAssets: [asset],
+      audioTakeFolders: [{
+        id: 'folder-topology',
+        trackId,
+        startBeat: 0,
+        lengthBeats: 4,
+        crossfadeMs: 5,
+        takes: [
+          {
+            id: 'take-topology-a',
+            audioAssetId: asset.id,
+            offsetBeats: 0,
+            lengthBeats: 4,
+            sourceStartFrame: 0,
+            sourceFrameCount: 96_000,
+            fadeInFrames: 0,
+            fadeOutFrames: 0,
+            gainDb: 0,
+          },
+          {
+            id: 'take-topology-b',
+            audioAssetId: asset.id,
+            offsetBeats: 0,
+            lengthBeats: 4,
+            sourceStartFrame: 96_000,
+            sourceFrameCount: 96_000,
+            fadeInFrames: 0,
+            fadeOutFrames: 0,
+            gainDb: -2,
+          },
+        ],
+        compSegments: [{
+          id: 'segment-topology',
+          takeId: 'take-topology-a',
+          offsetBeats: 0,
+          lengthBeats: 4,
+        }],
+      }],
+      tracks: [{
+        id: trackId,
+        name: 'Takes',
+        type: 'audio' as const,
+        role: 'general' as const,
+        clips: [],
+        volume: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        effects: [],
+      }, ...project.tracks],
+    };
+
+    expect(hasPlaybackTopologyChanged(withFolder, {
+      ...withFolder,
+      audioTakeFolders: withFolder.audioTakeFolders.map((folder) => ({
+        ...folder,
+        crossfadeMs: 12,
+      })),
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(withFolder, {
+      ...withFolder,
+      audioTakeFolders: withFolder.audioTakeFolders.map((folder) => ({
+        ...folder,
+        takes: folder.takes.map((take, index) =>
+          index === 1 ? { ...take, gainDb: -6 } : take),
+      })),
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(withFolder, {
+      ...withFolder,
+      audioTakeFolders: withFolder.audioTakeFolders.map((folder) => ({
+        ...folder,
+        compSegments: folder.compSegments.map((segment) => ({
+          ...segment,
+          takeId: 'take-topology-b',
+        })),
+      })),
+    })).toBe(true);
+    expect(hasPlaybackTopologyChanged(withFolder, {
+      ...withFolder,
+      audioTakeFolders: withFolder.audioTakeFolders.map((folder) => ({
+        ...folder,
+        compSegments: folder.compSegments.map((segment) => ({ ...segment })),
+        takes: folder.takes.map((take) => ({ ...take })),
+      })),
+    })).toBe(false);
+  });
+
   it.each(['starting', 'playing'] as const)(
     'stops an active %s generation atomically when topology is adopted',
     (phase) => {

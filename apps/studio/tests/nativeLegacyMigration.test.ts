@@ -54,6 +54,26 @@ function projectFixture(id = 'legacy-project', title = 'Legacy project'): Projec
   };
 }
 
+function migrateArchivedCorpusProjectJson(projectJson: string): string {
+  const project = JSON.parse(projectJson) as Record<string, unknown>;
+  if (
+    project.schemaVersion !== LEGACY_MIGRATION_VERSION - 1
+    || LEGACY_MIGRATION_VERSION !== 5
+    || Object.prototype.hasOwnProperty.call(project, 'audioTakeFolders')
+  ) {
+    throw new Error('archived legacy corpus is not an unmigrated schema-v4 project');
+  }
+  project.schemaVersion = LEGACY_MIGRATION_VERSION;
+  const migratedEntries: Array<[string, unknown]> = [];
+  for (const entry of Object.entries(project)) {
+    migratedEntries.push(entry);
+    if (entry[0] === 'audioAssets') {
+      migratedEntries.push(['audioTakeFolders', []]);
+    }
+  }
+  return JSON.stringify(Object.fromEntries(migratedEntries));
+}
+
 function success<T>(value: T): RepositoryResult<T> {
   return { ok: true, value };
 }
@@ -119,6 +139,10 @@ function gateway(
 }
 
 describe('NativeLegacyMigratingRepository', () => {
+  it('uses schema-v5 legacy migration protocol receipts', () => {
+    expect(LEGACY_MIGRATION_VERSION).toBe(5);
+  });
+
   it('preserves crash-draft capability while enforcing migration lifecycle state', async () => {
     const project = projectFixture('crash-draft-project');
     const request: SaveRequest = {
@@ -497,7 +521,7 @@ describe('NativeLegacyMigratingRepository', () => {
   });
 
   it('keeps the shared TypeScript and Rust legacy authority corpus in parity', async () => {
-    expect(legacyMigrationCorpus.version).toBe(LEGACY_MIGRATION_VERSION);
+    expect(legacyMigrationCorpus.version + 1).toBe(LEGACY_MIGRATION_VERSION);
     for (const fixture of legacyMigrationCorpus.cases) {
       const storage = new TestStorage();
       for (const entry of fixture.storageEntries) storage.setItem(entry.key, entry.value);
@@ -519,7 +543,13 @@ describe('NativeLegacyMigratingRepository', () => {
           if (!loaded.ok || !loaded.value) throw new Error(`${fixture.name}: legacy load failed`);
           const encoded = encodeProjectJson(loaded.value.project);
           if (!encoded.ok) throw new Error(`${fixture.name}: legacy re-encode failed`);
-          expect(encoded.json, fixture.name).toBe(fixture.expected.canonicalProjectJson);
+          const canonicalProjectJson = fixture.expected.canonicalProjectJson;
+          if (typeof canonicalProjectJson !== 'string') {
+            throw new Error(`${fixture.name}: ready fixture is missing canonical JSON`);
+          }
+          expect(encoded.json, fixture.name).toBe(
+            migrateArchivedCorpusProjectJson(canonicalProjectJson),
+          );
           expect(loaded.value.recoveryReason, fixture.name).toBe(
             fixture.expected.recoveryReason,
           );
@@ -558,7 +588,18 @@ describe('NativeLegacyMigratingRepository', () => {
           JSON.stringify(left).localeCompare(JSON.stringify(right)),
         );
       expect(sortImports(actualImports), fixture.name).toEqual(
-        sortImports(fixture.expectedImports),
+        sortImports(
+          fixture.expectedImports.map((expectedImport) => {
+            if (!('projectJson' in expectedImport)) return expectedImport;
+            if (typeof expectedImport.projectJson !== 'string') {
+              throw new Error(`${fixture.name}: import is missing canonical JSON`);
+            }
+            return {
+              ...expectedImport,
+              projectJson: migrateArchivedCorpusProjectJson(expectedImport.projectJson),
+            };
+          }),
+        ),
       );
       const completion = migration.complete.mock.calls[0]?.[0] as
         | LegacyMigrationCompletion

@@ -149,6 +149,7 @@ export function createDefaultProject(opts: CreateDefaultProjectOpts = {}): Proje
       denominator: timeSignature[1],
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [instrTrack, drumTrack].map((track) => ({

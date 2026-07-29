@@ -299,6 +299,60 @@ fn schema_v4_routing_project_value() -> Value {
     project
 }
 
+fn schema_v5_audio_take_project_value() -> Value {
+    let mut project = schema_v4_routing_project_value();
+    project["schemaVersion"] = json!(5);
+    project.as_object_mut().unwrap().insert(
+        "audioTakeFolders".to_owned(),
+        json!([{
+            "id": "take-folder-a",
+            "trackId": "track-audio",
+            "startBeat": 1,
+            "lengthBeats": 4,
+            "crossfadeMs": 5,
+            "takes": [
+                {
+                    "id": "take-a",
+                    "audioAssetId": "asset-ready",
+                    "offsetBeats": 0,
+                    "lengthBeats": 4,
+                    "sourceStartFrame": 0,
+                    "sourceFrameCount": 1000,
+                    "fadeInFrames": 20,
+                    "fadeOutFrames": 20,
+                    "gainDb": 0
+                },
+                {
+                    "id": "take-b",
+                    "audioAssetId": "asset-ready",
+                    "offsetBeats": 0,
+                    "lengthBeats": 4,
+                    "sourceStartFrame": 1000,
+                    "sourceFrameCount": 1000,
+                    "fadeInFrames": 10,
+                    "fadeOutFrames": 10,
+                    "gainDb": -3
+                }
+            ],
+            "compSegments": [
+                {
+                    "id": "comp-a",
+                    "takeId": "take-a",
+                    "offsetBeats": 0,
+                    "lengthBeats": 2
+                },
+                {
+                    "id": "comp-b",
+                    "takeId": "take-b",
+                    "offsetBeats": 2,
+                    "lengthBeats": 2
+                }
+            ]
+        }]),
+    );
+    project
+}
+
 fn schema_v4_routing_limit_project_value() -> Value {
     let mut project = schema_v4_routing_project_value();
     {
@@ -809,11 +863,12 @@ fn native_v3_to_v4_routing_migration_is_deterministic_and_direct_to_master() {
     ));
 
     let through_all_versions = migrate_project_for_legacy_proof(
-        serde_json::from_str::<Value>(&project_json("legacy-v1-v4", "Legacy", 1)).unwrap(),
-        4,
+        serde_json::from_str::<Value>(&project_json("legacy-v1-v5", "Legacy", 1)).unwrap(),
+        5,
     )
-    .expect("v1 migrates through v4");
-    assert_eq!(through_all_versions["schemaVersion"], 4);
+    .expect("v1 migrates through v5");
+    assert_eq!(through_all_versions["schemaVersion"], 5);
+    assert_eq!(through_all_versions["audioTakeFolders"], json!([]));
     assert!(validate_project_file_json(
         &serde_json::to_vec(&through_all_versions).unwrap()
     ));
@@ -821,6 +876,197 @@ fn native_v3_to_v4_routing_migration_is_deterministic_and_direct_to_master() {
     let mut smuggled = source;
     smuggled["audioRouting"] = json!({ "outputs": [], "sends": [] });
     assert!(migrate_project_value_v3_to_v4(smuggled).is_none());
+}
+
+#[test]
+fn native_v4_to_v5_audio_take_migration_is_strict_and_deterministic() {
+    let source = schema_v4_routing_project_value();
+    let migrated = migrate_project_value_v4_to_v5(source.clone()).expect("v4 migrates");
+    assert_eq!(migrated["schemaVersion"], 5);
+    assert_eq!(migrated["audioTakeFolders"], json!([]));
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&migrated).unwrap()
+    ));
+    assert!(legacy_project_matches_migrated(
+        &serde_json::to_string(&source).unwrap(),
+        &serde_json::to_string(&migrated).unwrap(),
+    ));
+
+    let mut smuggled = source;
+    smuggled["audioTakeFolders"] = json!([]);
+    assert!(migrate_project_value_v4_to_v5(smuggled).is_none());
+}
+
+#[test]
+fn native_project_validation_round_trips_schema_v5_audio_take_folders() {
+    let fixture = schema_v5_audio_take_project_value();
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&fixture).unwrap()
+    ));
+    let canonical =
+        canonical_project_for_validation(fixture.clone()).expect("v5 fixture is canonical");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&canonical.json).unwrap(),
+        fixture
+    );
+
+    let mut epsilon_boundary = schema_v5_audio_take_project_value();
+    epsilon_boundary["audioTakeFolders"][0]["compSegments"][1]["offsetBeats"] = json!(2.0000000005);
+    epsilon_boundary["audioTakeFolders"][0]["compSegments"][1]["lengthBeats"] = json!(1.9999999995);
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&epsilon_boundary).unwrap()),
+        "gapless boundaries use the same 1e-9 tolerance as the TypeScript validator"
+    );
+}
+
+#[test]
+fn native_project_validation_rejects_invalid_schema_v5_audio_take_folders() {
+    let fixture = schema_v5_audio_take_project_value();
+    let mut cases = Vec::<(&str, Value)>::new();
+
+    let mut missing_root = fixture.clone();
+    missing_root
+        .as_object_mut()
+        .unwrap()
+        .remove("audioTakeFolders");
+    cases.push(("missing required root field", missing_root));
+
+    let mut explicit_null = fixture.clone();
+    explicit_null["audioTakeFolders"] = Value::Null;
+    cases.push(("explicit null root field", explicit_null));
+
+    let mut smuggled_into_v4 = fixture.clone();
+    smuggled_into_v4["schemaVersion"] = json!(4);
+    cases.push(("v5 field on v4", smuggled_into_v4));
+
+    let mut unknown_root = fixture.clone();
+    unknown_root["unknown"] = json!(true);
+    cases.push(("unknown root field", unknown_root));
+
+    let mut unknown_folder = fixture.clone();
+    unknown_folder["audioTakeFolders"][0]["unknown"] = json!(true);
+    cases.push(("unknown folder field", unknown_folder));
+
+    let mut unknown_take = fixture.clone();
+    unknown_take["audioTakeFolders"][0]["takes"][0]["unknown"] = json!(true);
+    cases.push(("unknown take field", unknown_take));
+
+    let mut unknown_segment = fixture.clone();
+    unknown_segment["audioTakeFolders"][0]["compSegments"][0]["unknown"] = json!(true);
+    cases.push(("unknown segment field", unknown_segment));
+
+    let mut non_audio_track = fixture.clone();
+    non_audio_track["audioTakeFolders"][0]["trackId"] = json!("track-chords");
+    cases.push(("folder on non-audio track", non_audio_track));
+
+    let mut outside_project = fixture.clone();
+    outside_project["audioTakeFolders"][0]["startBeat"] = json!(4);
+    cases.push(("folder outside project timeline", outside_project));
+
+    let mut invalid_crossfade = fixture.clone();
+    invalid_crossfade["audioTakeFolders"][0]["crossfadeMs"] = json!(50.1);
+    cases.push(("crossfade over limit", invalid_crossfade));
+
+    let mut one_take = fixture.clone();
+    one_take["audioTakeFolders"][0]["takes"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    cases.push(("fewer than two takes", one_take));
+
+    let mut too_many_folders = fixture.clone();
+    let folder = too_many_folders["audioTakeFolders"][0].clone();
+    too_many_folders["audioTakeFolders"] = Value::Array(vec![folder; 1_025]);
+    cases.push(("more than 1024 folders", too_many_folders));
+
+    let mut too_many_takes = fixture.clone();
+    let take = too_many_takes["audioTakeFolders"][0]["takes"][0].clone();
+    too_many_takes["audioTakeFolders"][0]["takes"] = Value::Array(vec![take; 129]);
+    cases.push(("more than 128 takes", too_many_takes));
+
+    let mut too_many_segments = fixture.clone();
+    let segment = too_many_segments["audioTakeFolders"][0]["compSegments"][0].clone();
+    too_many_segments["audioTakeFolders"][0]["compSegments"] = Value::Array(vec![segment; 4_097]);
+    cases.push(("more than 4096 comp segments", too_many_segments));
+
+    let mut missing_asset = fixture.clone();
+    missing_asset["audioTakeFolders"][0]["takes"][0]["audioAssetId"] = json!("missing-asset");
+    cases.push(("missing take asset", missing_asset));
+
+    let mut unresolved_asset = fixture.clone();
+    unresolved_asset["audioAssets"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "asset-unresolved",
+            "availability": "unresolved",
+            "reason": "missing-reference"
+        }));
+    unresolved_asset["audioTakeFolders"][0]["takes"][0]["audioAssetId"] = json!("asset-unresolved");
+    cases.push(("unresolved take asset", unresolved_asset));
+
+    let mut invalid_source_range = fixture.clone();
+    invalid_source_range["audioTakeFolders"][0]["takes"][1]["sourceFrameCount"] = json!(1001);
+    cases.push(("take source range outside asset", invalid_source_range));
+
+    let mut invalid_fades = fixture.clone();
+    invalid_fades["audioTakeFolders"][0]["takes"][0]["fadeInFrames"] = json!(900);
+    invalid_fades["audioTakeFolders"][0]["takes"][0]["fadeOutFrames"] = json!(101);
+    cases.push(("take fades exceed source", invalid_fades));
+
+    let mut duplicate_id = fixture.clone();
+    duplicate_id["audioTakeFolders"][0]["takes"][0]["id"] = json!("take-folder-a");
+    duplicate_id["audioTakeFolders"][0]["compSegments"][0]["takeId"] = json!("take-folder-a");
+    cases.push(("duplicate entity id", duplicate_id));
+
+    let mut duplicate_window = fixture.clone();
+    let mut second_folder = duplicate_window["audioTakeFolders"][0].clone();
+    second_folder["id"] = json!("take-folder-duplicate-window");
+    second_folder["takes"][0]["id"] = json!("take-duplicate-window-a");
+    second_folder["takes"][1]["id"] = json!("take-duplicate-window-b");
+    second_folder["compSegments"][0]["id"] = json!("segment-duplicate-window-a");
+    second_folder["compSegments"][0]["takeId"] = json!("take-duplicate-window-a");
+    second_folder["compSegments"][1]["id"] = json!("segment-duplicate-window-b");
+    second_folder["compSegments"][1]["takeId"] = json!("take-duplicate-window-b");
+    duplicate_window["audioTakeFolders"]
+        .as_array_mut()
+        .unwrap()
+        .push(second_folder);
+    cases.push(("duplicate folder track window", duplicate_window));
+
+    let mut missing_take = fixture.clone();
+    missing_take["audioTakeFolders"][0]["compSegments"][0]["takeId"] = json!("missing-take");
+    cases.push(("missing comp take", missing_take));
+
+    let mut gap = fixture.clone();
+    gap["audioTakeFolders"][0]["compSegments"][1]["offsetBeats"] = json!(2.25);
+    gap["audioTakeFolders"][0]["compSegments"][1]["lengthBeats"] = json!(1.75);
+    cases.push(("comp gap", gap));
+
+    let mut overlap = fixture.clone();
+    overlap["audioTakeFolders"][0]["compSegments"][1]["offsetBeats"] = json!(1.75);
+    overlap["audioTakeFolders"][0]["compSegments"][1]["lengthBeats"] = json!(2.25);
+    cases.push(("comp overlap", overlap));
+
+    let mut incomplete = fixture.clone();
+    incomplete["audioTakeFolders"][0]["compSegments"][1]["lengthBeats"] = json!(1);
+    cases.push(("comp does not cover folder end", incomplete));
+
+    let mut unmerged_adjacent = fixture.clone();
+    unmerged_adjacent["audioTakeFolders"][0]["compSegments"][1]["takeId"] = json!("take-a");
+    cases.push(("adjacent segments from the same take", unmerged_adjacent));
+
+    let mut outside_take = fixture;
+    outside_take["audioTakeFolders"][0]["takes"][1]["offsetBeats"] = json!(2.5);
+    outside_take["audioTakeFolders"][0]["takes"][1]["lengthBeats"] = json!(1.5);
+    cases.push(("comp segment outside take window", outside_take));
+
+    for (name, project) in cases {
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&project).unwrap()),
+            "must reject {name}"
+        );
+    }
 }
 
 #[test]
@@ -1560,6 +1806,62 @@ fn schema_v3_project_round_trips_through_save_crash_draft_and_reopen() {
     assert_eq!(
         serde_json::from_str::<Value>(&loaded.project_json).unwrap(),
         serde_json::from_str::<Value>(&project_json).unwrap()
+    );
+    assert!(!loaded.recovered);
+}
+
+#[test]
+fn schema_v5_audio_take_project_round_trips_through_save_and_reopen() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("projects.sqlite3");
+    let repository = NativeRepository::new(path.clone());
+    repository.initialize().expect("repository initializes");
+    let fixture_bytes = vec![0u8; 4096];
+    repository
+        .store_audio_asset(
+            audio_asset_sha256(&fixture_bytes),
+            fixture_bytes.len(),
+            fixture_bytes,
+        )
+        .expect("schema-v5 audio asset stores before project metadata");
+    let mut project = schema_v5_audio_take_project_value();
+    project["id"] = json!("schema-v5-project");
+    project["title"] = json!("Schema v5 Audio Takes");
+    let project_json = serde_json::to_string(&project).unwrap();
+
+    repository
+        .stage_crash_draft(CrashDraftRequestDto {
+            project_id: "schema-v5-project".to_owned(),
+            project_json: project_json.clone(),
+            activation_id: "activation-v5".to_owned(),
+            revision: 1,
+            write_id: "write-v5-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("schema-v5 crash draft stages");
+    repository
+        .save(SaveRequestDto {
+            project_id: "schema-v5-project".to_owned(),
+            project_json: project_json.clone(),
+            activation_id: "activation-v5".to_owned(),
+            revision: 1,
+            write_id: "write-v5-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("schema-v5 project saves");
+    repository.close().expect("repository closes");
+
+    let reopened = NativeRepository::new(path);
+    reopened.initialize().expect("repository reopens");
+    let loaded = reopened
+        .load("schema-v5-project".to_owned())
+        .expect("schema-v5 project loads")
+        .expect("schema-v5 project exists");
+    assert_eq!(
+        serde_json::from_str::<Value>(&loaded.project_json).unwrap(),
+        project
     );
     assert!(!loaded.recovered);
 }
@@ -5228,43 +5530,43 @@ fn incomplete_higher_migration_never_supersedes_completed_lower_authority_after_
 }
 
 #[test]
-fn protocol_v4_only_supersedes_completed_v3_after_atomic_completion() {
+fn protocol_v5_only_supersedes_completed_v4_after_atomic_completion() {
     let (_directory, repository) = initialized_repository();
-    let project_id = "protocol-v3-to-v4";
+    let project_id = "protocol-v4-to-v5";
     let source = project_json(project_id, "Protocol rollover", 1);
-    let project_v3 = migrated_project_json(&source, 3);
     let project_v4 = migrated_project_json(&source, 4);
+    let project_v5 = migrated_project_json(&source, 5);
     let mirror_key = format!("cts.project.{project_id}");
     let snapshot = legacy_snapshot(&[(mirror_key.as_str(), source.as_str())], CREATED_AT);
     repository.backup_legacy_snapshot(snapshot.clone()).unwrap();
 
-    let mut v3 = legacy_head_request_at_version(&snapshot, 3, project_id, "ignored", 1);
-    v3.project_json = Some(project_v3);
-    repository.import_legacy_project(v3).unwrap();
+    let mut v4 = legacy_head_request_at_version(&snapshot, 4, project_id, "ignored", 1);
+    v4.project_json = Some(project_v4);
+    repository.import_legacy_project(v4).unwrap();
     repository
-        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 3, 1, 0, 0))
+        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 4, 1, 0, 0))
         .unwrap();
     assert!(
         repository
-            .get_legacy_migration_status(snapshot.content_checksum.clone(), 3)
+            .get_legacy_migration_status(snapshot.content_checksum.clone(), 4)
             .unwrap()
             .complete
     );
     assert!(
         !repository
-            .get_legacy_migration_status(snapshot.content_checksum.clone(), 4)
+            .get_legacy_migration_status(snapshot.content_checksum.clone(), 5)
             .unwrap()
             .complete
     );
 
-    let mut v4 = legacy_head_request_at_version(&snapshot, 4, project_id, "ignored", 1);
-    v4.project_json = Some(project_v4);
-    repository.import_legacy_project(v4).unwrap();
+    let mut v5 = legacy_head_request_at_version(&snapshot, 5, project_id, "ignored", 1);
+    v5.project_json = Some(project_v5);
+    repository.import_legacy_project(v5).unwrap();
     let before_completion = repository.load(project_id.to_owned()).unwrap().unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&before_completion.project_json).unwrap()["schemaVersion"],
-        3,
-        "a staged v4 candidate must not replace the completed v3 authority"
+        4,
+        "a staged v5 candidate must not replace the completed v4 authority"
     );
 
     repository.close().unwrap();
@@ -5272,60 +5574,57 @@ fn protocol_v4_only_supersedes_completed_v3_after_atomic_completion() {
     let after_reopen = repository.load(project_id.to_owned()).unwrap().unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&after_reopen.project_json).unwrap()["schemaVersion"],
-        3,
-        "a crash before v4 completion must leave v3 live"
+        4,
+        "a crash before v5 completion must leave v4 live"
     );
 
     repository
-        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 4, 1, 0, 0))
+        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 5, 1, 0, 0))
         .unwrap();
     let migrated = repository.load(project_id.to_owned()).unwrap().unwrap();
     let migrated_json = serde_json::from_str::<Value>(&migrated.project_json).unwrap();
-    assert_eq!(migrated_json["schemaVersion"], 4);
-    assert_eq!(
-        migrated_json["audioRouting"],
-        json!({ "outputs": [], "sends": [] })
-    );
+    assert_eq!(migrated_json["schemaVersion"], 5);
+    assert_eq!(migrated_json["audioTakeFolders"], json!([]));
     assert!(migrated
         .head_version
-        .is_some_and(|version| version.contains(":legacy:v4:")));
+        .is_some_and(|version| version.contains(":legacy:v5:")));
 }
 
 #[test]
-fn protocol_v4_recovers_from_incomplete_v3_staging_without_promoting_it() {
+fn protocol_v5_recovers_from_incomplete_v4_staging_without_promoting_it() {
     let (_directory, repository) = initialized_repository();
-    let project_id = "incomplete-protocol-v3";
-    let source = project_json(project_id, "Interrupted v3", 1);
-    let project_v3 = migrated_project_json(&source, 3);
+    let project_id = "incomplete-protocol-v4";
+    let source = project_json(project_id, "Interrupted v4", 1);
     let project_v4 = migrated_project_json(&source, 4);
+    let project_v5 = migrated_project_json(&source, 5);
     let mirror_key = format!("cts.project.{project_id}");
     let snapshot = legacy_snapshot(&[(mirror_key.as_str(), source.as_str())], CREATED_AT);
     repository.backup_legacy_snapshot(snapshot.clone()).unwrap();
 
-    let mut v3 = legacy_head_request_at_version(&snapshot, 3, project_id, "ignored", 1);
-    v3.project_json = Some(project_v3);
-    repository.import_legacy_project(v3).unwrap();
+    let mut v4 = legacy_head_request_at_version(&snapshot, 4, project_id, "ignored", 1);
+    v4.project_json = Some(project_v4);
+    repository.import_legacy_project(v4).unwrap();
     repository.close().unwrap();
     repository.initialize().unwrap();
     assert!(repository.load(project_id.to_owned()).unwrap().is_none());
     assert!(
         !repository
-            .get_legacy_migration_status(snapshot.content_checksum.clone(), 3)
+            .get_legacy_migration_status(snapshot.content_checksum.clone(), 4)
             .unwrap()
             .complete
     );
 
-    let mut v4 = legacy_head_request_at_version(&snapshot, 4, project_id, "ignored", 1);
-    v4.project_json = Some(project_v4);
-    repository.import_legacy_project(v4).unwrap();
+    let mut v5 = legacy_head_request_at_version(&snapshot, 5, project_id, "ignored", 1);
+    v5.project_json = Some(project_v5);
+    repository.import_legacy_project(v5).unwrap();
     repository
-        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 4, 1, 0, 0))
+        .complete_legacy_migration(legacy_completion_at_version(&snapshot, 5, 1, 0, 0))
         .unwrap();
 
     let migrated = repository.load(project_id.to_owned()).unwrap().unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&migrated.project_json).unwrap()["schemaVersion"],
-        4
+        5
     );
     connection_value(&repository, |connection| {
         let staged_versions = connection
@@ -5341,18 +5640,18 @@ fn protocol_v4_recovers_from_incomplete_v3_staging_without_promoting_it() {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(staged_versions, vec![3, 4]);
-        let completed_v3: i64 = connection
+        assert_eq!(staged_versions, vec![4, 5]);
+        let completed_v4: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM legacy_migration_runs
-                 WHERE content_checksum = ?1 AND migration_version = 3",
+                 WHERE content_checksum = ?1 AND migration_version = 4",
                 params![snapshot.content_checksum],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(
-            completed_v3, 0,
-            "the interrupted v3 stage remains non-authoritative"
+            completed_v4, 0,
+            "the interrupted v4 stage remains non-authoritative"
         );
     });
 }
@@ -6640,8 +6939,12 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
         "/../../../fixtures/persistence/legacy-migration-v1.json"
     )))
     .expect("shared legacy fixture corpus parses");
-    let migration_version = corpus.version;
-    assert_eq!(migration_version, LEGACY_MIGRATION_VERSION);
+    assert_eq!(
+        corpus.version + 1,
+        LEGACY_MIGRATION_VERSION,
+        "the archived v4 corpus must be upgraded through the released v5 migration"
+    );
+    let migration_version = LEGACY_MIGRATION_VERSION;
     for fixture in corpus.cases {
         let (_directory, repository) = initialized_repository();
         let borrowed = fixture
@@ -6658,7 +6961,11 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
             .collect::<Vec<_>>();
         for expected_import in fixture.expected_imports {
             let (project_json, branch, diagnostic) = match expected_import {
-                LegacyParityImport::Head { project_json } => (Some(project_json), None, None),
+                LegacyParityImport::Head { project_json } => (
+                    Some(migrated_project_json(&project_json, migration_version)),
+                    None,
+                    None,
+                ),
                 LegacyParityImport::Diagnostic { error_code } => {
                     (None, None, Some(LegacyDiagnosticDto { error_code }))
                 }
@@ -6670,7 +6977,7 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
                     write_id,
                     saved_at,
                 } => (
-                    Some(project_json),
+                    Some(migrated_project_json(&project_json, migration_version)),
                     Some(LegacyBranchCandidateDto {
                         source,
                         activation_id,
@@ -6708,11 +7015,18 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
                     .load(fixture.project_id.clone())
                     .unwrap()
                     .map(|loaded| serde_json::from_str::<Value>(&loaded.project_json).unwrap());
-                let expected = fixture
-                    .expected
-                    .canonical_project_json
-                    .as_deref()
-                    .map(|project_json| serde_json::from_str::<Value>(project_json).unwrap());
+                let expected =
+                    fixture
+                        .expected
+                        .canonical_project_json
+                        .as_deref()
+                        .map(|project_json| {
+                            serde_json::from_str::<Value>(&migrated_project_json(
+                                project_json,
+                                migration_version,
+                            ))
+                            .unwrap()
+                        });
                 assert_eq!(loaded, expected, "{}", fixture.name);
             }
             "unreadable" => {

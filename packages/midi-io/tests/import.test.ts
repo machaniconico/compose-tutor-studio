@@ -53,6 +53,7 @@ describe('parseMidiFile', () => {
         denominator: 4,
       }],
       audioAssets: [],
+      audioTakeFolders: [],
       automationLanes: [],
       audioRouting: {
         outputs: [

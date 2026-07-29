@@ -16,7 +16,7 @@ import type {
   TrackType,
 } from './types';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export type CreateProjectOptions = {
   title?: string;
@@ -167,6 +167,7 @@ export function createEmptyProject(options: CreateProjectOptions = {}): Project 
       denominator: timeSignature[1],
     }],
     audioAssets: [],
+    audioTakeFolders: [],
     automationLanes: [],
     audioRouting: {
       outputs: [chords, bass, melody, drums].map((track) => ({

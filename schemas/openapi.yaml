@@ -230,12 +230,14 @@ components:
     Project:
       type: object
       description: >-
-        Current schema-v4 aggregate. lengthBeats, tempoMap, and timeSignatureMap
+        Current schema-v5 aggregate. lengthBeats, tempoMap, and timeSignatureMap
         are the musical-time authority; bpm, timeSignature, and lengthBars are
         validated compatibility mirrors. audioRouting is one normalized,
         acyclic stereo graph shared by realtime playback and offline WAV
         rendering; disabled and zero-gain sends still participate in cycle
-        validation. Across non-Master clips, resolved stored MIDI-note
+        validation. audioTakeFolders retain immutable ready-asset source
+        windows and an ordered, gapless audible comp; source Audio Clips are
+        removed when they are grouped. Across non-Master clips, resolved stored MIDI-note
         and drum-event occurrences (linked source payload multiplied by clip
         instances) must not exceed 200000. Runtime limits the MIDI, drum, and
         realized-chord audible projection to 20000 events for live playback.
@@ -261,6 +263,7 @@ components:
         - tempoMap
         - timeSignatureMap
         - audioAssets
+        - audioTakeFolders
         - automationLanes
         - audioRouting
         - tracks
@@ -275,7 +278,7 @@ components:
           maxLength: 4096
         schemaVersion:
           type: integer
-          const: 4
+          const: 5
         title:
           type: string
           maxLength: 4096
@@ -332,6 +335,19 @@ components:
             content-addressed repository and are resolved by checksum.
           items:
             $ref: '#/components/schemas/AudioAsset'
+        audioTakeFolders:
+          type: array
+          maxItems: 1024
+          description: >-
+            Non-destructive Audio-only alternatives attached to Audio Tracks.
+            Folder, take, and comp-segment identifiers participate in the
+            Project-wide identifier namespace. A folder's ordered comp
+            segments must be gapless, non-overlapping, merge adjacent ranges
+            that select the same take, and exactly cover the folder. At most
+            one folder may occupy the same Audio Track, startBeat, and
+            lengthBeats window.
+          items:
+            $ref: '#/components/schemas/AudioTakeFolder'
         automationLanes:
           type: array
           maxItems: 2048
@@ -596,7 +612,7 @@ components:
           maximum: 8192
         lengthBeats:
           type: number
-          minimum: 0.0010416666666666
+          minimum: 0.0010416666666666667
           description: Domain validation enforces the exact minimum of 1/960 beat.
           maximum: 8192
         loop:
@@ -614,7 +630,7 @@ components:
           minLength: 1
           maxLength: 4096
           description: >-
-            Linked-clip source id retained by current schema v4. MIDI/drum only;
+            Linked-clip source id retained by current schema v5. MIDI/drum only;
             the source must be
             a direct same-track, same-type non-alias clip of identical length.
             Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and
@@ -771,6 +787,129 @@ components:
           maxLength: 4096
         reason:
           enum: [legacy-reference, missing-reference]
+    AudioTakeFolder:
+      type: object
+      additionalProperties: false
+      required: [id, trackId, startBeat, lengthBeats, crossfadeMs, takes, compSegments]
+      description: >-
+        Alternatives for one Audio Track timeline window. The referenced Track
+        must exist and have type audio. The folder must end within the Project;
+        each take and comp segment uses folder-local beat offsets.
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        trackId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        startBeat:
+          type: number
+          minimum: 0
+          maximum: 8192
+        lengthBeats:
+          type: number
+          minimum: 0.0010416666666666667
+          maximum: 8192
+          description: Domain validation enforces the exact minimum of 1/960 beat.
+        crossfadeMs:
+          type: number
+          minimum: 0
+          maximum: 50
+          description: >-
+            Total centered linear overlap at a boundary between different
+            takes. Playback extends each side by half this value, bounded by
+            segment length and available source handles.
+        takes:
+          type: array
+          minItems: 2
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/AudioTake'
+        compSegments:
+          type: array
+          minItems: 1
+          maxItems: 4096
+          items:
+            $ref: '#/components/schemas/AudioCompSegment'
+    AudioTake:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - audioAssetId
+        - offsetBeats
+        - lengthBeats
+        - sourceStartFrame
+        - sourceFrameCount
+        - fadeInFrames
+        - fadeOutFrames
+        - gainDb
+      description: >-
+        One immutable source window. audioAssetId must reference a ready asset;
+        the frame range and combined fades must fit that asset/window.
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        audioAssetId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        offsetBeats:
+          type: number
+          minimum: 0
+          maximum: 8192
+        lengthBeats:
+          type: number
+          minimum: 0.0010416666666666667
+          maximum: 8192
+        sourceStartFrame:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        sourceFrameCount:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        fadeInFrames:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        fadeOutFrames:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        gainDb:
+          type: number
+          minimum: -96
+          maximum: 24
+    AudioCompSegment:
+      type: object
+      additionalProperties: false
+      required: [id, takeId, offsetBeats, lengthBeats]
+      description: >-
+        One half-open audible range. takeId must name a take in the same folder
+        whose folder-local source window covers this entire range.
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        takeId:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        offsetBeats:
+          type: number
+          minimum: 0
+          maximum: 8192
+        lengthBeats:
+          type: number
+          minimum: 0.0010416666666666667
+          maximum: 8192
     AutomationLane:
       type: object
       additionalProperties: false
@@ -839,7 +978,7 @@ components:
           maximum: 8192
         durationBeats:
           type: number
-          minimum: 0.0010416666666666
+          minimum: 0.0010416666666666667
           description: Domain validation enforces the exact minimum of 1/960 beat.
           maximum: 8192
         velocity:
@@ -903,7 +1042,7 @@ components:
           maximum: 8192
         durationBeats:
           type: number
-          minimum: 0.0010416666666666
+          minimum: 0.0010416666666666667
           description: Domain validation enforces the exact minimum of 1/960 beat.
           maximum: 8192
         symbol:

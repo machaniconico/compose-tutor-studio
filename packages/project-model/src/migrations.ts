@@ -225,10 +225,22 @@ function migrateV3ToV4(
   };
 }
 
+/** Add the schema-v5 non-destructive Audio take collection. */
+function migrateV4ToV5(
+  project: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    ...project,
+    schemaVersion: 5,
+    audioTakeFolders: [],
+  };
+}
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 1, to: 2, migrate: migrateV1ToV2 },
   { from: 2, to: 3, migrate: migrateV2ToV3 },
   { from: 3, to: 4, migrate: migrateV3ToV4 },
+  { from: 4, to: 5, migrate: migrateV4ToV5 },
 ]);
 
 export type ProjectMigrationErrorCode =

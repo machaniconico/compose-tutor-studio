@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CURRENT_SCHEMA_VERSION,
   barToBeatAt,
   beatToBarPosition,
   beatToSecondsAt,
@@ -24,6 +25,7 @@ function toLegacyRecord(project: Project, schemaVersion: 1 | 2): Record<string, 
   delete legacy.tempoMap;
   delete legacy.timeSignatureMap;
   delete legacy.audioAssets;
+  delete legacy.audioTakeFolders;
   delete legacy.automationLanes;
   delete legacy.audioRouting;
   for (const track of legacy.tracks as Array<Record<string, unknown>>) {
@@ -123,7 +125,7 @@ describe('schema-v3 migration', () => {
     expect(first).toEqual(second);
     expect(legacy).toEqual(untouched);
     expect(first).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
       lengthBeats: 32,
       tempoMap: [{ id: 'migrated-tempo-2', beat: 0, bpm: 120 }],
       timeSignatureMap: [{
@@ -133,6 +135,7 @@ describe('schema-v3 migration', () => {
         denominator: 4,
       }],
       automationLanes: [],
+      audioTakeFolders: [],
       audioRouting: expect.objectContaining({ sends: [] }),
     });
 

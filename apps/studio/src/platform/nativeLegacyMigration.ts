@@ -22,7 +22,7 @@ import {
 
 export type LegacyMigrationStatus = Readonly<{ complete: boolean }>;
 /** Bumped when archived payloads are re-encoded into a new canonical Project schema. */
-export const LEGACY_MIGRATION_VERSION = 4;
+export const LEGACY_MIGRATION_VERSION = 5;
 
 export type LegacyProjectImportReceipt = Readonly<{
   projectId: string;

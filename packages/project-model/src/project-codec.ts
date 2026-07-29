@@ -2,9 +2,12 @@ import { CURRENT_SCHEMA_VERSION } from './factories';
 import { migrateProject, ProjectMigrationError } from './migrations';
 import type {
   AudioAsset,
+  AudioCompSegment,
   AudioRouteDestination,
   AudioRouting,
   AudioSend,
+  AudioTake,
+  AudioTakeFolder,
   AutomationLane,
   AutomationPoint,
   AutomationTarget,
@@ -691,6 +694,132 @@ function decodeAudioAsset(
   };
 }
 
+function decodeAudioTake(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioTake {
+  const record = decoder.record(value, path, [
+    'id',
+    'audioAssetId',
+    'offsetBeats',
+    'lengthBeats',
+    'sourceStartFrame',
+    'sourceFrameCount',
+    'fadeInFrames',
+    'fadeOutFrames',
+    'gainDb',
+  ]) ?? {};
+  return {
+    id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    audioAssetId: decoder.string(
+      decoder.required(record, 'audioAssetId', `${path}.audioAssetId`),
+      `${path}.audioAssetId`,
+    ),
+    offsetBeats: decoder.number(
+      decoder.required(record, 'offsetBeats', `${path}.offsetBeats`),
+      `${path}.offsetBeats`,
+    ),
+    lengthBeats: decoder.number(
+      decoder.required(record, 'lengthBeats', `${path}.lengthBeats`),
+      `${path}.lengthBeats`,
+    ),
+    sourceStartFrame: decoder.safeInteger(
+      decoder.required(record, 'sourceStartFrame', `${path}.sourceStartFrame`),
+      `${path}.sourceStartFrame`,
+    ),
+    sourceFrameCount: decoder.safeInteger(
+      decoder.required(record, 'sourceFrameCount', `${path}.sourceFrameCount`),
+      `${path}.sourceFrameCount`,
+    ),
+    fadeInFrames: decoder.safeInteger(
+      decoder.required(record, 'fadeInFrames', `${path}.fadeInFrames`),
+      `${path}.fadeInFrames`,
+    ),
+    fadeOutFrames: decoder.safeInteger(
+      decoder.required(record, 'fadeOutFrames', `${path}.fadeOutFrames`),
+      `${path}.fadeOutFrames`,
+    ),
+    gainDb: decoder.number(
+      decoder.required(record, 'gainDb', `${path}.gainDb`),
+      `${path}.gainDb`,
+    ),
+  };
+}
+
+function decodeAudioCompSegment(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioCompSegment {
+  const record = decoder.record(value, path, [
+    'id',
+    'takeId',
+    'offsetBeats',
+    'lengthBeats',
+  ]) ?? {};
+  return {
+    id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    takeId: decoder.string(
+      decoder.required(record, 'takeId', `${path}.takeId`),
+      `${path}.takeId`,
+    ),
+    offsetBeats: decoder.number(
+      decoder.required(record, 'offsetBeats', `${path}.offsetBeats`),
+      `${path}.offsetBeats`,
+    ),
+    lengthBeats: decoder.number(
+      decoder.required(record, 'lengthBeats', `${path}.lengthBeats`),
+      `${path}.lengthBeats`,
+    ),
+  };
+}
+
+function decodeAudioTakeFolder(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioTakeFolder {
+  const record = decoder.record(value, path, [
+    'id',
+    'trackId',
+    'startBeat',
+    'lengthBeats',
+    'crossfadeMs',
+    'takes',
+    'compSegments',
+  ]) ?? {};
+  return {
+    id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
+    trackId: decoder.string(
+      decoder.required(record, 'trackId', `${path}.trackId`),
+      `${path}.trackId`,
+    ),
+    startBeat: decoder.number(
+      decoder.required(record, 'startBeat', `${path}.startBeat`),
+      `${path}.startBeat`,
+    ),
+    lengthBeats: decoder.number(
+      decoder.required(record, 'lengthBeats', `${path}.lengthBeats`),
+      `${path}.lengthBeats`,
+    ),
+    crossfadeMs: decoder.number(
+      decoder.required(record, 'crossfadeMs', `${path}.crossfadeMs`),
+      `${path}.crossfadeMs`,
+    ),
+    takes: decoder.array(
+      decoder.required(record, 'takes', `${path}.takes`),
+      `${path}.takes`,
+      (item, itemPath) => decodeAudioTake(decoder, item, itemPath),
+    ),
+    compSegments: decoder.array(
+      decoder.required(record, 'compSegments', `${path}.compSegments`),
+      `${path}.compSegments`,
+      (item, itemPath) => decodeAudioCompSegment(decoder, item, itemPath),
+    ),
+  };
+}
+
 function decodeAutomationTarget(
   decoder: StructureDecoder,
   value: unknown,
@@ -866,6 +995,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
       'tempoMap',
       'timeSignatureMap',
       'audioAssets',
+      'audioTakeFolders',
       'automationLanes',
       'audioRouting',
       'tracks',
@@ -925,6 +1055,11 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
         decoder.required(record, 'audioAssets', 'audioAssets'),
         'audioAssets',
         (item, itemPath) => decodeAudioAsset(decoder, item, itemPath),
+      ),
+      audioTakeFolders: decoder.array(
+        decoder.required(record, 'audioTakeFolders', 'audioTakeFolders'),
+        'audioTakeFolders',
+        (item, itemPath) => decodeAudioTakeFolder(decoder, item, itemPath),
       ),
       automationLanes: decoder.array(
         decoder.required(record, 'automationLanes', 'automationLanes'),
@@ -992,7 +1127,10 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
 }
 
 /** Reject fields that were not part of the declared legacy transport shape. */
-function inspectLegacyProjectStructure(input: unknown, schemaVersion: 1 | 2 | 3): ProjectCodecIssue[] {
+function inspectLegacyProjectStructure(
+  input: unknown,
+  schemaVersion: 1 | 2 | 3 | 4,
+): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
     'id',
@@ -1006,6 +1144,7 @@ function inspectLegacyProjectStructure(input: unknown, schemaVersion: 1 | 2 | 3)
     ...(schemaVersion >= 3
       ? ['lengthBeats', 'tempoMap', 'timeSignatureMap', 'audioAssets', 'automationLanes']
       : []),
+    ...(schemaVersion >= 4 ? ['audioRouting'] : []),
     'tracks',
     'chordTrack',
     'sections',
@@ -1055,6 +1194,13 @@ function inspectLegacyProjectStructure(input: unknown, schemaVersion: 1 | 2 | 3)
       decoder.required(record, 'automationLanes', 'automationLanes'),
       'automationLanes',
       (item, itemPath) => decodeAutomationLane(decoder, item, itemPath),
+    );
+  }
+  if (schemaVersion >= 4) {
+    decodeAudioRouting(
+      decoder,
+      decoder.required(record, 'audioRouting', 'audioRouting'),
+      'audioRouting',
     );
   }
   decoder.array(
@@ -1144,7 +1290,7 @@ export function decodeProject(input: unknown): ProjectDecodeResult {
 
   let current: unknown = input;
   if (version.version < CURRENT_SCHEMA_VERSION) {
-    const legacyIssues = inspectLegacyProjectStructure(input, version.version as 1 | 2 | 3);
+    const legacyIssues = inspectLegacyProjectStructure(input, version.version as 1 | 2 | 3 | 4);
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };
     }

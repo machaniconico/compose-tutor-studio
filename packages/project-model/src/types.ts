@@ -172,6 +172,42 @@ export type UnresolvedAudioAsset = {
 
 export type AudioAsset = ReadyAudioAsset | UnresolvedAudioAsset;
 
+/** One immutable source window available to an Audio take folder. */
+export type AudioTake = {
+  id: string;
+  audioAssetId: string;
+  /** Folder-local position of this take's source window. */
+  offsetBeats: number;
+  lengthBeats: number;
+  sourceStartFrame: number;
+  sourceFrameCount: number;
+  fadeInFrames: number;
+  fadeOutFrames: number;
+  gainDb: number;
+};
+
+/** One folder-local half-open range selected for the audible comp. */
+export type AudioCompSegment = {
+  id: string;
+  takeId: string;
+  offsetBeats: number;
+  lengthBeats: number;
+};
+
+/**
+ * Non-destructive alternatives for one Audio Track timeline window.
+ * compSegments are canonical, ordered, gapless, and cover the whole folder.
+ */
+export type AudioTakeFolder = {
+  id: string;
+  trackId: string;
+  startBeat: number;
+  lengthBeats: number;
+  crossfadeMs: number;
+  takes: AudioTake[];
+  compSegments: AudioCompSegment[];
+};
+
 export type AutomationInterpolation = 'hold' | 'linear';
 
 export type AutomationPoint = {
@@ -233,6 +269,7 @@ export type Project = {
   tempoMap: TempoMapEvent[];
   timeSignatureMap: TimeSignatureMapEvent[];
   audioAssets: AudioAsset[];
+  audioTakeFolders: AudioTakeFolder[];
   automationLanes: AutomationLane[];
   audioRouting: AudioRouting;
   tracks: Track[];

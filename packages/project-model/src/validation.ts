@@ -14,10 +14,22 @@ import {
   MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS,
   preflightScheduleEventBudget,
 } from './schedule-budget';
-import { MAX_CLIPS_PER_TRACK, MIN_EVENT_DURATION_BEATS } from './limits';
+import {
+  MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
+  MAX_AUDIO_TAKE_FOLDERS,
+  MAX_AUDIO_TAKES_PER_FOLDER,
+  MAX_CLIPS_PER_TRACK,
+  MIN_EVENT_DURATION_BEATS,
+} from './limits';
 import { validateAudioRouting } from './audio-routing';
 
-export { MAX_CLIPS_PER_TRACK, MIN_EVENT_DURATION_BEATS } from './limits';
+export {
+  MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
+  MAX_AUDIO_TAKE_FOLDERS,
+  MAX_AUDIO_TAKES_PER_FOLDER,
+  MAX_CLIPS_PER_TRACK,
+  MIN_EVENT_DURATION_BEATS,
+} from './limits';
 
 export type ValidationError = {
   /** Dot/bracket path to the offending value, e.g. `tracks[0].clips[1].startBeat`. */
@@ -62,6 +74,12 @@ const TRACK_ROLES = new Set([
 
 function inRange(value: number, min: number, max: number): boolean {
   return Number.isFinite(value) && value >= min && value <= max;
+}
+
+function sameBeat(left: number, right: number): boolean {
+  return Number.isFinite(left)
+    && Number.isFinite(right)
+    && Math.abs(left - right) <= 1e-9;
 }
 
 /**
@@ -367,6 +385,193 @@ export function validateProject(project: Project): ValidationResult {
     if (atErrorLimit()) break;
     push(error.path, error.message);
   }
+
+  if (project.audioTakeFolders.length > MAX_AUDIO_TAKE_FOLDERS) {
+    push(
+      'audioTakeFolders',
+      `audioTakeFolders must contain at most ${MAX_AUDIO_TAKE_FOLDERS} items`,
+    );
+  }
+  const seenAudioTakeFolderWindows: Array<Readonly<{
+    trackId: string;
+    startBeat: number;
+    lengthBeats: number;
+  }>> = [];
+  project.audioTakeFolders.forEach((folder, folderIndex) => {
+    if (atErrorLimit()) return;
+    const folderPath = `audioTakeFolders[${folderIndex}]`;
+    markId(folder.id, `${folderPath}.id`);
+    const folderTrack = tracksById.get(folder.trackId);
+    if (folderTrack === undefined) {
+      push(
+        `${folderPath}.trackId`,
+        `Audio take folder references missing track "${folder.trackId}"`,
+      );
+    } else if (folderTrack.type !== 'audio') {
+      push(`${folderPath}.trackId`, 'Audio take folders must belong to an Audio track');
+    }
+    if (seenAudioTakeFolderWindows.some((window) => (
+      window.trackId === folder.trackId
+      && sameBeat(window.startBeat, folder.startBeat)
+      && sameBeat(window.lengthBeats, folder.lengthBeats)
+    ))) {
+      push(
+        folderPath,
+        'Only one Audio take folder may occupy the same track and timeline window',
+      );
+    } else {
+      seenAudioTakeFolderWindows.push({
+        trackId: folder.trackId,
+        startBeat: folder.startBeat,
+        lengthBeats: folder.lengthBeats,
+      });
+    }
+    if (!inRange(folder.startBeat, 0, projectLengthBeats)) {
+      push(`${folderPath}.startBeat`, 'Audio take folder start must fall within the project timeline');
+    }
+    if (
+      !Number.isFinite(folder.lengthBeats)
+      || folder.lengthBeats < MIN_EVENT_DURATION_BEATS
+      || folder.lengthBeats > MAX_PROJECT_TIMELINE_BEATS
+    ) {
+      push(
+        `${folderPath}.lengthBeats`,
+        `Audio take folder length must be between ${MIN_EVENT_DURATION_BEATS} and ${MAX_PROJECT_TIMELINE_BEATS} beats`,
+      );
+    } else if (
+      Number.isFinite(folder.startBeat)
+      && folder.startBeat + folder.lengthBeats > projectLengthBeats
+    ) {
+      push(`${folderPath}.lengthBeats`, 'Audio take folder must end within the project timeline');
+    }
+    if (!inRange(folder.crossfadeMs, 0, 50)) {
+      push(`${folderPath}.crossfadeMs`, 'crossfadeMs must be between 0 and 50');
+    }
+    if (folder.takes.length < 2 || folder.takes.length > MAX_AUDIO_TAKES_PER_FOLDER) {
+      push(
+        `${folderPath}.takes`,
+        `Audio take folder must contain between 2 and ${MAX_AUDIO_TAKES_PER_FOLDER} takes`,
+      );
+    }
+    if (
+      folder.compSegments.length < 1
+      || folder.compSegments.length > MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER
+    ) {
+      push(
+        `${folderPath}.compSegments`,
+        `Audio take folder must contain between 1 and ${MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER} comp segments`,
+      );
+    }
+
+    const takesById = new Map<string, Project['audioTakeFolders'][number]['takes'][number]>();
+    folder.takes.forEach((take, takeIndex) => {
+      if (atErrorLimit()) return;
+      const takePath = `${folderPath}.takes[${takeIndex}]`;
+      markId(take.id, `${takePath}.id`);
+      if (!takesById.has(take.id)) takesById.set(take.id, take);
+      const asset = audioAssetsById.get(take.audioAssetId);
+      if (asset === undefined) {
+        push(
+          `${takePath}.audioAssetId`,
+          `audioAssetId "${take.audioAssetId}" references a non-existent audio asset`,
+        );
+      } else if (asset.availability !== 'ready') {
+        push(`${takePath}.audioAssetId`, 'Audio takes require a ready audio asset');
+      }
+      if (!inRange(take.offsetBeats, 0, folder.lengthBeats)) {
+        push(`${takePath}.offsetBeats`, 'Audio take offset must fall within its folder');
+      }
+      if (
+        !Number.isFinite(take.lengthBeats)
+        || take.lengthBeats < MIN_EVENT_DURATION_BEATS
+        || take.lengthBeats > folder.lengthBeats
+      ) {
+        push(`${takePath}.lengthBeats`, 'Audio take length must be positive and fit its folder');
+      } else if (
+        Number.isFinite(take.offsetBeats)
+        && take.offsetBeats + take.lengthBeats > folder.lengthBeats
+      ) {
+        push(`${takePath}.lengthBeats`, 'Audio take range must fit within its folder');
+      }
+      if (!Number.isSafeInteger(take.sourceStartFrame) || take.sourceStartFrame < 0) {
+        push(`${takePath}.sourceStartFrame`, 'sourceStartFrame must be a non-negative safe integer');
+      }
+      if (!Number.isSafeInteger(take.sourceFrameCount) || take.sourceFrameCount <= 0) {
+        push(`${takePath}.sourceFrameCount`, 'sourceFrameCount must be a positive safe integer');
+      }
+      if (
+        asset?.availability === 'ready'
+        && Number.isSafeInteger(take.sourceStartFrame)
+        && Number.isSafeInteger(take.sourceFrameCount)
+        && take.sourceStartFrame + take.sourceFrameCount > asset.frameCount
+      ) {
+        push(`${takePath}.sourceFrameCount`, 'Audio take source range must fit within the asset');
+      }
+      for (const field of ['fadeInFrames', 'fadeOutFrames'] as const) {
+        if (!Number.isSafeInteger(take[field]) || take[field] < 0) {
+          push(`${takePath}.${field}`, `${field} must be a non-negative safe integer`);
+        }
+      }
+      if (
+        Number.isSafeInteger(take.fadeInFrames)
+        && Number.isSafeInteger(take.fadeOutFrames)
+        && Number.isSafeInteger(take.sourceFrameCount)
+        && take.fadeInFrames + take.fadeOutFrames > take.sourceFrameCount
+      ) {
+        push(`${takePath}.fadeOutFrames`, 'combined fades must not exceed sourceFrameCount');
+      }
+      if (!inRange(take.gainDb, -96, 24)) {
+        push(`${takePath}.gainDb`, 'gainDb must be between -96 and 24');
+      }
+    });
+
+    let expectedOffset = 0;
+    let previousTakeId: string | undefined;
+    folder.compSegments.forEach((segment, segmentIndex) => {
+      if (atErrorLimit()) return;
+      const segmentPath = `${folderPath}.compSegments[${segmentIndex}]`;
+      markId(segment.id, `${segmentPath}.id`);
+      const take = takesById.get(segment.takeId);
+      if (take === undefined) {
+        push(`${segmentPath}.takeId`, `Comp segment references missing take "${segment.takeId}"`);
+      }
+      if (previousTakeId === segment.takeId) {
+        push(`${segmentPath}.takeId`, 'Adjacent comp segments for the same take must be merged');
+      }
+      if (!sameBeat(segment.offsetBeats, expectedOffset)) {
+        push(
+          `${segmentPath}.offsetBeats`,
+          segment.offsetBeats < expectedOffset
+            ? 'Comp segments must not overlap and must be sorted'
+            : 'Comp segments must be gapless and sorted',
+        );
+      }
+      if (
+        !Number.isFinite(segment.lengthBeats)
+        || segment.lengthBeats < MIN_EVENT_DURATION_BEATS
+        || segment.lengthBeats > folder.lengthBeats
+      ) {
+        push(`${segmentPath}.lengthBeats`, 'Comp segment length must be positive and fit its folder');
+      }
+      if (
+        take !== undefined
+        && (
+          segment.offsetBeats < take.offsetBeats
+          || segment.offsetBeats + segment.lengthBeats > take.offsetBeats + take.lengthBeats
+        )
+      ) {
+        push(`${segmentPath}.takeId`, 'Comp segment range must fit within its selected take');
+      }
+      expectedOffset = segment.offsetBeats + segment.lengthBeats;
+      previousTakeId = segment.takeId;
+    });
+    if (
+      folder.compSegments.length > 0
+      && !sameBeat(expectedOffset, folder.lengthBeats)
+    ) {
+      push(`${folderPath}.compSegments`, 'Comp segments must exactly cover the Audio take folder');
+    }
+  });
 
   if (project.automationLanes.length > MAX_AUTOMATION_LANES) {
     push(

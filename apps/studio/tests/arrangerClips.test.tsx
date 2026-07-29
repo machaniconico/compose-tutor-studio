@@ -1,10 +1,12 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  appendAudioTrackClip,
   duplicateClip,
   createAudioTrackClip,
   compileMusicalTime,
   findClip,
+  groupAudioClipsIntoTakeFolder,
   resizeClip,
   setMidiClipLoop,
   unlinkClip,
@@ -192,6 +194,62 @@ describe('Arranger clip workflow', () => {
     expect(html).toMatch(/<button[^>]*>クリップを削除<\/button>/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>連動コピーは利用不可<\/button>/);
     expect(html).toContain('クリップを削除');
+    expect(html).toContain('同じ区間をテイク化');
+    expect(html).toContain('音声素材を確認できないため、テイクを変更できません。');
+  });
+
+  it('renders one selectable Arranger object for a grouped Audio take folder', () => {
+    const firstAsset: ReadyAudioAsset = {
+      id: 'asset-arranger-take-a',
+      availability: 'ready',
+      checksumSha256: 'c'.repeat(64),
+      originalName: 'take a.wav',
+      mediaType: 'audio/wav',
+      byteLength: 384_044,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 96_000,
+    };
+    const secondAsset: ReadyAudioAsset = {
+      ...firstAsset,
+      id: 'asset-arranger-take-b',
+      checksumSha256: 'd'.repeat(64),
+      originalName: 'take b.wav',
+    };
+    const first = createAudioTrackClip(createDefaultProject('Take Arranger'), firstAsset, {
+      trackName: 'Vocals',
+      idFactory: (kind) => `${kind}-arranger-take-a`,
+    });
+    if (!first.ok) throw new Error(first.error.code);
+    const second = appendAudioTrackClip(first.project, first.trackId, secondAsset, {
+      startBeat: 0,
+      idFactory: (kind) => `${kind}-arranger-take-b`,
+    });
+    if (!second.ok) throw new Error(second.error.code);
+    let sequence = 0;
+    const grouped = groupAudioClipsIntoTakeFolder(
+      second.project,
+      [first.clipId, second.clipId],
+      { idFactory: (kind) => `${kind}-arranger-${++sequence}` },
+    );
+    if (!grouped.ok) throw new Error(grouped.error.code);
+    activate(grouped.project, '');
+    useStore.getState().selectTakeFolder(grouped.folderId);
+    const state = useStore.getState();
+    Object.assign(useStore.getInitialState(), {
+      project: state.project,
+      editor: state.editor,
+    });
+
+    const html = renderToStaticMarkup(<Arranger />);
+
+    expect(html).toContain(`data-take-folder-id="${grouped.folderId}"`);
+    expect(html).toContain('Comp · 2テイク');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('aria-label="選択テイクフォルダ"');
+    expect(html).toContain('テイク編集を開く');
+    expect(html).not.toContain(firstAsset.originalName);
+    expect(html).not.toContain(secondAsset.originalName);
   });
 
   it('invalidates success notices when undo restores the prior clip state', () => {

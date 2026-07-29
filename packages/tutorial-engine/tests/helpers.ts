@@ -37,6 +37,7 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
     tempoMap,
     timeSignatureMap,
     audioAssets,
+    audioTakeFolders,
     automationLanes,
     audioRouting,
     tracks,
@@ -61,6 +62,7 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
       denominator: 4,
     }],
     audioAssets: audioAssets ?? [],
+    audioTakeFolders: audioTakeFolders ?? [],
     automationLanes: automationLanes ?? [],
     audioRouting: audioRouting ?? {
       outputs: projectTracks
