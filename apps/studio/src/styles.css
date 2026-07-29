@@ -616,14 +616,18 @@ input[type='range'] {
 
 .track-row__controls {
   grid-column: 2;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-1);
 }
 
 .track-row__controls input[type='range'] {
-  flex: 1;
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
 }
 
 .mini-btn {
@@ -2646,6 +2650,7 @@ button.pr__note:hover {
 }
 
 .mix-ch {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -2692,6 +2697,7 @@ button.pr__note:hover {
 
 .mix-ch__volume {
   width: 100%;
+  min-height: 44px;
 }
 
 .mix-ch__db {
@@ -2709,6 +2715,7 @@ button.pr__note:hover {
 
 .mix-ch__pan input {
   width: 100%;
+  min-height: 44px;
 }
 
 .mix-ch__pan-label {
@@ -4954,6 +4961,135 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.automation-lane__automation-controls {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-2);
+}
+
+.automation-lane__read-gates,
+.automation-lane__mode-selector {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.automation-lane__read-gates button,
+.automation-lane__mode-selector button {
+  min-width: 96px;
+  min-height: 44px;
+  flex: 0 1 auto;
+  font-weight: 700;
+}
+
+.automation-lane__mode-selector button[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.automation-lane__mode-selector button[role='radio']:last-child[aria-checked='true'] {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.automation-lane__write-status {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--text-faint);
+  background: var(--bg-input);
+  color: var(--text-dim);
+}
+
+.automation-lane__write-status strong {
+  color: var(--text);
+}
+
+.automation-lane__write-status.is-armed {
+  border-left-color: var(--warning);
+}
+
+.automation-lane__write-status.is-writing {
+  border-left-color: var(--danger);
+}
+
+.automation-lane__recording-recovery {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--danger) 64%, var(--border));
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-panel-2) 88%, var(--danger));
+}
+
+.automation-lane__recording-recovery p {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.automation-lane__recording-recovery strong {
+  color: var(--text);
+}
+
+.automation-lane__recording-recovery button {
+  min-height: 44px;
+  flex: 0 0 auto;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.automation-lane__write-confirmation {
+  width: min(520px, calc(100% - 24px));
+  max-width: 100%;
+  margin: auto;
+  padding: var(--sp-4);
+  border: 1px solid color-mix(in srgb, var(--danger) 64%, var(--border));
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 38%);
+}
+
+.automation-lane__write-confirmation h4,
+.automation-lane__write-confirmation p {
+  margin: 0;
+}
+
+.automation-lane__write-confirmation p {
+  margin-top: var(--sp-2);
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.automation-lane__write-confirmation > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.automation-lane__write-confirmation button {
+  min-height: 44px;
+}
+
 .automation-lane__read-mode {
   display: flex;
   min-width: 0;
@@ -5310,10 +5446,27 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
 
   .automation-lane__target,
   .automation-lane__target button,
+  .automation-lane__read-gates,
+  .automation-lane__read-gates button,
   .automation-lane__toolbar,
   .automation-lane__toolbar label,
   .automation-lane__toolbar select,
   .automation-lane__toolbar button {
+    width: 100%;
+  }
+
+  .automation-lane__mode-selector {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .automation-lane__mode-selector button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .automation-lane__write-confirmation > div,
+  .automation-lane__write-confirmation button {
     width: 100%;
   }
 

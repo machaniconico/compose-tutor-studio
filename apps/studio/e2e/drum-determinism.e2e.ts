@@ -33,6 +33,7 @@ function drumOnlyProject(grooveSeed: number): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [{
         sourceTrackId: 'track-deterministic-drums',

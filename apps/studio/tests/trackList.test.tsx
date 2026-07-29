@@ -1,7 +1,13 @@
+import { readFileSync } from 'node:fs';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createAudioTrackClip, type AudioClip, type ReadyAudioAsset } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
+
+const studioStyles = readFileSync(
+  new URL('../src/styles.css', import.meta.url),
+  'utf8',
+);
 
 let useStore: typeof import('../src/state/store')['useStore'];
 let TrackList: typeof import('../src/features/tracklist/TrackList')['TrackList'];
@@ -30,13 +36,41 @@ describe('TrackList mixer controls', () => {
     expect(html).toContain('id="track-selection:');
   });
 
-  it('uses the project-model 0..2 volume range for every track', () => {
+  it('uses model ranges for every volume and non-Master pan control', () => {
     const html = renderToStaticMarkup(<TrackList />);
     const ranges = html.match(/<input[^>]*type="range"[^>]*>/g) ?? [];
+    const tracks = useStore.getState().project.tracks;
+    const nonMasterTracks = tracks.filter((track) => track.type !== 'master');
 
-    expect(ranges).toHaveLength(useStore.getState().project.tracks.length);
-    expect(ranges.every((range) => range.includes('min="0"') && range.includes('max="2"'))).toBe(
-      true,
+    expect(ranges).toHaveLength(tracks.length + nonMasterTracks.length);
+    expect(
+      ranges.filter((range) => range.includes(' 音量"')).every(
+        (range) => range.includes('min="0"') && range.includes('max="2"'),
+      ),
+    ).toBe(true);
+    expect(
+      ranges.filter((range) => range.includes(' パン"')).every(
+        (range) => range.includes('min="-1"') && range.includes('max="1"'),
+      ),
+    ).toBe(true);
+  });
+
+  it('computes at least 44px focusable volume and pan sliders', () => {
+    const html = renderToStaticMarkup(<TrackList />);
+    const sliders = html.match(/<input[^>]*type="range"[^>]*>/g) ?? [];
+    const declarations = studioStyles.match(
+      /\.track-row__controls input\[type='range'\]\s*\{([^}]*)\}/,
+    )?.[1] ?? '';
+
+    expect(sliders.length).toBeGreaterThan(0);
+    expect(sliders.every((slider) => (
+      !slider.includes('disabled=""') && !slider.includes('tabindex="-1"')
+    ))).toBe(true);
+    expect(Number(
+      declarations.match(/min-height:\s*([\d.]+)px/)?.[1] ?? 0,
+    )).toBeGreaterThanOrEqual(44);
+    expect(studioStyles).toMatch(
+      /:focus-visible\s*\{[^}]*outline:\s*(?!none)[^;}]+;/,
     );
   });
 
@@ -47,6 +81,7 @@ describe('TrackList mixer controls', () => {
     const masterRowRemainder = html.slice(masterStart);
 
     expect(masterRowRemainder).toContain('aria-label="Master 音量"');
+    expect(masterRowRemainder).not.toContain('aria-label="Master パン"');
     expect(masterRowRemainder).not.toContain('title="ミュート"');
     expect(masterRowRemainder).not.toContain('title="ソロ"');
 
@@ -129,6 +164,10 @@ describe('TrackList mixer controls', () => {
     const html = renderToStaticMarkup(<TrackList />);
     expect(html).toContain('aria-label="Harmony（同名 1/2） トラックを選択"');
     expect(html).toContain('aria-label="Harmony（同名 2/2） トラックを選択"');
+    expect(html).toContain('aria-label="Harmony（同名 1/2） 音量"');
+    expect(html).toContain('aria-label="Harmony（同名 2/2） パン"');
+    expect(html).toContain(`トラックID ${first.id}`);
+    expect(html).toContain(`トラックID ${second.id}`);
     expect(html.match(/<span class="track-row__name">Harmony<\/span>/g)).toHaveLength(2);
   });
 

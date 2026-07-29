@@ -107,6 +107,19 @@ function success(
   return { ok: true, project, changed, trackId };
 }
 
+function reconcileAutomationReadState(
+  project: Project,
+  tracks: readonly Track[],
+): Project['automationReadState'] {
+  const disabled = new Set(project.automationReadState.disabledTrackIds);
+  return {
+    globalEnabled: project.automationReadState.globalEnabled,
+    disabledTrackIds: tracks
+      .filter((track) => track.type !== 'master' && disabled.has(track.id))
+      .map((track) => track.id),
+  };
+}
+
 function codecFailure(project: Project): TrackMutationResult | null {
   const encoded = encodeProjectJson(project);
   if (encoded.ok) return null;
@@ -363,7 +376,11 @@ export function renameTrack(
     const tracks = project.tracks.map((track, trackIndex) => (
       trackIndex === index ? { ...track, name: normalized } : track
     ));
-    return success({ ...project, tracks }, trackId, true);
+    return success({
+      ...project,
+      tracks,
+      automationReadState: reconcileAutomationReadState(project, tracks),
+    }, trackId, true);
   });
 }
 
@@ -586,7 +603,11 @@ export function moveTrack(
     }
     const tracks = [...project.tracks];
     [tracks[index], tracks[destination]] = [tracks[destination]!, tracks[index]!];
-    return success({ ...project, tracks }, trackId, true);
+    return success({
+      ...project,
+      tracks,
+      automationReadState: reconcileAutomationReadState(project, tracks),
+    }, trackId, true);
   });
 }
 
@@ -653,6 +674,7 @@ export function removeTrack(project: Project, trackId: string): TrackMutationRes
       ...project,
       tracks,
       automationLanes,
+      automationReadState: reconcileAutomationReadState(project, tracks),
       audioTakeFolders,
       audioAssets,
       audioRouting,

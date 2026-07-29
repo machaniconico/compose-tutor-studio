@@ -230,6 +230,13 @@ export type AutomationLane = {
   points: AutomationPoint[];
 };
 
+export type AutomationReadState = {
+  /** Global automation Read gate. */
+  globalEnabled: boolean;
+  /** Canonical project-order list of non-Master tracks whose Read gate is off. */
+  disabledTrackIds: string[];
+};
+
 /** A track's single main-output destination. Master is a logical sink. */
 export type AudioRouteDestination =
   | { type: 'master' }
@@ -273,6 +280,7 @@ export type Project = {
   audioAssets: AudioAsset[];
   audioTakeFolders: AudioTakeFolder[];
   automationLanes: AutomationLane[];
+  automationReadState: AutomationReadState;
   audioRouting: AudioRouting;
   tracks: Track[];
   chordTrack: ChordEvent[];

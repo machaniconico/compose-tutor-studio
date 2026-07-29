@@ -27,8 +27,14 @@ import {
   resolveTrackMix,
   type MixUpdateMode,
 } from './mixState';
+import {
+  automationLaneForTrack,
+  isAutomationReadEnabled,
+} from './automation';
 
 export { clampPan, clampVolume } from './mixState';
+
+export const AUTOMATION_MANUAL_SMOOTHING_SECONDS = 0.010;
 
 export type MeterLevel = {
   /** Highest absolute sample in the analyser window, where 1.0 is 0 dBFS. */
@@ -417,6 +423,12 @@ type OwnedRouteEdge = Readonly<{
   gain: GainNode;
 }>;
 
+type AutomationTargetOverride = Readonly<{
+  generation: number;
+  /** Infinity while manually held; finite while returning to the frozen curve. */
+  until: number;
+}>;
+
 /** Live/offline node chain for one source or Bus channel. */
 export class TrackGraph {
   readonly trackId: string;
@@ -429,6 +441,11 @@ export class TrackGraph {
   private readonly outputGain: GainNode | null;
   private readonly meter: AnalyserNode | null;
   private readonly routeEdges = new Map<string, OwnedRouteEdge>();
+  private readonly automationOverrides = new Map<
+    AutomationTarget['type'],
+    AutomationTargetOverride
+  >();
+  private automationOverrideGeneration = 0;
   private effectChain: BuiltEffectChain | null = null;
   private effectSignature: string | null = null;
 
@@ -517,6 +534,31 @@ export class TrackGraph {
   }
 
   /**
+   * Apply one scalar without rebuilding effects, routing, or the other
+   * parameter. Returns false while a manual automation override owns it.
+   */
+  applyScalar(
+    target: AutomationTarget['type'],
+    track: Track,
+    audible: boolean,
+    when: number,
+    mode: MixUpdateMode,
+  ): boolean {
+    if (track.id !== this.trackId || this.automationOverrides.has(target)) {
+      return false;
+    }
+    if (target === 'track-volume') {
+      const value = this.audibilityGate !== null || audible
+        ? clampVolume(track.volume)
+        : 0;
+      applyAudioParam(this.fader.gain, value, when, mode);
+    } else {
+      applyAudioParam(this.panner.pan, clampPan(track.pan), when, mode);
+    }
+    return true;
+  }
+
+  /**
    * Gate one owned Auto Punch window without mutating persisted mix state.
    *
    * Web Audio automation is evaluated on the render clock, so the half-open
@@ -556,6 +598,11 @@ export class TrackGraph {
     interpolation: 'hold' | 'linear',
     audible: boolean,
   ): void {
+    const activeOverride = this.automationOverrides.get(target);
+    if (activeOverride) {
+      if (when <= activeOverride.until) return;
+      this.automationOverrides.delete(target);
+    }
     const param = target === 'track-volume' ? this.fader.gain : this.panner.pan;
     const safeValue = target === 'track-volume'
       ? (this.audibilityGate ? clampVolume(value) : (audible ? clampVolume(value) : 0))
@@ -571,6 +618,153 @@ export class TrackGraph {
     } else {
       param.value = safeValue;
     }
+  }
+
+  /**
+   * Cancel already-scheduled lookahead and take manual ownership of one target.
+   * The fader/panner remains independent from the audibility gate, so mute,
+   * solo, and route decisions are unchanged by the override.
+   */
+  beginAutomationOverride(
+    target: AutomationTarget['type'],
+    value: number,
+    when: number,
+    audible = true,
+  ): number {
+    const generation = this.nextAutomationOverrideGeneration();
+    this.automationOverrides.set(target, { generation, until: Infinity });
+    this.smoothAutomationOverride(target, value, when, audible);
+    return generation;
+  }
+
+  /** Update a manually owned value without releasing its scheduling fence. */
+  updateAutomationOverride(
+    target: AutomationTarget['type'],
+    value: number,
+    when: number,
+    audible = true,
+  ): number {
+    if (!this.automationOverrides.has(target)) {
+      return this.beginAutomationOverride(target, value, when, audible);
+    }
+    this.smoothAutomationOverride(target, value, when, audible);
+    return this.automationOverrides.get(target)!.generation;
+  }
+
+  /**
+   * Return to a value from the frozen playback curve. Commands at or before the
+   * return endpoint remain fenced; the next later lookahead command resumes the
+   * curve and retires this exact override generation.
+   */
+  releaseAutomationOverride(
+    target: AutomationTarget['type'],
+    frozenValue: number,
+    when: number,
+    returnSeconds: number,
+    audible = true,
+    expectedGeneration?: number,
+  ): boolean {
+    const active = this.automationOverrides.get(target);
+    if (!active || (
+      expectedGeneration !== undefined
+      && active.generation !== expectedGeneration
+    )) {
+      return false;
+    }
+    const duration = Number.isFinite(returnSeconds)
+      ? Math.max(0, returnSeconds)
+      : 0;
+    const endTime = Math.max(when, when + duration);
+    this.automationOverrides.set(target, {
+      generation: active.generation,
+      until: endTime,
+    });
+    const param = this.automationParam(target);
+    const safeValue = this.safeAutomationValue(target, frozenValue, audible);
+    this.cancelAndHoldAutomationParam(param, when);
+    const candidate = param as AudioParam & {
+      linearRampToValueAtTime?: (value: number, endTime: number) => AudioParam;
+      setValueAtTime?: (value: number, startTime: number) => AudioParam;
+    };
+    if (
+      duration > 0
+      && typeof candidate.linearRampToValueAtTime === 'function'
+    ) {
+      candidate.linearRampToValueAtTime(safeValue, endTime);
+    } else if (typeof candidate.setValueAtTime === 'function') {
+      candidate.setValueAtTime(safeValue, endTime);
+    } else {
+      param.value = safeValue;
+    }
+    return true;
+  }
+
+  /** True while manual ownership or its ordered return ramp fences lookahead. */
+  isAutomationOverridden(
+    target: AutomationTarget['type'],
+    when = this.ctx.currentTime,
+  ): boolean {
+    const active = this.automationOverrides.get(target);
+    return active !== undefined && when <= active.until;
+  }
+
+  private automationParam(target: AutomationTarget['type']): AudioParam {
+    return target === 'track-volume' ? this.fader.gain : this.panner.pan;
+  }
+
+  private safeAutomationValue(
+    target: AutomationTarget['type'],
+    value: number,
+    audible: boolean,
+  ): number {
+    return target === 'track-volume'
+      ? (this.audibilityGate ? clampVolume(value) : (audible ? clampVolume(value) : 0))
+      : clampPan(value);
+  }
+
+  private cancelAndHoldAutomationParam(param: AudioParam, when: number): void {
+    const candidate = param as AudioParam & {
+      cancelAndHoldAtTime?: (cancelTime: number) => AudioParam;
+      cancelScheduledValues?: (cancelTime: number) => AudioParam;
+      setValueAtTime?: (value: number, startTime: number) => AudioParam;
+    };
+    if (typeof candidate.cancelAndHoldAtTime === 'function') {
+      candidate.cancelAndHoldAtTime(when);
+      return;
+    }
+    candidate.cancelScheduledValues?.(when);
+    candidate.setValueAtTime?.(param.value, when);
+  }
+
+  private smoothAutomationOverride(
+    target: AutomationTarget['type'],
+    value: number,
+    when: number,
+    audible: boolean,
+  ): void {
+    const param = this.automationParam(target);
+    const safeValue = this.safeAutomationValue(target, value, audible);
+    this.cancelAndHoldAutomationParam(param, when);
+    const candidate = param as AudioParam & {
+      linearRampToValueAtTime?: (value: number, endTime: number) => AudioParam;
+      setValueAtTime?: (value: number, startTime: number) => AudioParam;
+    };
+    const endTime = when + AUTOMATION_MANUAL_SMOOTHING_SECONDS;
+    if (typeof candidate.linearRampToValueAtTime === 'function') {
+      candidate.linearRampToValueAtTime(safeValue, endTime);
+    } else if (typeof candidate.setValueAtTime === 'function') {
+      candidate.setValueAtTime(safeValue, endTime);
+    } else {
+      param.value = safeValue;
+    }
+  }
+
+  private nextAutomationOverrideGeneration(): number {
+    this.automationOverrideGeneration =
+      this.automationOverrideGeneration === Number.MAX_SAFE_INTEGER
+        ? 1
+        : this.automationOverrideGeneration + 1;
+    return this.automationOverrideGeneration;
   }
 
   /** Rebuild the insert effect nodes when the track's effect list changes. */
@@ -650,6 +844,7 @@ export class TrackGraph {
 
   /** Disconnect from the graph. */
   dispose(): void {
+    this.automationOverrides.clear();
     for (const edge of this.routeEdges.values()) {
       try { edge.tap.disconnect(edge.gain); } catch { /* already disconnected */ }
       try { edge.gain.disconnect(); } catch { /* already disconnected */ }
@@ -803,6 +998,60 @@ export function applyMixState(
       );
     }
   }
+}
+
+/**
+ * Apply only Read Track scalars that are not currently owned by an enabled
+ * automation lane. This preserves every unrelated graph and manual override.
+ */
+export function applyReadScalarMixState(
+  graphs: Map<string, TrackGraph>,
+  project: Project,
+  targets: readonly AutomationTarget[],
+  when: number,
+  suppliedPlan?: CompiledAudioRoutingPlan,
+): boolean {
+  const plan = suppliedPlan ?? requireCompiledRouting(project);
+  const audible = resolveAudioRoutingMix(project, plan).audibleChannelIds;
+  const updates: Array<Readonly<{
+    target: AutomationTarget;
+    track: Track;
+    graph: TrackGraph;
+  }>> = [];
+  for (const target of targets) {
+    const track = project.tracks.find((candidate) =>
+      candidate.id === target.trackId && candidate.type !== 'master');
+    const graph = graphs.get(target.trackId);
+    if (!track || !graph) {
+      throw new Error(`Missing live Track graph for ${target.trackId}.`);
+    }
+    const lane = automationLaneForTrack(
+      project.automationLanes,
+      target.trackId,
+      target.type,
+    );
+    if (lane && isAutomationReadEnabled(project.automationReadState, lane)) {
+      // The Track scalar is the lane's value before its first point (and on a
+      // later loop pass). The accepted session still owns the old Project
+      // snapshot, so preserving it would silently play the stale base value.
+      // Stop and rebuild from the committed Project instead of partially
+      // cancelling a scheduled automation window here.
+      return false;
+    }
+    updates.push({ target, track, graph });
+  }
+  for (const { target, track, graph } of updates) {
+    if (!graph.applyScalar(
+      target.type,
+      track,
+      audible.has(track.id),
+      when,
+      'smoothed',
+    )) {
+      throw new Error(`Automation override owns ${target.trackId}:${target.type}.`);
+    }
+  }
+  return true;
 }
 
 /** Apply send enable/gain and route-aware solo gates without touching automation. */

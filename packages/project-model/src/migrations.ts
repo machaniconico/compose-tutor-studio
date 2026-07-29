@@ -259,12 +259,27 @@ function migrateV5ToV6(
   };
 }
 
+/** Preserve every existing curve when schema-v7 adds global/track Read gates. */
+function migrateV6ToV7(
+  project: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    ...project,
+    schemaVersion: 7,
+    automationReadState: {
+      globalEnabled: true,
+      disabledTrackIds: [],
+    },
+  };
+}
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 1, to: 2, migrate: migrateV1ToV2 },
   { from: 2, to: 3, migrate: migrateV2ToV3 },
   { from: 3, to: 4, migrate: migrateV3ToV4 },
   { from: 4, to: 5, migrate: migrateV4ToV5 },
   { from: 5, to: 6, migrate: migrateV5ToV6 },
+  { from: 6, to: 7, migrate: migrateV6ToV7 },
 ]);
 
 export type ProjectMigrationErrorCode =

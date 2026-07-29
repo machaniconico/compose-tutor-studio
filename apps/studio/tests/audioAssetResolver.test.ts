@@ -79,6 +79,7 @@ function projectWithAsset(asset: ReadyAudioAsset): Project {
     audioAssets: [asset],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [{ sourceTrackId: track.id, destination: { type: 'master' } }],
       sends: [],

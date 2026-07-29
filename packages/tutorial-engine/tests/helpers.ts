@@ -39,6 +39,7 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
     audioAssets,
     audioTakeFolders,
     automationLanes,
+    automationReadState,
     audioRouting,
     tracks,
     ...rest
@@ -64,6 +65,10 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
     audioAssets: audioAssets ?? [],
     audioTakeFolders: audioTakeFolders ?? [],
     automationLanes: automationLanes ?? [],
+    automationReadState: automationReadState ?? {
+      globalEnabled: true,
+      disabledTrackIds: [],
+    },
     audioRouting: audioRouting ?? {
       outputs: projectTracks
         .filter((track) => track.type !== 'master')

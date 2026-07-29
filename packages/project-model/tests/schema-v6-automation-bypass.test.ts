@@ -50,6 +50,7 @@ function projectWithLane(): Project {
 function legacyRecord(project: Project, schemaVersion: 1 | 2 | 3 | 4 | 5) {
   const legacy = structuredClone(project) as unknown as Record<string, unknown>;
   legacy.schemaVersion = schemaVersion;
+  delete legacy.automationReadState;
 
   if (schemaVersion < 5) delete legacy.audioTakeFolders;
   if (schemaVersion < 4) delete legacy.audioRouting;
@@ -90,11 +91,11 @@ function expectIssue(
 }
 
 describe('schema-v6 Automation lane bypass', () => {
-  it('uses schema v6 and creates every new lane in active Read state', () => {
+  it('keeps schema-v6 lane bypass in schema v7 and creates every new lane active', () => {
     const project = projectWithLane();
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(6);
-    expect(project.schemaVersion).toBe(6);
+    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    expect(project.schemaVersion).toBe(7);
     expect(project.automationLanes).toEqual([{
       id: 'schema-v6-lane',
       bypassed: false,
@@ -116,7 +117,8 @@ describe('schema-v6 Automation lane bypass', () => {
     const legacy = legacyRecord(current, 5);
     const before = structuredClone(legacy);
     const expected = structuredClone(legacy);
-    expected.schemaVersion = 6;
+    expected.schemaVersion = 7;
+    expected.automationReadState = { globalEnabled: true, disabledTrackIds: [] };
     expected.automationLanes = (
       expected.automationLanes as Array<Record<string, unknown>>
     ).map((lane) => ({ ...lane, bypassed: false }));
@@ -139,8 +141,12 @@ describe('schema-v6 Automation lane bypass', () => {
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
     expect(decoded).toMatchObject({ sourceSchemaVersion: 1, migrated: true });
-    expect(decoded.project.schemaVersion).toBe(6);
+    expect(decoded.project.schemaVersion).toBe(7);
     expect(decoded.project.automationLanes).toEqual([]);
+    expect(decoded.project.automationReadState).toEqual({
+      globalEnabled: true,
+      disabledTrackIds: [],
+    });
     expect(decoded.project.audioTakeFolders).toEqual([]);
   });
 

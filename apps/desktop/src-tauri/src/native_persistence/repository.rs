@@ -43,7 +43,7 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 6;
+const PROJECT_SCHEMA_VERSION: u64 = 7;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
@@ -585,6 +585,7 @@ struct ProjectDto {
     time_signature_map: Option<Vec<TimeSignatureMapEventDto>>,
     audio_assets: Option<Vec<AudioAssetDto>>,
     automation_lanes: Option<Vec<AutomationLaneDto>>,
+    automation_read_state: Option<AutomationReadStateDto>,
     audio_routing: Option<AudioRoutingDto>,
     audio_take_folders: Option<Vec<AudioTakeFolderDto>>,
     tracks: Vec<TrackDto>,
@@ -592,6 +593,13 @@ struct ProjectDto {
     sections: Vec<SectionDto>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationReadStateDto {
+    global_enabled: bool,
+    disabled_track_ids: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -3426,6 +3434,7 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
             3 => migrate_project_value_v3_to_v4(project)?,
             4 => migrate_project_value_v4_to_v5(project)?,
             5 => migrate_project_value_v5_to_v6(project)?,
+            6 => migrate_project_value_v6_to_v7(project)?,
             _ => return None,
         };
         version += 1;
@@ -3762,6 +3771,23 @@ fn migrate_project_value_v5_to_v6(mut project: Value) -> Option<Value> {
             .insert("bypassed".to_owned(), Value::Bool(false));
     }
     project_record.insert("schemaVersion".to_owned(), Value::from(6));
+    Some(project)
+}
+
+/** v7 adds project/Track Read gates while preserving all existing automation. */
+fn migrate_project_value_v6_to_v7(mut project: Value) -> Option<Value> {
+    let project_record = project.as_object()?;
+    if project_record.get("schemaVersion").and_then(Value::as_u64) != Some(6)
+        || project_record.contains_key("automationReadState")
+    {
+        return None;
+    }
+    let project_record = project.as_object_mut()?;
+    project_record.insert("schemaVersion".to_owned(), Value::from(7));
+    project_record.insert(
+        "automationReadState".to_owned(),
+        serde_json::json!({ "globalEnabled": true, "disabledTrackIds": [] }),
+    );
     Some(project)
 }
 
@@ -7344,11 +7370,13 @@ fn validate_project_versioned_presence(
     let has_v4_fields = schema_version >= 4;
     let has_v5_fields = schema_version >= 5;
     let has_v6_lane_fields = schema_version >= 6;
+    let has_v7_read_state = schema_version >= 7;
     if V3_PROJECT_FIELDS
         .iter()
         .any(|key| project.contains_key(*key) != has_v3_fields)
         || project.contains_key("audioRouting") != has_v4_fields
         || project.contains_key("audioTakeFolders") != has_v5_fields
+        || project.contains_key("automationReadState") != has_v7_read_state
     {
         return Err(GenerationIssue::Corrupt);
     }
@@ -7799,6 +7827,42 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                 .checked_add(effect.params.len())
                 .ok_or(GenerationIssue::Corrupt)?;
         }
+    }
+
+    if project.schema_version >= 7 {
+        let read_state = project
+            .automation_read_state
+            .as_ref()
+            .ok_or(GenerationIssue::Corrupt)?;
+        let mut disabled = HashSet::new();
+        let mut canonical = Vec::new();
+        for track_id in &read_state.disabled_track_ids {
+            if !valid_project_string(track_id, MAX_STRING_CHARS, false)
+                || !disabled.insert(track_id.as_str())
+                || !track_ids.contains(track_id.as_str())
+                || track_kinds_by_id.get(track_id.as_str()) == Some(&"master")
+            {
+                return Err(GenerationIssue::Corrupt);
+            }
+        }
+        for track in &project.tracks {
+            if track.kind != "master" && disabled.contains(track.id.as_str()) {
+                canonical.push(track.id.as_str());
+            }
+        }
+        if canonical.as_slice()
+            != read_state
+                .disabled_track_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .as_slice()
+        {
+            return Err(GenerationIssue::Corrupt);
+        }
+        let _ = read_state.global_enabled;
+    } else if project.automation_read_state.is_some() {
+        return Err(GenerationIssue::Corrupt);
     }
 
     if project.schema_version >= 4 {
@@ -8434,6 +8498,7 @@ fn project_has_explicit_null_optionals(value: &Value) -> bool {
             "timeSignatureMap",
             "audioAssets",
             "automationLanes",
+            "automationReadState",
             "audioRouting",
             "audioTakeFolders",
         ],

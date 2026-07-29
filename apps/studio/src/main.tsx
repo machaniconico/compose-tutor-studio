@@ -20,6 +20,10 @@ import {
   registerGlobalRuntimeDiagnostics,
   tryRecordRuntimeDiagnostic,
 } from './platform/runtimeDiagnostics';
+import {
+  registerAutomationGestureLifecycle,
+  registerRuntimeCaptureLifecycle,
+} from './state/persistenceLifecycle';
 import './styles.css';
 
 const rootEl = document.getElementById('root');
@@ -44,6 +48,8 @@ async function continueNormalStartup(): Promise<void> {
     try {
       await registerNativeCloseGuard({
         isEraseInProgress: () => useStore.getState().localDataErase.phase !== 'idle',
+        finalizeRuntimeEdits: () =>
+          useStore.getState().finalizeAutomationRecording('native-close'),
         tryFenceEdits: () => useStore.getState().tryBeginNativeClose(),
         releaseEditFence: () => useStore.getState().cancelNativeClose(),
         claimCloseRequest: () => nativeAppLifecycleGateway.claimCloseRequest(),
@@ -134,6 +140,14 @@ async function start(): Promise<void> {
 }
 
 registerGlobalRuntimeDiagnostics();
+registerAutomationGestureLifecycle({
+  endActiveGestures: () => useStore.getState().endActiveAutomationGestures(),
+});
+registerRuntimeCaptureLifecycle({
+  finalize: (boundary) =>
+    useStore.getState().finalizeAutomationRecording(boundary),
+  cancel: () => useStore.getState().cancelAutomationRecording(),
+});
 void start().catch((error: unknown) => {
   tryRecordRuntimeDiagnostic({ stage: 'startup', error, runtime: studioRuntime.kind });
   root.render(

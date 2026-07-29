@@ -33,6 +33,8 @@ import {
   type Project,
   type ScaleName,
   type Track,
+  type AutomationTarget,
+  type AutomationWriteMode,
 } from '@cts/project-model';
 import { getScalePitchClasses } from '@cts/theory-engine';
 import { createDefaultProject } from './defaultProject';
@@ -62,6 +64,13 @@ import { hasLiveMixChanged } from '../audio/mixState';
 import { fenceRendererStorageWrites } from '../platform/rendererStorageFence';
 import { nativeLifecycleGate } from '../platform/nativeLifecycleGate';
 import { settleNativeCloseHandoff } from '../platform/nativeCloseHandoff';
+import {
+  AutomationRecordingCoordinator,
+  type AutomationRecordingBoundary,
+  type AutomationRecordingGraphBridge,
+  type AutomationRecordingOwnership,
+  type AutomationRecordingRuntimeState,
+} from '../audio/automationRecording';
 
 export type EditorView =
   | 'pianoRoll'
@@ -72,6 +81,11 @@ export type EditorView =
   | 'comping';
 
 export type TransportPhase = 'stopped' | 'starting' | 'playing';
+
+export type AutomationReadScalarCommitMarker = Readonly<{
+  playbackRequestId: number;
+  targets: readonly AutomationTarget[];
+}>;
 
 export type RecordingLatencyCompensationMode = 'calibrated' | 'estimated' | 'off';
 
@@ -291,6 +305,12 @@ export type StoreState = {
   savedProjects: readonly ProjectSummary[];
   /** Runtime-only evidence; Project metadata remains intact for relink/recovery. */
   audioAssetIssues: Readonly<Record<string, AudioAssetRuntimeIssue>>;
+  /** Runtime-only Track automation modes and one-pass capture visibility. */
+  automationRecording: AutomationRecordingRuntimeState;
+  /** One synchronous publication marker consumed by the audio bridge. */
+  automationRecordingCommitRequestId: number | null;
+  /** Target-scoped live update marker for a scalar edit on a Read Track. */
+  automationReadScalarCommit: AutomationReadScalarCommitMarker | null;
 
   // history
   past: Project[];
@@ -341,6 +361,24 @@ export type StoreState = {
   setTrackPan: (trackId: string, pan: number) => void;
   toggleMute: (trackId: string) => void;
   toggleSolo: (trackId: string) => void;
+
+  // automation recording (runtime-only)
+  setTrackAutomationMode: (trackId: string, mode: AutomationWriteMode) => boolean;
+  beginAutomationGesture: (target: AutomationTarget, value: number) => boolean;
+  updateAutomationGesture: (target: AutomationTarget, value: number) => boolean;
+  endAutomationGesture: (target: AutomationTarget) => boolean;
+  endActiveAutomationGestures: () => boolean;
+  attachAutomationPlaybackRuntime: (
+    requestId: number,
+    currentBeat: () => number,
+    graph: AutomationRecordingGraphBridge,
+  ) => boolean;
+  detachAutomationPlaybackRuntime: (ownership: AutomationRecordingOwnership) => void;
+  finalizeAutomationRecording: (
+    boundary: AutomationRecordingBoundary,
+    explicitBeat?: number,
+  ) => boolean;
+  cancelAutomationRecording: () => boolean;
 
   // selection (UI-only, no history)
   selectTrack: (trackId: string | null) => void;
@@ -396,6 +434,8 @@ export type StoreState = {
    */
   stop: (reset?: boolean) => void;
   setPosition: (beat: number) => void;
+  /** Scheduler-owned playhead update; never treated as a user seek. */
+  updatePlaybackPosition: (requestId: number, beat: number) => void;
   /** Adopt an exact scheduler-safe runtime loop and enable it without touching Project/history. */
   setLoopRange: (startBeat: number, endBeat: number) => boolean;
   toggleLoop: () => void;
@@ -640,6 +680,12 @@ function musicalTimelineTopologyEqual(left: Project, right: Project): boolean {
 
 function automationTopologyEqual(left: Project, right: Project): boolean {
   return (
+    left.automationReadState.globalEnabled === right.automationReadState.globalEnabled &&
+    left.automationReadState.disabledTrackIds.length
+      === right.automationReadState.disabledTrackIds.length &&
+    left.automationReadState.disabledTrackIds.every(
+      (trackId, index) => right.automationReadState.disabledTrackIds[index] === trackId,
+    ) &&
     left.automationLanes.length === right.automationLanes.length &&
     left.automationLanes.every((lane, laneIndex) => {
       const candidate = right.automationLanes[laneIndex];
@@ -1542,6 +1588,8 @@ export function createStudioStore(
 ) {
   const startingProject = createDefaultProject();
   const startingActivationId = uid('activation');
+  const automationCoordinator = new AutomationRecordingCoordinator();
+  automationCoordinator.activate(startingProject, startingActivationId);
   const coordinator = new ProjectSaveCoordinator({ repository });
   const crashProtectionAvailable = coordinator.supportsCrashProtection();
   const audioAssetRepository = options.audioAssetRepository ?? selectedAudioAssetRepository;
@@ -1667,6 +1715,7 @@ export function createStudioStore(
   ): Promise<boolean> => {
     const current = get();
     if (current.projectOperationBusy || current.audioRecordingOperationId !== null) return false;
+    if (!current.finalizeAutomationRecording('project-activation')) return false;
     set({ projectOperationBusy: true });
     try {
       return await operation();
@@ -2147,6 +2196,7 @@ export function createStudioStore(
     clearSaveTimers();
     firstDirtyAt = null;
     retryAttempt = 0;
+    automationCoordinator.activate(project, activationId);
     set({
       project,
       editor: makeEditor(project),
@@ -2158,6 +2208,9 @@ export function createStudioStore(
       past: [],
       future: [],
       audioAssetIssues,
+      automationRecording: automationCoordinator.snapshot(),
+      automationRecordingCommitRequestId: null,
+      automationReadScalarCommit: null,
       saveState: makeSaveState(
         project,
         activationId,
@@ -2291,9 +2344,30 @@ export function createStudioStore(
       operationId: number;
       expectedSnapshot: Project;
     }>,
+    automationAuthorization?: AutomationRecordingOwnership,
+    automationReadScalarTarget?: AutomationTarget,
   ): boolean => {
     const stateAtCommit = get();
     if (stateAtCommit.projectOperationBusy) return false;
+    if (
+      automationCoordinator.hasActivePass()
+      && automationAuthorization === undefined
+      && automationReadScalarTarget === undefined
+    ) {
+      return false;
+    }
+    if (
+      automationAuthorization !== undefined
+      && (
+        stateAtCommit.project.id !== automationAuthorization.projectId
+        || stateAtCommit.saveState.activationId !== automationAuthorization.activationId
+        || stateAtCommit.transport.playbackRequestId
+          !== automationAuthorization.playbackRequestId
+        || stateAtCommit.audioRecordingOperationId !== null
+      )
+    ) {
+      return false;
+    }
     if (stateAtCommit.audioRecordingOperationId !== null) {
       if (
         recordingAuthorization === undefined
@@ -2331,9 +2405,33 @@ export function createStudioStore(
       });
       return false;
     }
+    const preparedReadScalarRebase = automationReadScalarTarget === undefined
+      ? null
+      : automationCoordinator.prepareReadScalarRebase(current, stamped);
+    if (preparedReadScalarRebase !== null && !preparedReadScalarRebase.ok) {
+      return false;
+    }
+    if (
+      preparedReadScalarRebase?.ok
+      && preparedReadScalarRebase.preparation !== null
+      && (
+        preparedReadScalarRebase.changedTargets.length !== 1
+        || preparedReadScalarRebase.changedTargets[0]?.trackId
+          !== automationReadScalarTarget?.trackId
+        || preparedReadScalarRebase.changedTargets[0]?.type
+          !== automationReadScalarTarget?.type
+      )
+    ) {
+      return false;
+    }
     const past = [...get().past, current].slice(-HISTORY_CAP);
     const revision = get().saveState.revision + 1;
     if (!scheduleSave(stamped, revision)) return false;
+    automationCoordinator.adoptPreparedReadScalarRebase(
+      preparedReadScalarRebase?.ok
+        ? preparedReadScalarRebase.preparation
+        : null,
+    );
     const topologyChanged = hasPlaybackTopologyChanged(current, stamped);
     set((state) => ({
       project: stamped,
@@ -2341,7 +2439,17 @@ export function createStudioStore(
       future: [],
       editor: reconcileEditorSelection(state.editor, stamped),
       armedAudioTrackId: reconcileArmedAudioTrackId(state.armedAudioTrackId, stamped),
-      transport: transportAfterProjectChange(state.transport, topologyChanged),
+      transport: automationAuthorization || automationReadScalarTarget
+        ? state.transport
+        : transportAfterProjectChange(state.transport, topologyChanged),
+      automationRecordingCommitRequestId:
+        automationAuthorization?.playbackRequestId ?? null,
+      automationReadScalarCommit: automationReadScalarTarget
+        ? {
+            playbackRequestId: state.transport.playbackRequestId,
+            targets: [Object.freeze({ ...automationReadScalarTarget })],
+          }
+        : null,
     }));
     if (stamped.key !== current.key || stamped.scale !== current.scale) {
       publishScaleSnapStateIfEnabled();
@@ -2350,6 +2458,48 @@ export function createStudioStore(
       void refreshAudioAssetIssuesNow(stamped);
     }
     return true;
+  };
+
+  const publishAutomationRuntime = (): void => {
+    set({
+      automationRecording: automationCoordinator.snapshot(),
+      automationRecordingCommitRequestId: null,
+      automationReadScalarCommit: null,
+    });
+  };
+
+  const finalizeAutomationPass = (
+    boundary: AutomationRecordingBoundary,
+    explicitBeat?: number,
+  ): boolean => {
+    void boundary;
+    const state = get();
+    const ownership = state.automationRecording.ownership;
+    const result = automationCoordinator.punchOutCurrent(
+      state.project,
+      state.saveState.activationId,
+      (expectedProject, nextProject) => {
+        const latest = get();
+        if (
+          ownership === null
+          || latest.project !== expectedProject
+          || latest.project.id !== ownership.projectId
+          || latest.saveState.activationId !== ownership.activationId
+          || latest.transport.playbackRequestId !== ownership.playbackRequestId
+        ) {
+          return false;
+        }
+        return commitProject(
+          nextProject,
+          undefined,
+          undefined,
+          ownership,
+        );
+      },
+      explicitBeat,
+    );
+    publishAutomationRuntime();
+    return result.ok;
   };
 
   return {
@@ -2376,6 +2526,9 @@ export function createStudioStore(
     persistenceNotice: null,
     savedProjects: [],
     audioAssetIssues: {},
+    automationRecording: automationCoordinator.snapshot(),
+    automationRecordingCommitRequestId: null,
+    automationReadScalarCommit: null,
     past: [],
     future: [],
 
@@ -2639,21 +2792,43 @@ export function createStudioStore(
 
     // --- mixer ---
     setTrackVolume: (trackId, volume) => {
-      const project = get().project;
+      const state = get();
+      const project = state.project;
       const track = project.tracks.find((t) => t.id === trackId);
       if (
         !track ||
         !Number.isFinite(volume) ||
         volume < 0 ||
-        volume > 2 ||
-        track.volume === volume
+        volume > 2
       ) {
         return;
       }
+      const target: AutomationTarget | null = track.type === 'master'
+        ? null
+        : { type: 'track-volume', trackId };
+      const automationMode = automationCoordinator.modeForTrack(trackId);
+      if (
+        state.transport.phase === 'playing'
+        && target !== null
+        && automationMode !== 'read'
+      ) {
+        const touching = state.automationRecording.touchingTargetKeys
+          .includes(`${trackId}:track-volume`);
+        if (touching) get().updateAutomationGesture(target, volume);
+        else get().beginAutomationGesture(target, volume);
+        return;
+      }
+      if (track.volume === volume) return;
       const committed = commitProject(
         mapTracks(project, (candidate) =>
           candidate.id === trackId ? { ...candidate, volume } : candidate,
         ),
+        undefined,
+        undefined,
+        undefined,
+        state.transport.phase === 'playing' && automationMode === 'read'
+          ? target ?? undefined
+          : undefined,
       );
       if (!committed) return;
       const adoptedTrack = get().project.tracks.find((candidate) => candidate.id === trackId);
@@ -2668,8 +2843,42 @@ export function createStudioStore(
       });
     },
     setTrackPan: (trackId, pan) => {
-      const project = get().project;
-      commitProject(mapTracks(project, (t) => (t.id === trackId ? { ...t, pan } : t)));
+      const state = get();
+      const project = state.project;
+      const track = project.tracks.find((candidate) => candidate.id === trackId);
+      if (
+        !track
+        || !Number.isFinite(pan)
+        || pan < -1
+        || pan > 1
+      ) {
+        return;
+      }
+      const target: AutomationTarget | null = track.type === 'master'
+        ? null
+        : { type: 'track-pan', trackId };
+      const automationMode = automationCoordinator.modeForTrack(trackId);
+      if (
+        state.transport.phase === 'playing'
+        && target !== null
+        && automationMode !== 'read'
+      ) {
+        const touching = state.automationRecording.touchingTargetKeys
+          .includes(`${trackId}:track-pan`);
+        if (touching) get().updateAutomationGesture(target, pan);
+        else get().beginAutomationGesture(target, pan);
+        return;
+      }
+      if (track.pan === pan) return;
+      commitProject(
+        mapTracks(project, (t) => (t.id === trackId ? { ...t, pan } : t)),
+        undefined,
+        undefined,
+        undefined,
+        state.transport.phase === 'playing' && automationMode === 'read'
+          ? target ?? undefined
+          : undefined,
+      );
     },
     toggleMute: (trackId) => {
       const project = get().project;
@@ -2678,6 +2887,140 @@ export function createStudioStore(
     toggleSolo: (trackId) => {
       const project = get().project;
       commitProject(mapTracks(project, (t) => (t.id === trackId ? { ...t, solo: !t.solo } : t)));
+    },
+
+    // --- automation recording (runtime only until one punch-out commit) ---
+    setTrackAutomationMode: (trackId, mode) => {
+      const state = get();
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+      ) {
+        return false;
+      }
+      if (
+        automationCoordinator.hasActivePass()
+        && !finalizeAutomationPass('mode-change')
+      ) {
+        return false;
+      }
+      const latest = get();
+      const result = automationCoordinator.setTrackMode(
+        latest.project,
+        latest.saveState.activationId,
+        trackId,
+        mode,
+      );
+      publishAutomationRuntime();
+      return result.ok;
+    },
+    beginAutomationGesture: (target, value) => {
+      const state = get();
+      if (state.transport.phase === 'stopped') {
+        const track = state.project.tracks.find(
+          (candidate) => candidate.id === target.trackId,
+        );
+        if (
+          !track
+          || track.type === 'master'
+          || !Number.isFinite(value)
+          || (
+            target.type === 'track-volume'
+              ? value < 0 || value > 2
+              : value < -1 || value > 1
+          )
+        ) {
+          return false;
+        }
+        return commitProject(mapTracks(state.project, (candidate) => (
+          candidate.id !== target.trackId
+            ? candidate
+            : target.type === 'track-volume'
+              ? { ...candidate, volume: value }
+              : { ...candidate, pan: value }
+        )));
+      }
+      const ownership = state.automationRecording.ownership;
+      if (!ownership) return false;
+      const result = automationCoordinator.gestureBegin(ownership, target, value);
+      publishAutomationRuntime();
+      return result.ok;
+    },
+    updateAutomationGesture: (target, value) => {
+      const state = get();
+      if (state.transport.phase === 'stopped') {
+        return get().beginAutomationGesture(target, value);
+      }
+      const ownership = state.automationRecording.ownership;
+      if (!ownership) return false;
+      const result = automationCoordinator.gestureUpdate(ownership, target, value);
+      publishAutomationRuntime();
+      return result.ok;
+    },
+    endAutomationGesture: (target) => {
+      const state = get();
+      if (state.transport.phase === 'stopped') return true;
+      const ownership = state.automationRecording.ownership;
+      if (!ownership) return false;
+      const result = automationCoordinator.gestureEnd(ownership, target);
+      publishAutomationRuntime();
+      return result.ok;
+    },
+    endActiveAutomationGestures: () => {
+      const keys = [...get().automationRecording.touchingTargetKeys];
+      for (const key of keys) {
+        const type = key.endsWith(':track-volume')
+          ? 'track-volume'
+          : key.endsWith(':track-pan')
+            ? 'track-pan'
+            : null;
+        if (type === null) return false;
+        const trackId = key.slice(0, -(type.length + 1));
+        if (
+          trackId.length === 0
+          || !get().endAutomationGesture({ type, trackId })
+        ) {
+          return false;
+        }
+      }
+      return true;
+    },
+    attachAutomationPlaybackRuntime: (requestId, currentBeat, graph) => {
+      const state = get();
+      if (
+        state.transport.playbackRequestId !== requestId
+        || (
+          state.transport.phase !== 'starting'
+          && state.transport.phase !== 'playing'
+        )
+      ) {
+        return false;
+      }
+      const result = automationCoordinator.attachPlayback({
+        project: state.project,
+        activationId: state.saveState.activationId,
+        playbackRequestId: requestId,
+        currentBeat,
+        graph,
+        audioRecordingActive: state.audioRecordingOperationId !== null,
+      });
+      publishAutomationRuntime();
+      return result.ok;
+    },
+    detachAutomationPlaybackRuntime: (ownership) => {
+      automationCoordinator.detachPlayback(ownership);
+      publishAutomationRuntime();
+    },
+    finalizeAutomationRecording: (boundary, explicitBeat) =>
+      finalizeAutomationPass(boundary, explicitBeat),
+    cancelAutomationRecording: () => {
+      const state = get();
+      const result = automationCoordinator.cancelCurrent(
+        state.project,
+        state.saveState.activationId,
+      );
+      publishAutomationRuntime();
+      return result.ok;
     },
 
     // --- selection (UI only) ---
@@ -2850,6 +3193,14 @@ export function createStudioStore(
       ) {
         return;
       }
+      if (state.automationRecording.ownership?.playbackRequestId === requestId) {
+        const cancelled = automationCoordinator.cancelCurrent(
+          state.project,
+          state.saveState.activationId,
+        );
+        publishAutomationRuntime();
+        if (!cancelled.ok) return;
+      }
       set({
         transport: {
           ...state.transport,
@@ -2868,12 +3219,16 @@ export function createStudioStore(
       ) {
         return;
       }
+      if (state.automationRecording.ownership?.playbackRequestId === requestId) {
+        if (!finalizeAutomationPass('stop')) return;
+      }
+      const latest = get();
       set({
         transport: {
-          ...state.transport,
+          ...latest.transport,
           phase: 'stopped',
           isPlaying: false,
-          playbackRequestId: state.transport.playbackRequestId + 1,
+          playbackRequestId: latest.transport.playbackRequestId + 1,
           audioIssue: issue,
         },
       });
@@ -2886,12 +3241,20 @@ export function createStudioStore(
       ) {
         return;
       }
+      if (!finalizeAutomationPass('natural-end', state.project.lengthBeats)) return;
+      const latest = get();
+      if (
+        latest.transport.phase === 'stopped'
+        || latest.transport.playbackRequestId !== requestId
+      ) {
+        return;
+      }
       set({
         transport: {
-          ...state.transport,
+          ...latest.transport,
           phase: 'stopped',
           isPlaying: false,
-          playbackRequestId: state.transport.playbackRequestId + 1,
+          playbackRequestId: latest.transport.playbackRequestId + 1,
           positionBeat: 0,
         },
       });
@@ -2900,7 +3263,11 @@ export function createStudioStore(
       set((state) => ({
         transport: { ...state.transport, audioIssue: null },
       })),
-    stop: (reset) =>
+    stop: (reset) => {
+      const before = get();
+      if (before.transport.phase !== 'stopped') {
+        if (!finalizeAutomationPass('stop')) return;
+      }
       set((s) => {
         // Starting/playing -> pause (keep position) unless an explicit reset
         // is asked. Already stopped -> rewind to 0.
@@ -2914,18 +3281,48 @@ export function createStudioStore(
             positionBeat: shouldReset ? 0 : s.transport.positionBeat,
           },
         };
-      }),
-    setPosition: (beat) => set((s) => ({ transport: { ...s.transport, positionBeat: beat } })),
-    setLoopRange: (startBeat, endBeat) => {
+      });
+    },
+    setPosition: (beat) => {
+      if (get().transport.phase !== 'stopped') {
+        if (!finalizeAutomationPass('seek')) return;
+      }
+      set((s) => ({ transport: { ...s.transport, positionBeat: beat } }));
+    },
+    updatePlaybackPosition: (requestId, beat) => {
       const state = get();
-      const projectLength = transportProjectLengthBeats(state.project);
       if (
-        state.audioRecordingOperationId !== null
+        state.transport.phase !== 'playing'
+        || state.transport.playbackRequestId !== requestId
+        || !Number.isFinite(beat)
+        || beat < 0
+      ) {
+        return;
+      }
+      set({
+        transport: {
+          ...state.transport,
+          positionBeat: beat,
+        },
+      });
+    },
+    setLoopRange: (startBeat, endBeat) => {
+      const before = get();
+      const projectLength = transportProjectLengthBeats(before.project);
+      if (
+        before.audioRecordingOperationId !== null
         || !isExactLoopRangeValid(startBeat, endBeat, projectLength)
       ) {
         return false;
       }
 
+      if (
+        before.transport.phase !== 'stopped'
+        && !finalizeAutomationPass('seek')
+      ) {
+        return false;
+      }
+      const state = get();
       const supersedesPlayback = state.transport.phase !== 'stopped';
       const safePosition = safeTransportPosition(
         state.transport.positionBeat,
@@ -2953,7 +3350,15 @@ export function createStudioStore(
       });
       return true;
     },
-    toggleLoop: () =>
+    toggleLoop: () => {
+      const before = get();
+      if (before.audioRecordingOperationId !== null) return;
+      if (
+        before.transport.phase !== 'stopped'
+        && !finalizeAutomationPass('seek')
+      ) {
+        return;
+      }
       set((s) => {
         if (s.audioRecordingOperationId !== null) return s;
         const projectLength = transportProjectLengthBeats(s.project);
@@ -2983,7 +3388,8 @@ export function createStudioStore(
             punchEnabled: false,
           },
         };
-      }),
+      });
+    },
     setPunchRange: (punchInBeat, punchOutBeat) => {
       const state = get();
       const projectLength = transportProjectLengthBeats(state.project);
@@ -3201,6 +3607,7 @@ export function createStudioStore(
       if (
         state.projectOperationBusy
         || state.audioRecordingOperationId !== null
+        || automationCoordinator.hasActivePass()
         || state.localDataErase.phase !== 'idle'
       ) {
         return null;
@@ -3228,6 +3635,7 @@ export function createStudioStore(
     // --- history ---
     undo: () => {
       if (get().projectOperationBusy || get().audioRecordingOperationId !== null) return;
+      if (!finalizeAutomationPass('undo')) return;
       const { past, project, future } = get();
       const previous = past[past.length - 1];
       if (!previous) return;
@@ -3250,6 +3658,7 @@ export function createStudioStore(
     },
     redo: () => {
       if (get().projectOperationBusy || get().audioRecordingOperationId !== null) return;
+      if (!finalizeAutomationPass('redo')) return;
       const { past, project, future } = get();
       const next = future[0];
       if (!next) return;
@@ -3381,8 +3790,19 @@ export function createStudioStore(
         }
         return false;
       }
+      if (!finalizeAutomationPass('native-close')) return false;
       nativeCloseFenced = true;
-      set({ projectOperationBusy: true });
+      set((current) => ({
+        projectOperationBusy: true,
+        transport: current.transport.phase === 'stopped'
+          ? current.transport
+          : {
+              ...current.transport,
+              phase: 'stopped',
+              isPlaying: false,
+              playbackRequestId: current.transport.playbackRequestId + 1,
+            },
+      }));
       return true;
     },
     cancelNativeClose: () => {

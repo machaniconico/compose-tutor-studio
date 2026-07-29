@@ -1,6 +1,7 @@
 import type {
   AutomationLane,
   AutomationPoint,
+  AutomationReadState,
   AutomationTarget,
   Track,
 } from '@cts/project-model';
@@ -11,6 +12,16 @@ export type AutomationCommand = Readonly<{
   value: number;
   interpolation: 'hold' | 'linear';
 }>;
+
+/** One shared precedence resolver for live and offline rendering. */
+export function isAutomationReadEnabled(
+  readState: AutomationReadState,
+  lane: AutomationLane,
+): boolean {
+  return readState.globalEnabled
+    && !readState.disabledTrackIds.includes(lane.target.trackId)
+    && !lane.bypassed;
+}
 
 function lastPointAtOrBefore(
   points: readonly AutomationPoint[],

@@ -21,6 +21,7 @@ export * from './audio-punch';
 export * from './audio-routing';
 export * from './audio-routing-mutations';
 export * from './automation-mutations';
+export * from './automation-recording';
 export * from './tempo-map-mutations';
 // Persistable id helper with a per-realm nonce and monotonic local counter.
 export * from './ids';

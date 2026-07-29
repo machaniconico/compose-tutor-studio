@@ -151,6 +151,7 @@ export function createDefaultProject(opts: CreateDefaultProjectOpts = {}): Proje
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [instrTrack, drumTrack].map((track) => ({
         sourceTrackId: track.id,

@@ -190,6 +190,7 @@ function tinyProject(): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [
         { sourceTrackId: 'inst', destination: { type: 'master' } },

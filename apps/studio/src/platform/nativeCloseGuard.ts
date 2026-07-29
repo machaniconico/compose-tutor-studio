@@ -16,6 +16,7 @@ export type NativeCloseWindow = Readonly<{
 
 export type NativeCloseFailureStage =
   | 'erase'
+  | 'runtime-finalization'
   | 'edit-fence'
   | 'authorization'
   | 'flush'
@@ -25,6 +26,8 @@ export type NativeCloseFailureStage =
 export type NativeCloseGuardActions = Readonly<{
   /** Checked synchronously after cancellation; true blocks every normal close path. */
   isEraseInProgress?: () => boolean;
+  /** Punches out runtime-only captures before the Store edit fence is acquired. */
+  finalizeRuntimeEdits?: () => boolean;
   /** Acquires the Store mutation fence before the first asynchronous close stage. */
   tryFenceEdits?: () => boolean;
   /** Releases only a reversible Store mutation fence. */
@@ -106,6 +109,19 @@ export async function registerNativeCloseGuard(
     event.preventDefault();
     if (closing) return;
     if (eraseIsActive() || !lifecycleGate.tryClaimNormalClose()) return;
+    if (actions.finalizeRuntimeEdits) {
+      let finalized = false;
+      try {
+        finalized = actions.finalizeRuntimeEdits();
+      } catch {
+        finalized = false;
+      }
+      if (!finalized) {
+        lifecycleGate.releaseNormalClose();
+        actions.onBlocked?.('runtime-finalization');
+        return;
+      }
+    }
     let editFenceClaimed = false;
     if (actions.tryFenceEdits) {
       try {

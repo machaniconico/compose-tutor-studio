@@ -32,6 +32,7 @@ export type AutomationMutationErrorCode =
   | 'invalid-value'
   | 'invalid-interpolation'
   | 'invalid-bypassed'
+  | 'invalid-read-enabled'
   | 'point-beat-conflict'
   | 'lane-limit'
   | 'point-limit'
@@ -55,6 +56,15 @@ export type AutomationMutationResult =
       trackId: string;
       laneId: string;
       pointId?: string;
+    }>
+  | Readonly<{ ok: false; error: AutomationMutationError }>;
+
+export type AutomationReadMutationResult =
+  | Readonly<{
+      ok: true;
+      project: Project;
+      changed: boolean;
+      trackId?: string;
     }>
   | Readonly<{ ok: false; error: AutomationMutationError }>;
 
@@ -163,6 +173,86 @@ function runMutation(
   } catch {
     return failure('unexpected', 'The automation change could not be completed safely.');
   }
+}
+
+function runReadMutation(
+  project: Project,
+  build: () => AutomationReadMutationResult,
+): AutomationReadMutationResult {
+  try {
+    const inputFailure = codecFailure(project, 'project-not-adoptable');
+    if (inputFailure) return inputFailure;
+    const built = build();
+    if (!built.ok || !built.changed) return built;
+    return codecFailure(built.project, 'invalid-automation') ?? built;
+  } catch {
+    return failure('unexpected', 'The automation Read change could not be completed safely.');
+  }
+}
+
+/** Set the project-wide automation Read gate without touching any curve. */
+export function setGlobalAutomationReadEnabled(
+  project: Project,
+  enabled: boolean,
+): AutomationReadMutationResult {
+  return runReadMutation(project, () => {
+    if (typeof enabled !== 'boolean') {
+      return failure('invalid-read-enabled', 'Global automation Read state must be a boolean.');
+    }
+    if (project.automationReadState.globalEnabled === enabled) {
+      return { ok: true, project, changed: false };
+    }
+    return {
+      ok: true,
+      changed: true,
+      project: {
+        ...project,
+        automationReadState: {
+          ...project.automationReadState,
+          globalEnabled: enabled,
+        },
+      },
+    };
+  });
+}
+
+/** Set one non-Master Track Read gate, stored in canonical project order. */
+export function setTrackAutomationReadEnabled(
+  project: Project,
+  trackId: string,
+  enabled: boolean,
+): AutomationReadMutationResult {
+  return runReadMutation(project, () => {
+    const track = project.tracks.find((candidate) => candidate.id === trackId);
+    if (!track) return failure('track-not-found', `Track not found: ${String(trackId)}`);
+    if (track.type === 'master') {
+      return failure('master-protected', 'Master automation Read is not supported.');
+    }
+    if (typeof enabled !== 'boolean') {
+      return failure('invalid-read-enabled', 'Track automation Read state must be a boolean.');
+    }
+    const currentlyEnabled = !project.automationReadState.disabledTrackIds.includes(trackId);
+    if (currentlyEnabled === enabled) {
+      return { ok: true, project, changed: false, trackId };
+    }
+    const disabled = new Set(project.automationReadState.disabledTrackIds);
+    if (enabled) disabled.delete(trackId);
+    else disabled.add(trackId);
+    return {
+      ok: true,
+      project: {
+        ...project,
+        automationReadState: {
+          ...project.automationReadState,
+          disabledTrackIds: project.tracks
+            .filter((candidate) => candidate.type !== 'master' && disabled.has(candidate.id))
+            .map((candidate) => candidate.id),
+        },
+      },
+      changed: true,
+      trackId,
+    };
+  });
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

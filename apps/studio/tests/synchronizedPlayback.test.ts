@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyProject, type Project, type Track } from '@cts/project-model';
 import type { AudioAssetBufferLease } from '../src/audio/audioAssetResolver';
-import type { TrackGraph } from '../src/audio/graph';
+import { buildTrackGraphs, type TrackGraph } from '../src/audio/graph';
 
 const engineHarness = vi.hoisted(() => {
   const harness = {
@@ -34,6 +34,7 @@ const assetHarness = vi.hoisted(() => ({
 
 type GraphDouble = Readonly<{
   input: GainNode;
+  scheduleAutomation: ReturnType<typeof vi.fn>;
   schedulePunchAudibility: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 }>;
@@ -179,6 +180,7 @@ function createPunchProject(): Project {
 function makeGraphDouble(): GraphDouble {
   return {
     input: {} as GainNode,
+    scheduleAutomation: vi.fn(),
     schedulePunchAudibility: vi.fn(),
     dispose: vi.fn(),
   };
@@ -338,6 +340,99 @@ describe('synchronized recording playback runtime races', () => {
 
     expect(stopSynchronizedRecordingPlayback(clock.requestId)).toBe(true);
     expect(assetHarness.release).toHaveBeenCalledOnce();
+  });
+
+  it('uses the Track scalar while live Read is disabled and restores the exact curve plan', async () => {
+    const target = project.tracks.find((track) => track.type !== 'master');
+    if (!target) throw new Error('The default Project must contain a playable Track.');
+    const points = [
+      {
+        id: 'live-read-point-0',
+        beat: 0,
+        value: 0.25,
+        interpolation: 'linear' as const,
+      },
+      {
+        id: 'live-read-point-1',
+        beat: 2,
+        value: 1.25,
+        interpolation: 'hold' as const,
+      },
+    ];
+    const readProject: Project = {
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.id === target.id ? { ...track, volume: 0.73 } : track),
+      automationLanes: [{
+        id: 'live-read-volume',
+        bypassed: false,
+        target: { type: 'track-volume', trackId: target.id },
+        points,
+      }],
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
+    };
+    const graph = makeGraphDouble();
+    graphHarness.graphs.set(target.id, graph);
+
+    const playAndCapture = async (snapshot: Project) => {
+      const before = useStore.getState();
+      const ensureContextCalls = engineHarness.ensureContext.mock.calls.length;
+      vi.mocked(buildTrackGraphs).mockClear();
+      useStore.setState({
+        project: snapshot,
+        audioRecordingOperationId: null,
+        transport: {
+          ...before.transport,
+          phase: 'stopped',
+          isPlaying: false,
+          positionBeat: 0,
+          playbackRequestId: before.transport.playbackRequestId + 1,
+        },
+      });
+      graph.scheduleAutomation.mockClear();
+      graphHarness.graphs.set(target.id, graph);
+      expect(useStore.getState()).toMatchObject({
+        projectOperationBusy: false,
+        audioRecordingOperationId: null,
+        transport: { phase: 'stopped' },
+      });
+      useStore.getState().play();
+      expect(useStore.getState().transport.phase).toBe('starting');
+      await flushMicrotasks();
+      expect(engineHarness.ensureContext).toHaveBeenCalledTimes(ensureContextCalls + 1);
+      expect(buildTrackGraphs).toHaveBeenCalledOnce();
+      const runtimeProject = vi.mocked(buildTrackGraphs).mock.calls[0]?.[2] as Project;
+      expect(runtimeProject.tracks.find((track) => track.id === target.id)?.volume).toBe(0.73);
+      const commands = graph.scheduleAutomation.mock.calls.map((call) => [...call]);
+      useStore.getState().stop();
+      await flushMicrotasks();
+      return commands;
+    };
+
+    const enabledCommands = await playAndCapture(readProject);
+    expect(enabledCommands[0]).toEqual(
+      ['track-volume', 0.25, 10, 'hold', true],
+    );
+    expect(enabledCommands[1]?.[0]).toBe('track-volume');
+    expect(enabledCommands[1]?.[1]).toBeCloseTo(0.37, 10);
+    expect(enabledCommands[1]?.[2]).toBeCloseTo(10.12, 10);
+    expect(enabledCommands[1]?.slice(3)).toEqual(['linear', true]);
+    expect(enabledCommands).toHaveLength(2);
+
+    const disabledProject: Project = {
+      ...readProject,
+      automationReadState: { globalEnabled: false, disabledTrackIds: [] },
+    };
+    expect(await playAndCapture(disabledProject)).toEqual([]);
+    expect(disabledProject.tracks.find((track) => track.id === target.id)?.volume).toBe(0.73);
+
+    const reenabledProject: Project = {
+      ...disabledProject,
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
+    };
+    expect(await playAndCapture(reenabledProject)).toEqual(enabledCommands);
+    expect(reenabledProject.automationLanes[0]?.points).toBe(points);
+    expect(reenabledProject.automationLanes[0]?.points).toEqual(readProject.automationLanes[0]?.points);
   });
 
   it('arms Auto Punch capture at the exact punch-in frame and exposes both clocks', async () => {

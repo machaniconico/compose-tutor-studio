@@ -9,6 +9,7 @@ import {
 } from '@cts/project-model';
 import {
   applyMixState,
+  applyReadScalarMixState,
   applyRoutingMixState,
   assertRoutingGraphNodeBudget,
   audioRoutingTopologySignature,
@@ -69,6 +70,7 @@ function routingProject(tracks: Track[], audioRouting: AudioRouting): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting,
     tracks,
     chordTrack: [],
@@ -90,6 +92,7 @@ class RoutingTestParam {
   value = 0;
   readonly setTargetAtTime = vi.fn();
   readonly setValueAtTime = vi.fn();
+  readonly linearRampToValueAtTime = vi.fn();
   readonly cancelAndHoldAtTime = vi.fn();
   readonly cancelScheduledValues = vi.fn();
 }
@@ -122,6 +125,7 @@ function routingContext() {
   const gains: RoutingTestGain[] = [];
   const panners: RoutingTestPanner[] = [];
   const context = {
+    currentTime: 0,
     createGain: vi.fn(() => {
       const gain = new RoutingTestGain();
       gains.push(gain);
@@ -201,6 +205,236 @@ describe('clampVolume / clampPan', () => {
     expect(clampPan(0.3)).toBe(0.3);
     expect(clampPan(2)).toBe(1);
     expect(clampPan(Number.NaN)).toBe(0);
+  });
+});
+
+describe('Read scalar live updates', () => {
+  it('updates only named targets without enabled Read automation', () => {
+    const project = routingProject(
+      [
+        track('automated', { volume: 0.5, pan: -0.25 }),
+        track('plain', { volume: 0.7 }),
+        track('master', { type: 'master' }),
+      ],
+      {
+        outputs: [
+          { sourceTrackId: 'automated', destination: { type: 'master' } },
+          { sourceTrackId: 'plain', destination: { type: 'master' } },
+        ],
+        sends: [],
+      },
+    );
+    project.automationLanes = [{
+      id: 'automated-volume',
+      bypassed: false,
+      target: { type: 'track-volume', trackId: 'automated' },
+      points: [{ id: 'point-1', beat: 0, value: 0.4, interpolation: 'hold' }],
+    }];
+    const automatedApply = vi.fn(() => true);
+    const plainApply = vi.fn(() => true);
+    const graphs = new Map([
+      ['automated', { applyScalar: automatedApply }],
+      ['plain', { applyScalar: plainApply }],
+    ]) as unknown as Parameters<typeof applyReadScalarMixState>[0];
+
+    applyReadScalarMixState(
+      graphs,
+      project,
+      [
+        { type: 'track-pan', trackId: 'automated' },
+        { type: 'track-volume', trackId: 'plain' },
+      ],
+      2,
+      compileRouting(project),
+    );
+
+    expect(automatedApply).toHaveBeenCalledOnce();
+    expect(automatedApply).toHaveBeenCalledWith(
+      'track-pan',
+      expect.objectContaining({ id: 'automated', pan: -0.25 }),
+      true,
+      2,
+      'smoothed',
+    );
+    expect(plainApply).toHaveBeenCalledOnce();
+    expect(plainApply).toHaveBeenCalledWith(
+      'track-volume',
+      expect.objectContaining({ id: 'plain', volume: 0.7 }),
+      true,
+      2,
+      'smoothed',
+    );
+  });
+
+  it('requests a restart before mutating a scalar owned by effective Read automation', () => {
+    const project = routingProject(
+      [track('source', { volume: 0.6 }), track('master', { type: 'master' })],
+      {
+        outputs: [{ sourceTrackId: 'source', destination: { type: 'master' } }],
+        sends: [],
+      },
+    );
+    project.automationLanes = [{
+      id: 'source-volume',
+      bypassed: false,
+      target: { type: 'track-volume', trackId: 'source' },
+      points: [{ id: 'point-1', beat: 4, value: 0.4, interpolation: 'hold' }],
+    }];
+    const applyScalar = vi.fn(() => true);
+    const graphs = new Map([
+      ['source', { applyScalar }],
+    ]) as unknown as Parameters<typeof applyReadScalarMixState>[0];
+
+    expect(applyReadScalarMixState(
+      graphs,
+      project,
+      [{ type: 'track-volume', trackId: 'source' }],
+      3,
+      compileRouting(project),
+    )).toBe(false);
+    expect(applyScalar).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['lane Bypass', true, true],
+    ['Global Read off', false, false],
+  ] as const)('applies a scalar when %s disables its lane', (_, globalEnabled, bypassed) => {
+    const project = routingProject(
+      [track('source', { volume: 0.6 }), track('master', { type: 'master' })],
+      {
+        outputs: [{ sourceTrackId: 'source', destination: { type: 'master' } }],
+        sends: [],
+      },
+    );
+    project.automationReadState.globalEnabled = globalEnabled;
+    project.automationLanes = [{
+      id: 'source-volume',
+      bypassed,
+      target: { type: 'track-volume', trackId: 'source' },
+      points: [{ id: 'point-1', beat: 0, value: 0.4, interpolation: 'hold' }],
+    }];
+    const applyScalar = vi.fn(() => true);
+    const graphs = new Map([
+      ['source', { applyScalar }],
+    ]) as unknown as Parameters<typeof applyReadScalarMixState>[0];
+
+    expect(applyReadScalarMixState(
+      graphs,
+      project,
+      [{ type: 'track-volume', trackId: 'source' }],
+      3,
+      compileRouting(project),
+    )).toBe(true);
+
+    expect(applyScalar).toHaveBeenCalledOnce();
+  });
+});
+
+describe('TrackGraph automation target overrides', () => {
+  it('cancels lookahead, smooths manual values, fences scheduling, and resumes in order', () => {
+    const project = routingProject(
+      [track('source'), track('master', { type: 'master' })],
+      {
+        outputs: [{
+          sourceTrackId: 'source',
+          destination: { type: 'master' },
+        }],
+        sends: [],
+      },
+    );
+    const { context, gains } = routingContext();
+    const master = new RoutingTestNode();
+    const graphs = buildTrackGraphs(
+      context,
+      master as unknown as AudioNode,
+      project,
+      0,
+      'disabled',
+      compileRouting(project),
+    );
+    const graph = graphs.get('source');
+    const audibility = gains[0]!.gain;
+    const fader = gains[1]!.gain;
+    try {
+      audibility.setValueAtTime.mockClear();
+      fader.setValueAtTime.mockClear();
+      fader.linearRampToValueAtTime.mockClear();
+      fader.cancelAndHoldAtTime.mockClear();
+
+      graph!.scheduleAutomation('track-volume', 0.9, 1, 'hold', true);
+      const generation = graph!.beginAutomationOverride(
+        'track-volume',
+        0.4,
+        0.5,
+        true,
+      );
+      graph!.scheduleAutomation('track-volume', 0.7, 0.8, 'hold', true);
+
+      expect(fader.cancelAndHoldAtTime).toHaveBeenCalledWith(0.5);
+      expect(fader.linearRampToValueAtTime).toHaveBeenCalledWith(0.4, 0.51);
+      expect(fader.setValueAtTime.mock.calls).toEqual([[0.9, 1]]);
+
+      expect(graph!.releaseAutomationOverride(
+        'track-volume',
+        0.6,
+        0.7,
+        0.1,
+        true,
+        generation,
+      )).toBe(true);
+      graph!.scheduleAutomation('track-volume', 0.65, 0.79, 'hold', true);
+      graph!.scheduleAutomation('track-volume', 0.75, 0.81, 'hold', true);
+
+      expect(fader.linearRampToValueAtTime).toHaveBeenLastCalledWith(
+        0.6,
+        0.7999999999999999,
+      );
+      expect(fader.setValueAtTime.mock.calls).toEqual([
+        [0.9, 1],
+        [0.75, 0.81],
+      ]);
+      expect(audibility.setValueAtTime).not.toHaveBeenCalled();
+    } finally {
+      for (const candidate of graphs.values()) candidate.dispose();
+    }
+  });
+
+  it('ignores a stale release generation after a newer gesture takes ownership', () => {
+    const { context, gains } = routingContext();
+    const graph = new TrackGraph(
+      context,
+      new RoutingTestNode() as unknown as AudioNode,
+      track('direct'),
+      'disabled',
+    );
+    const fader = gains[0]!.gain;
+    try {
+      const stale = graph.beginAutomationOverride('track-volume', 0.3, 1);
+      const current = graph.beginAutomationOverride('track-volume', 0.8, 1.1);
+      fader.linearRampToValueAtTime.mockClear();
+
+      expect(graph.releaseAutomationOverride(
+        'track-volume',
+        0.5,
+        1.2,
+        0.1,
+        true,
+        stale,
+      )).toBe(false);
+      expect(graph.isAutomationOverridden('track-volume', 99)).toBe(true);
+      expect(fader.linearRampToValueAtTime).not.toHaveBeenCalled();
+
+      expect(graph.releaseAutomationOverride(
+        'track-volume',
+        0.5,
+        1.2,
+        0.1,
+        true,
+        current,
+      )).toBe(true);
+    } finally {
+      graph.dispose();
+    }
   });
 });
 

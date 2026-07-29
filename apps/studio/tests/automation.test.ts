@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   automationCommandsInWindow,
   automationValueAt,
+  isAutomationReadEnabled,
 } from '../src/audio/automation';
 
 const lane: AutomationLane = {
@@ -53,6 +54,28 @@ function valueAtTime(commands: readonly TimedCommand[], time: number): number {
 }
 
 describe('track automation planning', () => {
+  it.each([
+    [true, false, false, true],
+    [true, false, true, false],
+    [true, true, false, false],
+    [true, true, true, false],
+    [false, false, false, false],
+    [false, false, true, false],
+    [false, true, false, false],
+    [false, true, true, false],
+  ])(
+    'resolves global=%s trackDisabled=%s laneBypassed=%s to %s',
+    (globalEnabled, trackDisabled, laneBypassed, expected) => {
+      expect(isAutomationReadEnabled(
+        {
+          globalEnabled,
+          disabledTrackIds: trackDisabled ? [lane.target.trackId] : [],
+        },
+        { ...lane, bypassed: laneBypassed },
+      )).toBe(expected);
+    },
+  );
+
   it('keeps the stored curve editable but schedules nothing while bypassed', () => {
     const bypassed = { ...linearLane, bypassed: true };
 

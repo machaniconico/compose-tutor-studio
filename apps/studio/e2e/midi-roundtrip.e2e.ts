@@ -66,6 +66,7 @@ function sourceProject(): Project {
     audioAssets: [],
     audioTakeFolders: [],
     automationLanes: [],
+    automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     audioRouting: {
       outputs: [
         { sourceTrackId: 'source-drums', destination: { type: 'master' } },

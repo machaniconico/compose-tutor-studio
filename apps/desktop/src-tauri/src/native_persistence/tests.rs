@@ -364,6 +364,16 @@ fn schema_v6_automation_bypass_project_value() -> Value {
     project
 }
 
+fn schema_v7_automation_read_project_value() -> Value {
+    let mut project = schema_v6_automation_bypass_project_value();
+    project["schemaVersion"] = json!(7);
+    project["automationReadState"] = json!({
+        "globalEnabled": true,
+        "disabledTrackIds": []
+    });
+    project
+}
+
 fn schema_v4_routing_limit_project_value() -> Value {
     let mut project = schema_v4_routing_project_value();
     {
@@ -1009,6 +1019,116 @@ fn native_schema_v6_automation_bypass_presence_and_type_are_exact() {
     assert!(!validate_project_file_json(
         &serde_json::to_vec(&future).unwrap()
     ));
+}
+
+#[test]
+fn native_v6_to_v7_automation_read_migration_and_validation_are_exact() {
+    let source = schema_v6_automation_bypass_project_value();
+    let migrated = migrate_project_value_v6_to_v7(source.clone()).expect("v6 migrates");
+    let mut expected = source.clone();
+    expected["schemaVersion"] = json!(7);
+    expected["automationReadState"] = json!({ "globalEnabled": true, "disabledTrackIds": [] });
+    assert_eq!(migrated, expected);
+    assert_eq!(source["schemaVersion"], 6);
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&migrated).unwrap()
+    ));
+
+    let v1 = serde_json::from_str::<Value>(&project_json("legacy-v1-v7", "Legacy v7", 1)).unwrap();
+    let chain = migrate_project_for_legacy_proof(v1, 7).expect("v1 migrates through v7");
+    assert_eq!(chain["schemaVersion"], 7);
+    assert_eq!(
+        chain["automationReadState"],
+        json!({ "globalEnabled": true, "disabledTrackIds": [] })
+    );
+
+    let fixture = schema_v7_automation_read_project_value();
+    let non_master_ids = fixture["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|track| track["type"] != "master")
+        .map(|track| track["id"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let master_id = fixture["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["type"] == "master")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let mut valid_disabled = fixture.clone();
+    valid_disabled["automationReadState"]["disabledTrackIds"] =
+        json!([non_master_ids[0], non_master_ids[1]]);
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&valid_disabled).unwrap()
+    ));
+
+    let mut cases = Vec::<Value>::new();
+    let mut missing = fixture.clone();
+    missing
+        .as_object_mut()
+        .unwrap()
+        .remove("automationReadState");
+    cases.push(missing);
+    for invalid in [Value::Null, json!(false), json!([])] {
+        let mut candidate = fixture.clone();
+        candidate["automationReadState"] = invalid;
+        cases.push(candidate);
+    }
+    let mut wrong_global = fixture.clone();
+    wrong_global["automationReadState"]["globalEnabled"] = json!("true");
+    cases.push(wrong_global);
+    let mut missing_global = fixture.clone();
+    missing_global["automationReadState"]
+        .as_object_mut()
+        .unwrap()
+        .remove("globalEnabled");
+    cases.push(missing_global);
+    let mut missing_disabled = fixture.clone();
+    missing_disabled["automationReadState"]
+        .as_object_mut()
+        .unwrap()
+        .remove("disabledTrackIds");
+    cases.push(missing_disabled);
+    for invalid in [Value::Null, json!(false), json!({}), json!(["missing", 1])] {
+        let mut wrong_disabled = fixture.clone();
+        wrong_disabled["automationReadState"]["disabledTrackIds"] = invalid;
+        cases.push(wrong_disabled);
+    }
+    let mut duplicates = fixture.clone();
+    duplicates["automationReadState"]["disabledTrackIds"] =
+        json!([non_master_ids[0], non_master_ids[0]]);
+    cases.push(duplicates);
+    let mut master = fixture.clone();
+    master["automationReadState"]["disabledTrackIds"] = json!([master_id]);
+    cases.push(master);
+    let mut missing_track = fixture.clone();
+    missing_track["automationReadState"]["disabledTrackIds"] = json!(["missing"]);
+    cases.push(missing_track);
+    let mut noncanonical = fixture.clone();
+    noncanonical["automationReadState"]["disabledTrackIds"] =
+        json!([non_master_ids[1], non_master_ids[0]]);
+    cases.push(noncanonical);
+    let mut unknown = fixture.clone();
+    unknown["automationReadState"]["unknown"] = json!(true);
+    cases.push(unknown);
+
+    for candidate in cases {
+        assert!(!validate_project_file_json(
+            &serde_json::to_vec(&candidate).unwrap()
+        ));
+    }
+
+    let mut smuggled = source;
+    smuggled["automationReadState"] = json!({ "globalEnabled": true, "disabledTrackIds": [] });
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&smuggled).unwrap()
+    ));
+    assert!(migrate_project_value_v6_to_v7(smuggled).is_none());
 }
 
 #[test]
@@ -2027,6 +2147,60 @@ fn schema_v6_automation_bypass_recovers_exact_crash_draft_after_reopen() {
         loaded.recovery_reason,
         Some(ProjectRecoveryReason::InterruptedSave)
     );
+}
+
+#[test]
+fn schema_v7_automation_read_survives_save_and_reopen_exactly() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("projects.sqlite3");
+    let repository = NativeRepository::new(path.clone());
+    repository.initialize().expect("repository initializes");
+    let fixture_bytes = vec![0u8; 4096];
+    repository
+        .store_audio_asset(
+            audio_asset_sha256(&fixture_bytes),
+            fixture_bytes.len(),
+            fixture_bytes,
+        )
+        .expect("schema-v7 audio asset stores before project metadata");
+    let mut project = schema_v7_automation_read_project_value();
+    project["id"] = json!("schema-v7-project");
+    project["title"] = json!("Schema v7 Automation Read");
+    let disabled_track_id = project["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["type"] != "master")
+        .unwrap()["id"]
+        .clone();
+    project["automationReadState"] =
+        json!({ "globalEnabled": false, "disabledTrackIds": [disabled_track_id] });
+    let project_json = serde_json::to_string(&project).unwrap();
+
+    repository
+        .save(SaveRequestDto {
+            project_id: "schema-v7-project".to_owned(),
+            project_json,
+            activation_id: "activation-v7".to_owned(),
+            revision: 1,
+            write_id: "write-v7-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("schema-v7 project saves");
+    repository.close().expect("repository closes");
+
+    let reopened = NativeRepository::new(path);
+    reopened.initialize().expect("repository reopens");
+    let loaded = reopened
+        .load("schema-v7-project".to_owned())
+        .expect("schema-v7 project loads")
+        .expect("schema-v7 project exists");
+    assert_eq!(
+        serde_json::from_str::<Value>(&loaded.project_json).unwrap(),
+        project
+    );
+    assert!(!loaded.recovered);
 }
 
 #[test]
