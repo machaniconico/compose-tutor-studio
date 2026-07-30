@@ -23,6 +23,7 @@ import {
   resolveAudioRoutingMix,
   TrackGraph,
 } from '../src/audio/graph';
+import { buildSessionMasterGraph } from '../src/audio/masterAutomationGraph';
 
 /** Minimal Track factory for mute/solo tests. */
 function track(
@@ -907,12 +908,19 @@ describe('buildTrackGraphs', () => {
       connect: vi.fn(),
       disconnect: vi.fn(),
     } as unknown as AudioNode;
+    const liveMasterMeterSource = {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    } as unknown as AudioNode;
     const liveGraphs = buildTrackGraphs(
       liveContext,
       liveMaster,
       [track('sound'), track('master', { type: 'master' })],
       0,
       'live',
+      undefined,
+      undefined,
+      liveMasterMeterSource,
     );
 
     const offlineContext = {
@@ -927,6 +935,7 @@ describe('buildTrackGraphs', () => {
     } as unknown as AudioNode;
 
     try {
+      expect(liveMasterMeterSource.connect).toHaveBeenCalledWith(liveMasterAnalyser);
       expect(readMeterLevel('master').peak).toBeCloseTo(0.1, 6);
       const offlineGraphs = buildTrackGraphs(
         offlineContext,
@@ -941,7 +950,69 @@ describe('buildTrackGraphs', () => {
       expect(readMeterLevel('master').peak).toBeCloseTo(0.1, 6);
     } finally {
       for (const graph of liveGraphs.values()) graph.dispose();
-      disposeMasterMeter(liveMaster);
+      disposeMasterMeter(liveMasterMeterSource);
     }
+  });
+
+  it('releases a custom Master meter source when live graph construction fails', () => {
+    const makeParam = () => ({
+      value: 0,
+      setValueAtTime: vi.fn(),
+      cancelScheduledValues: vi.fn(),
+    });
+    const makeGain = () => ({
+      gain: makeParam(),
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    });
+    const analyser = {
+      fftSize: 4,
+      smoothingTimeConstant: 0,
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      getFloatTimeDomainData: vi.fn((buffer: Float32Array) => buffer.fill(0.8)),
+    };
+    const context = {
+      currentTime: 0,
+      destination: {},
+      createGain: vi.fn(makeGain),
+      createAnalyser: vi.fn(() => analyser),
+      createStereoPanner: vi.fn(() => {
+        throw new Error('Track graph failed after Master meter install');
+      }),
+    } as unknown as BaseAudioContext;
+    const routingMaster = {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    } as unknown as AudioNode;
+    const engineMaster = makeGain() as unknown as GainNode;
+    const sessionMaster = buildSessionMasterGraph(
+      context,
+      engineMaster,
+      0.8,
+      0,
+    );
+
+    expect(() => buildTrackGraphs(
+      context,
+      routingMaster,
+      [track('sound'), track('master', { type: 'master' })],
+      0,
+      'live',
+      undefined,
+      undefined,
+      sessionMaster.master,
+    )).toThrow('Track graph failed after Master meter install');
+
+    expect(sessionMaster.master.disconnect).toHaveBeenCalledWith(analyser);
+    expect(analyser.disconnect).toHaveBeenCalledOnce();
+    expect(readMeterLevel('master')).toEqual({ peak: 0, rms: 0, clipping: false });
+
+    sessionMaster.dispose();
+    expect(sessionMaster.output.disconnect).toHaveBeenCalledWith(
+      sessionMaster.master,
+    );
+    expect(sessionMaster.master.disconnect).toHaveBeenCalledWith(engineMaster);
+    expect(sessionMaster.master.disconnect).toHaveBeenCalledTimes(2);
   });
 });

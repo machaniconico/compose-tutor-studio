@@ -11,7 +11,6 @@ import {
   automationReadScalarCommitPreservesRuntimeSession,
   beginRuntimeNaturalDrain,
   planRuntimeAudioTail,
-  restoreRuntimeMaster,
   stopRuntimePlaybackForProjectTopologyChange,
   transportTransitionOwnsRuntimeStop,
 } from '../src/audio/playback';
@@ -61,21 +60,6 @@ function instrumentTrack(effects: EffectConfig[] = [], mute = false): Track {
     solo: false,
     instrument: { type: 'synth', preset: 'softPad' },
     effects,
-  };
-}
-
-function masterTrack(volume: number): Track {
-  return {
-    id: 'master',
-    name: 'Master',
-    type: 'master',
-    role: 'general',
-    clips: [],
-    volume,
-    pan: 0,
-    mute: false,
-    solo: false,
-    effects: [],
   };
 }
 
@@ -336,31 +320,6 @@ describe('beginRuntimeNaturalDrain', () => {
     expect(onComplete).not.toHaveBeenCalled();
   });
 
-  it('cancels pending fade automation and restores project master gain on disposal', () => {
-    vi.useFakeTimers();
-    const { output, cancelScheduledValues, setValueAtTime } = fakeOutput(0.42);
-    const cancelDrain = beginRuntimeNaturalDrain({
-      scheduler: { stop: vi.fn() },
-      output,
-      now: () => 10,
-      projectEndTime: 10,
-      tailSeconds: 1,
-      postLimiterTailSeconds: MASTER_LIMITER_LOOKAHEAD_SECONDS,
-      stopPositionUpdates: vi.fn(),
-      cancelMetronomeClicks: vi.fn(),
-      onComplete: vi.fn(),
-    });
-
-    cancelDrain();
-    restoreRuntimeMaster(output, [masterTrack(0.65)], 10.1);
-
-    expect(vi.getTimerCount()).toBe(0);
-    expect(cancelScheduledValues.mock.calls[0]?.[0]).toBeCloseTo(10.944, 10);
-    expect(cancelScheduledValues).toHaveBeenNthCalledWith(2, 10.1);
-    expect(setValueAtTime.mock.calls[0]?.[0]).toBe(0.42);
-    expect(setValueAtTime.mock.calls[0]?.[1]).toBeCloseTo(10.944, 10);
-    expect(setValueAtTime).toHaveBeenNthCalledWith(2, 0.65, 10.1);
-  });
 });
 
 describe('Project topology changes during natural drain', () => {

@@ -282,7 +282,7 @@ describe('studio automation commands', () => {
     });
   });
 
-  it('rejects collisions and Master targets without touching state', () => {
+  it('rejects collisions and Master pan without touching state', () => {
     const added = addVolumePoint();
     if (!added.ok || added.pointId === undefined) {
       throw new Error('automation point fixture missing');
@@ -310,6 +310,41 @@ describe('studio automation commands', () => {
       { beat: 1, value: 0, interpolation: 'hold' },
     )).toEqual({ ok: false, code: 'master-protected' });
     expectMutationStateUnchanged(beforeMaster);
+  });
+
+  it('edits effective Master output volume and its Read gate atomically', () => {
+    const master = useStore.getState().project.tracks.find(
+      (track) => track.type === 'master',
+    );
+    if (!master) throw new Error('Master fixture missing');
+
+    const added = automationActions.addStudioAutomationPoint(
+      { type: 'track-volume', trackId: master.id },
+      { beat: 1, value: 0.8, interpolation: 'linear' },
+    );
+    expect(added).toMatchObject({
+      ok: true,
+      changed: true,
+      trackId: master.id,
+    });
+    expect(useStore.getState().project.automationLanes).toEqual([
+      expect.objectContaining({
+        target: { type: 'track-volume', trackId: master.id },
+      }),
+    ]);
+
+    expect(automationActions.setStudioTrackAutomationReadEnabled(
+      master.id,
+      false,
+    )).toEqual({
+      ok: true,
+      changed: true,
+      trackId: master.id,
+      playbackStopped: false,
+    });
+    expect(
+      useStore.getState().project.automationReadState.disabledTrackIds,
+    ).toEqual([master.id]);
   });
 
   it('does not overwrite a project change that wins the snapshot race', () => {
@@ -425,7 +460,7 @@ describe('studio automation commands', () => {
     }
   });
 
-  it('keeps Read no-ops and missing/Master/busy requests atomic', () => {
+  it('keeps Read no-ops and missing/secondary-Master/busy requests atomic', () => {
     const initial = useStore.getState();
     expect(automationActions.setStudioGlobalAutomationReadEnabled(true)).toEqual({
       ok: true,
@@ -439,11 +474,23 @@ describe('studio automation commands', () => {
       false,
     )).toEqual({ ok: false, code: 'track-not-found' });
     const master = initial.project.tracks.find((track) => track.type === 'master')!;
+    const secondaryMaster = {
+      ...structuredClone(master),
+      id: 'secondary-master-read',
+      name: 'Secondary Master',
+    };
+    useStore.setState({
+      project: {
+        ...initial.project,
+        tracks: [...initial.project.tracks, secondaryMaster],
+      },
+    });
+    const beforeSecondaryMaster = useStore.getState();
     expect(automationActions.setStudioTrackAutomationReadEnabled(
-      master.id,
+      secondaryMaster.id,
       false,
     )).toEqual({ ok: false, code: 'master-protected' });
-    expectMutationStateUnchanged(initial);
+    expectMutationStateUnchanged(beforeSecondaryMaster);
 
     useStore.setState({ projectOperationBusy: true });
     try {
@@ -451,7 +498,7 @@ describe('studio automation commands', () => {
         ok: false,
         code: 'commit-rejected',
       });
-      expect(useStore.getState().project).toBe(initial.project);
+      expect(useStore.getState().project).toBe(beforeSecondaryMaster.project);
     } finally {
       useStore.setState({ projectOperationBusy: false });
     }
@@ -466,7 +513,7 @@ describe('studio automation commands', () => {
     ).toContain('音量は0〜200%');
     expect(
       automationActions.studioAutomationErrorMessage('master-protected'),
-    ).toContain('通常トラックまたはバス');
+    ).toContain('先頭のMaster');
     expect(
       automationActions.studioAutomationErrorMessage('commit-rejected'),
     ).toContain('最新の状態');

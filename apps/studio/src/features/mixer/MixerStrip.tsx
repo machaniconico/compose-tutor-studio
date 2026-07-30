@@ -1,5 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { MAX_AUDIO_SENDS_PER_SOURCE, type EffectConfig, type Track } from '@cts/project-model';
+import {
+  effectiveMasterTrackId,
+  MAX_AUDIO_SENDS_PER_SOURCE,
+  type EffectConfig,
+  type Track,
+} from '@cts/project-model';
 import { useStore } from '../../state/store';
 import {
   addTrackEffect,
@@ -195,10 +200,12 @@ function useMeterLevel(trackId: string): MeterLevel {
  * slider -1..1, and M/S toggles with active states.
  */
 export function MixerStrip() {
-  const tracks = useStore((s) => s.project.tracks);
+  const project = useStore((s) => s.project);
+  const tracks = project.tracks;
   const channels = tracks.filter((t) => t.type !== 'master');
   const buses = channels.filter((track) => track.type === 'bus');
-  const master = tracks.find((t) => t.type === 'master') ?? null;
+  const masterId = effectiveMasterTrackId(project);
+  const master = tracks.find((track) => track.id === masterId) ?? null;
   const contentId = useId();
   const manuallyToggled = useRef(false);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
@@ -292,13 +299,24 @@ function ChannelStrip(props: {
   const volumeGesture = useAutomationGesture({
     trackId: track.id,
     targetType: 'track-volume',
+    scalarValue: track.volume,
+    followReadAutomation: isMaster,
     setScalar: (value) => setTrackVolume(track.id, value),
   });
   const panGesture = useAutomationGesture({
     trackId: track.id,
     targetType: 'track-pan',
+    scalarValue: track.pan,
     setScalar: (value) => setTrackPan(track.id, value),
   });
+  const {
+    displayValue: displayedVolume,
+    ...volumeGestureProps
+  } = volumeGesture;
+  const {
+    displayValue: displayedPan,
+    ...panGestureProps
+  } = panGesture;
   const automationDescriptionId = `mixer-automation-${encodeURIComponent(track.id)}`;
 
   return (
@@ -322,14 +340,12 @@ function ChannelStrip(props: {
           min={0}
           max={2}
           step={0.01}
-          value={track.volume}
+          value={displayedVolume}
           aria-label={`${accessibleName} 音量`}
-          aria-describedby={isMaster ? undefined : automationDescriptionId}
-          {...(isMaster
-            ? { onChange: (event) => setTrackVolume(track.id, Number(event.target.value)) }
-            : volumeGesture)}
+          aria-describedby={automationDescriptionId}
+          {...volumeGestureProps}
         />
-        <span className="mix-ch__db">{gainToDbLabel(track.volume)}</span>
+        <span className="mix-ch__db">{gainToDbLabel(displayedVolume)}</span>
       </div>
 
       {!isMaster ? (
@@ -339,24 +355,23 @@ function ChannelStrip(props: {
             min={-1}
             max={1}
             step={0.01}
-            value={track.pan}
+            value={displayedPan}
             aria-label={`${accessibleName} パン`}
             aria-describedby={automationDescriptionId}
-            {...panGesture}
+            {...panGestureProps}
           />
           <span className="mix-ch__pan-label">{panLabel(track.pan)}</span>
         </div>
       ) : null}
 
-      {!isMaster ? (
-        <span
-          id={automationDescriptionId}
-          className="visually-hidden"
-        >
-          {accessibleName}、トラックID {track.id}。再生中のTouch、Latch、Writeでは
-          オートメーションジェスチャーとして記録します。
-        </span>
-      ) : null}
+      <span
+        id={automationDescriptionId}
+        className="visually-hidden"
+      >
+        {accessibleName}、トラックID {track.id}。
+        {isMaster ? 'Master出力音量。' : ''}
+        再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。
+      </span>
 
       {!isMaster ? (
         <div className="mix-ch__buttons">

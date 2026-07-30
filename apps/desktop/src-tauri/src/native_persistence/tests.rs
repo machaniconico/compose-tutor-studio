@@ -374,6 +374,41 @@ fn schema_v7_automation_read_project_value() -> Value {
     project
 }
 
+fn schema_v8_master_automation_project_value() -> Value {
+    let mut project = schema_v7_automation_read_project_value();
+    project["schemaVersion"] = json!(8);
+    let tracks = project["tracks"].as_array_mut().unwrap();
+    let effective_master = tracks
+        .iter()
+        .find(|track| track["type"] == "master")
+        .unwrap()
+        .clone();
+    let mut compatibility_master = effective_master.clone();
+    compatibility_master["id"] = json!("track-compatibility-master");
+    compatibility_master["name"] = json!("Compatibility Master");
+    tracks.push(compatibility_master);
+
+    let effective_master_id = effective_master["id"].clone();
+    project["automationLanes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "automation-master-volume",
+            "target": {
+                "type": "track-volume",
+                "trackId": effective_master_id
+            },
+            "points": [{
+                "id": "automation-master-point-1",
+                "beat": 0,
+                "value": 0.75,
+                "interpolation": "linear"
+            }],
+            "bypassed": false
+        }));
+    project
+}
+
 fn schema_v4_routing_limit_project_value() -> Value {
     let mut project = schema_v4_routing_project_value();
     {
@@ -1129,6 +1164,157 @@ fn native_v6_to_v7_automation_read_migration_and_validation_are_exact() {
         &serde_json::to_vec(&smuggled).unwrap()
     ));
     assert!(migrate_project_value_v6_to_v7(smuggled).is_none());
+}
+
+#[test]
+fn native_v7_to_v8_master_automation_migration_is_schema_only_and_proven() {
+    let source = schema_v7_automation_read_project_value();
+    let migrated = migrate_project_value_v7_to_v8(source.clone()).expect("valid v7 migrates");
+    let mut expected = source.clone();
+    expected["schemaVersion"] = json!(8);
+    assert_eq!(migrated, expected);
+    assert_eq!(source["schemaVersion"], 7);
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&migrated).unwrap()
+    ));
+    assert!(legacy_project_matches_migrated(
+        &serde_json::to_string(&source).unwrap(),
+        &serde_json::to_string(&migrated).unwrap(),
+    ));
+
+    let v1 =
+        serde_json::from_str::<Value>(&project_json("legacy-v1-v8", "Legacy v8 proof chain", 1))
+            .unwrap();
+    let chain = migrate_project_for_legacy_proof(v1.clone(), 8).expect("v1 migrates through v8");
+    assert_eq!(chain["schemaVersion"], 8);
+    assert_eq!(
+        chain["automationReadState"],
+        json!({ "globalEnabled": true, "disabledTrackIds": [] })
+    );
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&chain).unwrap()
+    ));
+    assert!(legacy_project_matches_migrated(
+        &serde_json::to_string(&v1).unwrap(),
+        &serde_json::to_string(&chain).unwrap(),
+    ));
+
+    let master_id = source["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["type"] == "master")
+        .unwrap()["id"]
+        .clone();
+    let mut master_lane = source.clone();
+    master_lane["automationLanes"][0]["target"] =
+        json!({ "type": "track-volume", "trackId": master_id });
+    assert!(
+        migrate_project_value_v7_to_v8(master_lane).is_none(),
+        "the proof migration must validate legacy-v7's ban on every Master lane"
+    );
+
+    let mut master_read = source;
+    master_read["automationReadState"]["disabledTrackIds"] = json!([master_id]);
+    assert!(
+        migrate_project_value_v7_to_v8(master_read).is_none(),
+        "the proof migration must validate legacy-v7's ban on every Master Read id"
+    );
+}
+
+#[test]
+fn native_schema_v8_accepts_only_effective_master_volume_and_read_gate() {
+    let fixture = schema_v8_master_automation_project_value();
+    let tracks = fixture["tracks"].as_array().unwrap();
+    let effective_master_id = tracks
+        .iter()
+        .find(|track| track["type"] == "master")
+        .unwrap()["id"]
+        .clone();
+    let compatibility_master_id = tracks
+        .iter()
+        .filter(|track| track["type"] == "master")
+        .nth(1)
+        .unwrap()["id"]
+        .clone();
+    let first_track_id = tracks[0]["id"].clone();
+    let last_non_master_id = tracks
+        .iter()
+        .rev()
+        .find(|track| track["type"] != "master")
+        .unwrap()["id"]
+        .clone();
+
+    let mut canonical = fixture.clone();
+    canonical["automationReadState"]["disabledTrackIds"] =
+        json!([first_track_id, last_non_master_id, effective_master_id]);
+    assert!(
+        validate_project_file_json(&serde_json::to_vec(&canonical).unwrap()),
+        "v8 accepts effective-Master volume and its Read-disabled id in Project track order"
+    );
+    let canonical_project =
+        canonical_project_for_validation(canonical.clone()).expect("v8 fixture is canonical");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&canonical_project.json).unwrap(),
+        canonical
+    );
+
+    let mut cases = Vec::<(&str, Value)>::new();
+    let mut effective_pan = fixture.clone();
+    effective_pan["automationLanes"][1]["target"]["type"] = json!("track-pan");
+    cases.push(("effective Master pan", effective_pan));
+
+    let mut later_master_volume = fixture.clone();
+    later_master_volume["automationLanes"][1]["target"]["trackId"] =
+        compatibility_master_id.clone();
+    cases.push(("later Master volume", later_master_volume));
+
+    let mut missing_target = fixture.clone();
+    missing_target["automationLanes"][1]["target"]["trackId"] = json!("missing-master");
+    cases.push(("missing target", missing_target));
+
+    let mut later_master_read = fixture.clone();
+    later_master_read["automationReadState"]["disabledTrackIds"] = json!([compatibility_master_id]);
+    cases.push(("later Master Read id", later_master_read));
+
+    let mut noncanonical = canonical;
+    noncanonical["automationReadState"]["disabledTrackIds"] =
+        json!([effective_master_id, last_non_master_id, first_track_id]);
+    cases.push(("noncanonical all-Track Read order", noncanonical));
+
+    for (name, project) in cases {
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&project).unwrap()),
+            "v8 must reject {name}"
+        );
+    }
+
+    let mut legacy_fixture = fixture;
+    legacy_fixture["schemaVersion"] = json!(7);
+    legacy_fixture["automationLanes"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    legacy_fixture["automationReadState"]["disabledTrackIds"] = json!([]);
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&legacy_fixture).unwrap()
+    ));
+    for master_id in [effective_master_id, compatibility_master_id] {
+        let mut legacy_lane = legacy_fixture.clone();
+        legacy_lane["automationLanes"][0]["target"] =
+            json!({ "type": "track-volume", "trackId": master_id });
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&legacy_lane).unwrap()),
+            "v7 must reject every Master lane"
+        );
+
+        let mut legacy_read = legacy_fixture.clone();
+        legacy_read["automationReadState"]["disabledTrackIds"] = json!([master_id]);
+        assert!(
+            !validate_project_file_json(&serde_json::to_vec(&legacy_read).unwrap()),
+            "v7 must reject every Master Read id"
+        );
+    }
 }
 
 #[test]
@@ -2199,6 +2385,99 @@ fn schema_v7_automation_read_survives_save_and_reopen_exactly() {
     assert_eq!(
         serde_json::from_str::<Value>(&loaded.project_json).unwrap(),
         project
+    );
+    assert!(!loaded.recovered);
+}
+
+#[test]
+fn schema_v8_master_volume_automation_survives_save_and_reopen_exactly() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("projects.sqlite3");
+    let repository = NativeRepository::new(path.clone());
+    repository.initialize().expect("repository initializes");
+    let fixture_bytes = vec![0u8; 4096];
+    repository
+        .store_audio_asset(
+            audio_asset_sha256(&fixture_bytes),
+            fixture_bytes.len(),
+            fixture_bytes,
+        )
+        .expect("schema-v8 audio asset stores before project metadata");
+
+    let mut project = schema_v8_master_automation_project_value();
+    project["id"] = json!("schema-v8-master-automation-project");
+    project["title"] = json!("Schema v8 Master Automation");
+    let effective_master_id = project["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["type"] == "master")
+        .unwrap()["id"]
+        .clone();
+    let effective_master = project["tracks"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|track| track["id"] == effective_master_id)
+        .unwrap();
+    effective_master["volume"] = json!(0.625);
+    let master_lane = project["automationLanes"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|lane| lane["id"] == "automation-master-volume")
+        .unwrap();
+    master_lane["points"] = json!([
+        {
+            "id": "automation-master-point-1",
+            "beat": 0.5,
+            "value": 0.25,
+            "interpolation": "hold"
+        },
+        {
+            "id": "automation-master-point-2",
+            "beat": 3,
+            "value": 1.5,
+            "interpolation": "linear"
+        },
+        {
+            "id": "automation-master-point-3",
+            "beat": 7,
+            "value": 0.875,
+            "interpolation": "hold"
+        }
+    ]);
+    master_lane["bypassed"] = json!(true);
+    project["automationReadState"] = json!({
+        "globalEnabled": true,
+        "disabledTrackIds": [effective_master_id]
+    });
+    let project_json = serde_json::to_string(&project).unwrap();
+
+    repository
+        .save(SaveRequestDto {
+            project_id: "schema-v8-master-automation-project".to_owned(),
+            project_json,
+            activation_id: "activation-v8-master-automation".to_owned(),
+            revision: 1,
+            write_id: "write-v8-master-automation-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("schema-v8 Master automation project saves");
+    repository.close().expect("repository closes");
+
+    let reopened = NativeRepository::new(path);
+    reopened.initialize().expect("repository reopens");
+    let loaded = reopened
+        .load("schema-v8-master-automation-project".to_owned())
+        .expect("schema-v8 Master automation project loads")
+        .expect("schema-v8 Master automation project exists");
+    let loaded_project = serde_json::from_str::<Value>(&loaded.project_json).unwrap();
+    assert_eq!(loaded_project, project);
+    assert_eq!(
+        loaded_project["automationReadState"]["disabledTrackIds"],
+        json!([effective_master_id])
     );
     assert!(!loaded.recovered);
 }
@@ -7279,9 +7558,10 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
     assert_eq!(
         corpus.version + 1,
         LEGACY_MIGRATION_VERSION,
-        "the archived v4 corpus must be upgraded through the released v5 migration"
+        "the archived v4 corpus must use the released v5 import protocol"
     );
     let migration_version = LEGACY_MIGRATION_VERSION;
+    let target_schema_version = PROJECT_SCHEMA_VERSION;
     for fixture in corpus.cases {
         let (_directory, repository) = initialized_repository();
         let borrowed = fixture
@@ -7299,7 +7579,7 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
         for expected_import in fixture.expected_imports {
             let (project_json, branch, diagnostic) = match expected_import {
                 LegacyParityImport::Head { project_json } => (
-                    Some(migrated_project_json(&project_json, migration_version)),
+                    Some(migrated_project_json(&project_json, target_schema_version)),
                     None,
                     None,
                 ),
@@ -7314,7 +7594,7 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
                     write_id,
                     saved_at,
                 } => (
-                    Some(migrated_project_json(&project_json, migration_version)),
+                    Some(migrated_project_json(&project_json, target_schema_version)),
                     Some(LegacyBranchCandidateDto {
                         source,
                         activation_id,
@@ -7360,7 +7640,7 @@ fn shared_typescript_and_rust_legacy_authority_corpus_stays_in_parity() {
                         .map(|project_json| {
                             serde_json::from_str::<Value>(&migrated_project_json(
                                 project_json,
-                                migration_version,
+                                target_schema_version,
                             ))
                             .unwrap()
                         });

@@ -19,6 +19,10 @@ import {
   MAX_AUTOMATION_LANES,
   MAX_AUTOMATION_POINTS_PER_LANE,
 } from './validation';
+import {
+  automationTargetTypesForTrack,
+  isSupportedAutomationTarget,
+} from './automation-targets';
 
 export type AutomationIdFactory = (kind: 'lane' | 'point') => string;
 
@@ -216,7 +220,7 @@ export function setGlobalAutomationReadEnabled(
   });
 }
 
-/** Set one non-Master Track Read gate, stored in canonical project order. */
+/** Set one supported Track Read gate, stored in canonical project order. */
 export function setTrackAutomationReadEnabled(
   project: Project,
   trackId: string,
@@ -225,8 +229,8 @@ export function setTrackAutomationReadEnabled(
   return runReadMutation(project, () => {
     const track = project.tracks.find((candidate) => candidate.id === trackId);
     if (!track) return failure('track-not-found', `Track not found: ${String(trackId)}`);
-    if (track.type === 'master') {
-      return failure('master-protected', 'Master automation Read is not supported.');
+    if (automationTargetTypesForTrack(project, track.id).length === 0) {
+      return failure('master-protected', 'Automation Read is not supported for this Master.');
     }
     if (typeof enabled !== 'boolean') {
       return failure('invalid-read-enabled', 'Track automation Read state must be a boolean.');
@@ -245,7 +249,9 @@ export function setTrackAutomationReadEnabled(
         automationReadState: {
           ...project.automationReadState,
           disabledTrackIds: project.tracks
-            .filter((candidate) => candidate.type !== 'master' && disabled.has(candidate.id))
+            .filter((candidate) =>
+              automationTargetTypesForTrack(project, candidate.id).length > 0
+              && disabled.has(candidate.id))
             .map((candidate) => candidate.id),
         },
       },
@@ -293,16 +299,22 @@ function validateTarget(project: Project, value: unknown): TargetValidationResul
       result: failure('track-not-found', `Track not found: ${trackId}`),
     };
   }
-  if (track.type === 'master') {
+  const target: AutomationTarget = { type, trackId };
+  if (!isSupportedAutomationTarget(project, target)) {
     return {
       ok: false,
-      result: failure('master-protected', 'Automation cannot target a Master track.'),
+      result: failure(
+        track.type === 'master' ? 'master-protected' : 'invalid-target',
+        track.type === 'master'
+          ? 'Only the effective Master volume can be automated.'
+          : 'Automation target is not supported for this Track.',
+      ),
     };
   }
   return {
     ok: true,
     value: {
-      target: { type, trackId },
+      target,
       track,
     },
   };

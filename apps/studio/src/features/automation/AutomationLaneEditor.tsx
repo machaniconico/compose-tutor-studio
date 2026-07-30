@@ -6,11 +6,14 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react';
-import type {
-  AutomationInterpolation,
-  AutomationPoint,
-  AutomationTarget,
-  AutomationWriteMode,
+import {
+  automationTargetTypesForTrack,
+  effectiveMasterTrackId,
+  isSupportedAutomationTarget,
+  type AutomationInterpolation,
+  type AutomationPoint,
+  type AutomationTarget,
+  type AutomationWriteMode,
 } from '@cts/project-model';
 import { automationValueAt } from '../../audio/automation';
 import {
@@ -36,6 +39,8 @@ import {
   automationDisplayValueToModel,
   automationInterpolationLabel,
   automationPointAriaLabel,
+  automationTargetPresentation,
+  automationWriteConfirmationDescription,
   automationValueToDisplay,
   automationValueFromClientY,
   automationValueToY,
@@ -44,6 +49,7 @@ import {
   clampAutomationValue,
   formatAutomationBeat,
   formatAutomationValue,
+  resolveAutomationTargetType,
   selectAutomationPointsForViewport,
   snapAutomationBeat,
   type AutomationTargetType,
@@ -172,7 +178,7 @@ export function AutomationLaneEditor() {
     (state) => state.setTrackAutomationMode,
   );
 
-  const [targetType, setTargetType] =
+  const [requestedTargetType, setTargetType] =
     useState<AutomationTargetType>('track-volume');
   const [snapBeats, setSnapBeats] = useState(DEFAULT_SNAP_BEATS);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
@@ -198,6 +204,20 @@ export function AutomationLaneEditor() {
 
   const selectedTrack =
     project.tracks.find((track) => track.id === selectedTrackId) ?? null;
+  const effectiveMasterId = effectiveMasterTrackId(project);
+  const isEffectiveMaster =
+    selectedTrack?.type === 'master' && selectedTrack.id === effectiveMasterId;
+  const supportedTargetTypes = selectedTrack === null
+    ? []
+    : automationTargetTypesForTrack(project, selectedTrack.id);
+  const targetType = resolveAutomationTargetType(
+    requestedTargetType,
+    supportedTargetTypes,
+  );
+  const targetPresentation = automationTargetPresentation(
+    targetType,
+    isEffectiveMaster,
+  );
   const lane =
     selectedTrack === null
       ? null
@@ -208,7 +228,7 @@ export function AutomationLaneEditor() {
         ) ?? null;
   const baseValue =
     selectedTrack === null
-      ? AUTOMATION_TARGETS[targetType].min
+      ? targetPresentation.min
       : targetBaseValue(
           targetType,
           selectedTrack.volume,
@@ -293,13 +313,16 @@ export function AutomationLaneEditor() {
   );
 
   useEffect(() => {
+    if (selectedTrack?.type === 'master') {
+      setTargetType('track-volume');
+    }
     setSelectedPointId(null);
     setDraft(null);
     setDragPreview(null);
     setNotice(null);
     setClearConfirmationOpen(false);
     setWriteConfirmationOpen(false);
-  }, [selectedTrackId]);
+  }, [selectedTrack?.type, selectedTrackId]);
 
   useEffect(() => {
     setClearConfirmationOpen(false);
@@ -378,7 +401,7 @@ export function AutomationLaneEditor() {
   };
 
   const setReadNotice = (
-    scope: 'Global' | 'Track',
+    scope: 'Global' | 'Track' | 'Master',
     enabled: boolean,
     playbackStopped: boolean,
   ): void => {
@@ -391,7 +414,11 @@ export function AutomationLaneEditor() {
   };
 
   const setMode = (mode: AutomationWriteMode): void => {
-    if (selectedTrack === null || selectedTrack.type === 'master' || disabled) {
+    if (
+      selectedTrack === null
+      || supportedTargetTypes.length === 0
+      || disabled
+    ) {
       return;
     }
     if (!setTrackAutomationMode(selectedTrack.id, mode)) {
@@ -411,7 +438,7 @@ export function AutomationLaneEditor() {
   };
 
   const addPoint = (beat: number, value: number, origin: string): void => {
-    if (selectedTrack === null || selectedTrack.type === 'master' || disabled) {
+    if (selectedTrack === null || disabled) {
       return;
     }
     const snappedBeat = snapAutomationBeat(beat, snapBeats, lengthBeats);
@@ -433,6 +460,7 @@ export function AutomationLaneEditor() {
       type: targetType,
       trackId: selectedTrack.id,
     };
+    if (!isSupportedAutomationTarget(project, target)) return;
     const result = addStudioAutomationPoint(target, {
       beat: snappedBeat,
       value: clampAutomationValue(value, targetType),
@@ -447,7 +475,7 @@ export function AutomationLaneEditor() {
     if (pointId !== null) setFocusTarget(pointId);
     setNotice({
       kind: 'status',
-      message: `${origin}に${AUTOMATION_TARGETS[targetType].shortLabel}の点を追加しました。${stoppedSuffix(
+      message: `${origin}に${targetPresentation.shortLabel}の点を追加しました。${stoppedSuffix(
         result.playbackStopped,
       )}`,
     });
@@ -509,7 +537,7 @@ export function AutomationLaneEditor() {
     setFocusTarget('add');
     setNotice({
       kind: 'status',
-      message: `${AUTOMATION_TARGETS[targetType].shortLabel}レーンをクリアしました。「元に戻す」で復元できます。${stoppedSuffix(
+      message: `${targetPresentation.shortLabel}レーンをクリアしました。「元に戻す」で復元できます。${stoppedSuffix(
         result.playbackStopped,
       )}`,
     });
@@ -535,10 +563,10 @@ export function AutomationLaneEditor() {
     setNotice({
       kind: 'status',
       message: nextBypassed
-        ? `${AUTOMATION_TARGETS[targetType].shortLabel}オートメーションをBypassにしました。点と曲線は保持され、再生とWAV書き出しではトラックの現在の基準値を使います。${stoppedSuffix(
+        ? `${targetPresentation.shortLabel}オートメーションをBypassにしました。点と曲線は保持され、再生とWAV書き出しでは${isEffectiveMaster ? 'Master' : 'トラック'}の現在の基準値を使います。${stoppedSuffix(
             result.playbackStopped,
           )}`
-        : `${AUTOMATION_TARGETS[targetType].shortLabel}オートメーションをReadにしました。保存している曲線を再生とWAV書き出しに反映します。${stoppedSuffix(
+        : `${targetPresentation.shortLabel}オートメーションをReadにしました。保存している曲線を再生とWAV書き出しに反映します。${stoppedSuffix(
             result.playbackStopped,
           )}`,
     });
@@ -690,7 +718,7 @@ export function AutomationLaneEditor() {
             targetType,
           ),
         },
-        `${AUTOMATION_TARGETS[targetType].shortLabel}を調整しました。`,
+        `${targetPresentation.shortLabel}を調整しました。`,
       );
     }
   };
@@ -733,11 +761,11 @@ export function AutomationLaneEditor() {
     );
   }
 
-  if (selectedTrack.type === 'master') {
+  if (selectedTrack.type === 'master' && !isEffectiveMaster) {
     return (
       <section className="automation-lane automation-lane--message" aria-labelledby="automation-lane-title">
         <h3 id="automation-lane-title">オートメーション</h3>
-        <p>Masterのオートメーションは現在編集できません。通常トラックまたはBusを選択してください。</p>
+        <p>この追加Masterはオートメーションに対応していません。先頭のMaster、通常トラック、またはBusを選択してください。</p>
       </section>
     );
   }
@@ -762,7 +790,7 @@ export function AutomationLaneEditor() {
           role="group"
           aria-label="オートメーション対象"
         >
-          {(Object.keys(AUTOMATION_TARGETS) as AutomationTargetType[]).map(
+          {supportedTargetTypes.map(
             (type) => (
               <button
                 type="button"
@@ -778,7 +806,7 @@ export function AutomationLaneEditor() {
                   setClearConfirmationOpen(false);
                 }}
               >
-                {AUTOMATION_TARGETS[type].shortLabel}
+                {automationTargetPresentation(type, isEffectiveMaster).shortLabel}
               </button>
             ),
           )}
@@ -831,13 +859,13 @@ export function AutomationLaneEditor() {
                 return;
               }
               setReadNotice(
-                'Track',
+                isEffectiveMaster ? 'Master' : 'Track',
                 !trackReadEnabled,
                 result.playbackStopped,
               );
             }}
           >
-            Track Read: {trackReadEnabled ? 'オン' : 'オフ'}
+            {isEffectiveMaster ? 'Master' : 'Track'} Read: {trackReadEnabled ? 'オン' : 'オフ'}
           </button>
         </div>
 
@@ -944,7 +972,7 @@ export function AutomationLaneEditor() {
             Writeモードを有効にしますか？
           </h4>
           <p id="automation-write-confirmation-description">
-            Writeは、コントロールに触れなくても再生位置の下にある音量とパンのオートメーションを両方とも置き換えます。パスをパンチアウトすると、安全なTouchモードへ自動的に戻ります。
+            {automationWriteConfirmationDescription(isEffectiveMaster)}
           </p>
           <div>
             <button
@@ -1059,7 +1087,7 @@ export function AutomationLaneEditor() {
                   : 'Lane Bypassはオフです。'}
               </strong>{' '}
               {lane.bypassed
-                ? '曲線と点は保持され、再生とWAV書き出しではトラックの現在の基準値を使います。点はそのまま編集できます。'
+                ? `曲線と点は保持され、再生とWAV書き出しでは${isEffectiveMaster ? 'Master' : 'トラック'}の現在の基準値を使います。点はそのまま編集できます。`
                 : '曲線を再生とWAV書き出しに反映します。Bypassに切り替えても点は削除されません。'}
             </p>
           </>
@@ -1078,7 +1106,7 @@ export function AutomationLaneEditor() {
           aria-label="レーン消去の確認"
         >
           <p>
-            {AUTOMATION_TARGETS[targetType].shortLabel}レーンの
+            {targetPresentation.shortLabel}レーンの
             {lane.points.length}点をすべて消去しますか？
           </p>
           <button
@@ -1128,7 +1156,7 @@ export function AutomationLaneEditor() {
           ref={timelineRef}
           className="automation-lane__timeline"
           role="group"
-          aria-label={`${AUTOMATION_TARGETS[targetType].label}オートメーションレーン`}
+          aria-label={`${targetPresentation.label}オートメーションレーン`}
           aria-describedby="automation-lane-help automation-lane-read-description"
           tabIndex={lane?.points.length ? -1 : 0}
           style={{
@@ -1223,6 +1251,7 @@ export function AutomationLaneEditor() {
                   point,
                   fullIndex,
                   targetType,
+                  isEffectiveMaster,
                 )}
                 aria-pressed={selected}
                 aria-keyshortcuts="PageUp PageDown Home End ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown ArrowLeft ArrowRight Delete Backspace Control+Z Meta+Z Control+Shift+Z Meta+Shift+Z"
@@ -1367,12 +1396,12 @@ export function AutomationLaneEditor() {
             />
           </label>
           <label>
-            {AUTOMATION_TARGETS[targetType].displayLabel}
+            {targetPresentation.displayLabel}
             <input
               type="number"
-              min={AUTOMATION_TARGETS[targetType].displayMin}
-              max={AUTOMATION_TARGETS[targetType].displayMax}
-              step={AUTOMATION_TARGETS[targetType].displayStep}
+              min={targetPresentation.displayMin}
+              max={targetPresentation.displayMax}
+              step={targetPresentation.displayStep}
               value={draft.value}
               disabled={disabled}
               onChange={(event) =>

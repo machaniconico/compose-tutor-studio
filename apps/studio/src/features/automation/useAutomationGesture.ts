@@ -1,12 +1,22 @@
 import {
   useEffect,
   useRef,
+  useState,
   type ChangeEventHandler,
   type FocusEventHandler,
   type KeyboardEventHandler,
   type PointerEventHandler,
 } from 'react';
-import type { AutomationTarget } from '@cts/project-model';
+import type {
+  AutomationTarget,
+  AutomationWriteMode,
+  Project,
+} from '@cts/project-model';
+import {
+  automationLaneForTrack,
+  automationValueAt,
+  isAutomationReadEnabled,
+} from '../../audio/automation';
 import { useStore } from '../../state/store';
 
 const RANGE_ADJUSTMENT_KEYS = new Set([
@@ -146,6 +156,7 @@ export function createAutomationGestureAdapter(
 }
 
 export type AutomationGestureInputProps = Readonly<{
+  displayValue: number;
   onPointerDown: PointerEventHandler<HTMLInputElement>;
   onPointerUp: PointerEventHandler<HTMLInputElement>;
   onPointerCancel: PointerEventHandler<HTMLInputElement>;
@@ -156,15 +167,76 @@ export type AutomationGestureInputProps = Readonly<{
   onBlur: FocusEventHandler<HTMLInputElement>;
 }>;
 
+export function automationDisplayValue(
+  project: Project,
+  target: AutomationTarget,
+  phase: 'stopped' | 'starting' | 'playing',
+  beat: number,
+  followReadAutomation: boolean,
+): number {
+  const track = project.tracks.find((candidate) => candidate.id === target.trackId);
+  const baseValue = target.type === 'track-volume'
+    ? track?.volume ?? 1
+    : track?.pan ?? 0;
+  if (
+    !followReadAutomation
+    || phase !== 'playing'
+    || !Number.isFinite(beat)
+    || beat < 0
+  ) {
+    return baseValue;
+  }
+  const lane = automationLaneForTrack(
+    project.automationLanes,
+    target.trackId,
+    target.type,
+  );
+  return lane && isAutomationReadEnabled(project.automationReadState, lane)
+    ? automationValueAt(lane, baseValue, beat)
+    : baseValue;
+}
+
+export function resolveAutomationGestureDisplayValue(
+  previewValue: number | null,
+  scalarValue: number,
+  readDisplayValue: number,
+  followReadAutomation: boolean,
+): number {
+  return previewValue ?? (
+    followReadAutomation ? readDisplayValue : scalarValue
+  );
+}
+
+export function shouldFollowAutomationRead(
+  requested: boolean,
+  phase: 'stopped' | 'starting' | 'playing',
+  mode: AutomationWriteMode,
+): boolean {
+  return requested && !(phase === 'playing' && mode === 'write');
+}
+
 export function useAutomationGesture(input: Readonly<{
   trackId: string;
   targetType: AutomationTarget['type'];
+  scalarValue: number;
+  followReadAutomation?: boolean;
   setScalar: (value: number) => void;
 }>): AutomationGestureInputProps {
-  const { trackId, targetType, setScalar } = input;
+  const {
+    trackId,
+    targetType,
+    scalarValue,
+    followReadAutomation = false,
+    setScalar,
+  } = input;
   const phase = useStore((state) => state.transport.phase);
   const mode = useStore(
     (state) => state.automationRecording.trackModes[trackId] ?? 'read',
+  );
+  const followLiveRead = shouldFollowAutomationRead(
+    followReadAutomation,
+    phase,
+    mode,
   );
   const beginAutomationGesture = useStore(
     (state) => state.beginAutomationGesture,
@@ -175,6 +247,20 @@ export function useAutomationGesture(input: Readonly<{
   const endAutomationGesture = useStore(
     (state) => state.endAutomationGesture,
   );
+  const readDisplayValue = useStore((state) => automationDisplayValue(
+    state.project,
+    { trackId, type: targetType },
+    state.transport.phase,
+    state.transport.positionBeat,
+    followLiveRead,
+  ));
+  const sharedOverrideValue = useStore((state) => {
+    const value = state.automationRecording.overrideValues[
+      `${trackId}:${targetType}`
+    ];
+    return value !== undefined && Number.isFinite(value) ? value : null;
+  });
+  const [previewValue, setPreviewValue] = useState<number | null>(null);
   const latest = useRef({
     phase,
     mode,
@@ -219,9 +305,35 @@ export function useAutomationGesture(input: Readonly<{
   const adapter = adapterRef.current;
 
   useEffect(() => () => adapter.dispose(), [adapter]);
+  useEffect(() => {
+    setPreviewValue(null);
+  }, [trackId, targetType, mode]);
+  useEffect(() => {
+    if (phase !== 'playing') setPreviewValue(null);
+  }, [phase]);
+
+  const clearCompletedPreview = (): void => {
+    if (
+      !adapter.isActive()
+      && (
+        phase !== 'playing'
+        || mode === 'read'
+        || mode === 'touch'
+      )
+    ) {
+      setPreviewValue(null);
+    }
+  };
 
   return {
+    displayValue: resolveAutomationGestureDisplayValue(
+      sharedOverrideValue ?? previewValue,
+      scalarValue,
+      readDisplayValue,
+      followLiveRead,
+    ),
     onPointerDown: (event) => {
+      setPreviewValue(event.currentTarget.valueAsNumber);
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {
@@ -230,20 +342,39 @@ export function useAutomationGesture(input: Readonly<{
       }
       adapter.pointerDown(event.pointerId, event.currentTarget.valueAsNumber);
     },
-    onPointerUp: (event) => adapter.pointerUp(event.pointerId),
-    onPointerCancel: (event) => adapter.pointerCancel(event.pointerId),
-    onLostPointerCapture: (event) => (
-      adapter.lostPointerCapture(event.pointerId)
-    ),
-    onKeyDown: (event) => (
+    onPointerUp: (event) => {
+      adapter.pointerUp(event.pointerId);
+      clearCompletedPreview();
+    },
+    onPointerCancel: (event) => {
+      adapter.pointerCancel(event.pointerId);
+      clearCompletedPreview();
+    },
+    onLostPointerCapture: (event) => {
+      adapter.lostPointerCapture(event.pointerId);
+      clearCompletedPreview();
+    },
+    onKeyDown: (event) => {
+      if (RANGE_ADJUSTMENT_KEYS.has(event.key) && !event.repeat) {
+        setPreviewValue(event.currentTarget.valueAsNumber);
+      }
       adapter.keyDown(
         event.key,
         event.currentTarget.valueAsNumber,
         event.repeat,
-      )
-    ),
-    onKeyUp: (event) => adapter.keyUp(event.key),
-    onChange: (event) => adapter.change(event.currentTarget.valueAsNumber),
-    onBlur: () => adapter.blur(),
+      );
+    },
+    onKeyUp: (event) => {
+      adapter.keyUp(event.key);
+      clearCompletedPreview();
+    },
+    onChange: (event) => {
+      setPreviewValue(event.currentTarget.valueAsNumber);
+      adapter.change(event.currentTarget.valueAsNumber);
+    },
+    onBlur: () => {
+      adapter.blur();
+      clearCompletedPreview();
+    },
   };
 }

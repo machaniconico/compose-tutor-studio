@@ -142,8 +142,8 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | US-013 | 作曲者として、手元の音声を曲へ置いて非破壊編集したい | Must | WAV / MP3 / M4A / AACをAudio Trackへ読み込み、移動、左右trim、gain、fade、loop、split、独立複製、削除をUndo/Redoでき、live再生・WAV・再読込で同じ範囲を使う |
 | US-014 | 作曲者として、マイク入力を新規または既存のAudio Trackへ録音したい | Must | Audio Trackを1件だけ録音待機にでき、システム既定または列挙された入力を選び、通常は現在playheadから1 Clip、明示loop時は2〜128回の固定passを連続録音して自動take folderとして採用できる。さらに明示Punch範囲ではpre/post-roll付きのbounded Auto Punchを行い、既存素材を旧takeとして残して新takeを採用する。いずれもasset-first・Undo 1回、途中停止・失敗・cancelはProject不変とする |
 | US-015 | 作曲者として、同じ区間を複数回録った素材から良い部分をつないで仕上げたい | Must | 同一Audio Track・同一時間窓の既存Clipを非破壊take folderへまとめ、複数範囲を別takeへ切り替え、境界調整・未使用take削除・Undo/Redo・保存/再読込・live/WAVで同じcompを使える |
-| US-016 | 作曲者として、音量やパンの変化を一時的に外して元のTrack設定と聴き比べたい | Must | volume / panのAutomation laneをRead / Bypassで切り替え、Bypass中もpointを保持・編集できる。live再生とWAVはBypass時にTrack scalarを使い、Undo / Redo・保存 / 再読込後も同じ状態になる |
-| US-017 | 作曲者として、再生しながらミキサー操作をオートメーションへ記録したい | Must | non-Master TrackごとにRead / Touch / Latch / Writeを選び、Touchは操作中だけ、Latchは最初の操作からパンチアウトまで、Writeは再生開始から音量とパンの両方を記録できる。1 passをProject変更・Undo・保存revision各1回で確定し、Writeは警告確認後だけ有効化して確定後Touchへ戻る。modeと記録中状態はruntime-only、確定curveだけを保存する |
+| US-016 | 作曲者として、音量やパンの変化を一時的に外して元のTrack設定と聴き比べたい | Must | non-Masterのvolume / panとeffective Masterの出力volumeをRead / Bypassで切り替え、Bypass中もpointを保持・編集できる。live再生とWAVはBypass時にTrack scalarを使い、Undo / Redo・保存 / 再読込後も同じ状態になる |
+| US-017 | 作曲者として、再生しながらミキサー操作をオートメーションへ記録したい | Must | non-Master Trackの音量 / パンとeffective Masterの出力音量についてRead / Touch / Latch / Writeを選び、Touchは操作中だけ、Latchは最初の操作からパンチアウトまで、Writeは再生開始から対応targetを記録できる。Master Writeは音量だけを扱う。1 passをProject変更・Undo・保存revision各1回で確定し、Writeは警告確認後だけ有効化して確定後Touchへ戻る。modeと記録中状態はruntime-only、確定curveだけを保存する |
 
 ## 3. MVP機能範囲
 
@@ -187,8 +187,8 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 - 0.5〜60秒の単一マイク入力録音。録音待機なしでは新規Audio Track、録音待機中の既存Audio Trackでは同Trackへ追加する。loop OFF / punch OFFは1 Clip、loop ONは2〜128固定pass、punch ONは録音待機中の既存Audio Trackへ明示`[in, out)`だけを録るbounded Auto Punchとする。Punchはloopと排他で、pre-rollから伴奏、future render frameのinでcapture、out＋正latency tailでcapture完了、post-roll自然完了の両方を確認してから採用する。60秒上限は正のlatency tailを含み、途中停止・cancel・unmount・失敗では全体を破棄する。録音待機、入力device、loop / punch locator、roll / pass指定はruntime-onlyでProjectへ保存しない
 - WAV/MP3/M4A/AACのステレオ音源を使う、ローカル完結の中央定位ボーカル軽減
 - stereo Bus、各non-Masterのmain output、pre/post-fader send / return。循環は候補Project採用前に拒否し、live再生とoffline WAVで同じrouting graphを使う
-- non-Master Trackのvolume / pan Automation lane。pointのhold / linear curve編集、parameter-lane Read / Bypass、Track / Global Readを保存・Undoできる。いずれかのRead gateが無効ならpointを破棄せず、live再生とoffline WAVの両方で対象Track scalarを使う
-- Track別のRead / Touch / Latch / Write。再生pass中はミキサー / Track Listの音量・パン操作を一時bufferへ記録し、停止、自然終了、seek、loop右端などのパンチアウトでcurveを1回だけ確定する。mode、Armed / Writing、pointer / keyboard gesture所有権はruntime-onlyで、Project切替・再読込時はReadへ戻す
+- non-Master Trackのvolume / panとeffective Masterのoutput volume Automation lane。pointのhold / linear curve編集、parameter-lane Read / Bypass、TrackまたはMaster / Global Readを保存・Undoできる。いずれかのRead gateが無効ならpointを破棄せず、live再生とoffline WAVの両方で対象Track scalarを使う
+- 対応Track別のRead / Touch / Latch / Write。再生pass中はミキサー / Track Listの音量・パン操作を一時bufferへ記録し、停止、自然終了、seek、loop右端などのパンチアウトでcurveを1回だけ確定する。effective Masterは音量だけを記録する。mode、Armed / Writing、pointer / keyboard gesture所有権はruntime-onlyで、Project切替・再読込時はReadへ戻す
 
 ### 3.5 Export
 
@@ -209,7 +209,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
 | VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
 | Quick Punch / 長時間streaming / 複数入力 / MIDI・named comp | 単一入力の伴奏同期録音、物理loopback実測校正、既存Clipの手動take folder化、明示loopの固定pass cycle capture、pre/post-roll付きbounded Auto Punchと非破壊take採用までは持つ。disk streaming、既存再生を継続したまま任意時点でin/outするQuick Punch、自動input monitoring、複数入力、MIDI comp、複数の名前付きcomp / flattenは持たない | boundedなlocal captureを3OS実機で検証した後、長時間streaming、Quick Punch、複数I/Oを独立gateで追加する |
-| 高度なAutomation target / mode | non-Master Trackのvolume / panに対するRead / Touch / Latch / Write、Global / Track / lane Read gateまでは利用可能。Master、insert / send / tempo、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass管理は持たない | 現行passのfailure atomicityと実機操作を固定した後、target追加と高度modeを別々のgateで追加 |
+| 高度なAutomation target / mode | non-Master Trackのvolume / panとeffective Masterのoutput volumeに対するRead / Touch / Latch / Write、Global / TrackまたはMaster / lane Read gateまでは利用可能。Master pan、later Master、insert / send / tempo、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass管理は持たない | 現行passのfailure atomicityと実機操作を固定した後、target追加と高度modeを別々のgateで追加 |
 
 ## 5. 非機能要件
 
@@ -261,7 +261,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | Clip Launcher | ループ試作 | Partial | MVPは簡易クリップ一覧。v1で非線形再生 |
 | Arranger | セクション配置 | Yes | Intro/A/B/Chorus/Bridge/Outro ラベル |
 | Mixer | 音量/パン/ミュート/ソロ/routing | Yes | 各トラックの基本操作、stereo Bus、main output、pre/post-fader sendを扱う |
-| Automation | Track音量/パンの時間変化 | Yes | 選択中のnon-Master Trackについて、beat snap付きlane editor、hold / linear、lane Bypass、Global / Track Readを保存し、再生中はTrack別のRead / Touch / Latch / Writeで音量・パン操作を記録する。mode自体はruntime-only |
+| Automation | Track音量/パンとMaster出力音量の時間変化 | Yes | non-Master Trackの音量 / パンとeffective Masterの出力音量について、beat snap付きlane editor、hold / linear、lane Bypass、Global / TrackまたはMaster Readを保存し、再生中はRead / Touch / Latch / Writeで対応操作を記録する。mode自体はruntime-only |
 | Effects | 基本エフェクト | Partial | Filter/Delay/Reverbを最小実装 |
 | Tutorial | 操作・状態連動チュートリアル | Yes | 確定操作イベントと採用済みProject/UI状態を再照合して進行 |
 | Exercise | 理論演習 | Yes | コード判定、スケール判定、メロディ添削 |
@@ -523,7 +523,7 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - liveとoffline WAVは共通のAudio Clip window plannerを使い、seek途中、transport loop、Clip loop、variable tempo、source frame range、gain、fadeを同じhalf-open windowへ解決する。Audio Trackはsynth voiceを作らず、decoded AudioBufferをTrack graphへrate 1.0で接続する。再生前に対象assetを全件preflightし、途中までgraph / WAVを作った状態で欠落を発見しない
 - raw objectのchecksum / length検証とdecode cacheを共有し、raw preflightとdecoded PCMは各256 MiB以下に制限する。missing / changed / unavailable / decode / resource超過は型付きに分類し、Track / Clip単位の説明と再読み込み手段を表示する。metadataを自動的に`unresolved`へ書き換えたり、同名の別fileへ黙って置換したりしない
 - liveは実AudioContext sample rate確定後、resolver I/OとTrack graph生成前に未使用decoded LRUを解放し、active / in-flight cacheだけを保持量へ数える。resolve/hash phaseは`raw合計 + 2 × 最大raw + retained decoded`、decode phaseは`raw合計 + 最大raw decode copy + target-rate decoded合計 + retained decoded`をchecked加算し、大きい方が384 MiBを越えるProjectを型付きで拒否する
-- `.ctsproj.json`はschema v7 metadata、automation bypass、Global / Track Read、確定済みautomation curve、audio take folder、audio routingのexact交換形式だが、Read / Touch / Latch / Writeの選択、Armed / Writing、gesture所有権とAudioAsset binaryを同梱しない。単体JSONを別端末・別profileで開く場合は、対応binaryが既に同じcontent-addressed repositoryに存在する時だけreadyとして採用し、それ以外は既存Projectを変更せず非同梱を説明する。per-song bundleは引き続き将来案である
+- `.ctsproj.json`はschema v8 metadata、automation bypass、Global / TrackまたはMaster Read、確定済みautomation curve、audio take folder、audio routingのexact交換形式だが、Read / Touch / Latch / Writeの選択、Armed / Writing、gesture所有権とAudioAsset binaryを同梱しない。単体JSONを別端末・別profileで開く場合は、対応binaryが既に同じcontent-addressed repositoryに存在する時だけreadyとして採用し、それ以外は既存Projectを変更せず非同梱を説明する。per-song bundleは引き続き将来案である
 
 ### 7.7 Audio Track録音 / Record Arm
 
@@ -534,7 +534,7 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - captureは3秒countdown、最大60秒、1〜2 channel、dry録音、monitor初期OFFと明示opt-inを維持する。capture開始前に共有384 MiB予約とrecording tokenを同期取得し、asset上限、既存TrackのClip上限または新規Track上限を検査する。Workletはabsolute context frameとsequenceをchunkへ付け、arm frame途中のrender quantumも正確にsliceし、欠落・重複・世代変更をfail closedにする。借用したapp AudioContextはcapture側でcloseしない
 - transport loopがOFFなら従来のone-shot録音、ONなら開始前に曲内の明示`[loopStartBeat, loopEndBeat)`と2〜128の固定pass数を凍結する。cycleはloop左端から1本の連続local captureを行い、同じ将来frameから有限の伴奏再生を開始し、Nth右境界で伴奏だけを止める。正の録音latency tailまで含めたeffective captureは0.5〜60秒とし、各passを累積丸めしたexact frame境界で同じ長さのAssetへ分割する
 - 録音位置補正はruntime-onlyの`自動（推定） / 実測校正 / 自動なし`と整数-500〜+500 msの手動offsetを持つ。正値は早め、負値は遅らせる。推定値はinput track、`baseLatency`、`outputLatency`、Master limiter look-aheadの申告値・既知値を合算する。`実測校正`は選択中のexact input ID、現在のAudioContext generation / sample rateに一致する成功profileだけを使い、その`latencyFrames`でhost推定、base / output / input latency、limiter look-aheadの合計を置き換えてから手動offsetだけを加算する。profile不一致時に推定値へ黙ってfallbackしない。capture first frameを可変tempo mapでbeatへ変換し、曲頭より前になる時はstartBeatを0にclampしてcanonical assetの`sourceStartFrame / sourceFrameCount`を非破壊trimする
-- 実測校正は通常の録音wizardとは分け、オーディオinterfaceの出力を選択入力へケーブル接続する外部I/O校正として案内する。スピーカーからマイクへの空中loopbackは禁止し、app monitorに加えてinterface / driver mixerのDirect Monitor・hardware Loopback・同一outputへのreturnもOFFにするよう開始前に明示する。開始時はtransport表示がstoppedでも保持中のnatural drain graphを同期disposeし、Master automationをProject値へ戻してからprobeを準備する。probe振幅は固定の低levelとし、排他中だけapp-wide AudioContextのMaster gainを既知unityへ正規化してfinallyで元値へ戻す。固定PRBSをMaster / limiter経由で複数burst送出し、同じ将来render frameから選択入力をcaptureする。各burstは最大500 msの整数sample lagを正規化相関し、silence、clipping、同率または近接peakによる曖昧さ、低confidence、context generation / sample rate変化をfail closedにする
+- 実測校正は通常の録音wizardとは分け、オーディオinterfaceの出力を選択入力へケーブル接続する外部I/O校正として案内する。スピーカーからマイクへの空中loopbackは禁止し、app monitorに加えてinterface / driver mixerのDirect Monitor・hardware Loopback・同一outputへのreturnもOFFにするよう開始前に明示する。開始時はtransport表示がstoppedでも保持中のnatural drain session graphを同期disposeしてからprobeを準備する。probe振幅は固定の低levelとし、排他中だけapp-wide AudioContextのengine output/calibration gainを既知unityへ正規化してfinallyで元値へ戻す。固定PRBSをengine output / limiter経由で複数burst送出し、同じ将来render frameから選択入力をcaptureする。各burstは最大500 msの整数sample lagを正規化相関し、silence、clipping、同率または近接peakによる曖昧さ、低confidence、context generation / sample rate変化をfail closedにする
 - 実測校正はopaqueなIDを固定できる明示選択済み入力だけで開始でき、`システム既定`では開始させない。校正成功時だけ`inputDeviceId / contextGeneration / sampleRate / latencyFrames / confidence`のprofileをrenderer runtimeへ置き換える。Project / history / revision / asset / autosave / SQLite / `.ctsproj.json`には保存しない。app lifetimeの`devicechange`購読はdialog表示や録音phaseにかかわらずfuture profileを破棄する。入力選択または校正中の`devicechange`では進行中校正も中止し、以前の入力へ戻しても自動再利用しない。通常takeは開始時policyをimmutableに所有し、bind前のprofile破棄はfail closed、bind後の変更は現在takeを変えず次回以降だけ無効化する。一般録音は引き続き`システム既定`を利用できる。Web Audioから安定した出力identityを取得できないため、出力deviceまたはdriver / buffer設定変更後は再校正するよう明示する。通常のcancelまたは解析失敗は直前のprofileを上書きしない
 - raw PCMを48 kHz PCM16 WAVへ正規化し、bytesとchecksum receiptをrepositoryへ確定してからだけProjectへ採用する。既存TrackではそのTrackのvolume / pan / effects / routingを保ったままAsset metadataと補正済みsource rangeのClipを追記し、新規TrackではTrack / routing / Clipを作る。どちらも開始時snapshotへのexact CAS、Undo 1回、revision 1回として扱う
 - cycle完走時は各周のReady Audio Assetを全件保存した後だけ、1 take folder、pass順のtake、最初のtake全体を採用する1 comp segmentをstrict CASで追加し、folder / Track / Comp Editorを選択する。新規Track生成を含む全体が1 Project change / 1 Undoである。manual stop / cancel / unmount / permission / device loss / context世代変更 / clock不連続 / arm失敗 / canonicalize / store失敗 / stale snapshot / target消失 / revoked tokenでは全passを破棄し、Project / history / selectionを変更しない。入力hot switch、長時間disk streaming、既存再生へ途中参加するQuick Punch、複数入力は未実装である
@@ -579,19 +579,19 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 
 Masterの`pan` / `mute` / `solo`は将来互換用の予約フィールドであり、MVPでは音声へ適用せずUIにも表示しない。Master trackを持たないlegacy projectはunity gain（1.0）として再生・WAV書き出しし、Master volumeが非有限値なら音声境界でfail-silent（gain 0）にする。
 
-ライブのTrack出力とWAV PCMは同じstable routing DAGとMaster gainをlimiter直前で一度だけ適用する。Bus soloは関係する上流・下流edgeだけを開き、上流sourceの無関係なMaster直通edgeを漏らさない。ライブ専用のメトロノームもMaster faderを通し、ライブのMaster meterはpost-fader信号を表示する。WAVにはメトロノームclickとUI meter / analyserを含めない。Trackのmute / solo、各Track volume、Master volumeは、再生開始時およびoffline renderではsample 0から確定値を使い、再生中に値を変更した場合だけ10msで平滑化する。
+ライブのTrack出力とWAV PCMは同じstable routing DAGとProject Master gainをlimiter直前で一度だけ適用する。ライブは`session output → session Master fader → engine output/calibration gain → limiter`とし、Project scalar / automation / gestureはsession Masterだけを所有してengine gainをunityに保つ。Bus soloは関係する上流・下流edgeだけを開き、上流sourceの無関係なMaster直通edgeを漏らさない。ライブ専用のメトロノームもMaster faderを通し、ライブのMaster meterはpost-fader信号を表示する。WAVにはメトロノームclickとUI meter / analyserを含めない。Trackのmute / solo、各Track volume、Master volumeは、再生開始時およびoffline renderではsample 0から確定値を使い、再生中に値を変更した場合だけ10msで平滑化する。
 
-schema v3で導入したAutomationLaneはnon-Master Trackのvolume / panだけを対象にし、Track scalarを最初のpointまでのbase valueとしてhold / linear補間をライブとWAVへ同じbeat→time変換で適用する。schema v6の必須`bypassed`とschema v7の必須`automationReadState`を共通resolverへ入力し、effective Readを`globalEnabled && !disabledTrackIds.includes(trackId) && !lane.bypassed`で決める。falseならpointを保持したままcommandを生成せず、そのtargetのTrack scalarを曲本体からrelease / effect tailまで使う。各pointの`interpolation`はそのpointから次のpointまでの出力方向の意味を持ち、`hold`は現在値を保ち、`linear`は次の値までbeat上で直線変化する。
+schema v3で導入したAutomationLaneはnon-Master Trackのvolume / panを対象とし、schema v8ではcanonical Track順の最初のeffective Masterだけにoutput volume targetを追加する。Master panとlater Master targetは拒否する。Track scalarを最初のpointまでのbase valueとしてhold / linear補間をライブとWAVへ同じbeat→time変換で適用する。schema v6の必須`bypassed`とschema v7の必須`automationReadState`を共通resolverへ入力し、effective Readを`globalEnabled && !disabledTrackIds.includes(trackId) && !lane.bypassed`で決める。falseならpointを保持したままcommandを生成せず、そのtargetのTrack scalarを曲本体からrelease / effect tailまで使う。各pointの`interpolation`はそのpointから次のpointまでの出力方向の意味を持ち、`hold`は現在値を保ち、`linear`は次の値までbeat上で直線変化する。
 
-Editorの「オートメーション」tabは選択中のnon-Master Trackへ結び付き、Global Read、選択TrackのTrack Read、Track別のRead / Touch / Latch / Write、音量 / パンtarget、beat snapをnative controlで操作できる。Global / Track Readはlane Bypassと独立し、schema v7へ保存する。laneがあればRead / Bypassを切り替え、Bypass中もcurveとpointを消さず編集できる。lane上または現在の再生位置へのpoint追加、選択pointのbeat / value / 次のpointまでの変化方法、1件削除、確認後のlane全消去を行える。Inspectorは実際に変更したfieldだけをpatchし、beat snapはbeat自体を確定した時だけ適用するため、無編集blurと値だけの編集ではimport済みoff-grid beatの精度を変えない。音量は0〜2、パンは-1〜1、beatは0〜曲末で、同じlaneの同beat重複を採用しない。laneがなければ最初の追加時にRead状態で作り、最後のpoint削除または全消去ではlane自体を除去する。追加・確定編集・削除・全消去・各Read gate切替はそれぞれ1 gestureをProject変更1回、Undo 1回、自動保存revision 1回として採用し、no-opまたは拒否では履歴を増やさない。保存・再読込後もvolume / panの独立laneとpoint ID、beat、value、interpolation、bypassed、Global / Track Readを保つ。
+Editorの「オートメーション」tabは選択中の対応Trackへ結び付き、Global Read、選択TrackのTrackまたはMaster Read、Track別のRead / Touch / Latch / Write、対応target、beat snapをnative controlで操作できる。non-Masterは音量 / パン、effective Masterは「Master出力音量」だけを表示し、later Masterには未対応を明示する。Global / TrackまたはMaster Readはlane Bypassと独立し、schema v8へ保存する。laneがあればRead / Bypassを切り替え、Bypass中もcurveとpointを消さず編集できる。lane上または現在の再生位置へのpoint追加、選択pointのbeat / value / 次のpointまでの変化方法、1件削除、確認後のlane全消去を行える。Inspectorは実際に変更したfieldだけをpatchし、beat snapはbeat自体を確定した時だけ適用するため、無編集blurと値だけの編集ではimport済みoff-grid beatの精度を変えない。音量は0〜2、パンは-1〜1、beatは0〜曲末で、同じlaneの同beat重複を採用しない。laneがなければ最初の追加時にRead状態で作り、最後のpoint削除または全消去ではlane自体を除去する。追加・確定編集・削除・全消去・各Read gate切替はそれぞれ1 gestureをProject変更1回、Undo 1回、自動保存revision 1回として採用し、no-opまたは拒否では履歴を増やさない。保存・再読込後も独立laneとpoint ID、beat、value、interpolation、bypassed、Global / TrackまたはMaster Readを保つ。
 
 AutomationLaneは再生session snapshotであり、lane編集またはRead / Bypass切替はactive playbackを停止して有限なplayheadを保持し、natural drainも破棄して次のplayで再構築する。laneが1件以上ある状態でのmixer / effect編集も原則同じ扱いだが、active write pass中に開始時Readだった別Trackのvolume / pan scalarだけを変える場合はpassをexact rebaseする。対象にeffective Read laneがなければAudioParamだけを更新して再生を維持し、laneがあれば最初のpoint前や次loopでscalarが可聴になるため、古い予約値を残さず再生を停止して次回再構築する。改名・ノート編集などmixerに無関係なProject変更では、予約済みAudioParam automationをcancelしない。transport loopと可変tempoでも既存の共通resolverを使うため、ライブ再生とoffline WAVは同じRead / Bypass結果になる。
 
-再生開始時にnon-Master Trackごとのmodeを凍結し、Read以外が1件でもあればruntime-onlyの1 passを開始する。Touchはミキサー / Track Listの音量・パンをpointerまたはkeyboardで操作している範囲だけを書き、releaseから100 msで開始前curveへ戻す。Latchは最初の接触からパンチアウトまで最後の操作値を保持する。Writeは確認dialogを通過した時だけ有効になり、接触がなくてもpass開始から選択Trackの音量とパンを開始時scalarで所有して既存curveを置き換え、パンチアウト後はTouchへ戻す。記録は既存laneの`bypassed`とGlobal / Track Readを暗黙変更しないため、Read gateが無効なまま確定したcurveは再有効化するまで可聴化されない。
+再生開始時に対応Trackごとのmodeを凍結し、Read以外が1件でもあればruntime-onlyの1 passを開始する。Touchはミキサー / Track Listの対応controlをpointerまたはkeyboardで操作している範囲だけを書き、releaseから100 msで開始前curveへ戻す。Latchは最初の接触からパンチアウトまで最後の操作値を保持する。Writeは確認dialogを通過した時だけ有効になり、接触がなくてもpass開始からnon-Masterの音量 / パン、effective Masterの出力音量だけを開始時scalarで所有して既存curveを置き換え、パンチアウト後はTouchへ戻す。記録は既存laneの`bypassed`とGlobal / TrackまたはMaster Readを暗黙変更しないため、Read gateが無効なまま確定したcurveは再有効化するまで可聴化されない。Track ListとMixerの両Master faderは再生中のRead曲線を表示し、Write所有中はscalar、Touch/Latchのgesture中は操作値を優先する。
 
-pass中のsampleはProject / history / revisionを変えず、停止、自然終了、seek、transport loop右端、mode / Read / Bypass変更、Undo / Redo、Project切替、native close、pagehideの境界で半開区間をパンチアウトする。確定候補は開始時Project参照とcanonical fingerprintへのCAS、point / lane上限、全Project codecを通過した時だけProject変更・Undo・save revision各1回として採用し、失敗時は部分curveを公開しない。pagehideで確定できない場合はProject no-opでpassを破棄する。確定curveは通常のschema v7 laneとしてlive / WAVの共通resolverへ渡るため、記録時のmode名はoffline bounceへ影響しない。
+pass中のsampleはProject / history / revisionを変えず、停止、自然終了、seek、transport loop右端、mode / Read / Bypass変更、Undo / Redo、Project切替、native close、pagehideの境界で半開区間をパンチアウトする。確定候補は開始時Project参照とcanonical fingerprintへのCAS、point / lane上限、全Project codecを通過した時だけProject変更・Undo・save revision各1回として採用し、失敗時は部分curveを公開しない。pagehideで確定できない場合はProject no-opでpassを破棄する。確定curveは通常のschema v8 laneとしてlive / full WAV / selected Track WAVの共通resolverへ渡るため、記録時のmode名はoffline bounceへ影響しない。
 
-Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生passの所有権はrenderer runtime-onlyで、Project / history / SQLite / `.ctsproj.json` / OpenAPIへ保存しない。Project activationと再読込では全TrackをReadへ戻す。Master、insert / send / tempo parameter、MIDI CC / LFO modulation、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass管理は未実装であり、対応済みと表示しない。
+Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生passの所有権はrenderer runtime-onlyで、Project / history / SQLite / `.ctsproj.json` / OpenAPIへ保存しない。Project activationと再読込では全TrackをReadへ戻す。Master pan、later Master、insert / send / tempo parameter、MIDI CC / LFO modulation、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass管理は未実装であり、対応済みと表示しない。
 
 ### 8.2 学習連動
 
@@ -605,7 +605,7 @@ Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生pass�
 - 停止中に再生を要求した時、現在位置が有限かつ`0 <= positionBeat < songEnd`ならその位置を保つ。負値、非有限値、曲末と同じ位置、曲末より後では、拍子分母を含むquarter-note beat長から求めた`0`へ同じstate更新内で巻き戻してから再生を開始する。この補正はloop bounds、Project、Undo/Redo history、save stateを変更しない
 - transport loopなしで曲末へ達した時は、transportをただちに停止して位置を0へ戻し、メトロノームと位置更新も止める。一方、最後の音、Filter / EQのIIR state、Delay / Reverb、Compressorのlook-aheadは、controllerが所有する1つだけのdraining sessionで自然に減衰させる。drain中もpost-fader Master meterは残響を表示する
 - 最終50ms fadeはMaster limiterより前で完了し、その後もWeb Audio規格の固定6ms look-ahead分だけgraph / offline renderを保持する。40秒hard capはこの6msを含む出力全体へ適用し、短いtailでもfadeを曲本体へ食い込ませない
-- 新しい再生、手動停止、Project切替、AudioContextの`suspended / interrupted / closed`は残っているdrainを即時に破棄する。破棄時は末尾fadeのMaster gain automationをcancelし、現在のMaster volumeを復元する。transport loopのwrapではdrainを開始しない
+- 新しい再生、手動停止、Project切替、AudioContextの`suspended / interrupted / closed`は残っているdrainを即時に破棄する。破棄時はsession outputとsession Masterを一度だけ切断し、app-wide engine output/calibration gainへfadeやProject scalarを残さない。transport loopのwrapではdrainを開始しない
 - 自然テールは`Clip.loop`の反復仕様とは別のone-shot終端契約であり、現行のdrum `Clip.loop`未展開を変更しない
 
 ## 9. AI Coach
@@ -1085,13 +1085,13 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Inspectorはfieldごとのdirty状態を持ち、無編集blurではcommandを発行しない。値だけの確定はbeatをpatchせず、beat snapはbeat fieldの確定時だけに適用する。表示用の丸め値を未変更fieldへ書き戻さず、off-grid / 高精度beatを保持する
 - lane編集でactive playbackが停止した場合は、再生位置を保持して次回再生から新しいcurveを使うことを通知する。保存・再読込、Undo / Redo、transport loop、可変tempo、offline WAVで同じlaneを使う
 - laneが存在する時は最低44×44 CSS pxのnative Read / Bypass controlを表示し、`aria-pressed`と文字で状態を伝える。Bypass中もcurve / pointは表示・編集可能なままmuted表示し、「点は保持され、再生 / WAVはTrackの基準値を使う」と明示する。laneがない時は最初のpointがRead状態でlaneを作ることだけを説明し、保存先のないtoggleを表示しない
-- non-Master Trackではlaneの有無にかかわらず、Global Readと選択TrackのTrack Readを独立した最低44pxのnative buttonで表示する。`aria-pressed`、オン / オフの文字、両方とlane Bypassから決まるeffective Readの説明を持たせ、GlobalまたはTrackを切ってもlane Bypassやpointを暗黙変更しない。これら2状態はProjectへ保存される
-- Read / Touch / Latch / WriteはTrack名を含むnative radiogroupにし、ArmedとWritingを文字とlive regionで区別する。Touchは操作中だけ記録して100 msで元curveへ戻ること、Latchは最初の操作後も停止・seekなどのパンチアウトまで最後の値を書き続けることを初心者向けに説明する。音量 / パンのrange controlはpointer、矢印、Home / End、PageUp / PageDownのどの調整gestureでも開始・更新・終了をexactly once扱いにする
-- Write選択時は即座にmodeを変えず、modal dialogで「触れなくても音量とパンの両方を再生位置から置き換える」「パンチアウト後はTouchへ戻る」と警告する。取消はWrite controlへfocusを戻して以前のmodeを保ち、確認だけがWriteをArmedにする。pass確定後はTouchを選択状態にし、確定curveだけが保存されることをstatusで伝える
+- non-Master Trackと最初のeffective Masterではlaneの有無にかかわらず、Global Readと選択TrackのTrackまたはMaster Readを独立した最低44pxのnative buttonで表示する。`aria-pressed`、オン / オフの文字、両方とlane Bypassから決まるeffective Readの説明を持たせ、GlobalまたはTrack / Masterを切ってもlane Bypassやpointを暗黙変更しない。これら2状態はProjectへ保存される。later Masterにはautomation未対応を明示し、操作controlを出さない
+- Read / Touch / Latch / WriteはTrack名を含むnative radiogroupにし、ArmedとWritingを文字とlive regionで区別する。Touchは操作中だけ記録して100 msで元curveへ戻ること、Latchは最初の操作後も停止・seekなどのパンチアウトまで最後の値を書き続けることを初心者向けに説明する。non-Masterの音量 / パンとeffective Masterの出力音量range controlはpointer、矢印、Home / End、PageUp / PageDownのどの調整gestureでも開始・更新・終了をexactly once扱いにする。Track ListとMixerの両Master faderは同じRead曲線またはgesture値を表示する
+- Write選択時は即座にmodeを変えず、modal dialogでnon-Masterなら「触れなくても音量とパンの両方」、effective Masterなら「触れなくてもMaster出力音量」を再生位置から置き換え、パンチアウト後はTouchへ戻ると警告する。取消はWrite controlへfocusを戻して以前のmodeを保ち、確認だけがWriteをArmedにする。pass確定後はTouchを選択状態にし、確定curveだけが保存されることをstatusで伝える
 - point / lane上限、CAS競合などでpassを確定できない時はassertive alertに理由と最低44pxの「記録を破棄して停止」を表示する。破棄は部分curveを採用せず、pass / overrideを解放してtransportを停止し、通常編集へ戻れるようにする
 - 最大20,000 pointの正当なlaneでもnative point controlはviewportと選択pointを合わせて最大400件、curveは意味を保った最大3本のSVG pathへまとめる。30 Hzの再生位置購読はplayheadだけへ隔離し、lane全体を再renderしない。keyboardでviewport外を選択した場合もそのpointをrenderしてfocus / scrollを回復する
 - 320px幅ではdocument全体を横overflowさせず、時間軸だけをlane内部で横scrollさせる。target、snap、追加、Inspector、削除、全消去は折り返して読める状態を保ち、hover、focus-visible、selected、disabled、errorを色以外でも区別する
-- mode、Armed / Writing、gesture所有権はruntime-onlyであり、保存 / 再読込後はReadへ戻る。Master、insert / send / tempo automation、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loop passを利用可能に見せるcontrolや予約状態名は表示しない
+- mode、Armed / Writing、gesture所有権はruntime-onlyであり、保存 / 再読込後はReadへ戻る。Master pan、later Master、insert / send / tempo automation、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loop passを利用可能に見せるcontrolや予約状態名は表示しない
 
 #### 2.3.5 Tempo / 拍子map Editor
 
@@ -1504,7 +1504,7 @@ drum Clipの表示小節数はdomain値を変更せず、Clip開始位置からc
 5. pitch frameを無声区間、中央値、semitone hysteresisで単音note候補へまとめる。強い第2倍音はfundamental energyと倍周期scoreを併用してoctave候補を補正する。候補はtransient stable ID、開始 / 終了、MIDI、confidenceへ正規化し、60 ms最小長、非重複、512件上限をpure editing domainで検証する
 6. 候補のpitch / position / boundary修正、split / merge / 除外とbounded Undo / Redo、target Clip、quantizeはReact local stateに保持する。source変更、cancel、失敗、unmountでは候補historyと表示投影を破棄する。確定時だけcurrent draftをseconds→beats mappingとproject validationへ渡し、`replaceClipNotes`の単一changeで全notesを採用する
 
-decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否ではProject fingerprintを変えない。current schema v7ではcompiled tempo mapの共通seconds↔beat resolverを使い、beat 0だけの固定mapも同じ経路で従来と同じ結果にする。
+decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否ではProject fingerprintを変えない。current schema v8ではcompiled tempo mapの共通seconds↔beat resolverを使い、beat 0だけの固定mapも同じ経路で従来と同じ結果にする。
 
 ### 5.7 Track管理transaction（Batch 3 + Audio Track + Bus routing）
 
@@ -1515,40 +1515,40 @@ decode / analysis失敗、cancel、0件、512件超、mapping / commit拒否で�
 5. `commitProject`は候補全体をcanonical encode / validationし、採用時だけhistory、revision、autosaveとselection reconciliationを1回進める。128 Trackまたはcodec上限超過、stale ID、Master / 学習role保護、invalid name / preset、no-opではProject参照と全付随stateを変えない
 6. playback schedule、AutomationLane、TrackGraphはsession開始時snapshotであるため、採用されたTrack / Clip構造、semantic role、tempo / 拍子map、曲長、preset、automation lane、routingのsource / target / position / edge集合変更をcommit境界で停止し、有限な現在playheadを保持する。sendのgain / enabledだけは既存edge gainを10ms平滑更新する。AutomationLaneが1件以上ある時のmixer / effect変更も原則停止する。live write pass中に開始時Readだった別Trackのvolume / pan scalarだけを変える場合はpassをexact rebaseし、effective Read laneがないtargetだけはAudioParamを更新してsessionを維持する。laneがあるtargetは最初のpoint前または次loopで古いscalarが再予約されるためsessionを停止し、次のplayで新snapshotからclock / topology / voice / AudioParam commandを再構築する。改名、mixerに無関係なevent編集、拒否、no-opでは予約済みautomationへ触れずsessionを停止しない
 
-Track管理はschema v7 aggregate codecを正本にし、Undo/Redo、SQLite autosave、`.ctsproj.json`へrole、Audio metadata、take folder、automation bypass、Global / Track Read、routingを含めて保存する。Audio Trackはproduction追加・再生・非破壊編集、stereo Busはproduction追加・routing・insert処理へ接続済みである。
+Track管理はschema v8 aggregate codecを正本にし、Undo/Redo、SQLite autosave、`.ctsproj.json`へrole、Audio metadata、take folder、automation bypass、Global / TrackまたはMaster Read、routingを含めて保存する。Audio Trackはproduction追加・再生・非破壊編集、stereo Busはproduction追加・routing・insert処理へ接続済みである。
 
-### 5.8 Project schema v7 aggregate boundary
+### 5.8 Project schema v8 aggregate boundary
 
-- current schemaは7。v1→v2→v3→v4→v5→v6に続き、v6→v7は`automationReadState: { globalEnabled: true, disabledTrackIds: [] }`だけを加え、既存Track、scalar、lane、pointと音を変えない。
+- current schemaは8。v6→v7は`automationReadState: { globalEnabled: true, disabledTrackIds: [] }`だけを加え、v7→v8は`schemaVersion`だけを更新する。v7では不正だったMaster automationを移行時に許容せず、canonical v8から最初のeffective Masterのoutput volumeだけを新たに表現できる。
 - `lengthBeats`、`tempoMap`、`timeSignatureMap`を時間の正本にし、`bpm` / `timeSignature` / `lengthBars`は旧consumer用mirrorとして検証する。project-modelはcompiled immutable indexからbeat↔seconds、bar↔beatを変換する。
 - v2→v3は保存順で最初の正規化済みChord / Chords / コード、Bass、Melody instrument Trackだけを学習roleへ移す。TypeScriptとRustはECMAScript `String#trim`相当（BOMを含みNEXT LINEを含まない）を共有する。legacy audio参照は決定的な`unresolved` AudioAssetへ保持し、raw object全体の既存IDと衝突しないmigration IDを使う。
-- AutomationLaneはnon-Master Trackのvolume / panだけを対象にし、`bypassed: false`ではpoint前をTrack scalar、point間をhold / linearで評価する。`bypassed: true`ではpointを保持したままcommandを0件にし、Track scalarを使う。lookahead windowはhalf-openを保つが、曲末の最終windowだけexact end pointを含め、release / insert tailへ終値を維持する。beat-linearなlinear区間はtempo change beatごとに補間値commandへ分割し、seconds-linearなWeb Audio `linearRampToValueAtTime`と同じ曲線にする。同じbeatのlane point / tempo change / window endは1 commandへ決定的にまとめ、loop境界だけは前cycleの終値と次cycleのhold resetをこの順で残す。ライブとoffline WAVは同じcommand plannerとProject snapshotのtempo change列を使い、Master targetはTypeScript / Rust両境界で拒否する。
+- AutomationLaneはnon-Master Trackのvolume / panと、canonical Track順の最初のeffective Masterのoutput volumeだけを対象にする。Master panとlater MasterはTypeScript / Rust両境界で拒否する。`bypassed: false`ではpoint前をTrack scalar、point間をhold / linearで評価し、`bypassed: true`ではpointを保持したままcommandを0件にしてTrack scalarを使う。lookahead windowはhalf-openを保つが、曲末の最終windowだけexact end pointを含め、release / insert tailへ終値を維持する。beat-linearなlinear区間はtempo change beatごとに補間値commandへ分割し、seconds-linearなWeb Audio `linearRampToValueAtTime`と同じ曲線にする。同じbeatのlane point / tempo change / window endは1 commandへ決定的にまとめ、loop境界だけは前cycleの終値と次cycleのhold resetをこの順で残す。ライブ、full WAV、selected Track WAVは同じcommand plannerとProject snapshotのtempo change列を使う。
 - production lane editorはProject point列を正本のまま保持し、viewport内と選択pointだけを決定的に最大400 native controlへ投影する。curve segmentはhold / linear / jump別の最大3 SVG pathへ集約し、transportの30 Hz playhead購読は専用leaf componentへ隔離する。pointer previewはこのbounded controlだけを動かし、Project curveとhistoryはpointerupまで変更しない。
 - `compileAudioRouting`は全non-Masterのexact 1 outputとsendをstable DAGへ正規化する。output/send合わせて1,024 edge、sourceごと16 sendを上限とし、無効・gain 0のsendもcycle検査へ含める。live / WAVは同じcompiled planからTrack graphを未接続で全確保した後にedgeを接続し、途中失敗時は全nodeをrollbackする。channel基礎node、insert、live meter、route edge、Master meterを合計するstatic node preflightは4,096を上限とし、起動 / WAVでは最初のAudioNode前、再生中のeffect変更では既存channelを1つも更新する前に再検査する。上限超過またはlive insert再構築失敗では採用済みProjectをUndo可能なまま残し、旧session全体を破棄してresource-limitを表示する。互換性のためsource main pathはvoice→audibility gate→pre tap→fader→insert→pan→post tapを維持し、pre-sendはfader / insert前、post-sendはpan後から取る。Bus soloは関係する上流・下流edgeだけを開き、上流sourceの無関係なMaster直通edgeを開かない。
-- `ready` AudioAssetはchecksumとdecode前metadata、Audio Clipはasset IDとframe単位のsource range / fade / gainを持つ。AutomationLaneはTrack volume / pan target、point、hold / linear補間、bypassedを持ち、同じcommand resolverをlive schedulerとoffline WAVへ接続する。
-- TypeScript codecとRust native persistence境界はcanonical schema v7 JSONを同じrequired-field / unknown-field / routing DAG / take-comp / automation Read相関条件で受理・migrationする。binaryはJSONへ埋め込まず、checksum / byte lengthで別のcontent-addressed repositoryを参照する。
+- `ready` AudioAssetはchecksumとdecode前metadata、Audio Clipはasset IDとframe単位のsource range / fade / gainを持つ。AutomationLaneはnon-Master Trackのvolume / panまたはeffective Masterのoutput volume target、point、hold / linear補間、bypassedを持ち、同じcommand resolverをlive schedulerとfull / selected Track WAVへ接続する。
+- TypeScript codecとRust native persistence境界はcanonical schema v8 JSONを同じrequired-field / unknown-field / routing DAG / take-comp / automation target / Read相関条件で受理・migrationする。binaryはJSONへ埋め込まず、checksum / byte lengthで別のcontent-addressed repositoryを参照する。
 
-schema v7 aggregateとAudio Asset repositoryは正本を分離する。Project JSONは編集意味、take comp、automation bypass、Global / Track Read、確定済みautomation curve、routing、content identityを保持し、repositoryはimmutable binaryを保持する。Audio Clipのproduction配置・再生・trim / gain / fade / loop / split / duplicate / deleteと、既存Clipからのtake grouping / comp範囲編集は実装済みである。Automationはvolume / panのproduction lane editor、lane Read / Bypass、Track / Global Read control、Track別Read / Touch / Latch / Writeを公開済みである。mode、Armed / Writing、gesture / pass所有権はruntime-onlyであり、Master、insert / send / tempo automation、modulationと高度write modeは後続である。
+schema v8 aggregateとAudio Asset repositoryは正本を分離する。Project JSONは編集意味、take comp、automation bypass、Global / TrackまたはMaster Read、確定済みautomation curve、routing、content identityを保持し、repositoryはimmutable binaryを保持する。Audio Clipのproduction配置・再生・trim / gain / fade / loop / split / duplicate / deleteと、既存Clipからのtake grouping / comp範囲編集は実装済みである。Automationはnon-Master volume / panとeffective Master output volumeのproduction lane editor、lane Read / Bypass、TrackまたはMaster / Global Read control、Read / Touch / Latch / Writeを公開済みである。mode、Armed / Writing、gesture / pass所有権はruntime-onlyであり、Master pan、later Master、insert / send / tempo automation、modulationと高度write modeは後続である。
 
 #### 5.8.1 Automation lane editing transaction
 
 1. UIは`selectedTrackId`とvolume / pan target、snap済みbeat、value、outbound interpolationだけをcommand引数にする。Inspectorの入力途中とlane上のpointer previewはcomponent local stateに留め、Enter / blur / pointerupなどの確定境界までProjectへ書かない。
-2. project-modelのpublic mutationはsource Projectをcanonical codecで先に検査し、non-Master target、曲内beat、target別value範囲、`hold | linear`、同一lane内のbeat衝突、lane / point上限をno-throwのtyped resultで検査する。最初のpointで`bypassed: false`のtarget laneを遅延作成し、全Project entityと衝突しないlane / point IDを同じ予約集合から発行する。更新後はbeat昇順へ並べ、最後のpoint削除またはclearでは空laneを除去する。
+2. project-modelのpublic mutationはsource Projectをcanonical codecで先に検査し、non-Master volume / panまたはeffective Master volume target、曲内beat、target別value範囲、`hold | linear`、同一lane内のbeat衝突、lane / point上限をno-throwのtyped resultで検査する。最初のpointで`bypassed: false`のtarget laneを遅延作成し、全Project entityと衝突しないlane / point IDを同じ予約集合から発行する。更新後はbeat昇順へ並べ、最後のpoint削除またはclearでは空laneを除去する。
 3. `setAutomationLaneBypassed`はlane IDとbooleanだけを受け取り、target / point / ID / Track scalarを保持して`bypassed`だけをimmutableに変更する。同値は元Project参照のsemantic no-op、missing laneと非booleanはtyped failureである。Bypass中のpoint add / update / removeは状態を暗黙にReadへ戻さない。
 4. 候補Project全体もcanonical codecを通過した場合だけStudio actionが開始時のProject参照へcompare-and-swapする。成功したadd / update / remove / clear / Read-Bypass切替は各1 Project change、Undo 1回、save revision 1回で、semantic no-opは元Project参照を返し、stale snapshot、busy operation、invalid source / candidateではProject、history、revision、selection、transportを変更しない。
 5. 採用されたlane編集またはRead / Bypass切替はsession snapshotを無効化するため、active playbackを1回停止して有限なplayheadを保つ。accepted切替は既存runtime stop境界を呼んでnatural drainも破棄し、次のplayback requestが新Projectからautomation commandを再構築する。no-opと拒否ではactive / draining sessionへ触れない。
 6. snapは入力正規化でありschema fieldを追加しない。schema v3で導入したtarget、point ID、beat、value、interpolation、schema v6の`bypassed`、schema v7の`automationReadState`をcurrent SQLite autosaveと`.ctsproj.json`でexact roundtripする。live lookahead、transport loop、可変tempo分割、offline WAVは`globalEnabled && !disabledTrackIds.includes(trackId) && !lane.bypassed`を判定する同じresolverを使い、effective Readがfalseなら全windowで空command列を返すため、Editor固有の可聴判定を作らない。
-7. Track / global Readのproduction controlは同じ永続stateを変更するが、live write-mode captureは次節のruntime transactionで扱う。Master、insert / send / tempo parameter、MIDI CC / LFO modulationは対象外とする。
+7. Trackまたはeffective Master / Global Readのproduction controlは同じ永続stateを変更するが、live write-mode captureは次節のruntime transactionで扱う。Master pan、later Master、insert / send / tempo parameter、MIDI CC / LFO modulationは対象外とする。
 
 #### 5.8.2 Automation Read / Touch / Latch / Write runtime transaction
 
-1. Storeはnon-Master Trackごとの`AutomationWriteMode = read | touch | latch | write`、Armed / Writing、touch中target、pass ownershipをrenderer runtimeだけに保持する。Project activationは全TrackをReadで初期化し、modeをProject codec、history、SQLite、`.ctsproj.json`、OpenAPIへ投影しない。
-2. 再生graphのattach時に1件でもRead以外のTrackがあれば、project-modelの`beginAutomationPass`へ全non-Masterのmode、有限な開始beat、exact Project参照を渡す。passは開始時Projectのcanonical fingerprintとdeep-frozen snapshotを所有し、live操作中はProject / history / revisionを変更しない。音声録音中、stale activation / playback、無効Track / modeではgraph override前にfail closedする。
-3. Mixer / Track Listのvolume / panは共通gesture adapterを通す。pointerdown / move / up / cancel / lost captureと、矢印 / Home / End / PageUp / PageDownのkeydown / keyup / blurを同じpending identityへ正規化し、各targetのbegin / update / endをexactly once呼ぶ。live graphは対象AudioParamだけのscheduled curveをcancelしてmanual overrideを所有し、Touch releaseはtempo map上の100 ms後に開始前curveへ復帰、Latch / Writeはパンチアウトまでoverrideを維持する。
-4. Touchは接触区間だけを置換し、release後100 msのlinear return boundaryで開始前curveへ戻す。Latchは最初の接触からhalf-open punch-outまで最後のsampleを保持する。Writeはpass開始時にvolume / pan両targetを開始時Track scalarでcaptureし、接触がなくても両curveを置換する。既存laneの`bypassed`、Global / Track Read、対象外point object / IDは保持し、sampleはvolume 0.001、pan 0.0005の最大再構成誤差で決定的に削減する。
+1. Storeはautomation対応Trackごとの`AutomationWriteMode = read | touch | latch | write`、Armed / Writing、touch中target、pass ownershipをrenderer runtimeだけに保持する。Project activationは全TrackをReadで初期化し、modeをProject codec、history、SQLite、`.ctsproj.json`、OpenAPIへ投影しない。
+2. 再生graphのattach時に1件でもRead以外の対応Trackがあれば、project-modelの`beginAutomationPass`へnon-Masterとeffective Masterのmode、有限な開始beat、exact Project参照を渡す。passは開始時Projectのcanonical fingerprintとdeep-frozen snapshotを所有し、live操作中はProject / history / revisionを変更しない。音声録音中、stale activation / playback、無効Track / modeではgraph override前にfail closedする。
+3. Mixer / Track Listのnon-Master volume / panとeffective Master volumeは共通gesture adapterを通す。pointerdown / move / up / cancel / lost captureと、矢印 / Home / End / PageUp / PageDownのkeydown / keyup / blurを同じpending identityへ正規化し、各targetのbegin / update / endをexactly once呼ぶ。live graphは対象AudioParamだけのscheduled curveをcancelしてmanual overrideを所有し、Touch releaseはtempo map上の100 ms後に開始前curveへ復帰、Latch / Writeはパンチアウトまでoverrideを維持する。両Master faderは同じruntime gesture値を購読し、片方の操作中も表示を一致させる。
+4. Touchは接触区間だけを置換し、release後100 msのlinear return boundaryで開始前curveへ戻す。Latchは最初の接触からhalf-open punch-outまで最後のsampleを保持する。Writeはpass開始時にnon-Masterのvolume / pan両target、effective Masterのvolume targetを開始時Track scalarでcaptureし、接触がなくても対応curveを置換する。既存laneの`bypassed`、Global / TrackまたはMaster Read、対象外point object / IDは保持し、sampleはvolume 0.001、pan 0.0005の最大再構成誤差で決定的に削減する。
 5. 停止、自然終了、seek、loop右端、mode / Read / Bypass変更、Undo / Redo、Project activation、native close、pagehideは同じpunch-out pathを使う。終了beatをProject範囲へclampし、source exact参照 / fingerprint、lane / point上限、fresh global ID、candidate codecを検証してから、開始時Projectへのstrict CASをProject変更・Undo・save revision各1回として採用する。commit拒否ではpassをretry可能なまま保持し、pagehideだけは同期確定できなければProject no-opでcancelする。
 6. active pass中に許す並行Project変更は、開始時Readだった別Trackのvolume / pan scalarだけである。exact source参照とfingerprintに対する2段階rebaseでpassのfrozen baselineを維持する。effective Read laneがないtargetだけをlive graphへ反映し、laneがあるtargetはcommit後にsessionを停止して古いbase予約を破棄する。Write / Touch / Latch Trackのscalar、lane / routing / effect / noteなどとの混在候補はpassを失わずatomicに拒否する。
-7. 確定curveは通常のschema v7 `AutomationLane`として次のlive再生とoffline WAVの共通resolverへ入り、記録時modeはbounce結果を変えない。成功したpunch-outまたは明示cancelと同じCoordinator transactionでWriteをTouchへfallbackし、React mount有無に依存させない。point / lane上限、CAS競合などで確定に失敗したpassは理由をUIへ公開し、明示cancelだけが部分curveを採用せずoverrideを解放してtransportを停止する。Master、insert / send / tempo、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass managementは別gateとする。
+7. 確定curveは通常のschema v8 `AutomationLane`として次のlive再生とfull / selected Track WAVの共通resolverへ入り、記録時modeはbounce結果を変えない。成功したpunch-outまたは明示cancelと同じCoordinator transactionでWriteをTouchへfallbackし、React mount有無に依存させない。point / lane上限、CAS競合などで確定に失敗したpassは理由をUIへ公開し、明示cancelだけが部分curveを採用せずoverrideを解放してtransportを停止する。Master pan、later Master、insert / send / tempo、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass managementは別gateとする。
 
 #### 5.8.3 Tempo / 拍子map editing transaction
 
@@ -1556,7 +1556,7 @@ schema v7 aggregateとAudio Asset repositoryは正本を分離する。Project J
 2. project-modelのpublic mutationはsource Projectをcanonical codecで先に検査し、有限な曲内beat、BPM 20〜300、拍子1〜32 / 分母2・4・8・16、map上限、global ID、厳密昇順、同beat衝突をno-throwのtyped resultで検査する。新規追加と移動先は`0 <= beat < lengthBeats`、拍子eventの追加・移動はさらに直前segmentの小節境界に限定する。canonical sourceで既に`beat === lengthBeats`にあるeventだけは、同じbeatでの値更新 / no-op、曲内への移動、削除を互換操作として許す。
 3. 拍子候補は後続eventを含む全segmentと`lengthBeats`終端をcompileし、全てが小節境界になる場合だけ`lengthBars`を再導出する。終端exactの拍子eventは長さ0の最終segmentとしてcanonical validatorと同じく許容し、他のmap eventを更新・削除した候補も再計算できるようにする。先頭eventの値を変えた候補では`bpm` / `timeSignature` mirrorも同じimmutable candidate内で更新する。
 4. candidate全体がcanonical codecを通過した時だけStudio actionが開始時Project参照へcompare-and-swapする。成功したadd / update / move / deleteは各1 Project change、Undo 1回、save revision 1回で、semantic no-op、stale snapshot、busy operation、invalid source / candidateではProject、history、revision、selection、transportを変更しない。
-5. 採用されたmap変更は再生session snapshotを停止し、有限なplayheadを保持する。次のplayback / metronome / WAV / MIDI / timelineは既存のcompiled musical-time indexを再構築するため、Editor固有の変換器を作らない。map entity自体はschema v4から変えず、current schema v7へそのまま保存する。
+5. 採用されたmap変更は再生session snapshotを停止し、有限なplayheadを保持する。次のplayback / metronome / WAV / MIDI / timelineは既存のcompiled musical-time indexを再構築するため、Editor固有の変換器を作らない。map entity自体はschema v4から変えず、current schema v8へそのまま保存する。
 6. 連続tempo ramp、音声からのtempo追従、AutomationLaneのtempo targetは別の品質gateとし、このtransactionに予約fieldを先行追加しない。
 
 ### 5.9 Audio Track import / content-addressed transaction（Batch 5）
@@ -1589,7 +1589,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 ### 5.10.1 Physical loopback recording-latency calibration
 
 1. 校正は通常の録音wizardやマイクの音響テストではなく、CubaseのExternal Effect `Measure Delay` / Logic ProのI/O Utility `Latency Detection (Ping)`に相当する限定的な外部I/O測定である。利用者へオーディオinterfaceの出力から選択中のexact入力へケーブル接続し、スピーカーとマイクを使う空中loopbackを行わないよう案内する。app monitorだけでなくinterface / driver mixerのDirect Monitor、hardware Loopback、同一outputへのreturnもOFFにする。probe振幅は固定し、排他校正中だけMaster gainをunityへ正規化して全経路のfinallyで元値へ戻すため、Project Master fader 0〜2へ出力levelと検出可否が依存しない。
-2. 校正開始はrecording / playbackと排他にし、transportが既にstoppedでも`PlaybackController`のnatural drainを同期stopしてgraph disposalとProject Master値のrestoreを完了してから共有Masterを再利用する。app-wide `AudioContext`のgeneration / sample rateと選択中のexact input IDをimmutableなrequestへ凍結する。固定seedから生成した既知PRBSを無音で区切った複数burstとしてMaster経由で流し、capture Workletを同じ将来render frameへarmする。通常のTrack、Clip、AudioAsset、Project mutationや録音asset保存経路は作らない。
+2. 校正開始はrecording / playbackと排他にし、transportが既にstoppedでも`PlaybackController`のnatural drainを同期stopしてsession output / Master graphを破棄してから、app-wide engine output/calibration gainを校正専用に所有する。`AudioContext`のgeneration / sample rateと選択中のexact input IDをimmutableなrequestへ凍結する。固定seedから生成した既知PRBSを無音で区切った複数burstとしてengine output / limiter経由で流し、capture Workletを同じ将来render frameへarmする。通常のTrack、Clip、AudioAsset、Project mutationや録音asset保存経路は作らない。
 3. 取得PCMはsilenceとclippingを先に検査する。各burstについて送出した既知系列と入力を、lag 0から500 ms相当frameまで整数sample単位の正規化相互相関で走査する。sub-sample補間は行わない。複数burstのpeak位置が一貫し、一意性と固定confidence gateを満たす時だけlagを`latencyFrames`として採用する。同率または近接する競合peak、burst間で不一致なpeak、低confidenceはambiguousとして拒否する。
 4. 校正は`システム既定`では開始せず、明示選択したopaque `inputDeviceId`をrequestへ固定する。解析の直前と結果公開の直前にinput、Context generation、sample rateを再検証する。途中のdevice / context変化、silence、clipping、ambiguous、low confidence、500 ms窓外、cancelはfail closedとする。通常のcancel / 解析失敗は既存profileを上書きせず、入力選択または`devicechange`は進行中の校正を中止して旧profileも破棄する。成功時だけexact `inputDeviceId / contextGeneration / sampleRate / latencyFrames / confidence`を持つ単一runtime profileへatomicに置き換える。
 5. app rootはdialog lifecycleや録音phaseと独立して`devicechange`を購読し、future profileを即時破棄する。通常takeは開始時のmode / profile object / manual offsetをimmutableに所有し、clock bind前にruntime policyが変わればfail closed、bind後は現在takeの配置値を変えず次回takeだけを無効化する。exact input選択の変更でもprofileを破棄し、以前の入力へ戻しても自動再利用しない。Web Audioは安定したoutput identityを公開しないため、出力device、audio driver、buffer設定を変更した利用者へ再校正を明示する。Context generationまたはsample rateが変わった旧profileも適用しない。profileはProject codec / history / revision / autosave / SQLite / Asset repository / `.ctsproj.json`へ投影しない。
@@ -1621,7 +1621,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 2. folder / take / comp segment IDはProject全entityとの予約集合から発行する。初期compは先頭takeの全range 1件で、後から一致Clipをtakeへ追加しても現在のcompを変更しない。Track削除はfolderをcascade除去し、Track複製はfolder / take / segmentをfresh IDへ張り替えてassetだけを共有する。asset metadata GCはAudio Clipとtakeの両参照をrootにする。
 3. range paintは選択takeとfolder-local half-open範囲を受け、既存segmentを分割・置換して隣接同takeをmergeする。境界移動は左右segmentのidentityを保ったまま最小1/960拍を確保する。未使用takeだけを削除でき、folderは最低2 takeを維持する。候補はgapless / sorted / exact cover、take range内、segment 4,096件以下をcanonical codecで再検証する。
 4. Studio actionは開始時Project参照へのCASを通し、accepted group / add / range paint / boundary move / unused take deleteを各1 Project change、Undo 1回、save revision 1回にする。semantic no-op、pointer cancel / Escape、recording / save operation fence、stale snapshot、asset issue、codec拒否ではProject / history / revision / playbackを変えない。
-5. accepted topology / comp選択変更はactive playback sessionを停止して有限なplayheadを保持する。選択folder / take、pointer preview、Inspector draft、focusはruntime-onlyである。reload後はv5で導入されcurrent schema v7へ継承されたfolderを復元し、次のplayとWAVが同じpure `AudioClipPlaybackIndex`へ正規化する。
+5. accepted topology / comp選択変更はactive playback sessionを停止して有限なplayheadを保持する。選択folder / take、pointer preview、Inspector draft、focusはruntime-onlyである。reload後はv5で導入されcurrent schema v8へ継承されたfolderを復元し、次のplayとWAVが同じpure `AudioClipPlaybackIndex`へ正規化する。
 6. plannerはcomp segmentごとに選択takeだけをvirtual Audio Clip regionへ変換する。source offsetはcompiled tempo mapとtake source windowから求める。異なるtakeの境界では`crossfadeMs / 2`ずつ両側へsource handle内で延長し、独立したlinear splice envelopeを掛ける。persist済みtake fadeはtake-local秒数を保ち、短いcomp sliceへ合わせて伸縮せずtruncateする。構造化source identityで通常Clipとcomp occurrenceのID衝突を防ぐ。
 7. MIDI exportはaudio takeをMIDI eventへ投影しない。ただしv5 aggregateの独立hardening境界としてfolder / ready asset / source frame / comp exact-coverを検証し、壊れた参照を`invalid-project`として拒否する。
 8. 固定pass cycle recordingとbounded Auto Punchから生成したfolderも同じ編集 / plannerを使うが、そのcapture / atomic生成は5.10.2 / 5.10.3が所有する。再生中の任意Quick Punch、MIDI take / comp、複数入力、複数の名前付きcomp、flatten / bounceはこのtransactionの完了条件に含めない。
@@ -1645,7 +1645,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 ### 6.1.1 Audio Asset preflight / Audio Clip voice
 
-- `AudioAssetPlaybackCache`はcurrent schema v7の`ready` assetだけを受理し、repository readの前後で128 MiB objectのlength / SHA-256を照合する。再生対象のraw preflightとdecoded AudioBuffer cacheは各256 MiBを上限とし、decode cache keyへchecksumとtarget AudioContext sample rateを含める
+- `AudioAssetPlaybackCache`はcurrent schema v8の`ready` assetだけを受理し、repository readの前後で128 MiB objectのlength / SHA-256を照合する。再生対象のraw preflightとdecoded AudioBuffer cacheは各256 MiBを上限とし、decode cache keyへchecksumとtarget AudioContext sample rateを含める
 - live開始はユーザーgesture内でAudioContextの生成 / resumeを開始した後、対象Audio Asset全件のpreflight完了を待つ。preflight前にTrackGraph、source、schedulerを生成しない。offline WAVはOfflineAudioContext生成前に同じasset preflightを完了する。missing / changed / unavailable / decode / resource-limitは型付きに返し、partial再生や部分WAVを作らない
 - playable Audio Clip region indexはProject snapshotごとに開始秒でsortし、prefix maximum endを持つ。liveの25ms tickはこのindexをrange queryし、全Clipを再収集しない。index region、1 planning window、WAVのMIDI / drum / chord eventとAudio source planの合計は各10,000件をhard capとする。region超過はlive Track graph生成前に拒否する。live window超過はそのscheduler境界で当該windowを部分scheduleせずsessionを中断するため、後続windowで初めて超過した場合は以前のwindowが再生済みになり得る。WAVの全曲plan超過は`OfflineAudioContext`生成前に拒否する
 - liveはユーザーgesture内でcontext activationを開始し、実sample rate取得後に未使用decoded LRUを解放してから、resolver I/O / TrackGraph / source生成前のcombined preflightを行う。active / in-flight decoded cacheは保持量として残し、resolve/hash peakを`rawTotal + 2 × largestRaw + retainedDecoded`、decode peakを`rawTotal + largestRaw decode copy + targetRateDecodedTotal + retainedDecoded`としてchecked加算する。両phaseの最大が384 MiBを越えればresolverを呼ばず`audio-resource-limit`にする
@@ -1658,13 +1658,13 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 - MVPで有効なMasterパラメータは`volume`だけとし、有限値を0.0〜2.0へ制限する。Master trackが複数あるprojectでは`project.tracks`配列の先頭にあるMasterだけを有効とし、後続Masterは音声へ影響させない。Master trackがないlegacy projectは1.0、`NaN` / `Infinity`など有効Masterの非有限値はfail-silentの0として解決する
 - Masterの`pan` / `mute` / `solo`はschema互換用に保持しても音声処理へ接続せず、MVP UIにも公開しない
-- ライブ再生とOfflineAudioContextによるWAV renderは、current schema v7のcompiled routing DAGに従うTrack / Busのmain outputとpre/post-fader send→Master gain→limiterを共有する。ライブだけがメトロノームをMaster入力へ加え、Master gain直後へpost-fader UI meterを接続する。offline WAVにはメトロノームclickとUI meter / analyserを作らず、両経路は同じrouting planとMaster gain resolverを使って別経路でgainを重ねない
-- graph初期化時とoffline renderでは、Trackのmute / solo、各Track volumeおよび有効Master volumeをsample 0から確定gainへ設定し、既定gain 1.0の漏れを許さない。10ms平滑化は、再生中にTrack volume / mute / soloまたは有効Master volumeを更新した時だけ使う
+- ライブ再生はcurrent schema v8のcompiled routing DAGに従うTrack / Busのmain outputとpre/post-fader sendを`session output → session Master fader → engine output/calibration gain → limiter`へ接続する。Project scalar / Read automation / write gestureはsession Master faderだけを所有し、engine gainは通常unityに保つ。ライブ専用メトロノームもsession outputへ加え、session Master fader直後へpost-fader UI meterを接続する。OfflineAudioContextは同じrouting planとMaster gain resolverをrender-owned Master fader→limiterへ接続し、メトロノームclickとUI meter / analyserを作らず、full / selected Track WAVで別経路のgainを重ねない
+- graph初期化時とoffline renderでは、Trackのmute / solo、各Track volumeおよび有効Master volumeをsample 0から確定gainへ設定し、既定gain 1.0の漏れを許さない。10ms平滑化は、再生中にTrack volume / mute / soloまたは有効Master volumeを更新した時だけ使う。有効なMaster Read lane中のbase scalar変更は現在beatを保持したsession replacementとして再開し、古い予約値を残さない
 
 ### 6.1.3 Live meter ownership / offline export
 
 - per-track UI analyserとmeter registry entryはlive TrackGraph / accepted sessionが所有し、live TrackGraph構築時に登録する。構築が途中で失敗した時とgraph破棄時は、registryが同じanalyser identityを保持している場合だけcleanupする。古いgraphのcleanupは後から登録されたentryを削除しない
-- Master UI analyserとmeter registry entryはsessionではなく、live AudioEngineのmaster bus / sourceとそのAudioContextが所有する。同じmaster sourceを使うaccepted session間では同一analyser / entryを再利用し、accepted sessionの置換だけでは削除しない。master source / contextの退役時に、registryが同じanalyser identityを保持する場合だけ削除する
+- Master UI analyserとmeter registry entryはaccepted playback sessionとそのsession Master faderが所有する。構築途中の失敗、session replacement、graph破棄では、そのsourceとanalyser identityがregistryの現在値に一致する場合だけcleanupし、古いsessionの後始末が新しいentryを削除しない
 - offline WAVはTrack / Bus routing DAG→Master→limiterの可聴処理topologyを共有するが、per-track / MasterいずれのUI analyserやmeter registry entryも作成・登録・置換・削除しない。成功・失敗を問わずlive analyserのidentity、meter更新、transport state、再生sessionを変更しない
 - 各offline renderは独立したSynth / Drum manager、TrackGraph、Master gain、limiterを所有し、WAV生成成功時も、render / encodeが失敗した時も、voice manager→TrackGraph→Masterの同じcleanup境界で全nodeと参照を一度だけ解放する
 
@@ -1687,7 +1687,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 - enabledなDelayはwet echoの振幅が0.001（-60 dB）以上である最後のechoまで含め、浮動小数点誤差があるexact thresholdも含める。enabledなReverbはruntime impulseと共有する固定peak 0.35、wet gain、squared decay envelopeの上限が同じthresholdへ達するまでを解析的に見積もる。連続insertのimpulse tailは保守的に加算する
 - enabledなFilter / EQはruntime nodeへ設定する同じtype / frequency / Q / gainを共有resolverから得る。Web Audio 1.1のbiquad係数から最大pole半径を求め、36dBのstate headroomが振幅0.001へ減衰するframe数を算出する。neutral 0dB EQ stageは0、無効・非有限・不安定なstageは最大2秒でfail-closedし、Filter 1段とEQ 3段をinsert順に加算する。synth内部filterは後段ADSR Gainが0になるため別tailを加えない
 - Web Audio 1.1 `DynamicsCompressorNode`は内部の固定0.006秒DelayNodeによるtail-timeを持つ。enabledなinsert Compressorはstageごとに6msを直列加算し、常設Master limiterの6msはTrack統合後に1回だけ加える
-- routing伝播ではmain output / post-fader sendへchannel insert後の終端、pre-fader sendへchannel input終端を渡すため、pre-sendはsource insert tailを迂回し、到達Busのinsert tailは加える。source end、経由したTrack / Bus insert tail、Master limiterから曲本体を超える`uncappedTailSeconds`を求め、0より大きい時だけ`50ms fade + 6ms limiter`以上を確保する。製品安全上の40秒hard capはlimiter込み出力へ適用する。WAVはrouting graph後のrender-owned output bus、liveはdrain generationだけがautomationを所有するengine Master gainを使い、`fadeEndSeconds = totalSeconds - 0.006`でfadeを終えてからlimiter outputだけをcleanup deadlineまで保持する。これはPCM silence scanではなく解析的な上限である
+- routing伝播ではmain output / post-fader sendへchannel insert後の終端、pre-fader sendへchannel input終端を渡すため、pre-sendはsource insert tailを迂回し、到達Busのinsert tailは加える。source end、経由したTrack / Bus insert tail、Master limiterから曲本体を超える`uncappedTailSeconds`を求め、0より大きい時だけ`50ms fade + 6ms limiter`以上を確保する。製品安全上の40秒hard capはlimiter込み出力へ適用する。WAVはrouting graph後のrender-owned output bus、liveはdrain generationだけが所有するsession output gainを使い、`fadeEndSeconds = totalSeconds - 0.006`でfadeを終えてからlimiter outputだけをcleanup deadlineまで保持する。これはPCM silence scanではなく解析的な上限である
 - WAVは`ceil(totalSeconds * 44,100)`の動的frame数を計算する。render固有memoryは`frames × 2ch × Float32 4 bytes + (44 + frames × 2ch × PCM16 2 bytes)`で192 MiB以下、end-to-end export peakは`frames × 2ch × Float32 4 bytes + 4 × (44 + frames × 2ch × PCM16 2 bytes)`で384 MiB以下を必須とし、OfflineAudioContextより前に拒否する。後者はencoder / Blob / native ArrayBuffer / IPC copyを含む。曲本体は最大300秒で、300秒本体と40秒tailは両budget内である
 - schedule生成前の共通preflightはchecked/saturating加算を使う。`resolved-stored` projectionはlinked正本の保存payloadをinstanceごとに数え、MIDI Clip loopの派生音を増やさない。`audible` projectionは各MIDI instanceのloop展開後Note、linked Drum payload、派生Chord noteを数える。ライブは全体20,000 event、全曲のnodeを一括所有するWAVはAudio source planとの合計10,000件を上限とし、両者ともMIDI loop展開後・drum swing解決後onsetの任意0.75拍rolling windowを256件以下にする。Audio Clipは別途region indexと1 windowを各10,000件に制限する。transport loopはindex構築後・per-track Web Audio graph構築前に、完全周期数×phase件数と余り区間のcircular two-pointer scanからsteady-state最大密度を展開せず求め、同じ256件上限を適用する。event / density / regionの起動時超過は型付きに失敗し、UIはノート・ドラム・オーディオクリップ・連動コピーを減らす案内を出す。liveの後続Audio Clip window超過は当該windowをscheduleせず通常のsession interruptionとして停止する。WAVは`OfflineAudioContext`と部分fileを作らない
 - Project走査から得るraw scheduleの順序は正本としない。ライブは各due windowを時刻順に処理し、WAVは確率・swing解決後の全eventをonset昇順でstable sortしてからvoiceを割り当てる。同一onsetの元順序を保ち、後位置の正本が先に格納されたlinked Clipや未整列Noteでも、未来のvoiceを先にsteal / stopしない
@@ -1699,7 +1699,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 - non-loop schedulerの`onEnd`ではstoreをただちに`stopped`、`isPlaying=false`、`positionBeat=0`へ進める。同時にscheduler、position timer、metronome clickを停止するが、TrackGraph、voice、Master busとpost-fader Master analyserは、絶対project-end時刻にtail秒を加えたdeadlineまで接続したままにする。transport loop schedulerはwrap時に`onEnd`を持たず、drainを開始しない
 - `PlaybackController`はactive sessionをちょうど1つのdraining slotへ移し、同期的な`finish()`が発生させるreentrant `stopped`通知をgenerationと1回限りのguardで識別する。drain完了callbackはslot identityが一致する場合だけdisposeし、古いcallbackはreplacement sessionへ作用しない
-- drain末尾fadeは共有Master fader値を上書きせず、absolute cleanup deadlineの6ms前をfade endとしてautomationする。callbackがfade endより遅れた場合はMasterを即時0にし、cleanup deadlineより遅れた場合はtimerなしで完了する。いずれも現在時刻からtailを延長しない。新しい再生、手動停止、Project activation、context interruption、controller / bridge disposeはtimerとgraphを即時破棄し、pending fadeをcancelして現在ProjectのMaster gainを即時復元する
+- drain末尾fadeはProject Master faderとengine output gainを上書きせず、session output gainだけをabsolute cleanup deadlineの6ms前までautomationする。callbackがfade endより遅れた場合はsession outputを即時0にし、cleanup deadlineより遅れた場合はtimerなしで完了する。いずれも現在時刻からtailを延長しない。新しい再生、手動停止、Project activation、context interruption、controller / bridge disposeはtimerとsession graphを即時破棄し、pending fadeをcancelする。engine output/calibration gainには触れない
 - 停止状態からの`play()`は、拍子分母を含む`projectLengthBeats`に対し現在位置が有限かつ`0 <= positionBeat < songEnd`なら保持し、負値、非有限、曲末以上、または利用不能な曲長では0へ正規化する。位置補正、`starting`への遷移、request ID増加、audio issue解除を1つのstore更新で行い、loop bounds、Project identity、history、save stateは変更しない。曲末startが失敗しても、次のplayは新generationで再び0から開始できる
 
 ### 6.2 v1以降
@@ -1713,8 +1713,8 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 ### 7.1 現在の実装
 
-- Project schemaのcurrent versionは7。v1の`aliasOf`はruntime上の意味を持たず各Clip自身のpayloadが再生されていたため、v1→v2 migrationでは`aliasOf`だけを削除して独立Clipとして保持する。v2→v3はrole、tempo/signature map、AudioAsset / Automation metadataを決定的に加え、固定tempoの音とlegacy audio参照を失わない。v3→v4は全non-Masterへdirect-to-Master outputをexact 1件、sendを0件作る。v4→v5は空の`audioTakeFolders`、v5→v6は全AutomationLaneへ`bypassed: false`、v6→v7は`automationReadState: { globalEnabled: true, disabledTrackIds: [] }`だけを加えて既存の音を変えない。TypeScript codecとRust native metadata境界は`v1 → v2 → v3 → v4 → v5 → v6 → v7`を順に適用し、canonical v7を保存する。
-- schema v7では`lengthBeats`とtempo / 拍子mapが正本で、`bpm` / `timeSignature` / `lengthBars`は検証対象のcompatibility mirrorである。Track roleは名前から独立した正本、AudioAssetは`ready` / `unresolved`のmetadata union、AudioTakeFolderはimmutable source windowとgapless comp、Automationはvolume / pan target、point / interpolation、bypassed、Global / Track Read、AudioRoutingはoutput / sendの非循環graphを持つ。
+- Project schemaのcurrent versionは8。v1の`aliasOf`はruntime上の意味を持たず各Clip自身のpayloadが再生されていたため、v1→v2 migrationでは`aliasOf`だけを削除して独立Clipとして保持する。v2→v3はrole、tempo/signature map、AudioAsset / Automation metadataを決定的に加え、固定tempoの音とlegacy audio参照を失わない。v3→v4は全non-Masterへdirect-to-Master outputをexact 1件、sendを0件作る。v4→v5は空の`audioTakeFolders`、v5→v6は全AutomationLaneへ`bypassed: false`、v6→v7は`automationReadState: { globalEnabled: true, disabledTrackIds: [] }`だけを加えて既存の音を変えない。v7→v8は`schemaVersion`だけを更新し、v7で不正だったMaster targetを移行時に許容しない。TypeScript codecとRust native metadata境界は`v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8`を順に適用し、canonical v8を保存する。
+- schema v8では`lengthBeats`とtempo / 拍子mapが正本で、`bpm` / `timeSignature` / `lengthBars`は検証対象のcompatibility mirrorである。Track roleは名前から独立した正本、AudioAssetは`ready` / `unresolved`のmetadata union、AudioTakeFolderはimmutable source windowとgapless comp、Automationはnon-Master volume / panまたはeffective Master output volume target、point / interpolation、bypassed、Global / TrackまたはMaster Read、AudioRoutingはoutput / sendの非循環graphを持つ。
 - linked Clipのconsumerは共有`resolveClipContent`を使い、instanceのID / start / length / loopとsourceのnotes / drum payloadを合成する。編集はsourceへ、ライブ/WAV/MIDIの配置とdrum乱数identityはinstanceへ帰属させる。
 - codec / Rust保存境界は、非Master Clipの保存済みNote / DrumEventをlinked instance解決後に数える`resolved-stored` projectionを200,000件以下に制限する。これは従来の200,000 raw-item envelopeを狭めない互換上限であり、v1はinertな`aliasOf`を辿らず各Clip自身のpayloadを数え、派生Chord noteは含めない。複製候補もcommit前に同じ上限を検査する。
 
@@ -1733,7 +1733,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 MVPの正本はapp data directory内の`projects-v1.sqlite3`。Project集約はUI都合の正規化tableへ分解せず、`project-model` codecが生成したversioned canonical JSON snapshotとして保持する。ユーザーが持ち運ぶ交換形式は、codecで再検証する単一の`.ctsproj.json`ファイルであり、正本DBそのものやOS pathはrendererへ公開しない。
 
-schema v7のAudioAsset metadata、Audio Clip / Audio Take frame payload、AutomationLane bypass、Global / Track Read、AudioRoutingはcanonical JSON、音声binaryは別のapplication-owned content-addressed repositoryへ保存する。binaryはProject採用前に確定し、Project save / crash draft前に存在・length・checksumを再検証する。起動時staging recoveryとgeneration-aware GCでcrash後のpartial / orphanを整理する。下記はfutureのper-song bundle proposalであり、現行の`.ctsproj.json`へbinaryは同梱しない。
+schema v8のAudioAsset metadata、Audio Clip / Audio Take frame payload、AutomationLane bypass、Global / TrackまたはMaster Read、AudioRoutingはcanonical JSON、音声binaryは別のapplication-owned content-addressed repositoryへ保存する。binaryはProject採用前に確定し、Project save / crash draft前に存在・length・checksumを再検証する。起動時staging recoveryとgeneration-aware GCでcrash後のpartial / orphanを整理する。下記はfutureのper-song bundle proposalであり、現行の`.ctsproj.json`へbinaryは同梱しない。
 
 ```text
 MySong.ctsproj/       # future proposal
@@ -1840,7 +1840,7 @@ full-mixとselected Trackは同じoffline renderer、export operation lock、lea
 | NoteEvent | MIDIノート |
 | DrumEvent | ドラムステップ |
 | ChordEvent | コードトラック上のコード |
-| AutomationLane / AutomationPoint | Track音量/パンの時間変化 |
+| AutomationLane / AutomationPoint | non-Master Track音量/パン、effective Master出力音量の時間変化 |
 | Lesson | 教材 |
 | LessonStep | 教材の各ステップ |
 | UserProgress | 学習進捗 |
@@ -2052,21 +2052,22 @@ export type ChordEvent = {
 };
 ```
 
-### 2.1 Project schema v7（current）
+### 2.1 Project schema v8（current）
 
-- `schemaVersion`のcurrent valueは`7`。decodeはversionごとにrequired field、unknown field、型、有限値、整数、範囲を厳密検証し、`v1 → v2 → v3 → v4 → v5 → v6 → v7`の順にpureかつ決定的にmigrationする。
+- `schemaVersion`のcurrent valueは`8`。decodeはversionごとにrequired field、unknown field、型、有限値、整数、範囲を厳密検証し、`v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8`の順にpureかつ決定的にmigrationする。
 - v3では`Project.lengthBeats`を曲長の正本、`tempoMap` / `timeSignatureMap`を時間変換の正本とする。mapはbeat 0から始まり、IDを含む昇順event列として保存する。`bpm`、`timeSignature`、`lengthBars`は旧consumer用の互換mirrorであり、それぞれ先頭tempo、先頭拍子、拍子mapから算出した実小節数と一致しなければならない。
 - `compileMusicalTime`でimmutable indexを作り、`beatToSecondsAt` / `secondsToBeatAt` / `secondsBetweenBeats` / `barToBeatAt` / `beatToBarPosition`を共通変換境界とする。従来の固定tempo用`beatToSeconds(bpm)`は互換APIとして残す。
 - Trackの意味は`role`が正本であり、runtimeで名前から推測しない。`general`は予約名を含め自由に改名でき、改名でroleは変わらない。学習role Trackの削除は保護し、Track複製時のroleは`general`にする。
 - v2→v3は全Trackを一度`general`にし、保存順で最初に正規化名`Chords` / `Bass` / `Melody`へ一致するinstrument Trackだけを対応する学習roleへ移す。固定曲長を`lengthBeats`へ移し、beat 0のtempo / 拍子event、空のAutomationを作る。
 - legacy audio参照は捨てず、同じ非空`audioAssetId`を1つの`unresolved` AudioAssetへ集約する。欠落・空参照はClipごとの`missing-reference` placeholderにし、source range / fadeは0へ移行する。migration IDはraw object全体の既存IDとの衝突を避けて決定的に発行する。
 - `ready` AudioAssetはchecksum、元名、media type、byte / sample / channel / frame metadataを持つ。v3 audio Clipは`audioAssetId`、frame単位のsource range / fade、`gainDb`を必須とする。`ready`参照はaudio Trackに限り、asset範囲とfadeを検証する。`unresolved`参照はframe range / fadeを0とし、legacy dataを破壊しないためmigration後だけ非audio Track上にも残せる。
-- AutomationLaneはnon-Master Track volume / panをtargetとし、pointのbeat / value、`hold` / `linear`補間、必須`bypassed`を保存する。v7の必須`automationReadState`は`globalEnabled:boolean`と、Project Track順で一意な既存non-Master ID列`disabledTrackIds:string[]`を保存する。effective Readは`globalEnabled && !disabledTrackIds.includes(trackId) && !lane.bypassed`で、live schedulerとoffline WAVは同じresolverを使い、falseならcommandを0件にしてTrack scalarを使う。Read / Touch / Latch / Writeの選択と記録pass状態はv7 fieldではなくruntime-onlyで、確定したpointだけがAutomationLaneへ入る。
+- AutomationLaneはnon-Master Trackのvolume / panと、Project Track順で最初のeffective Masterのoutput volumeをtargetとし、pointのbeat / value、`hold` / `linear`補間、必須`bypassed`を保存する。Master panとlater Master targetは拒否する。v7で導入した必須`automationReadState`は`globalEnabled:boolean`と、Project Track順で一意な対応Track ID列`disabledTrackIds:string[]`を保存し、effective Master IDも許容する。effective Readは`globalEnabled && !disabledTrackIds.includes(trackId) && !lane.bypassed`で、live schedulerとfull / selected Track WAVは同じresolverを使い、falseならcommandを0件にしてTrack scalarを使う。Read / Touch / Latch / Writeの選択と記録pass状態はruntime-onlyで、確定したpointだけがAutomationLaneへ入る。
 - v3→v4は各non-Masterへ保存順のdirect-to-Master outputをexact 1件作り、sendを空にする。v4はoutput / sendを合わせたDAGを正本にし、Master発edge、自分自身、missing / non-Bus target、重複send、main outputと同じBusへのsend、cycleを拒否する。無効またはgain 0のsendもgraph edgeとしてcycle検査へ含める。
 - v4→v5は`audioTakeFolders: []`を追加するだけで既存のAudio Clipと再生結果を変えない。v5はfolder / take / comp segmentをProject全体のID名前空間へ加え、Audio Track・ready asset・source frame・gapless compの相関制約を正本にする。
 - v5→v6は各AutomationLaneへ`bypassed: false`を決定的に追加し、既存curveと可聴結果を変えない。v5 payloadへの`bypassed`混入、v6 payloadでの欠落 / null / 非boolean / unknown fieldをTypeScriptとRustで同条件に拒否する。
 - v6→v7は`automationReadState: { globalEnabled: true, disabledTrackIds: [] }`だけを追加し、Track、scalar、lane、pointと可聴結果を変えない。v6へのfield混入、v7の欠落 / null / 型違い / 重複 / Master / missing Track / unknown field / 非canonical順を拒否する。
-- TypeScript codecとnative Rust境界は同じcanonical schema v7 JSONを検証・migration・保存する。AudioAsset binaryはJSONへ埋め込まず、checksum / byte lengthでapp-owned repositoryのimmutable objectを参照する。
+- v7→v8は`schemaVersion`だけを更新し、v7で不正だったMaster automation / Read IDを移行時に許容しない。canonical v8だけが最初のeffective Masterのvolume target / Read IDを追加で許容し、Master pan、later Master、missing Track、重複 / 非canonical順を拒否する。
+- TypeScript codecとnative Rust境界は同じcanonical schema v8 JSONを検証・migration・保存する。AudioAsset binaryはJSONへ埋め込まず、checksum / byte lengthでapp-owned repositoryのimmutable objectを参照する。
 
 linked Clipのv2契約はv6でも次のとおり維持する。
 
@@ -2161,9 +2162,9 @@ Auto Punch plannerは開始anchorから可変tempoのbeat境界を累積seconds�
 
 canonical Asset bytesとreceiptを先に保存し、fresh IDを含むdomain候補を作った後、Storeは同じ入力とexact IDでpure mutationを再実行してcanonical JSONの一致を確認する。開始時Project snapshotとoperationへのstrict CASを通った成功だけがProject / selection / historyを1回変更し、Undo 1回でfolder / take / Clip / Asset metadataをまとめて戻す。permission / device / context / clock / target gate / planner / canonicalize / store / replay / CASの失敗、capture完了だけ、post-roll完了だけ、cancel / unmountではProject・historyをatomicに保持する。asset-first保存後の失敗でorphan bytesは残り得るが、欠損または未採用bytesを指すmetadataは作らない。Quick Punch、automatic input monitoring、cycleとの併用、disk streaming、arbitrary overlaps、input hot switch、multi-input、MIDI comp、named comps、flatten / bounceはこの境界に含めない。
 
-### 2.6.2 Automation lane編集、Read gate、runtime write pass（schema v3 / v6 / v7）
+### 2.6.2 Automation lane編集、Read gate、runtime write pass（schema v3 / v6 / v7 / v8）
 
-Automationの永続正本は`Project.automationLanes`とschema v7の`Project.automationReadState`である。schema v6は各laneへ必須`bypassed`を加え、schema v7はGlobal / Track Read gateを加える。選択中のnon-Master Trackについて、volumeとpanはtargetごとに最大1 laneを持つ。最初のpoint追加で`bypassed: false`のlaneを遅延作成し、最後のpoint削除または全消去では空laneをProjectから除去する。
+Automationの永続正本は`Project.automationLanes`とschema v8の`Project.automationReadState`である。schema v6は各laneへ必須`bypassed`、schema v7はGlobal / Track Read gateを加え、schema v8は最初のeffective Masterのoutput volumeとRead IDを許容する。non-Master Trackはvolumeとpan、effective Masterはvolumeだけをtargetごとに最大1 lane持つ。最初のpoint追加で`bypassed: false`のlaneを遅延作成し、最後のpoint削除または全消去では空laneをProjectから除去する。
 
 - volume pointの`value`は0〜2、pan pointは-1〜1、`beat`は0〜`Project.lengthBeats`で有限値にする。同一laneのbeatは重複させず、保存時は厳密な昇順にする
 - pointの`interpolation`はそのpointから次のpointへのoutbound semanticsである。`hold`は次のpoint直前まで現在値を保持し、`linear`はbeat domainで次の値へ直線補間する。最初のpoint前はTrack scalar、最後のpoint後は最終値を使う
@@ -2172,12 +2173,12 @@ Automationの永続正本は`Project.automationLanes`とschema v7の`Project.aut
 - lane単位のRead / Bypassは`bypassed`だけを変更し、point / target / ID / Track scalarを保持する。同値切替は同じProject参照を返すsemantic no-opである。Bypass中のpoint編集も`bypassed`を保持する
 - 1 gestureの確定は1 Project snapshot、Undo 1回、save revision 1回である。semantic no-opとstale / invalid候補は元Project参照、history、revisionを変えない
 - lane編集またはRead / Bypass切替はactive playbackのimmutable session snapshotを停止し、accepted切替は残存natural drainも破棄する。その停止状態と保持playheadは永続fieldではない。再生時とoffline WAVは保存済みlaneを同じtempo / loop-aware resolverへ入力し、`bypassed: true`ならcommandを生成しない
-- Global / Track Readのpure mutationはlane / pointを保持し、同値は元Project参照を返す。Track削除はdisabled IDを除去し、複製Trackは常にRead enabledで開始する。各採用は1 CAS / 1 Undo / 1 save revisionでactive snapshotを1回停止する
+- Global / TrackまたはMaster Readのpure mutationはlane / pointを保持し、同値は元Project参照を返す。Track削除はdisabled IDを除去し、複製Trackは常にRead enabledで開始する。各採用は1 CAS / 1 Undo / 1 save revisionでactive snapshotを1回停止する
 - `AutomationWriteMode = read | touch | latch | write`、Track別mode map、Armed / Writing、touching target、playback request / activation ownershipはrenderer runtime-onlyである。Project、history、revision、SQLite、`.ctsproj.json`、OpenAPIへ投影せず、Project activation / 再読込時は全TrackをReadへ戻す
-- runtime `AutomationPass`は開始時Projectのexact参照、canonical fingerprint、deep-frozen snapshot、開始beat、全non-Master Trackのmode、target別sample / regionをimmutableに所有する。Readだけの再生はpassを作らない。Touchは接触区間とtempo-awareな100 ms return、Latchは最初の接触からhalf-open punch-out、Writeはpass開始からvolume / pan両targetを開始時scalarでcaptureする
+- runtime `AutomationPass`は開始時Projectのexact参照、canonical fingerprint、deep-frozen snapshot、開始beat、全対応Trackのmode、target別sample / regionをimmutableに所有する。Readだけの再生はpassを作らない。Touchは接触区間とtempo-awareな100 ms return、Latchは最初の接触からhalf-open punch-out、Writeはpass開始からnon-Masterのvolume / pan、effective Masterのvolumeを開始時scalarでcaptureする
 - raw sampleは同beatの最新値へ正規化し、volume 0.001 / pan 0.0005以内の最大再構成誤差で決定的にpoint削減する。置換範囲外のpoint object / ID、lane ID、`bypassed`、Global / Track Readを保持し、必要な境界だけfresh global IDで作る。20,000 point / lane、2,048 laneとcandidate全体のcodecを越える場合はProjectを変更しない
 - punch-outは終了beatを曲内へclampし、開始時source参照 / fingerprintへのCASが一致した時だけ確定laneをProject変更・Undo・save revision各1回で採用する。開始時Readだった別Trackのvolume / pan scalarだけはexact rebaseを許し、passのfrozen curve / scalar判断を変えない。他の並行変更、stale ownership、resource / ID / codec failureは部分pointを公開しない。成功または明示cancelはruntimeのWrite modeを同じtransaction内でTouchへ戻す
-- 保存・再読込するのは確定したAutomationLane、lane Bypass、Global / Track Readだけであり、記録時modeはlive / WAV resolverの入力ではない。Master、insert / send / tempo automation、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loop pass管理のstateは未定義である
+- 保存・再読込するのは確定したAutomationLane、lane Bypass、Global / TrackまたはMaster Readだけであり、記録時modeはlive / WAV resolverの入力ではない。Master pan、later Master、insert / send / tempo automation、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loop pass管理のstateは未定義である
 
 ### 2.6.3 Tempo / 拍子map編集（schema v4）
 
@@ -2203,7 +2204,7 @@ production Editorが変更する正本は既存の`Project.tempoMap`と`Project.
 - Track削除は所有folderをcascade除去し、Track複製はfolder / take / segmentへfresh IDを発行してassetを共有する。AudioAsset GCはAudio Clipだけでなく全take参照もrootとして数える
 - liveとoffline WAVはfolderを一時的なAudio regionへ正規化して既存Audio Clip plannerへ渡す。選択takeだけを鳴らし、spliceは`crossfadeMs`を境界中心に半分ずつ延長したlinear overlap、persist済みtake fadeはslice長へ再正規化せずtake-local時間のままtruncateする
 - MIDI exportはtake audioを出力しないが、壊れたv5 aggregateを無視せず独立validationで`invalid-project`として拒否する
-- fixed-pass Audio cycleとbounded Auto Punchのexact-window folder生成はv5で導入されcurrent schema v7へ継承された同じtake aggregateを使う。Quick Punch、automatic input monitoring、cycleとの併用、disk streaming、arbitrary overlaps、MIDI comping、multi-input、named comps、flatten / bounceはschema / UIの対応済み範囲に含めない
+- fixed-pass Audio cycleとbounded Auto Punchのexact-window folder生成はv5で導入されcurrent schema v8へ継承された同じtake aggregateを使う。Quick Punch、automatic input monitoring、cycleとの併用、disk streaming、arbitrary overlaps、MIDI comping、multi-input、named comps、flatten / bounceはschema / UIの対応済み範囲に含めない
 
 ### 2.7 Track管理とpreset（schema v4）
 
@@ -2313,7 +2314,7 @@ exact snapshotから特定projectらしいbytesだけを抜くと、snapshot che
 | unresolved AudioAsset | `legacy-reference` / `missing-reference`だけ。参照Clipのsource range / fadeは0 |
 | ready Audio Clip | audio Track上でasset参照、frame rangeがasset内、fade合計がrange以下、gain -96〜+24 dB。loop中left trim / splitは禁止 |
 | Audio take folder | Project全体1,024以下、folderごとtake 2〜128・comp segment 1〜4,096。同じAudio Track / startBeat / lengthBeats windowは1 folderだけ。Audio Track / ready asset参照、source frame範囲、folder内take範囲、0〜50 ms crossfade、gapless exact-cover comp、隣接同take禁止 |
-| automation | Project全体で2,048 lane以下、1 laneあたり20,000 point以下。targetはnon-Master Trackのvolume/panでtargetごとに最大1 lane。point ID一意、beat厳密昇順・0〜曲末、volume valueは0〜2、pan valueは-1〜1、補間はoutboundのhold/linear |
+| automation | Project全体で2,048 lane以下、1 laneあたり20,000 point以下。targetはnon-Master Trackのvolume/panまたは最初のeffective Masterのvolumeでtargetごとに最大1 lane。Master panとlater Masterは拒否。point ID一意、beat厳密昇順・0〜曲末、volume valueは0〜2、pan valueは-1〜1、補間はoutboundのhold/linear |
 | note/drum events | 1クリップあたり20,000以下 |
 | drum resolution | 1〜128 steps/bar |
 | drum swing / probability | 0.0〜1.0 |
@@ -2573,7 +2574,7 @@ Output:
 |---|---|---|
 | theory-engine | unit | コード/スケール/度数判定の正確性 |
 | tutorial-engine | unit/integration | レッスン判定の再現性 |
-| project-model | unit/migration | current schema v7の保存/読み込み、v1→v2→v3→v4→v5→v6→v7移行、time map、role、AudioAsset / Automation / routing、Audio take folder metadataの安全性 |
+| project-model | unit/migration | current schema v8の保存/読み込み、v1→v2→v3→v4→v5→v6→v7→v8移行、time map、role、AudioAsset / Automation / routing、Audio take folder metadataの安全性 |
 | UI | component/e2e | 主要操作フロー |
 | audio | integration/golden | 再生イベント、レンダー結果 |
 | audio-assets | unit/integration/e2e | canonical 48 kHz PCM16、content-addressed保存、staging recovery / GC、欠落診断、Audio Clip live/WAV parity |
@@ -2672,21 +2673,22 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 4. laneのReadをBypassへ切り替え、pointが残ったままTrack scalarで再生・WAV書き出しされることを確認してReadへ戻す
 5. パンへ切り替えて独立laneを作り、1件削除、Undo / Redo、lane全消去を行う
 6. 保存・再読込し、可変tempoとtransport loopを含む再生およびWAV書き出しを行う
-7. Global Readと選択TrackのTrack Readを別々にオフ / オンし、lane Bypassが独立して残ること、Undo / Redo各1回、保存 / 再読込後のschema v7 stateとlive / WAVを確認する
+7. Global Readと選択TrackのTrack Readを別々にオフ / オンし、lane Bypassが独立して残ること、Undo / Redo各1回、保存 / 再読込後のschema v8 stateとlive / WAVを確認する
 8. TouchをArmedにして再生し、MixerとTrack Listの音量 / パンをpointerとkeyboardで操作する。操作中だけWritingになり、release後100 msで旧curveへ戻り、停止時に1 Project変更として確定する
 9. Latchでは最初の操作後から停止まで最後の値を保持し、Writeでは警告dialogを取消 / 確認の両方で操作する。確認したWriteは非接触でも音量・パン両方を書き、パンチアウト後Touchへ戻ることを確認する
 10. Touchで確定したcurveをUndo / Redoし、保存 / 再読込する。再読込後もcurve / Read state / Bypassは一致し、runtime-only modeはReadへ戻ることを確認する
+11. canonical Track順の先頭Masterを選び、output volume lane、Master Read、Read / Touch / Latch / Writeを操作する。Track ListとMixerの両Master faderがRead曲線と片側のgesture値を同時表示し、full / selected Track WAV、保存 / 再読込でも同じcurveになることを確認する
 
 期待結果:
 
-- 追加・確定編集・削除・全消去は各1 gestureにつきUndo 1回、save revision 1回で、no-op、同beat衝突、範囲外、Master targetはProject / history / playbackを変更しない
+- 追加・確定編集・削除・全消去は各1 gestureにつきUndo 1回、save revision 1回で、no-op、同beat衝突、範囲外、Master pan / later Master / missing Master targetはProject / history / playback / active write passを変更しない
 - volume / pan laneは独立してpoint ID、beat、value、interpolationを保存し、最後のpoint削除または全消去で対象laneを除去する
 - 最初のpoint前はTrack scalar、pointの`hold` / `linear`はそのpointから次のpointへのoutbound semantics、最後のpoint後は最終値保持となり、Editor表示、live、offline WAVで一致する
 - active playback中のlane変更はplayheadを保持してsessionを停止し、次回再生から新しいcurveを使う。transport loopとtempo変更境界でもlive / WAVのcommand列が一致する
 - laneが存在するときだけRead / Bypass controlを表示し、Bypassはpoint / 編集状態を保持したままautomation commandを発行せずTrack scalarを使う。Readへ戻すと同じcurveが復帰し、各切替はUndo / save revision各1回、active sessionとnatural drainを停止する
 - pointへkeyboardで到達・編集でき、削除後のfocusが回復する。320px幅ではdocument全体に横overflowがなく、lane時間軸だけが内部scrollする
-- Global / Track ReadとRead / Touch / Latch / Writeはproduction controlから操作できる。pass中はProject / history / revisionが不変で、停止 / 自然終了 / seek / loop右端 / mode・Read・Bypass変更 / Undo・Redo / Project切替 / closeの確定成功時だけ1 Undo / revisionを追加する。stale / resource / point上限 / CAS失敗では部分curveを採用しない
-- Global / Track / laneのRead gate、確定curve、Bypassだけが保存対象で、mode、Armed / Writing、gesture / pass所有権はProject JSONとOpenAPIに現れない。Master、insert / send / tempo automation、MIDI CC / LFO、高度write modeを実装済みと示すcontrolはない
+- Global / TrackまたはMaster ReadとRead / Touch / Latch / Writeはproduction controlから操作できる。pass中はProject / history / revisionが不変で、停止 / 自然終了 / seek / loop右端 / mode・Read・Bypass変更 / Undo・Redo / Project切替 / closeの確定成功時だけ1 Undo / revisionを追加する。stale / resource / point上限 / CAS失敗では部分curveを採用しない
+- Global / TrackまたはMaster / laneのRead gate、確定curve、Bypassだけが保存対象で、mode、Armed / Writing、gesture / pass所有権はProject JSONとOpenAPIに現れない。Master pan、later Master、insert / send / tempo automation、MIDI CC / LFO、高度write modeを実装済みと示すcontrolはない
 
 ### E2E-005: Tempo / 拍子mapを編集する
 
@@ -2699,7 +2701,7 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 期待結果:
 
 - 採用された各add / edit / move / deleteはUndo / save revision各1回、拒否 / no-opはProject / history / transportを変えない
-- tempo / 拍子mapは厳密昇順かつID一意で、`bpm` / `timeSignature` / `lengthBars` mirrorが正本と一致する。current schemaVersionは7のままである
+- tempo / 拍子mapは厳密昇順かつID一意で、`bpm` / `timeSignature` / `lengthBars` mirrorが正本と一致する。current schemaVersionは8のままである
 - 拍子eventとProject終端は小節境界を保ち、invalid候補は日本語のinline alertで理由を説明する
 - active playbackはplayheadを保持して停止し、Undo / Redo、保存・再読込後も両mapとmirrorがexactに一致する
 - tab / event / Inspectorをkeyboardで操作でき、320pxではdocument横overflowがなくtimelineだけが内部scrollする
@@ -2798,11 +2800,11 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 
 | テスト | 必須検証 |
 |---|---|
-| Project exact roundtrip | current schema v7の`.ctsproj.json`をcanonical codecでencode→decodeし、必須`automationReadState`、Track role、`lengthBeats`、tempo / 拍子map、AudioAsset、AutomationLaneのrequired `bypassed`、Audio routing、Audio Clip frame payload、`audioTakeFolders`のfolder / take / segment IDとrangeに加え、既存semanticsがexactに一致する |
+| Project exact roundtrip | current schema v8の`.ctsproj.json`をcanonical codecでencode→decodeし、必須`automationReadState`、Track role、`lengthBeats`、tempo / 拍子map、AudioAsset、AutomationLaneのrequired `bypassed`、Audio routing、Audio Clip frame payload、`audioTakeFolders`のfolder / take / segment IDとrangeに加え、既存semanticsがexactに一致する |
 | Project schema v1→v2 migration | own payloadを持つv1 Clipへlegacy `aliasOf`を設定したfixtureをTypeScript codecとRust native migrationへ通し、v2 stepでは`aliasOf`だけが削除され、Clip / Note / DrumEvent ID、payload、配置、順序が一致する |
 | Project schema v2→v3 migration | 固定tempo / 拍子 / 曲長、名前variantと重複Chords / Bass / Melody Track、非空・空・欠落legacy audio参照、migration用prefixと衝突するraw IDを混在させる。保存順の最初だけが学習role、mapはbeat 0、mirrorsは一致、同一legacy参照は同一`unresolved` asset、欠落はClip別placeholder、frame fieldは0になり、入力を変えず同一bytesから同一v3を返す |
 | Project schema v3→v4 migration | v3の全non-Masterへ保存順を保ったdirect-to-Master outputをexact 1件ずつ作り、sendを空にする。同じv3 bytesからTypeScript / Rustが同じcanonical v4を返し、入力object / raw snapshot / provenanceを変更しない |
-| migration chain / native parity | v1 fixtureを`v1 → v2 → v3 → v4 → v5 → v6 → v7`へ通し、TypeScriptとRustが同じcanonical v7を受理する。v6→v7は必須Read stateだけを追加する。v6 field smugglingと、v7の欠落 / null / 型違い / 重複 / Master / missing Track / unknown key / 非canonical順を両境界で拒否する。unknown / required / null / non-finite / integer / range違反とfuture schemaをfail closedし、移行元exact raw snapshotとprovenanceは保持する |
+| migration chain / native parity | v1 fixtureを`v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8`へ通し、TypeScriptとRustが同じcanonical v8を受理する。v6→v7は必須Read state、v7→v8はschemaVersionだけを追加・更新する。v7 Master target / Read ID smugglingを両境界で拒否し、v8はcanonical Track順の先頭effective Masterのvolume / Readだけを受理してMaster pan、later / missing Master、重複 / 非canonical順を拒否する。unknown / required / null / non-finite / integer / range違反とfuture schemaをfail closedし、移行元exact raw snapshotとprovenanceは保持する |
 | valid v3 linked persistence | MIDI / Drumそれぞれで同一Track・type・lengthの正本とpayloadlessな直接aliasを作り、canonical codec、SQLite save/reload、`.ctsproj.json` export/importを通してexact roundtripする。aliasのID / start / loop / `aliasOf`と正本だけのpayload ownershipを保持する |
 | musical-time map / mirrors | 複数tempo / 拍子eventでbeat↔seconds往復、区間duration、bar↔beat、変更境界、小数beatを許容誤差内で検証する。空map、beat 0欠落、非昇順、重複ID、曲外event、`bpm` / `timeSignature` / `lengthBars` mirror不一致を拒否する。beat 0だけの固定mapは旧固定計算と一致する |
 | AudioAsset metadata | `ready`のmedia type、lowercase SHA-256、byte/sample/channel/frame bounds、Audio Track参照、source range、fade合計、gainを検査する。`unresolved`はzero range/fadeでlegacy非audio Track上にも保持でき、dangling / duplicate ID / ready assetの非audio参照を拒否する。この行はmetadata codecだけを対象とし、binaryは下記の別gateで検証する |
@@ -2811,7 +2813,7 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 | Audio Track import atomicity | source 128 MiB、1〜2 channel、canonical output 128 MiB、decode PCM 256 MiBに加え、source read / decoded Float32 / 48 kHz resample / PCM16 WAV / persist copyのphase peakを384 MiB以下としてallocation前に検査する。descriptorなしは`2 × source + cache`の共有予約をinspect前に境界±1で検査し、descriptorありもplanner予約競合時にinspect / decodeを呼ばない。nativeは`openAudio`前に最大envelope + Blob + cacheを予約し、実sizeへの縮小、Blob直後のextra envelope→import同一turn引継ぎ、cancel / gateway失敗 / unmount / import拒否の冪等解放を検査する。要求48 kHzを無視する384 kHz contextはresize失敗後に`decodeAudioData`を呼ばず予約を解放する。48 kHz PCM16 WAV保存後、metadata / Track / Clip / selectionをUndo 1回で採用する。cancel、decode / store失敗、stale Project、throwing ID factoryではProject fingerprintが不変で、保存済みorphanを参照しない。cancel後もdecode / resample / storeの実作業がsettleするまでapp-scoped leaseを保持し、再openした2件目をtyped busyで拒否する |
 | Audio Clip domain editing | move、non-loop左右trim、gain -96〜+24 dB、fade、loop、split、fresh-ID独立duplicate、deleteをvariable tempo fixtureで検査する。create / move / right trim / duplicateが曲末を越える時は有効拍子mapの次小節境界までProjectを延長し、256小節 / 8,192拍超過はatomic rejectする。loop right trimは外側窓だけ、loop left trim / splitはtyped reject、各no-op / failureはhistoryを進めない |
 | Audio Clip live/WAV parity | shared plannerへseek途中、Clip loop、transport loop、variable tempo、source range、gain、fadeを入力し、half-open slice列を一致させる。playable region indexと1 windowを各10,000件で拒否し、複数live tickが同じcompiled indexを再利用する。region超過はlive graph前、window超過は当該windowのsourceを1件もscheduleせずsession interruptionにする（以前のwindowは再生済みでもよい）。liveは実context rateで`max(raw合計 + 2×最大raw + active/in-flight retained, raw合計 + 最大raw + target decoded + active/in-flight retained)`を384 MiB以下にし、未使用LRUを除外してresolver前に境界±1を検査する。WAVはMIDI / drum / chord eventとの合計10,000 source、Float32 output + PCM16 encoder / Blob / native ArrayBuffer / IPC copiesを含むasset working set 384 MiBをOfflineAudioContext前に境界±1で検査する。liveはasset全件preflight後だけgraph/source/scheduler、WAVはpreflight後だけOfflineAudioContextを作り、missing / changed / decode / resource超過でpartial outputを作らない |
-| Automation metadata / playback / write pass | non-Master volume / pan target、lane / point ID、必須boolean `bypassed`、必須`automationReadState`をroundtripし、Master / stale target、重複ID、不正順序を拒否する。Global / Track / laneの2x2x2 precedenceを共通resolverで検査し、disabled時はlive / WAVともcommandが0件かつTrack scalar、再有効化後はexact curveを復元する。Read変更は1 CAS / 1 Undo / 1 save revisionでactive snapshotを1回停止する。Touchの接触区間＋100 ms return、Latchのfirst-touch→punch-out、Writeのpass全域volume / pan、決定的sample削減、outside curve / bypass保持、point上限atomic rejectをpure domainで検査する。Storeはpass中Project不変、境界ごとのexact-once punch-out、1 commit / Undo / revision、stale / recording conflict / CAS failure、Read Track scalar exact rebaseを検査する。確定curveのlive / WAV command parityと、runtime modeがcodec payloadへ混入しないことを確認する |
+| Automation metadata / playback / write pass | non-Master volume / panとeffective Master volume target、lane / point ID、必須boolean `bypassed`、必須`automationReadState`をroundtripし、Master pan、later / stale target、重複ID、不正順序を拒否する。Global / TrackまたはMaster / laneの2x2x2 precedenceを共通resolverで検査し、disabled時はlive / full / selected Track WAVともcommandが0件かつTrack scalar、再有効化後はexact curveを復元する。Read変更は1 CAS / 1 Undo / 1 save revisionでactive snapshotを1回停止する。Touchの接触区間＋100 ms return、Latchのfirst-touch→punch-out、Writeのpass全域non-Master volume / panまたはMaster volume、決定的sample削減、outside curve / bypass保持、point上限atomic rejectをpure domainで検査する。Storeはpass中Project不変、境界ごとのexact-once punch-out、1 commit / Undo / revision、stale / recording conflict / CAS failure、Read Track scalar exact rebaseを検査する。有効Master Read lane中のscalar変更は同beatでsessionを置換・再開し、unsupported Master mode操作はactive passを確定しない。確定curveのlive / WAV command parity、SQLite save / reload、runtime modeがcodec payloadへ混入しないことを確認する |
 | linked effective-event budgets | 少数eventの正本を多数のaliasから参照し、resolved-stored 200,000超をTypeScript / Rust保存境界と複製操作がatomicに拒否する。MIDI Clip loop派生音はresolved-storedへ加えず、audibleだけへinstanceごとに加える。100,000超の非alias v1＋空Chord metadataは移行・保存できる。ライブ20,000、WAV 10,000、展開後timelineの任意0.75拍window 256超はschedule / OfflineAudioContext生成前、transport loop反復後の同window 256超はper-track Web Audio graph生成前の型付き失敗となり、部分WAVとProject / history / selection差分がない |
 | WAV schedule ordering | 16声を超えるNoteを持つ正本を後位置、linked instanceを前位置に置き、正本を先に格納する。WAVのresolved scheduleがonset非減少かつ同一onsetで元順序を保ち、未来のvoiceを先にsteal / stopしない |
 | Format 1 Track境界 | instrumentだけの1 / 15 / 16 / 128 Track fixtureをexportし、`1 conductor + N part MTrk`を保つ。各partの最初のeventがtick 0のFF 21 1件で、その後にchannel eventが始まることを検査する |
@@ -2985,23 +2987,23 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 
 ### 7.8 Production Automation lane / Read / write-mode regression gate
 
-- domain mutationはadd / update / remove / clearをpublic APIだけから検証する。source / candidate codec、immutable入力、lane遅延作成 / 再利用 / 空時prune、point厳密昇順、global ID、volume 0〜2 / pan -1〜1、beat 0〜曲末、lane 2,048 / point 20,000境界、同beat衝突、throwing ID factoryを網羅し、failure / no-opでは元Project参照を保つ
+- domain mutationはadd / update / remove / clearをpublic APIだけから検証する。source / candidate codec、immutable入力、lane遅延作成 / 再利用 / 空時prune、point厳密昇順、global ID、volume 0〜2 / pan -1〜1、beat 0〜曲末、lane 2,048 / point 20,000境界、同beat衝突、throwing ID factoryを網羅する。effective Master volumeを受理し、Master pan、later / missing Masterをfailure / no-opとして元Project参照のまま拒否する
 - Studio actionは開始時Project参照へのexact CAS、busy operation、stale snapshot、active playbackを検査する。採用されたadd / update / remove / clearは各1 history / revision、Undo / Redo 1回、拒否 / no-opはProject / history / save / transport不変、lane editによる停止だけ`playbackStopped=true`とする
-- 4つのARIA tab / panel、Track未選択、Master、空lane、volume / pan切替、snap、lane位置 / playhead追加、point選択、beat / value / interpolation編集、Delete / Backspace、確認付き全消去、inline alert、polite statusをcomponent / E2Eで検査する。全消去は確認表示と取消ではProject / history / revision不変、確定だけ1変更、Undo 1回でexact復元、取消と確定後のfocus回復を検査する
+- 4つのARIA tab / panel、Track未選択、non-Master、effective Master、later Master、空lane、対応target切替、snap、lane位置 / playhead追加、point選択、beat / value / interpolation編集、Delete / Backspace、確認付き全消去、inline alert、polite statusをcomponent / E2Eで検査する。effective Masterはvolumeだけ、later Masterはunsupported表示だけにし、全消去は確認表示と取消ではProject / history / revision不変、確定だけ1変更、Undo 1回でexact復元、取消と確定後のfocus回復を検査する
 - curve presentationは最初のpoint前のTrack scalar、各pointから次へのoutbound `hold` / `linear`、最後のpoint後の最終値保持を既存audio resolver fixtureと照合する。表示用helperを別の再生正本にせず、variable tempo / loopを含むliveとWAVの既存command parityを維持する
 - lane作成前はRead / Bypass controlを表示せず、作成後はnative controlをRead→Bypass→Readと切り替える。Bypass中もpointの表示・選択・編集・保存を維持し、live / WAV共通plannerはautomation commandを0件としてTrack scalarを使う。Read復帰後のcommand列とpointを切替前とexact比較する
 - Read / Bypass actionは開始時Project参照へのexact CAS、recording / save fence、semantic no-op、missing laneを検査する。採用された切替だけがProject / history / revision各1回で、active playbackとnatural drainを有限playheadのまま停止する。no-op / stale / busy / missing laneはProject / history / save / transportを変えない
-- Global / Track Readはlane Bypassと独立したnative buttonで、各2状態とlane 2状態の全組合せをproduction UIから切り替える。各採用は1 CAS / Undo / save revision、保存・再読込後にexact復元し、disabled中のscalar編集は対象AudioParamだけを更新して他Track / routing / effect / active write passを変えない。effective Read laneがあるtargetのscalar編集はpassをrebaseした後に再生を停止し、first point前や次loopで凍結済みの旧baseが鳴り続けない
-- Read / Touch / Latch / Write radiogroup、Armed / Writing status、Write確認dialogの警告、取消時focus / mode保持、確認後のWrite、pass終了後Touch fallbackをcomponent / Chromiumで検査する。Global / Track / mode controlは44px以上、keyboard focus-visibleを持ち、320pxでは縦に折り返してdocument横overflowを出さない
+- Global / TrackまたはMaster Readはlane Bypassと独立したnative buttonで、各2状態とlane 2状態の全組合せをproduction UIから切り替える。各採用は1 CAS / Undo / save revision、SQLite保存・再読込後にexact復元し、disabled中のscalar編集は対象AudioParamだけを更新して他Track / routing / effect / active write passを変えない。effective Read laneがあるtargetのscalar編集はpassをrebaseした後に同じ有限beatでsessionを置換・再開し、first point前や次loopで凍結済みの旧baseを鳴らさない
+- Read / Touch / Latch / Write radiogroup、Armed / Writing status、Write確認dialogの警告、取消時focus / mode保持、確認後のWrite、pass終了後Touch fallbackをcomponent / Chromiumで検査する。effective Master Writeはvolumeだけを所有する。Global / TrackまたはMaster / mode controlは44px以上、keyboard focus-visibleを持ち、320pxでは縦に折り返してdocument横overflowを出さない
 - pointerup / cancel / lostpointercapture / blurと、矢印 / Home / End / PageUp / PageDownのkeydown / keyupを共通gesture adapterへ通し、begin retry、update、endをexactly onceにする。Touchはrelease時だけ100 ms return、Latch / Writeはrelease後もoverrideを保持し、unmount / pagehideはactive gestureを終了してからpass確定へ進む
-- pure passはRead no-op、Touch / Latch / Writeのhalf-open replacement、variable tempoでの100 ms return、volume / pan独立、Write非接触の両target、same-beat retouch、outside object / ID / `bypassed` / Global・Track Read保持、決定的epsilon削減、20,000 point / 2,048 lane、fresh ID failure、invalid sourceを検査する
+- pure passはRead no-op、Touch / Latch / Writeのhalf-open replacement、variable tempoでの100 ms return、volume / pan独立、non-Master Write非接触の両target、effective Master Write非接触のvolumeだけ、same-beat retouch、outside object / ID / `bypassed` / Global・TrackまたはMaster Read保持、決定的epsilon削減、20,000 point / 2,048 lane、fresh ID failure、invalid sourceを検査する
 - Store / playbackは停止、自然終了、seek、loop右端、mode / Read / Bypass変更、Undo / Redo、Project activation、native close、pagehideを同じexact-once punch-outへ通す。commit / graph失敗、stale request、音声録音競合、clock不正ではProject / history / revisionをatomicに保ち、pagehide failureはProject no-op cancel、native close failureはwindow closeをblockする
 - 開始時ReadだったTrackのscalarだけをactive Touch / Latch / Write passへexact rebaseでき、Write Track scalar、lane、effect、routing、noteとの混在候補をrejectする。rebase前後でwrite targetのfrozen curve / graph ownership、停止後のpass commit、Undo順序が変わらないことを検査する。point / lane上限またはCAS競合で確定できない時はassertiveな理由と44px以上の破棄・停止actionを表示し、明示cancel後にProject / historyへ部分pointを残さず通常編集を再開できる
-- Touch / Latch / Writeで確定した同じschema v7 laneをlive command plannerとoffline WAVへ渡し、Read enabled / Global disabled / Track disabled / lane Bypassの各状態でmode名に依存せず同じcurveまたはscalarになることを比較する。保存・再読込後はcurve / Read / Bypassを保ち、runtime modeはReadへ戻る
+- Touch / Latch / Writeで確定した同じschema v8 laneをlive command plannerとfull / selected Track WAVへ渡し、Read enabled / Global disabled / TrackまたはMaster disabled / lane Bypassの各状態でmode名に依存せず同じcurveまたはscalarになることを比較する。保存・再読込後はcurve / Read / Bypassを保ち、runtime modeはReadへ戻る
 - local draft / pointer preview中はProject / history / revisionを変えず、Enter / blur / pointerupの確定を1 gesture = 1 Undoにする。同beatや範囲外の拒否、Undo / Redo、保存・再読込後もvolume / pan独立laneが一致する。off-grid高精度beatは無編集blurとsnap on / off双方の値だけの編集でbit-exactに維持し、beat field自体を確定した場合だけsnapする
 - 20,000 pointのproduction Chromium fixtureでnative point controlが最大400、curveが最大3 pathであること、playheadが最低3回更新されてもlane本体が全件再renderされないこと、選択・編集・停止が応答することを検査する
 - point buttonは44×44 CSS px以上でparameter / index / beat / value / interpolationを読み上げ、roving focusと削除後のfocus回復を検査する。320pxではdocument横overflowを許さずlaneだけを内部scrollさせ、hover / focus / selected / disabled / errorを色以外でも区別する
-- schema v7に保存されるのはcurve、lane Bypass、Global / Track Readだけで、runtime mode / pass fieldがTypeScript / Rust / OpenAPIへ混入しないことをloss-boundary回帰にする。Master、insert / send / tempo automation、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group Suspend、複数loop passはUIとschemaの双方に存在しないことを確認する
+- schema v8に保存されるのはcurve、lane Bypass、Global / TrackまたはMaster Readだけで、runtime mode / pass fieldがTypeScript / Rust / OpenAPIへ混入しないことをloss-boundary回帰にする。Master pan、later Master、insert / send / tempo automation、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group Suspend、複数loop passはUIとschemaの双方に存在しないことを確認する
 
 ### 7.9 Batch 6 remaining gates
 
@@ -3017,7 +3019,7 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 
 ### 7.9.1 Bounded Auto Punch regression gate
 
-- unitではTransportの`punchIn / punchOut / preRoll / postRoll`がloop / cycle locatorから独立したruntime-only値であり、Project codec、current schema v7、Rust persistence、OpenAPIへ投影されないことを検査する。`playbackStart <= punchIn < punchOut <= playbackEnd`、Project先頭 / 末尾clamp、0.5〜60秒、Auto Punchとcycleの相互排他を境界±1で確認する
+- unitではTransportの`punchIn / punchOut / preRoll / postRoll`がloop / cycle locatorから独立したruntime-only値であり、Project codec、current schema v8、Rust persistence、OpenAPIへ投影されないことを検査する。`playbackStart <= punchIn < punchOut <= playbackEnd`、Project先頭 / 末尾clamp、0.5〜60秒、Auto Punchとcycleの相互排他を境界±1で確認する
 - pure domain adoptionはempty window、exactに1件のspanning ready non-loop Clip、exact windowの既存folderの3形を検査する。emptyはexact Clipを追加し、spanningは左右の外側source / fade / gainを保持して旧source＋録音takeのfolderへ非破壊変換し、exact folderはtakeを追記する。部分 / 複数overlap、別window folder、loop / unresolved / source不足、上限、ID衝突、throwing factoryをProject不変で拒否し、source immutable、candidate codec、fresh IDを確認する
 - planner / playback unitは可変tempoの累積beat→seconds→frame丸め、正 / 負 / 0 latency、正latency tail、負latency先頭silence、exact output frame数をsample fixtureで比較する。capture startは共有anchorから求めたpunch-in exact context frame、対象Trackだけのaudibility gateはhalf-open `[in, out)`、他Trackと対象Trackの区間外状態は不変とする。clock / context generation / operation不一致、stale callbackを拒否し、通常one-shotとfixed-pass cycleの既存契約も回帰する
 - coordinator unitはcapture完了とnatural post-roll完走がどちらの順で届いても両proofが揃った時だけ1回finalizeすることを検査する。captureだけ、post-rollだけ、duplicate / late callback、manual stop、cancel、transport中断、unmountはcommitせず、terminal後の再入を無視する
@@ -3035,7 +3037,7 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - plannerは通常Audio Clipとcompを同じindexへ正規化し、選択takeだけ、可変tempo source offset、0〜50 ms centered crossfade、source handle clamp、persist済みtake fadeのtake-local時間保持、独立splice envelope、通常Clipとのadversarial ID衝突、natural tailをlive / WAV共通fixtureで検査する
 - MIDI exportはvalid take folderの有無でMIDI bytesが同一であること、missing required field、dangling track / asset / take、source overflow、gap / overlap / adjacent同takeを`invalid-project`で拒否することをproject-modelとは独立したhardening testで確認する
 - 6つのARIA tab / panel、Audio Clipからの自動候補group、Arranger folder 1件表示、「仕上がり」row + take lane、local pointer preview、exact range form、boundary form、unused delete / focus recovery、disabled reasonをcomponent / E2Eで検査する
-- current schema v7の保存・再読込でもv5由来folder / take / comp IDとaudible rangeをexact比較する。320pxではdocument横overflowを許さずtimelineだけを内部scrollさせ、native control / focus ring / 44px targetを確認する
+- current schema v8の保存・再読込でもv5由来folder / take / comp IDとaudible rangeをexact比較する。320pxではdocument横overflowを許さずtimelineだけを内部scrollさせ、native control / focus ring / 44px targetを確認する
 - fixed-pass Audio cycleとbounded Auto Punchのexact-window adoptionだけが自動folder生成に入ることを回帰する。Quick Punch、automatic input monitoring、cycleとの併用、disk streaming、arbitrary overlaps、MIDI comp、multi-input、named comps、flattenはschema、UI、status文言に対応済みとして存在しない。cycle UIは明示loop時だけ2〜128 pass、約総時間、全破棄契約を表示する
 
 ### 7.11 Production Tempo / 拍子map editor regression gate

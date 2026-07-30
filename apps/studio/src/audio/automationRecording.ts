@@ -1,6 +1,7 @@
 import {
   beginAutomationPass,
   cancelAutomationPass,
+  automationTargetTypesForTrack,
   punchOutAutomationPass,
   rebaseAutomationPass,
   releaseAutomationPass,
@@ -52,6 +53,7 @@ export type AutomationRecordingRuntimeState = Readonly<{
   armedTrackIds: readonly string[];
   writingTrackIds: readonly string[];
   touchingTargetKeys: readonly string[];
+  overrideValues: Readonly<Record<string, number>>;
   passActive: boolean;
   ownership: AutomationRecordingOwnership | null;
   status: AutomationRecordingStatus;
@@ -148,7 +150,7 @@ export function automationRecordingStatusMessage(
     case 'invalid-track':
     case 'invalid-target':
     case 'master-protected':
-      return 'このトラックまたはパラメーターにはオートメーションを記録できません。通常トラックの音量またはパンを選んでください。';
+      return 'このトラックまたはパラメーターにはオートメーションを記録できません。通常トラックの音量またはパン、または先頭のMasterの出力音量を選んでください。';
     case 'invalid-mode':
       return '現在のオートメーションモードでは記録できません。Touch、Latch、またはWriteを選んでください。';
     case 'not-touching':
@@ -192,6 +194,7 @@ export class AutomationRecordingCoordinator {
   private readonly writingTrackIds = new Set<string>();
   private readonly touchingTargetKeys = new Set<string>();
   private readonly overriddenTargets = new Map<string, AutomationTarget>();
+  private readonly overrideValues = new Map<string, number>();
   private status: AutomationRecordingStatus = NO_STATUS;
 
   activate(project: Project, activationId: string): void {
@@ -202,7 +205,9 @@ export class AutomationRecordingCoordinator {
     this.activationId = activationId;
     this.modes = new Map(
       project.tracks
-        .filter((track) => track.type !== 'master')
+        .filter(
+          (track) => automationTargetTypesForTrack(project, track.id).length > 0,
+        )
         .map((track) => [track.id, 'read' as const]),
     );
     this.clearPass();
@@ -220,6 +225,7 @@ export class AutomationRecordingCoordinator {
       ),
       writingTrackIds: Object.freeze([...this.writingTrackIds]),
       touchingTargetKeys: Object.freeze([...this.touchingTargetKeys]),
+      overrideValues: Object.freeze(Object.fromEntries(this.overrideValues)),
       passActive: this.pass !== null,
       ownership: this.ownership ? Object.freeze({ ...this.ownership }) : null,
       status: this.status,
@@ -300,8 +306,11 @@ export class AutomationRecordingCoordinator {
       return this.fail('commit-rejected');
     }
     const track = project.tracks.find((candidate) => candidate.id === trackId);
-    if (!track || track.type === 'master') {
-      return this.fail(track?.type === 'master' ? 'master-protected' : 'invalid-track');
+    if (!track) {
+      return this.fail('invalid-track');
+    }
+    if (automationTargetTypesForTrack(project, trackId).length === 0) {
+      return this.fail(track.type === 'master' ? 'master-protected' : 'invalid-track');
     }
     if (mode !== 'read' && mode !== 'touch' && mode !== 'latch' && mode !== 'write') {
       return this.fail('invalid-mode');
@@ -326,7 +335,10 @@ export class AutomationRecordingCoordinator {
       return this.fail('commit-rejected');
     }
     const tracks = input.project.tracks
-      .filter((track) => track.type !== 'master')
+      .filter(
+        (track) =>
+          automationTargetTypesForTrack(input.project, track.id).length > 0,
+      )
       .map((track) => ({
         trackId: track.id,
         mode: this.modeForTrack(track.id),
@@ -352,7 +364,10 @@ export class AutomationRecordingCoordinator {
     try {
       for (const trackMode of tracks) {
         if (trackMode.mode !== 'write') continue;
-        for (const type of ['track-volume', 'track-pan'] as const) {
+        for (const type of automationTargetTypesForTrack(
+          input.project,
+          trackMode.trackId,
+        )) {
           const target = Object.freeze({ type, trackId: trackMode.trackId });
           writeTargets.push(target);
           input.graph.beginOverride(
@@ -379,6 +394,10 @@ export class AutomationRecordingCoordinator {
     for (const target of writeTargets) {
       this.writingTrackIds.add(target.trackId);
       this.overriddenTargets.set(targetKey(target), target);
+      this.overrideValues.set(
+        targetKey(target),
+        frozenScalar(input.project, target),
+      );
     }
     return { ok: true, changed: true };
   }
@@ -405,6 +424,7 @@ export class AutomationRecordingCoordinator {
     this.touchingTargetKeys.add(targetKey(target));
     this.writingTrackIds.add(target.trackId);
     this.overriddenTargets.set(targetKey(target), Object.freeze({ ...target }));
+    this.overrideValues.set(targetKey(target), value);
     this.status = NO_STATUS;
     return { ok: true, changed: true };
   }
@@ -427,6 +447,7 @@ export class AutomationRecordingCoordinator {
     }
     this.pass = sampled.pass;
     this.lastBeat = beat;
+    this.overrideValues.set(targetKey(target), value);
     this.status = NO_STATUS;
     return { ok: true, changed: true };
   }
@@ -454,6 +475,7 @@ export class AutomationRecordingCoordinator {
     this.touchingTargetKeys.delete(targetKey(target));
     if (mode === 'touch') {
       this.overriddenTargets.delete(targetKey(target));
+      this.overrideValues.delete(targetKey(target));
       if (![...this.touchingTargetKeys].some((key) => key.startsWith(`${target.trackId}:`))) {
         this.writingTrackIds.delete(target.trackId);
       }
@@ -616,6 +638,7 @@ export class AutomationRecordingCoordinator {
     this.writingTrackIds.clear();
     this.touchingTargetKeys.clear();
     this.overriddenTargets.clear();
+    this.overrideValues.clear();
   }
 
   private fail(

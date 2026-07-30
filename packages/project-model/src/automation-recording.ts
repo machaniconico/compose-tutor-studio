@@ -23,12 +23,16 @@ import {
   MAX_AUTOMATION_LANES,
   MAX_AUTOMATION_POINTS_PER_LANE,
 } from './validation';
+import {
+  automationTargetTypesForTrack,
+  isSupportedAutomationTarget,
+} from './automation-targets';
 
 export type AutomationWriteMode = 'read' | 'touch' | 'latch' | 'write';
 export type AutomationRecordingTargetType = AutomationTarget['type'];
 export type AutomationRecordingIdFactory = (kind: 'lane' | 'point') => string;
 
-/** Write intentionally replaces both supported Track parameters without a gesture. */
+/** Stable ordering for the two target kinds; per-Track support can be narrower. */
 export const AUTOMATION_WRITE_TARGET_TYPES = Object.freeze([
   'track-volume',
   'track-pan',
@@ -367,8 +371,11 @@ function locateTrack(project: Project, trackId: unknown): Track | AutomationReco
   if (track === undefined) {
     return failure('invalid-track', `Track not found: ${trackId}`);
   }
-  if (track.type === 'master') {
-    return failure('master-protected', 'Automation recording cannot target Master.');
+  if (automationTargetTypesForTrack(project, track.id).length === 0) {
+    return failure(
+      'master-protected',
+      'Automation recording cannot target this Master.',
+    );
   }
   return track;
 }
@@ -424,7 +431,7 @@ function initialWriteCaptures(
   for (const trackMode of tracks) {
     if (trackMode.mode !== 'write') continue;
     const track = project.tracks.find((candidate) => candidate.id === trackMode.trackId)!;
-    for (const type of AUTOMATION_WRITE_TARGET_TYPES) {
+    for (const type of automationTargetTypesForTrack(project, track.id)) {
       captures.push({
         target: { type, trackId: track.id },
         mode: 'write',
@@ -484,7 +491,7 @@ export function beginAutomationPass(
 
 /**
  * Advance an active pass after a compare-and-swap commit that changed only
- * volume/pan scalars on Tracks whose begin-time mode is Read.
+ * supported scalars on Tracks whose begin-time mode is Read.
  *
  * The frozen recording baseline deliberately remains the begin-time snapshot:
  * Write captures and curve restoration must never observe an intervening Read
@@ -530,7 +537,7 @@ export function rebaseAutomationPass(
     // Construct the only candidate shape that is legal: the exact old
     // canonical Project with root updatedAt and begin-time Read scalars copied
     // from the next generation. Full fingerprint equality below rejects every
-    // other mutation, including Track reorder/removal and Master changes.
+    // other mutation, including Track reorder/removal and unsupported Master changes.
     expectedCanonical.updatedAt = nextCanonical.updatedAt;
     const changedTargets: AutomationTarget[] = [];
     for (const trackMode of pass.tracks) {
@@ -541,31 +548,40 @@ export function rebaseAutomationPass(
       const nextTrack = nextCanonical.tracks.find(
         (track) => track.id === trackMode.trackId,
       );
+      if (expectedTrack === undefined || nextTrack === undefined) {
+        return failure(
+          'invalid-pass',
+          'Automation pass rebase requires every Read Track to remain unchanged.',
+        );
+      }
+      const targetTypes = automationTargetTypesForTrack(
+        expectedCanonical,
+        trackMode.trackId,
+      );
+      const nextTargetTypes = automationTargetTypesForTrack(
+        nextCanonical,
+        trackMode.trackId,
+      );
       if (
-        expectedTrack === undefined
-        || nextTrack === undefined
-        || expectedTrack.type === 'master'
-        || nextTrack.type === 'master'
+        targetTypes.length === 0
+        || targetTypes.length !== nextTargetTypes.length
+        || targetTypes.some((type, index) => type !== nextTargetTypes[index])
       ) {
         return failure(
           'invalid-pass',
           'Automation pass rebase requires every Read Track to remain unchanged.',
         );
       }
-      if (expectedTrack.volume !== nextTrack.volume) {
-        changedTargets.push(freezeTarget({
-          type: 'track-volume',
-          trackId: trackMode.trackId,
-        }));
+      for (const type of targetTypes) {
+        if (scalarValue(expectedTrack, type) !== scalarValue(nextTrack, type)) {
+          changedTargets.push(freezeTarget({
+            type,
+            trackId: trackMode.trackId,
+          }));
+        }
+        if (type === 'track-volume') expectedTrack.volume = nextTrack.volume;
+        else expectedTrack.pan = nextTrack.pan;
       }
-      if (expectedTrack.pan !== nextTrack.pan) {
-        changedTargets.push(freezeTarget({
-          type: 'track-pan',
-          trackId: trackMode.trackId,
-        }));
-      }
-      expectedTrack.volume = nextTrack.volume;
-      expectedTrack.pan = nextTrack.pan;
     }
     if (changedTargets.length === 0) {
       return failure(
@@ -615,6 +631,12 @@ function inspectTargetInput(
     || typeof trackId !== 'string'
   ) {
     return failure('invalid-target', 'Only Track volume and pan can be recorded.');
+  }
+  if (!isSupportedAutomationTarget(pass.frozenProject, { type, trackId })) {
+    return failure(
+      'invalid-target',
+      'This automation target is not supported for the selected Track.',
+    );
   }
   const trackMode = pass.tracks.find((track) => track.trackId === trackId);
   if (trackMode === undefined) {

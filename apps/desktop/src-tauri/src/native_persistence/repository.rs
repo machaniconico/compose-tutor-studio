@@ -43,7 +43,7 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 7;
+const PROJECT_SCHEMA_VERSION: u64 = 8;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
@@ -3435,6 +3435,7 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
             4 => migrate_project_value_v4_to_v5(project)?,
             5 => migrate_project_value_v5_to_v6(project)?,
             6 => migrate_project_value_v6_to_v7(project)?,
+            7 => migrate_project_value_v7_to_v8(project)?,
             _ => return None,
         };
         version += 1;
@@ -3788,6 +3789,19 @@ fn migrate_project_value_v6_to_v7(mut project: Value) -> Option<Value> {
         "automationReadState".to_owned(),
         serde_json::json!({ "globalEnabled": true, "disabledTrackIds": [] }),
     );
+    Some(project)
+}
+
+/** v8 admits effective-Master volume automation without changing legacy-v7 data. */
+fn migrate_project_value_v7_to_v8(mut project: Value) -> Option<Value> {
+    if project.get("schemaVersion").and_then(Value::as_u64) != Some(7)
+        || validate_project(&project).is_err()
+    {
+        return None;
+    }
+    project
+        .as_object_mut()?
+        .insert("schemaVersion".to_owned(), Value::from(8));
     Some(project)
 }
 
@@ -7828,6 +7842,11 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                 .ok_or(GenerationIssue::Corrupt)?;
         }
     }
+    let effective_master_id = project
+        .tracks
+        .iter()
+        .find(|track| track.kind == "master")
+        .map(|track| track.id.as_str());
 
     if project.schema_version >= 7 {
         let read_state = project
@@ -7840,13 +7859,15 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
             if !valid_project_string(track_id, MAX_STRING_CHARS, false)
                 || !disabled.insert(track_id.as_str())
                 || !track_ids.contains(track_id.as_str())
-                || track_kinds_by_id.get(track_id.as_str()) == Some(&"master")
+                || (track_kinds_by_id.get(track_id.as_str()) == Some(&"master")
+                    && (project.schema_version < 8
+                        || effective_master_id != Some(track_id.as_str())))
             {
                 return Err(GenerationIssue::Corrupt);
             }
         }
         for track in &project.tracks {
-            if track.kind != "master" && disabled.contains(track.id.as_str()) {
+            if disabled.contains(track.id.as_str()) {
                 canonical.push(track.id.as_str());
             }
         }
@@ -8020,7 +8041,10 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                 || !valid_project_string(&lane.target.track_id, MAX_STRING_CHARS, false)
                 || !track_ids.contains(lane.target.track_id.as_str())
                 || !matches!(lane.target.kind.as_str(), "track-volume" | "track-pan")
-                || track_kinds_by_id.get(lane.target.track_id.as_str()) == Some(&"master")
+                || (track_kinds_by_id.get(lane.target.track_id.as_str()) == Some(&"master")
+                    && (project.schema_version < 8
+                        || lane.target.kind != "track-volume"
+                        || effective_master_id != Some(lane.target.track_id.as_str())))
                 || !automation_targets
                     .insert((lane.target.track_id.as_str(), lane.target.kind.as_str()))
                 || lane.points.len() > MAX_AUTOMATION_POINTS

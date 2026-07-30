@@ -887,8 +887,8 @@ function inspectLegacyAutomationLane(
   decoder: StructureDecoder,
   value: unknown,
   path: string,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6,
-): void {
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
+): AutomationTarget {
   const record = decoder.record(
     value,
     path,
@@ -901,7 +901,7 @@ function inspectLegacyAutomationLane(
       `${path}.bypassed`,
     );
   }
-  decodeAutomationTarget(
+  const target = decodeAutomationTarget(
     decoder,
     decoder.required(record, 'target', `${path}.target`),
     `${path}.target`,
@@ -911,6 +911,7 @@ function inspectLegacyAutomationLane(
     `${path}.points`,
     (item, itemPath) => decodeAutomationPoint(decoder, item, itemPath),
   );
+  return target;
 }
 
 function decodeAutomationReadState(
@@ -1189,7 +1190,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
 /** Reject fields that were not part of the declared legacy transport shape. */
 function inspectLegacyProjectStructure(
   input: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
 ): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
@@ -1206,6 +1207,7 @@ function inspectLegacyProjectStructure(
       : []),
     ...(schemaVersion >= 4 ? ['audioRouting'] : []),
     ...(schemaVersion >= 5 ? ['audioTakeFolders'] : []),
+    ...(schemaVersion >= 7 ? ['automationReadState'] : []),
     'tracks',
     'chordTrack',
     'sections',
@@ -1234,6 +1236,7 @@ function inspectLegacyProjectStructure(
   decoder.member(decoder.required(record, 'key', 'key'), PROJECT_KEYS, 'key');
   decoder.member(decoder.required(record, 'scale', 'scale'), PROJECT_SCALES, 'scale');
   decoder.number(decoder.required(record, 'lengthBars', 'lengthBars'), 'lengthBars');
+  let automationTargets: AutomationTarget[] = [];
   if (schemaVersion >= 3) {
     decoder.number(decoder.required(record, 'lengthBeats', 'lengthBeats'), 'lengthBeats');
     decoder.array(
@@ -1251,7 +1254,7 @@ function inspectLegacyProjectStructure(
       'audioAssets',
       (item, itemPath) => decodeAudioAsset(decoder, item, itemPath),
     );
-    decoder.array(
+    automationTargets = decoder.array(
       decoder.required(record, 'automationLanes', 'automationLanes'),
       'automationLanes',
       (item, itemPath) => inspectLegacyAutomationLane(
@@ -1262,6 +1265,13 @@ function inspectLegacyProjectStructure(
       ),
     );
   }
+  const automationReadState = schemaVersion >= 7
+    ? decodeAutomationReadState(
+        decoder,
+        decoder.required(record, 'automationReadState', 'automationReadState'),
+        'automationReadState',
+      )
+    : null;
   if (schemaVersion >= 4) {
     decodeAudioRouting(
       decoder,
@@ -1276,11 +1286,32 @@ function inspectLegacyProjectStructure(
       (item, itemPath) => decodeAudioTakeFolder(decoder, item, itemPath),
     );
   }
-  decoder.array(
+  const tracks = decoder.array(
     decoder.required(record, 'tracks', 'tracks'),
     'tracks',
     (item, itemPath) => decodeTrack(decoder, item, itemPath, schemaVersion),
   );
+  const masterTrackIds = new Set(
+    tracks.filter((track) => track.type === 'master').map((track) => track.id),
+  );
+  automationTargets.forEach((target, index) => {
+    if (masterTrackIds.has(target.trackId)) {
+      decoder.issue(
+        `automationLanes[${index}].target.trackId`,
+        'invalid-reference',
+        'automation cannot target a Master track',
+      );
+    }
+  });
+  automationReadState?.disabledTrackIds.forEach((trackId, index) => {
+    if (masterTrackIds.has(trackId)) {
+      decoder.issue(
+        `automationReadState.disabledTrackIds[${index}]`,
+        'invalid-reference',
+        'automation Read state cannot reference a Master track',
+      );
+    }
+  });
   decoder.array(
     decoder.required(record, 'chordTrack', 'chordTrack'),
     'chordTrack',
@@ -1365,7 +1396,7 @@ export function decodeProject(input: unknown): ProjectDecodeResult {
   if (version.version < CURRENT_SCHEMA_VERSION) {
     const legacyIssues = inspectLegacyProjectStructure(
       input,
-      version.version as 1 | 2 | 3 | 4 | 5 | 6,
+      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7,
     );
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };

@@ -17,6 +17,8 @@ import {
 import {
   clipContentOwnerId,
   adoptRecordedAudioPunch,
+  automationTargetTypesForTrack,
+  isSupportedAutomationTarget,
   createEmptyProject,
   decodeProject,
   encodeProjectJson,
@@ -2803,9 +2805,16 @@ export function createStudioStore(
       ) {
         return;
       }
-      const target: AutomationTarget | null = track.type === 'master'
-        ? null
-        : { type: 'track-volume', trackId };
+      const volumeTarget: AutomationTarget = {
+        type: 'track-volume',
+        trackId,
+      };
+      const target: AutomationTarget | null = isSupportedAutomationTarget(
+        project,
+        volumeTarget,
+      )
+        ? volumeTarget
+        : null;
       const automationMode = automationCoordinator.modeForTrack(trackId);
       if (
         state.transport.phase === 'playing'
@@ -2854,9 +2863,16 @@ export function createStudioStore(
       ) {
         return;
       }
-      const target: AutomationTarget | null = track.type === 'master'
-        ? null
-        : { type: 'track-pan', trackId };
+      const panTarget: AutomationTarget = {
+        type: 'track-pan',
+        trackId,
+      };
+      const target: AutomationTarget | null = isSupportedAutomationTarget(
+        project,
+        panTarget,
+      )
+        ? panTarget
+        : null;
       const automationMode = automationCoordinator.modeForTrack(trackId);
       if (
         state.transport.phase === 'playing'
@@ -2899,6 +2915,11 @@ export function createStudioStore(
         return false;
       }
       if (
+        automationTargetTypesForTrack(state.project, trackId).length === 0
+      ) {
+        return false;
+      }
+      if (
         automationCoordinator.hasActivePass()
         && !finalizeAutomationPass('mode-change')
       ) {
@@ -2922,7 +2943,7 @@ export function createStudioStore(
         );
         if (
           !track
-          || track.type === 'master'
+          || !isSupportedAutomationTarget(state.project, target)
           || !Number.isFinite(value)
           || (
             target.type === 'track-volume'

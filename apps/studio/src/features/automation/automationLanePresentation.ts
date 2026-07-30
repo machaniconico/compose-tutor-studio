@@ -49,6 +49,39 @@ export const AUTOMATION_TARGETS: Readonly<
   },
 };
 
+const MASTER_VOLUME_AUTOMATION_TARGET: AutomationTargetPresentation = {
+  ...AUTOMATION_TARGETS['track-volume'],
+  label: 'Master出力音量',
+  shortLabel: 'Master出力音量',
+  displayLabel: 'Master出力音量（%）',
+};
+
+export function automationTargetPresentation(
+  targetType: AutomationTargetType,
+  isMaster: boolean,
+): AutomationTargetPresentation {
+  return isMaster && targetType === 'track-volume'
+    ? MASTER_VOLUME_AUTOMATION_TARGET
+    : AUTOMATION_TARGETS[targetType];
+}
+
+export function resolveAutomationTargetType(
+  requested: AutomationTargetType,
+  supported: readonly AutomationTargetType[],
+): AutomationTargetType {
+  return supported.includes(requested)
+    ? requested
+    : supported[0] ?? requested;
+}
+
+export function automationWriteConfirmationDescription(
+  isMaster: boolean,
+): string {
+  return isMaster
+    ? 'Writeは、コントロールに触れなくても再生位置の下にあるMaster出力音量のオートメーションだけを置き換えます。パスをパンチアウトすると、安全なTouchモードへ自動的に戻ります。'
+    : 'Writeは、コントロールに触れなくても再生位置の下にある音量とパンのオートメーションを両方とも置き換えます。パスをパンチアウトすると、安全なTouchモードへ自動的に戻ります。';
+}
+
 export const AUTOMATION_SNAP_OPTIONS = [
   { value: 0, label: 'オフ' },
   { value: 0.25, label: '1/16音符' },
@@ -494,8 +527,9 @@ export function automationPointAriaLabel(
   point: AutomationPoint,
   index: number,
   targetType: AutomationTargetType,
+  isMaster = false,
 ): string {
-  const target = AUTOMATION_TARGETS[targetType];
+  const target = automationTargetPresentation(targetType, isMaster);
   return `${target.shortLabel} ${index + 1}点目、拍 ${formatAutomationBeat(
     point.beat,
   )}、値 ${formatAutomationValue(

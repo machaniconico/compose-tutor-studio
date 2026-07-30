@@ -4,11 +4,46 @@ import type { AudioAssetBufferLease } from '../src/audio/audioAssetResolver';
 import { buildTrackGraphs, type TrackGraph } from '../src/audio/graph';
 
 const engineHarness = vi.hoisted(() => {
+  const makeParam = () => {
+    const commands: Array<{
+      kind: 'cancel' | 'hold' | 'set' | 'target' | 'linear';
+      value?: number;
+      time: number;
+    }> = [];
+    return {
+      value: 1,
+      commands,
+      cancelScheduledValues: vi.fn((time: number) => {
+        commands.push({ kind: 'cancel', time });
+      }),
+      cancelAndHoldAtTime: vi.fn((time: number) => {
+        commands.push({ kind: 'hold', time });
+      }),
+      setValueAtTime: vi.fn((value: number, time: number) => {
+        commands.push({ kind: 'set', value, time });
+      }),
+      setTargetAtTime: vi.fn((value: number, time: number) => {
+        commands.push({ kind: 'target', value, time });
+      }),
+      linearRampToValueAtTime: vi.fn((value: number, time: number) => {
+        commands.push({ kind: 'linear', value, time });
+      }),
+    };
+  };
+  const makeGain = () => ({
+    gain: makeParam(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  });
+  const gains: ReturnType<typeof makeGain>[] = [];
   const harness = {
     currentTime: 10,
     contextState: 'running',
     generation: 7,
     listeners: new Set<(state: string) => void>(),
+    gains,
+    makeGain,
+    makeParam,
     context: null as unknown as AudioContext,
     master: null as unknown as GainNode,
     ensureContext: vi.fn(),
@@ -21,13 +56,19 @@ const engineHarness = vi.hoisted(() => {
     get state() {
       return harness.contextState;
     },
+    createGain: vi.fn(() => {
+      const gain = makeGain();
+      gains.push(gain);
+      return gain;
+    }),
   } as unknown as AudioContext;
-  harness.master = {} as GainNode;
+  harness.master = makeGain() as unknown as GainNode;
   return harness;
 });
 
 const assetHarness = vi.hoisted(() => ({
   acquire: vi.fn(),
+  preflight: vi.fn(),
   clearUnused: vi.fn(),
   release: vi.fn(),
 }));
@@ -66,6 +107,7 @@ vi.mock('../src/audio/audioAssetResolver', async (importOriginal) => {
     ...actual,
     getAudioAssetPlaybackCache: () => ({
       clearUnused: assetHarness.clearUnused,
+      preflight: assetHarness.preflight,
       retainedDecodedBytes: 0,
     }),
     projectHasReferencedReadyAudioAssets: () => false,
@@ -84,19 +126,15 @@ vi.mock('../src/audio/graph', async (importOriginal) => {
   };
 });
 
-vi.mock('../src/audio/mixState', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/audio/mixState')>();
-  return {
-    ...actual,
-    applyMasterMix: vi.fn(),
-  };
-});
-
 import {
   initAudioBridge,
   startSynchronizedRecordingPlayback,
   stopSynchronizedRecordingPlayback,
 } from '../src/audio/playback';
+import {
+  renderProjectToWav,
+  renderSelectedTrackToWav,
+} from '../src/audio/wav';
 import { useStore } from '../src/state/store';
 
 type Deferred<T> = Readonly<{
@@ -186,6 +224,60 @@ function makeGraphDouble(): GraphDouble {
   };
 }
 
+type MasterParamCommand =
+  ReturnType<typeof engineHarness.makeParam>['commands'][number];
+
+function normalizedMasterCommands(
+  gain: ReturnType<typeof engineHarness.makeGain>,
+  timeOrigin: number,
+): readonly MasterParamCommand[] {
+  return gain.gain.commands.map((command) => ({
+    ...command,
+    time: Number((command.time - timeOrigin).toFixed(9)),
+  }));
+}
+
+function installMasterParityOfflineContext(): Readonly<{
+  gains: Array<ReturnType<typeof engineHarness.makeGain>>;
+}> {
+  const gains: Array<ReturnType<typeof engineHarness.makeGain>> = [];
+  const compressor = {
+    threshold: engineHarness.makeParam(),
+    knee: engineHarness.makeParam(),
+    ratio: engineHarness.makeParam(),
+    attack: engineHarness.makeParam(),
+    release: engineHarness.makeParam(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  };
+  const rendered = {
+    duration: 1 / 44_100,
+    length: 1,
+    sampleRate: 44_100,
+    numberOfChannels: 2,
+    getChannelData: () => new Float32Array(1),
+  } as unknown as AudioBuffer;
+  const context = {
+    currentTime: 0,
+    sampleRate: 44_100,
+    destination: {},
+    createGain: vi.fn(() => {
+      const gain = engineHarness.makeGain();
+      gains.push(gain);
+      return gain;
+    }),
+    createDynamicsCompressor: vi.fn(() => compressor),
+    startRendering: vi.fn(async () => rendered),
+  };
+  vi.stubGlobal(
+    'OfflineAudioContext',
+    vi.fn(function OfflineAudioContext() {
+      return context;
+    }),
+  );
+  return { gains };
+}
+
 describe('synchronized recording playback runtime races', () => {
   let teardownBridge = (): void => undefined;
   let project = createEmptyProject();
@@ -225,6 +317,7 @@ describe('synchronized recording playback runtime races', () => {
     engineHarness.contextState = 'running';
     engineHarness.generation = 7;
     engineHarness.listeners.clear();
+    engineHarness.gains.length = 0;
     engineHarness.ensureContext.mockReset();
     engineHarness.ensureContext.mockResolvedValue({
       context: engineHarness.context,
@@ -233,15 +326,26 @@ describe('synchronized recording playback runtime races', () => {
     });
 
     assetHarness.acquire.mockReset();
+    assetHarness.preflight.mockReset();
     assetHarness.clearUnused.mockReset();
     assetHarness.release = vi.fn();
+    assetHarness.preflight.mockResolvedValue({
+      assets: [],
+      estimatedDecodedBytes: 0,
+    });
     assetHarness.acquire.mockResolvedValue({
       buffersByAssetId: new Map(),
       release: assetHarness.release,
     } satisfies AudioAssetBufferLease);
     graphHarness.graphs.clear();
 
-    project = createEmptyProject();
+    project = {
+      ...createEmptyProject(),
+      // Raw Zustand replacement is intentional in this runtime race harness.
+      // Keep the persistence coordinator's active ID so tests that exercise a
+      // real Project edit do not fail at the unrelated save CAS boundary.
+      id: useStore.getState().saveState.projectId,
+    };
     operationId += 1;
     const transport = useStore.getState().transport;
     useStore.setState({
@@ -275,6 +379,7 @@ describe('synchronized recording playback runtime races', () => {
     stopSynchronizedRecordingPlayback(transport.playbackRequestId);
     teardownBridge();
     await flushMicrotasks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -433,6 +538,237 @@ describe('synchronized recording playback runtime races', () => {
     expect(await playAndCapture(reenabledProject)).toEqual(enabledCommands);
     expect(reenabledProject.automationLanes[0]?.points).toBe(points);
     expect(reenabledProject.automationLanes[0]?.points).toEqual(readProject.automationLanes[0]?.points);
+  });
+
+  it('matches production live Master commands with full and selected-Track WAV across every Read gate', async () => {
+    const target = project.tracks.find((track) => track.type !== 'master');
+    const master = project.tracks.find((track) => track.type === 'master');
+    if (!target || !master) {
+      throw new Error('Expected playable and effective Master Tracks');
+    }
+    const readProject: Project = {
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.id === master.id ? { ...track, volume: 0.9 } : track),
+      automationLanes: [{
+        id: 'live-wav-master-parity-lane',
+        bypassed: false,
+        target: { type: 'track-volume', trackId: master.id },
+        points: [
+          {
+            id: 'live-wav-master-parity-0',
+            beat: 0,
+            value: 0.35,
+            interpolation: 'hold',
+          },
+          {
+            id: 'live-wav-master-parity-1',
+            beat: 0.1,
+            value: 0.65,
+            interpolation: 'hold',
+          },
+        ],
+      }],
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
+    };
+    const variants = [
+      { state: 'read-enabled', project: readProject },
+      {
+        state: 'global-read-disabled',
+        project: {
+          ...readProject,
+          automationReadState: {
+            globalEnabled: false,
+            disabledTrackIds: [],
+          },
+        },
+      },
+      {
+        state: 'master-read-disabled',
+        project: {
+          ...readProject,
+          automationReadState: {
+            globalEnabled: true,
+            disabledTrackIds: [master.id],
+          },
+        },
+      },
+      {
+        state: 'lane-bypassed',
+        project: {
+          ...readProject,
+          automationLanes: readProject.automationLanes.map((lane) => ({
+            ...lane,
+            bypassed: true,
+          })),
+        },
+      },
+    ] satisfies ReadonlyArray<Readonly<{ state: string; project: Project }>>;
+
+    const captureLive = async (
+      snapshot: Project,
+    ): Promise<readonly MasterParamCommand[]> => {
+      vi.unstubAllGlobals();
+      engineHarness.currentTime = 10;
+      engineHarness.gains.length = 0;
+      graphHarness.graphs.clear();
+      graphHarness.graphs.set(target.id, makeGraphDouble());
+      const before = useStore.getState();
+      useStore.setState({
+        project: snapshot,
+        projectOperationBusy: false,
+        audioRecordingOperationId: null,
+        armedAudioTrackId: null,
+        transport: {
+          ...before.transport,
+          phase: 'stopped',
+          isPlaying: false,
+          positionBeat: 0,
+          playbackRequestId: before.transport.playbackRequestId + 1,
+          audioIssue: null,
+          loopEnabled: false,
+          metronome: false,
+        },
+      });
+
+      useStore.getState().play();
+      await flushMicrotasks();
+      expect(useStore.getState().transport.phase).toBe('playing');
+      const liveMaster = engineHarness.gains[1];
+      if (!liveMaster) throw new Error('Expected the production live Master fader');
+      const commands = normalizedMasterCommands(liveMaster, 10);
+      useStore.getState().stop();
+      await flushMicrotasks();
+      return commands;
+    };
+
+    const captureWav = async (
+      snapshot: Project,
+      selected: boolean,
+    ): Promise<readonly MasterParamCommand[]> => {
+      vi.unstubAllGlobals();
+      graphHarness.graphs.clear();
+      graphHarness.graphs.set(target.id, makeGraphDouble());
+      const offline = installMasterParityOfflineContext();
+      const rendered = selected
+        ? await renderSelectedTrackToWav(snapshot, target.id)
+        : await renderProjectToWav(snapshot);
+      rendered.release();
+      const offlineMaster = offline.gains[0];
+      if (!offlineMaster) throw new Error('Expected the offline Master fader');
+      return normalizedMasterCommands(offlineMaster, 0);
+    };
+
+    for (const variant of variants) {
+      const liveCommands = await captureLive(variant.project);
+      const mixCommands = await captureWav(variant.project, false);
+      const selectedCommands = await captureWav(variant.project, true);
+      expect({
+        state: variant.state,
+        commands: mixCommands,
+      }).toEqual({
+        state: variant.state,
+        commands: liveCommands,
+      });
+      expect({
+        state: variant.state,
+        commands: selectedCommands,
+      }).toEqual({
+        state: variant.state,
+        commands: liveCommands,
+      });
+    }
+
+    const enabledCommands = await captureLive(readProject);
+    expect(enabledCommands).toContainEqual({
+      kind: 'set',
+      value: 0.35,
+      time: 0,
+    });
+    expect(enabledCommands).toContainEqual({
+      kind: 'set',
+      value: 0.65,
+      time: 0.05,
+    });
+    for (const variant of variants.slice(1)) {
+      const commands = await captureLive(variant.project);
+      expect(commands).toContainEqual({
+        kind: 'set',
+        value: 0.9,
+        time: 0,
+      });
+      expect(commands.some((command) => command.value === 0.35)).toBe(false);
+    }
+  });
+
+  it('replaces live playback at the same beat after editing an automated Master base scalar', async () => {
+    const master = project.tracks.find((track) => track.type === 'master');
+    if (!master) throw new Error('Master fixture missing');
+    project = {
+      ...project,
+      tracks: project.tracks.map((track) =>
+        track.id === master.id ? { ...track, volume: 0.8 } : track),
+      automationLanes: [{
+        id: 'live-master-base-replacement-lane',
+        bypassed: false,
+        target: { type: 'track-volume', trackId: master.id },
+        points: [{
+          id: 'live-master-base-replacement-point',
+          beat: 4,
+          value: 0.35,
+          interpolation: 'hold',
+        }],
+      }],
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
+    };
+    useStore.setState((state) => ({
+      project,
+      audioRecordingOperationId: null,
+      transport: {
+        ...state.transport,
+        phase: 'stopped',
+        isPlaying: false,
+        positionBeat: 2.75,
+        playbackRequestId: state.transport.playbackRequestId + 1,
+      },
+    }));
+
+    useStore.getState().play();
+    await flushMicrotasks();
+    const firstRequestId = useStore.getState().transport.playbackRequestId;
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'playing',
+      positionBeat: 2.75,
+      playbackRequestId: firstRequestId,
+    });
+    const graphBuildsBeforeEdit = vi.mocked(buildTrackGraphs).mock.calls.length;
+    engineHarness.currentTime = 10.25;
+    expect(useStore.getState().transport.positionBeat).toBe(2.75);
+
+    useStore.getState().setTrackVolume(master.id, 0.6);
+
+    expect(
+      useStore.getState().project.tracks.find(
+        (track) => track.id === master.id,
+      )?.volume,
+    ).toBe(0.6);
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'starting',
+      isPlaying: false,
+      positionBeat: 3.25,
+      audioIssue: null,
+    });
+    const replacementRequestId =
+      useStore.getState().transport.playbackRequestId;
+    expect(replacementRequestId).toBeGreaterThan(firstRequestId);
+    await flushMicrotasks();
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'playing',
+      positionBeat: 3.25,
+      playbackRequestId: replacementRequestId,
+    });
+    expect(vi.mocked(buildTrackGraphs).mock.calls.length)
+      .toBe(graphBuildsBeforeEdit + 1);
   });
 
   it('arms Auto Punch capture at the exact punch-in frame and exposes both clocks', async () => {

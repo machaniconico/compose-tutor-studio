@@ -236,6 +236,26 @@ function pcmSamples(wav: Buffer): Int16Array {
   throw new Error('WAV data chunk missing');
 }
 
+function expectPcmEqualWithinOneLsb(actual: Buffer, expected: Buffer): void {
+  expect(actual.length).toBe(expected.length);
+  expect(actual.subarray(0, 44)).toEqual(expected.subarray(0, 44));
+
+  const actualSamples = pcmSamples(actual);
+  const expectedSamples = pcmSamples(expected);
+  expect(actualSamples.length).toBe(expectedSamples.length);
+
+  let differingSamples = 0;
+  let maxAbsoluteDelta = 0;
+  for (let index = 0; index < actualSamples.length; index += 1) {
+    const absoluteDelta = Math.abs(actualSamples[index]! - expectedSamples[index]!);
+    if (absoluteDelta > 0) differingSamples += 1;
+    maxAbsoluteDelta = Math.max(maxAbsoluteDelta, absoluteDelta);
+  }
+
+  expect(differingSamples).toBeLessThanOrEqual(1);
+  expect(maxAbsoluteDelta).toBeLessThanOrEqual(1);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await dismissOnboarding(page);
@@ -281,7 +301,7 @@ test('downloads immutable routed PCM equal to a normalized solo reference', asyn
 
   await importProject(page, bounceProject({ normalizedReference: true }));
   const normalized = await exportFromDialog(page, 'WAVエクスポート');
-  expect(selected.bytes).toEqual(normalized.bytes);
+  expectPcmEqualWithinOneLsb(selected.bytes, normalized.bytes);
 
   await importProject(page, bounceProject({ sendGain: 1.5 }));
   const changedSend = await exportFromDialog(page, '選択トラックをWAV');

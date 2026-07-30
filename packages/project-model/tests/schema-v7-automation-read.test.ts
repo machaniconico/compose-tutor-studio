@@ -33,10 +33,10 @@ describe('schema-v7 Automation Read state', () => {
     delete v6.automationReadState;
     const before = structuredClone(v6);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    expect(CURRENT_SCHEMA_VERSION).toBe(8);
     expect(migrateProject(v6)).toEqual({
       ...v6,
-      schemaVersion: 7,
+      schemaVersion: 8,
       automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     });
     expect(v6).toEqual(before);
@@ -67,6 +67,12 @@ describe('schema-v7 Automation Read state', () => {
     const current = createEmptyProject({ clock });
     const track = current.tracks.find((candidate) => candidate.type !== 'master')!;
     const master = current.tracks.find((candidate) => candidate.type === 'master')!;
+    const compatibilityMaster = {
+      ...structuredClone(master),
+      id: 'schema-v7-compatibility-master',
+      name: 'Compatibility Master',
+    };
+    current.tracks.push(compatibilityMaster);
 
     const smuggled = structuredClone(current) as unknown as Record<string, unknown>;
     smuggled.schemaVersion = 6;
@@ -101,7 +107,7 @@ describe('schema-v7 Automation Read state', () => {
     duplicate.automationReadState.disabledTrackIds = [track.id, track.id];
     issue(duplicate, 'automationReadState.disabledTrackIds[1]');
     const masterState = structuredClone(current);
-    masterState.automationReadState.disabledTrackIds = [master.id];
+    masterState.automationReadState.disabledTrackIds = [compatibilityMaster.id];
     issue(masterState, 'automationReadState.disabledTrackIds[0]');
     const missingTrack = structuredClone(current);
     missingTrack.automationReadState.disabledTrackIds = ['missing'];
@@ -111,6 +117,40 @@ describe('schema-v7 Automation Read state', () => {
     };
     unknown.automationReadState.mode = 'read';
     issue(unknown, 'automationReadState.mode', 'unknown-key');
+  });
+
+  it('rejects v7 Master smuggling at both migration boundaries', () => {
+    const current = createEmptyProject({ clock });
+    const master = current.tracks.find((track) => track.type === 'master')!;
+    const masterLane = structuredClone(current) as unknown as Record<string, unknown>;
+    masterLane.schemaVersion = 7;
+    masterLane.automationLanes = [{
+      id: 'legacy-master-lane',
+      bypassed: false,
+      target: { type: 'track-volume', trackId: master.id },
+      points: [{
+        id: 'legacy-master-point',
+        beat: 0,
+        value: 1,
+        interpolation: 'linear',
+      }],
+    }];
+    expect(() => migrateProject(masterLane)).toThrow(/Master track/);
+    issue(masterLane, 'automationLanes[0].target.trackId', 'invalid-reference');
+
+    const masterRead = structuredClone(current) as unknown as Record<string, unknown>;
+    masterRead.schemaVersion = 7;
+    masterRead.automationReadState = {
+      globalEnabled: true,
+      disabledTrackIds: [master.id],
+    };
+    expect(() => migrateProject(masterRead)).toThrow(/Master track/);
+    issue(masterRead, 'automationReadState.disabledTrackIds[0]', 'invalid-reference');
+
+    const missingRead = structuredClone(current) as unknown as Record<string, unknown>;
+    missingRead.schemaVersion = 7;
+    delete missingRead.automationReadState;
+    issue(missingRead, 'automationReadState', 'required');
   });
 
   it('makes the public validator enforce the exact v7 Read-state shape', () => {
@@ -145,18 +185,27 @@ describe('schema-v7 Automation Read state', () => {
   it('provides immutable no-op-stable gates and reconciles Track lifecycle', () => {
     const initial = createEmptyProject({ clock });
     const first = initial.tracks.find((candidate) => candidate.type !== 'master')!;
+    const master = initial.tracks.find((candidate) => candidate.type === 'master')!;
     const disabled = setTrackAutomationReadEnabled(initial, first.id, false);
     expect(disabled.ok && disabled.changed).toBe(true);
     if (!disabled.ok) return;
     expect(disabled.project.automationReadState.disabledTrackIds).toEqual([first.id]);
     expect(disabled.project.automationLanes).toBe(initial.automationLanes);
 
-    const noOp = setTrackAutomationReadEnabled(disabled.project, first.id, false);
-    expect(noOp.ok && noOp.project).toBe(disabled.project);
-    const global = setGlobalAutomationReadEnabled(disabled.project, false);
+    const masterDisabled = setTrackAutomationReadEnabled(disabled.project, master.id, false);
+    expect(masterDisabled.ok).toBe(true);
+    if (!masterDisabled.ok) return;
+    expect(masterDisabled.project.automationReadState.disabledTrackIds).toEqual([
+      first.id,
+      master.id,
+    ]);
+
+    const noOp = setTrackAutomationReadEnabled(masterDisabled.project, first.id, false);
+    expect(noOp.ok && noOp.project).toBe(masterDisabled.project);
+    const global = setGlobalAutomationReadEnabled(masterDisabled.project, false);
     expect(global.ok && global.changed).toBe(true);
     if (!global.ok) return;
-    expect(global.project.automationReadState.disabledTrackIds).toEqual([first.id]);
+    expect(global.project.automationReadState.disabledTrackIds).toEqual([first.id, master.id]);
 
     const added = addTrack(global.project, 'bus', {
       name: 'Read lifecycle',
@@ -176,9 +225,11 @@ describe('schema-v7 Automation Read state', () => {
     expect(duplicated.project.automationReadState.disabledTrackIds).not.toContain(
       duplicated.trackId,
     );
+    expect(duplicated.project.automationReadState.disabledTrackIds).toContain(master.id);
     const removed = removeTrack(duplicated.project, busId);
     expect(removed.ok).toBe(true);
     if (!removed.ok) return;
     expect(removed.project.automationReadState.disabledTrackIds).not.toContain(busId);
+    expect(removed.project.automationReadState.disabledTrackIds).toContain(master.id);
   });
 });

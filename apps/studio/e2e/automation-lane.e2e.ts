@@ -449,6 +449,9 @@ test('edits independent volume and pan automation with accessible responsive con
     volumePointIdsBeforeBypass,
   );
 
+  // Bypass stops playback at its current position. Rewind explicitly so the
+  // following "add at playhead" assertion is independent of scheduler timing.
+  await page.getByRole('button', { name: '先頭へ戻す', exact: true }).click();
   await panTarget.click();
   await expect(panTarget).toHaveAttribute('aria-pressed', 'true');
   await expect(

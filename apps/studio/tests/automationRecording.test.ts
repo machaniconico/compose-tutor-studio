@@ -19,6 +19,12 @@ function trackFixture(project: Project) {
   return track;
 }
 
+function masterFixture(project: Project) {
+  const track = project.tracks.find((candidate) => candidate.type === 'master');
+  if (!track) throw new Error('Master Track fixture missing');
+  return track;
+}
+
 function trackPairFixture(project: Project) {
   const tracks = project.tracks.filter((candidate) => candidate.type !== 'master');
   if (tracks.length < 2) throw new Error('two non-Master Track fixtures are required');
@@ -173,6 +179,79 @@ describe('AutomationRecordingCoordinator', () => {
       writingTrackIds: [track.id],
       passActive: true,
     });
+  });
+
+  it('owns only effective Master output volume in Write and rejects a later Master', () => {
+    const baseProject = createDefaultProject();
+    const master = masterFixture(baseProject);
+    const laterMaster = {
+      ...structuredClone(master),
+      id: 'later-master-recording',
+      name: 'Later Master',
+    };
+    const project = {
+      ...baseProject,
+      tracks: [...baseProject.tracks, laterMaster],
+    };
+    const coordinator = new AutomationRecordingCoordinator();
+    const graph = graphBridge();
+    coordinator.activate(project, 'activation-1');
+
+    expect(coordinator.snapshot().trackModes[master.id]).toBe('read');
+    expect(coordinator.snapshot().trackModes[laterMaster.id]).toBeUndefined();
+    expect(coordinator.setTrackMode(
+      project,
+      'activation-1',
+      laterMaster.id,
+      'touch',
+    )).toMatchObject({ ok: false, code: 'master-protected' });
+    expect(coordinator.setTrackMode(
+      project,
+      'activation-1',
+      master.id,
+      'write',
+    )).toEqual({ ok: true, changed: true });
+    expect(coordinator.attachPlayback({
+      project,
+      activationId: 'activation-1',
+      playbackRequestId: 1,
+      currentBeat: () => 0,
+      graph,
+      audioRecordingActive: false,
+    })).toEqual({ ok: true, changed: true });
+
+    const masterVolumeTarget = {
+      type: 'track-volume',
+      trackId: master.id,
+    } as const;
+    expect(graph.beginOverride).toHaveBeenCalledOnce();
+    expect(graph.beginOverride).toHaveBeenCalledWith(
+      masterVolumeTarget,
+      master.volume,
+    );
+
+    const committedProjects: Project[] = [];
+    expect(coordinator.punchOut(
+      ownership(project),
+      project,
+      (_expected, next) => {
+        committedProjects.push(next);
+        return true;
+      },
+      2,
+    )).toEqual({ ok: true, changed: true });
+    const committed = committedProjects[0];
+    if (!committed) throw new Error('Master Write pass was not committed');
+    expect(committed.automationLanes).toEqual([
+      expect.objectContaining({ target: masterVolumeTarget }),
+    ]);
+    expect(
+      committed.automationLanes.some(
+        (lane) =>
+          lane.target.trackId === master.id
+          && lane.target.type === 'track-pan',
+      ),
+    ).toBe(false);
   });
 
   it('keeps a rejected CAS pass recoverable and rejects stale/resource ownership', () => {
@@ -453,6 +532,78 @@ describe('Studio automation pass commit', () => {
     expect(store.getState().saveState.revision).toBe(revision + 1);
   });
 
+  it('keeps a stopped effective Master fader edit as its base scalar', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const master = masterFixture(store.getState().project);
+    const revision = store.getState().saveState.revision;
+
+    store.getState().setTrackVolume(master.id, 0.65);
+
+    expect(
+      store.getState().project.tracks.find(
+        (candidate) => candidate.id === master.id,
+      )?.volume,
+    ).toBe(0.65);
+    expect(store.getState().project.automationLanes).toEqual([]);
+    expect(store.getState().saveState.revision).toBe(revision + 1);
+    expect(store.getState().beginAutomationGesture({
+      type: 'track-pan',
+      trackId: master.id,
+    }, 0.25)).toBe(false);
+  });
+
+  it('rejects unsupported automation modes without finalizing an active pass', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const track = trackFixture(store.getState().project);
+    const master = masterFixture(store.getState().project);
+    const laterMaster = {
+      ...structuredClone(master),
+      id: 'later-master-mode-fail-fast',
+      name: 'Later Master',
+    };
+    expect(store.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: [...project.tracks, laterMaster],
+    }))).toBe(true);
+    expect(store.getState().setTrackAutomationMode(track.id, 'touch')).toBe(true);
+    store.getState().play();
+    const requestId = store.getState().transport.playbackRequestId;
+    const graph = graphBridge();
+    expect(store.getState().attachAutomationPlaybackRuntime(
+      requestId,
+      () => 1,
+      graph,
+    )).toBe(true);
+    store.getState().confirmPlaybackStarted(requestId);
+    expect(store.getState().beginAutomationGesture({
+      type: 'track-volume',
+      trackId: track.id,
+    }, 0.45)).toBe(true);
+
+    const before = store.getState();
+    expect(before.automationRecording.passActive).toBe(true);
+    for (const invalidTrackId of [laterMaster.id, 'missing-master-id']) {
+      expect(store.getState().setTrackAutomationMode(
+        invalidTrackId,
+        'touch',
+      )).toBe(false);
+      const after = store.getState();
+      expect(after.project).toBe(before.project);
+      expect(after.past).toBe(before.past);
+      expect(after.saveState.revision).toBe(before.saveState.revision);
+      expect(after.transport).toBe(before.transport);
+      expect(after.automationRecording).toBe(before.automationRecording);
+      expect(after.automationRecording.passActive).toBe(true);
+      expect(graph.resumeOverride).not.toHaveBeenCalled();
+    }
+
+    expect(store.getState().endAutomationGesture({
+      type: 'track-volume',
+      trackId: track.id,
+    })).toBe(true);
+    store.getState().stop();
+  });
+
   it('keeps playing Read mixer changes as ordinary scalar edits', () => {
     const store = createStudioStore(new MemoryProjectRepository());
     const track = trackFixture(store.getState().project);
@@ -630,6 +781,54 @@ describe('Studio automation pass commit', () => {
     ).toBe(readVolumeBefore);
   });
 
+  it('rebases a playing Read Master scalar through another Track Touch pass', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const writingTrack = trackFixture(store.getState().project);
+    const master = masterFixture(store.getState().project);
+    expect(store.getState().setTrackAutomationMode(
+      writingTrack.id,
+      'touch',
+    )).toBe(true);
+    store.getState().play();
+    const requestId = store.getState().transport.playbackRequestId;
+    let beat = 1;
+    expect(store.getState().attachAutomationPlaybackRuntime(
+      requestId,
+      () => beat,
+      graphBridge(),
+    )).toBe(true);
+    store.getState().confirmPlaybackStarted(requestId);
+    expect(store.getState().beginAutomationGesture({
+      type: 'track-pan',
+      trackId: writingTrack.id,
+    }, 0.2)).toBe(true);
+
+    store.getState().setTrackVolume(master.id, 0.55);
+
+    expect(store.getState().automationReadScalarCommit).toEqual({
+      playbackRequestId: requestId,
+      targets: [{ type: 'track-volume', trackId: master.id }],
+    });
+    expect(store.getState().automationRecording.passActive).toBe(true);
+    expect(
+      store.getState().project.tracks.find(
+        (candidate) => candidate.id === master.id,
+      )?.volume,
+    ).toBe(0.55);
+
+    beat = 2;
+    expect(store.getState().endAutomationGesture({
+      type: 'track-pan',
+      trackId: writingTrack.id,
+    })).toBe(true);
+    store.getState().stop();
+    expect(
+      store.getState().project.tracks.find(
+        (candidate) => candidate.id === master.id,
+      )?.volume,
+    ).toBe(0.55);
+  });
+
   it('keeps Write graph ownership continuous across a Read scalar commit', () => {
     const store = createStudioStore(new MemoryProjectRepository());
     const [writingTrack, readTrack] = trackPairFixture(store.getState().project);
@@ -771,6 +970,51 @@ describe('Studio automation pass commit', () => {
     expect(store.getState().project.automationLanes).toHaveLength(2);
     expect(store.getState().past).toHaveLength(pastBefore + 1);
     expect(store.getState().saveState.revision).toBe(revisionBefore + 1);
+  });
+
+  it('routes a playing Master fader through one volume-only Touch pass', () => {
+    const store = createStudioStore(new MemoryProjectRepository());
+    const master = masterFixture(store.getState().project);
+    expect(store.getState().setTrackAutomationMode(master.id, 'touch')).toBe(true);
+    store.getState().play();
+    const requestId = store.getState().transport.playbackRequestId;
+    let beat = 1;
+    const graph = graphBridge();
+    expect(store.getState().attachAutomationPlaybackRuntime(
+      requestId,
+      () => beat,
+      graph,
+    )).toBe(true);
+    store.getState().confirmPlaybackStarted(requestId);
+
+    store.getState().setTrackVolume(master.id, 0.42);
+    beat = 1.25;
+    store.getState().setTrackVolume(master.id, 0.48);
+    expect(store.getState().automationRecording.touchingTargetKeys).toEqual([
+      `${master.id}:track-volume`,
+    ]);
+    expect(graph.beginOverride).toHaveBeenCalledWith({
+      type: 'track-volume',
+      trackId: master.id,
+    }, 0.42);
+
+    beat = 1.5;
+    expect(store.getState().endAutomationGesture({
+      type: 'track-volume',
+      trackId: master.id,
+    })).toBe(true);
+    store.getState().stop();
+
+    expect(store.getState().project.automationLanes).toEqual([
+      expect.objectContaining({
+        target: { type: 'track-volume', trackId: master.id },
+      }),
+    ]);
+    expect(store.getState().project.automationLanes.some(
+      (lane) =>
+        lane.target.trackId === master.id
+        && lane.target.type === 'track-pan',
+    )).toBe(false);
   });
 
   it('ends every live Touch target through the production release action', () => {

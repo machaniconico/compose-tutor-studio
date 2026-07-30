@@ -342,7 +342,7 @@ describe('schema-v3 audio and automation', () => {
     ]));
   });
 
-  it('rejects Master automation because schema-v3 playback exposes Track automation only', () => {
+  it('rejects Master automation because schema-v3 playback exposed Track automation only', () => {
     const project = createEmptyProject({ clock });
     const master = project.tracks.find((track) => track.type === 'master');
     if (!master) throw new Error('Master fixture missing');
@@ -353,11 +353,21 @@ describe('schema-v3 audio and automation', () => {
       points: [{ id: 'master-volume-point', beat: 0, value: 0.5, interpolation: 'hold' }],
     }];
 
-    expect(validateProject(project).errors).toContainEqual(expect.objectContaining({
+    const legacy = structuredClone(project) as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 3;
+    delete legacy.audioTakeFolders;
+    delete legacy.automationReadState;
+    delete legacy.audioRouting;
+    for (const lane of legacy.automationLanes as Array<Record<string, unknown>>) {
+      delete lane.bypassed;
+    }
+    const decoded = decodeProject(legacy);
+    expect(decoded.ok).toBe(false);
+    if (decoded.ok) return;
+    expect(decoded.error.issues).toContainEqual(expect.objectContaining({
       path: 'automationLanes[0].target.trackId',
       message: 'automation cannot target a Master track',
     }));
-    expect(encodeProjectJson(project).ok).toBe(false);
   });
 });
 

@@ -8,6 +8,7 @@
 import {
   assertScheduleEventBudget,
   compileAudioRouting,
+  effectiveMasterTrackId,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   ScheduleEventLimitError,
@@ -55,6 +56,7 @@ import {
 } from './graph';
 import { buildMasterBus } from './masterBus';
 import { applyMasterMix } from './mixState';
+import { MasterAutomationGraph } from './masterAutomationGraph';
 import { beatDurationSeconds, createProjectMusicalTime } from './musicalTime';
 import {
   beatToTime,
@@ -709,6 +711,7 @@ async function renderWavWithRouting(
 
     // Master bus topology and gain policy are shared with live playback.
     const { master, limiter } = buildMasterBus(ctx, ctx.destination);
+    const masterAutomation = new MasterAutomationGraph(ctx, master);
     let graphs = new Map<string, TrackGraph>();
     const synths = new Map<string, SynthVoiceManager>();
     const drums = new Map<string, DrumVoiceManager>();
@@ -749,12 +752,16 @@ async function renderWavWithRouting(
       );
       const audibleTrackIds = routingMix.audibleChannelIds;
       const tracksById = new Map(project.tracks.map((track) => [track.id, track]));
+      const effectiveMasterId = effectiveMasterTrackId(project);
       const tempoChangeBeats = project.tempoMap.slice(1).map((event) => event.beat);
       for (const lane of project.automationLanes) {
-        if (!audibleTrackIds.has(lane.target.trackId)) continue;
         const track = tracksById.get(lane.target.trackId);
+        const isMasterVolumeLane = effectiveMasterId !== null
+          && lane.target.trackId === effectiveMasterId
+          && lane.target.type === 'track-volume';
+        if (!isMasterVolumeLane && !audibleTrackIds.has(lane.target.trackId)) continue;
         const graph = graphs.get(lane.target.trackId);
-        if (!track || !graph) continue;
+        if (!track || (!isMasterVolumeLane && !graph)) continue;
         if (!isAutomationReadEnabled(project.automationReadState, lane)) continue;
         for (const command of automationCommandsInWindow(
           lane,
@@ -765,13 +772,22 @@ async function renderWavWithRouting(
           true,
           tempoChangeBeats,
         )) {
-          graph.scheduleAutomation(
-            lane.target.type,
-            command.value,
-            beatToTime(command.beat, tempo, 0, 0),
-            command.interpolation,
-            audibleTrackIds.has(track.id),
-          );
+          const when = beatToTime(command.beat, tempo, 0, 0);
+          if (isMasterVolumeLane) {
+            masterAutomation.scheduleAutomation(
+              command.value,
+              when,
+              command.interpolation,
+            );
+          } else {
+            graph!.scheduleAutomation(
+              lane.target.type,
+              command.value,
+              when,
+              command.interpolation,
+              audibleTrackIds.has(track.id),
+            );
+          }
         }
       }
       let sharedDrumNoise: AudioBuffer | undefined;
@@ -853,6 +869,7 @@ async function renderWavWithRouting(
       for (const synth of synths.values()) synth.dispose();
       for (const drum of drums.values()) drum.dispose();
       for (const voice of audioVoices.values()) voice.dispose();
+      masterAutomation.dispose();
       audioBuffers?.release();
       for (const graph of graphs.values()) graph.dispose();
       try {
