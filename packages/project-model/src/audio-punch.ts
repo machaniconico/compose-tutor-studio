@@ -50,6 +50,7 @@ export type AudioPunchMutationErrorCode =
   | 'take-limit'
   | 'ambiguous-overlap'
   | 'ineligible-source'
+  | 'edited-clip-unsupported'
   | 'mismatched-folder'
   | 'source-too-short'
   | 'invalid-id'
@@ -250,6 +251,12 @@ function locateSpanningSource(
     return failure(
       'ineligible-source',
       'Auto Punch can only replace one ready, non-looping Audio Clip.',
+    );
+  }
+  if (clip.audioWarp !== undefined) {
+    return failure(
+      'edited-clip-unsupported',
+      'Reset Elastic Audio edits before using this Audio Clip as an Auto Punch source.',
     );
   }
   const asset = project.audioAssets.find((candidate) => candidate.id === clip.audioAssetId);

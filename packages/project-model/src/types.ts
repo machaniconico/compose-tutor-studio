@@ -102,7 +102,36 @@ export type Clip = {
   fadeInFrames?: number;
   fadeOutFrames?: number;
   gainDb?: number;
+  /** Optional non-destructive timing and monophonic pitch edit metadata. */
+  audioWarp?: AudioWarp;
 };
+
+export type AudioWarpAlgorithm = 'wsola-v1';
+
+export type AudioWarpMarker = Readonly<{
+  /** Absolute frame in the immutable ready AudioAsset. */
+  sourceFrame: number;
+  /** Quarter-note beats from the Audio Clip's startBeat. */
+  targetBeatOffset: number;
+}>;
+
+export type AudioPitchRegion = Readonly<{
+  sourceStartFrame: number;
+  sourceFrameCount: number;
+  /** MIDI cents; A4 is 6900. */
+  sourcePitchCents: number;
+  targetPitchCents: number;
+  correctionAmount: number;
+  transitionFrames: number;
+}>;
+
+export type AudioWarp = Readonly<{
+  algorithm: AudioWarpAlgorithm;
+  timingEnabled: boolean;
+  pitchEnabled: boolean;
+  markers: readonly AudioWarpMarker[];
+  pitchRegions: readonly AudioPitchRegion[];
+}>;
 
 /** Schema-v3's required payload for an audio clip. */
 export type AudioClip = Clip & {
@@ -113,6 +142,7 @@ export type AudioClip = Clip & {
   fadeInFrames: number;
   fadeOutFrames: number;
   gainDb: number;
+  audioWarp?: AudioWarp;
 };
 
 export type TrackType = 'instrument' | 'drum' | 'audio' | 'bus' | 'master';

@@ -309,6 +309,8 @@ export function studioCompingErrorMessage(
       return '同じ位置・長さのオーディオクリップを2つ以上選んでください。';
     case 'ineligible-clip':
       return 'テイク化できるのは、同じオーディオトラック・位置・長さで、全区間の音声が残っている非ループ素材です。';
+    case 'edited-clip-unsupported':
+      return '音声のタイミングまたは音程を補正したクリップは、まだテイクへまとめられません。補正をリセットしてからお試しください。';
     case 'invalid-range':
       return '範囲がテイクの外へ出ています。開始と終了をテイク内に設定してください。';
     case 'invalid-crossfade':

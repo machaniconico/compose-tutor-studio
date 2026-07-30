@@ -283,6 +283,16 @@ function migrateV7ToV8(
   };
 }
 
+/** Schema-v9 adds optional Audio Clip warp metadata without changing v8 data. */
+function migrateV8ToV9(
+  project: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    ...project,
+    schemaVersion: 9,
+  };
+}
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 1, to: 2, migrate: migrateV1ToV2 },
   { from: 2, to: 3, migrate: migrateV2ToV3 },
@@ -291,6 +301,7 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 5, to: 6, migrate: migrateV5ToV6 },
   { from: 6, to: 7, migrate: migrateV6ToV7 },
   { from: 7, to: 8, migrate: migrateV7ToV8 },
+  { from: 8, to: 9, migrate: migrateV8ToV9 },
 ]);
 
 export type ProjectMigrationErrorCode =

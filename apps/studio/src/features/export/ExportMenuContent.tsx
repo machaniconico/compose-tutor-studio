@@ -20,6 +20,8 @@ import {
 } from '../../audio/wav';
 import { AudioAssetPlaybackError } from '../../audio/audioAssetResolver';
 import { AudioClipPlanLimitError } from '../../audio/audioClipPlanner';
+import { AudioWarpDspError } from '../../audio/audioWarpDsp';
+import { AudioWarpPlanError } from '../../audio/audioWarpPlan';
 import {
   downloadBlob,
   downloadBlobAndWaitForHandoff,
@@ -80,6 +82,15 @@ export function wavExportFailureMessage(error: unknown): string {
     if (error.code === 'resource-limit') {
       return '音声素材がWAV書き出し時のメモリ上限を超えています。使用する素材の数または長さを減らしてください。';
     }
+  }
+  if (error instanceof AudioWarpPlanError || error instanceof AudioWarpDspError) {
+    if (error.code === 'resource-limit') {
+      return 'Elastic Audioの処理がWAV書き出し時のメモリ上限を超えています。編集するクリップの数または長さを減らしてください。';
+    }
+    if (error.code === 'cancelled') {
+      return 'Elastic Audioの処理を中止したため、WAVは書き出されませんでした。';
+    }
+    return 'Elastic Audioの編集を音にできないためWAVを書き出せません。タイミング点やピッチ補正範囲を確認してください。元の音声素材は変更されていません。';
   }
   return 'WAVの書き出しに失敗しました。';
 }

@@ -9,6 +9,10 @@ import {
   projectLengthBeats as projectTimelineLengthBeats,
   secondsBetweenBeats,
 } from './time';
+import {
+  audioWarpTimingSegmentIssues,
+  iterateAudioWarpTimingSegments,
+} from './audio-warp';
 import type { Project } from './types';
 import { CURRENT_SCHEMA_VERSION } from './factories';
 import {
@@ -19,7 +23,14 @@ import {
   MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
   MAX_AUDIO_TAKE_FOLDERS,
   MAX_AUDIO_TAKES_PER_FOLDER,
+  MAX_AUDIO_PITCH_REGIONS,
+  MAX_AUDIO_PITCH_SHIFT_CENTS,
+  MAX_AUDIO_WARP_MARKERS,
+  MAX_AUDIO_WARP_SECONDS,
+  MAX_AUDIO_WARP_STRETCH,
   MAX_CLIPS_PER_TRACK,
+  MIN_AUDIO_WARP_SEGMENT_SECONDS,
+  MIN_AUDIO_WARP_STRETCH,
   MIN_EVENT_DURATION_BEATS,
 } from './limits';
 import { validateAudioRouting } from './audio-routing';
@@ -33,7 +44,12 @@ export {
   MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
   MAX_AUDIO_TAKE_FOLDERS,
   MAX_AUDIO_TAKES_PER_FOLDER,
+  MAX_AUDIO_PITCH_REGIONS,
+  MAX_AUDIO_WARP_MARKERS,
+  MAX_AUDIO_WARP_STRETCH,
   MAX_CLIPS_PER_TRACK,
+  MIN_AUDIO_WARP_SEGMENT_SECONDS,
+  MIN_AUDIO_WARP_STRETCH,
   MIN_EVENT_DURATION_BEATS,
 } from './limits';
 
@@ -827,6 +843,9 @@ export function validateProject(project: Project): ValidationResult {
         if (clip.audioAssetId !== undefined) {
           push(`${clipPath}.audioAssetId`, 'linked clip payload belongs to its source');
         }
+        if (clip.audioWarp !== undefined) {
+          push(`${clipPath}.audioWarp`, 'linked clip payload belongs to its source');
+        }
         for (const field of [
           'sourceStartFrame',
           'sourceFrameCount',
@@ -864,6 +883,9 @@ export function validateProject(project: Project): ValidationResult {
       }
       if (clip.type !== 'audio' && clip.audioAssetId !== undefined) {
         push(`${clipPath}.audioAssetId`, 'audioAssetId is only allowed on audio clips');
+      }
+      if (clip.type !== 'audio' && clip.audioWarp !== undefined) {
+        push(`${clipPath}.audioWarp`, 'audioWarp is only allowed on audio clips');
       }
       const audioFields = [
         'sourceStartFrame',
@@ -929,6 +951,188 @@ export function validateProject(project: Project): ValidationResult {
           ) {
             push(`${clipPath}.fadeOutFrames`, 'combined fades must not exceed sourceFrameCount');
           }
+          if (clip.audioWarp !== undefined) {
+            const warp = clip.audioWarp;
+            const warpPath = `${clipPath}.audioWarp`;
+            if (
+              asset.mediaType !== 'audio/wav'
+              || asset.sampleRate !== 48_000
+              || (asset.channelCount !== 1 && asset.channelCount !== 2)
+            ) {
+              push(
+                warpPath,
+                'audioWarp requires canonical 48 kHz mono or stereo PCM16 WAV source metadata',
+              );
+            }
+            if (clip.loop) {
+              push(warpPath, 'audioWarp is only supported on non-looping Audio Clips');
+            }
+            if (warp.algorithm !== 'wsola-v1') {
+              push(`${warpPath}.algorithm`, 'algorithm must be wsola-v1');
+            }
+            if (warp.markers.length < 2 || warp.markers.length > MAX_AUDIO_WARP_MARKERS) {
+              push(
+                `${warpPath}.markers`,
+                `markers must contain between 2 and ${MAX_AUDIO_WARP_MARKERS} items`,
+              );
+            }
+            if (warp.pitchRegions.length > MAX_AUDIO_PITCH_REGIONS) {
+              push(
+                `${warpPath}.pitchRegions`,
+                `pitchRegions must contain at most ${MAX_AUDIO_PITCH_REGIONS} items`,
+              );
+            }
+            if (
+              Number.isSafeInteger(clip.sourceFrameCount)
+              && (clip.sourceFrameCount ?? 0) / asset.sampleRate > MAX_AUDIO_WARP_SECONDS
+            ) {
+              push(
+                `${clipPath}.sourceFrameCount`,
+                `an edited source window must not exceed ${MAX_AUDIO_WARP_SECONDS} seconds`,
+              );
+            }
+            let previousSource = Number.NEGATIVE_INFINITY;
+            let previousBeat = Number.NEGATIVE_INFINITY;
+            let timingMarkersCanPartition = warp.markers.length >= 2
+              && warp.markers.length <= MAX_AUDIO_WARP_MARKERS;
+            warp.markers.forEach((marker, markerIndex) => {
+              const markerPath = `${warpPath}.markers[${markerIndex}]`;
+              if (!Number.isSafeInteger(marker.sourceFrame)) {
+                push(`${markerPath}.sourceFrame`, 'sourceFrame must be a safe integer');
+                timingMarkersCanPartition = false;
+              }
+              if (!Number.isFinite(marker.targetBeatOffset)) {
+                push(`${markerPath}.targetBeatOffset`, 'targetBeatOffset must be finite');
+                timingMarkersCanPartition = false;
+              }
+              if (marker.sourceFrame <= previousSource) {
+                push(`${markerPath}.sourceFrame`, 'marker source frames must be strictly increasing');
+                timingMarkersCanPartition = false;
+              }
+              if (marker.targetBeatOffset <= previousBeat) {
+                push(`${markerPath}.targetBeatOffset`, 'marker beat offsets must be strictly increasing');
+                timingMarkersCanPartition = false;
+              }
+              previousSource = marker.sourceFrame;
+              previousBeat = marker.targetBeatOffset;
+            });
+            if (
+              timingMarkersCanPartition
+              && musicalTimeIndex !== null
+              && Number.isFinite(clip.startBeat)
+              && Number.isFinite(asset.sampleRate)
+              && asset.sampleRate > 0
+            ) {
+              const timingSegments = iterateAudioWarpTimingSegments(
+                warp,
+                clip.startBeat,
+                project.tempoMap,
+              );
+              for (const segment of timingSegments) {
+                const markerPath = `${warpPath}.markers[${segment.markerIndex}]`;
+                const issues = audioWarpTimingSegmentIssues(segment, asset.sampleRate);
+                if (issues.includes('source-segment-too-short')) {
+                  push(
+                    `${markerPath}.sourceFrame`,
+                    `source timing intervals must be at least ${MIN_AUDIO_WARP_SEGMENT_SECONDS} seconds`,
+                  );
+                }
+                if (issues.includes('target-segment-too-short')) {
+                  push(
+                    `${markerPath}.targetBeatOffset`,
+                    `target timing intervals must be at least ${MIN_AUDIO_WARP_SEGMENT_SECONDS} seconds`,
+                  );
+                }
+                if (issues.includes('stretch-out-of-range')) {
+                  push(
+                    `${markerPath}.targetBeatOffset`,
+                    `local stretch must be between ${MIN_AUDIO_WARP_STRETCH}x and ${MAX_AUDIO_WARP_STRETCH}x`,
+                  );
+                }
+                if (issues.length > 0) break;
+              }
+            }
+            const expectedStart = clip.sourceStartFrame ?? Number.NaN;
+            const expectedEnd = expectedStart + (clip.sourceFrameCount ?? Number.NaN);
+            if (warp.markers[0]?.sourceFrame !== expectedStart) {
+              push(`${warpPath}.markers[0].sourceFrame`, 'the first marker must start at the source window');
+            }
+            if (warp.markers[0]?.targetBeatOffset !== 0) {
+              push(`${warpPath}.markers[0].targetBeatOffset`, 'the first marker beat offset must be zero');
+            }
+            const lastMarkerIndex = Math.max(0, warp.markers.length - 1);
+            if (warp.markers[lastMarkerIndex]?.sourceFrame !== expectedEnd) {
+              push(
+                `${warpPath}.markers[${lastMarkerIndex}].sourceFrame`,
+                'the last marker must end at the source window',
+              );
+            }
+            if (warp.markers[lastMarkerIndex]?.targetBeatOffset !== clip.lengthBeats) {
+              push(
+                `${warpPath}.markers[${lastMarkerIndex}].targetBeatOffset`,
+                'the last marker beat offset must equal clip lengthBeats',
+              );
+            }
+            let previousRegionEnd = expectedStart;
+            warp.pitchRegions.forEach((region, regionIndex) => {
+              const regionPath = `${warpPath}.pitchRegions[${regionIndex}]`;
+              if (!Number.isSafeInteger(region.sourceStartFrame)) {
+                push(`${regionPath}.sourceStartFrame`, 'sourceStartFrame must be a safe integer');
+              }
+              if (!Number.isSafeInteger(region.sourceFrameCount) || region.sourceFrameCount <= 0) {
+                push(`${regionPath}.sourceFrameCount`, 'sourceFrameCount must be a positive safe integer');
+              }
+              const regionEnd = region.sourceStartFrame + region.sourceFrameCount;
+              if (
+                region.sourceStartFrame < expectedStart
+                || region.sourceStartFrame < previousRegionEnd
+              ) {
+                push(
+                  `${regionPath}.sourceStartFrame`,
+                  'pitch regions must be ordered, non-overlapping, and inside the source window',
+                );
+              }
+              if (regionEnd > expectedEnd) {
+                push(`${regionPath}.sourceFrameCount`, 'pitch region must end inside the source window');
+              }
+              if (
+                !Number.isFinite(region.sourcePitchCents)
+                || region.sourcePitchCents < 0
+                || region.sourcePitchCents > 12_700
+              ) {
+                push(`${regionPath}.sourcePitchCents`, 'sourcePitchCents must be between 0 and 12700');
+              }
+              if (
+                !Number.isFinite(region.targetPitchCents)
+                || region.targetPitchCents < 0
+                || region.targetPitchCents > 12_700
+              ) {
+                push(`${regionPath}.targetPitchCents`, 'targetPitchCents must be between 0 and 12700');
+              }
+              if (!inRange(region.correctionAmount, 0, 1)) {
+                push(`${regionPath}.correctionAmount`, 'correctionAmount must be between 0 and 1');
+              }
+              const effectiveShift =
+                (region.targetPitchCents - region.sourcePitchCents) * region.correctionAmount;
+              if (!Number.isFinite(effectiveShift) || Math.abs(effectiveShift) > MAX_AUDIO_PITCH_SHIFT_CENTS) {
+                push(
+                  `${regionPath}.targetPitchCents`,
+                  `effective pitch shift must be within plus or minus ${MAX_AUDIO_PITCH_SHIFT_CENTS} cents`,
+                );
+              }
+              if (
+                !Number.isSafeInteger(region.transitionFrames)
+                || region.transitionFrames < 0
+                || region.transitionFrames > Math.floor(region.sourceFrameCount / 2)
+              ) {
+                push(
+                  `${regionPath}.transitionFrames`,
+                  'transitionFrames must be a non-negative safe integer no greater than half the region',
+                );
+              }
+              previousRegionEnd = Math.max(previousRegionEnd, regionEnd);
+            });
+          }
         } else if (asset?.availability === 'unresolved') {
           for (const field of [
             'sourceStartFrame',
@@ -939,6 +1143,9 @@ export function validateProject(project: Project): ValidationResult {
             if (clip[field] !== 0) {
               push(`${clipPath}.${field}`, 'unresolved audio clips must use a zero source range');
             }
+          }
+          if (clip.audioWarp !== undefined) {
+            push(`${clipPath}.audioWarp`, 'audioWarp requires a ready audio asset');
           }
         }
       }

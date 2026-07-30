@@ -61,6 +61,10 @@ function activate(project: Project, clipId: string): void {
   );
   const nextState = {
     project,
+    saveState: {
+      ...current.saveState,
+      phase: 'idle' as const,
+    },
     editor: {
       ...current.editor,
       activeView: 'arranger' as const,
@@ -182,6 +186,9 @@ describe('Arranger clip workflow', () => {
     expect(html).toContain('正常な音声素材が残っている元の端末・プロファイルで開き直してください');
     expect(html).toContain('プロジェクトJSONだけには音声本体が含まれず');
     expect(html).toContain('配置と編集情報は保持されています');
+    expect(html).toContain('音声を整える');
+    expect(html).toContain('音声素材が変更または破損しているため、音声を整えられません。');
+    expect(html).toContain('aria-disabled="true"');
     expect(html).toContain('配置開始（小節・0から）');
     expect(html).toContain('左端トリム（小節）');
     expect(html).toContain('右端トリム（小節）');
@@ -196,6 +203,42 @@ describe('Arranger clip workflow', () => {
     expect(html).toContain('クリップを削除');
     expect(html).toContain('同じ区間をテイク化');
     expect(html).toContain('音声素材を確認できないため、テイクを変更できません。');
+  });
+
+  it('temporarily disables audio warp editing without unmounting it while saving', () => {
+    const asset: ReadyAudioAsset = {
+      id: 'asset-arranger-saving',
+      availability: 'ready',
+      checksumSha256: 'f'.repeat(64),
+      originalName: 'saving.wav',
+      mediaType: 'audio/wav',
+      byteLength: 96_044,
+      sampleRate: 48_000,
+      channelCount: 1,
+      frameCount: 48_000,
+    };
+    const created = createAudioTrackClip(createDefaultProject('Saving Audio Arranger'), asset, {
+      idFactory: (kind) => `${kind}-arranger-saving`,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    activate(created.project, created.clipId);
+    const current = useStore.getState();
+    const saveState = { ...current.saveState, phase: 'pending' as const };
+    useStore.setState({ saveState });
+    Object.assign(useStore.getInitialState(), { saveState });
+
+    const html = renderToStaticMarkup(<Arranger />);
+    const reason = 'プロジェクトを保存中のため、完了後に音声を整えてください。';
+
+    expect(html).toContain('音声を整える');
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain(reason);
+    expect(html).toMatch(
+      new RegExp(`</details><p[^>]*>${reason}</p>`),
+    );
+    expect(html).toContain('class="audio-warp-editor__body" aria-disabled="true"');
+    expect(html).toContain('role="tablist"');
   });
 
   it('renders one selectable Arranger object for a grouped Audio take folder', () => {

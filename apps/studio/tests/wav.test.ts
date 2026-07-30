@@ -4,7 +4,7 @@ import {
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   ScheduleEventLimitError,
 } from '@cts/project-model';
-import type { Clip, DrumEvent, Project, Track } from '@cts/project-model';
+import type { AudioClip, Clip, DrumEvent, Project, Track } from '@cts/project-model';
 import {
   buildScheduleEvents,
   type DrumScheduleEvent,
@@ -20,6 +20,10 @@ import {
   getReservedHeavyAudioResourceBytes,
   reserveHeavyAudioResources,
 } from '../src/audio/audioResourceReservation';
+import {
+  estimateAudioWarpResourcePeakBytes,
+  getAudioClipBufferCache,
+} from '../src/audio/audioClipBuffers';
 import {
   nextEventsInWindow,
 } from '../src/audio/scheduler';
@@ -1014,6 +1018,79 @@ describe('WAV render allocation budget', () => {
       expect(offlineContext).not.toHaveBeenCalled();
     } finally {
       first.release();
+    }
+    expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+
+  it('reserves the Elastic Worker peak before resolver, Worker, or OfflineAudioContext allocation', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    project.lengthBars = 1;
+    project.lengthBeats = 4;
+    project.bpm = 240;
+    project.tempoMap = [{ id: 'wav-elastic-tempo', beat: 0, bpm: 240 }];
+    const clip = project.tracks[0]!.clips[0];
+    if (!clip || clip.type !== 'audio') throw new Error('audio fixture clip required');
+    const audioClip = clip as AudioClip;
+    audioClip.startBeat = 0;
+    audioClip.lengthBeats = 4;
+    audioClip.loop = false;
+    audioClip.audioWarp = {
+      algorithm: 'wsola-v1',
+      timingEnabled: true,
+      pitchEnabled: false,
+      markers: [
+        { sourceFrame: audioClip.sourceStartFrame, targetBeatOffset: 0 },
+        {
+          sourceFrame: audioClip.sourceStartFrame + audioClip.sourceFrameCount,
+          targetBeatOffset: 4,
+        },
+      ],
+      pitchRegions: [],
+    };
+    const cache = getAudioClipBufferCache();
+    cache.clearUnused();
+    const plan = planWavRender(project);
+    const warpResources = estimateAudioWarpResourcePeakBytes(project, cache);
+    const assetOnlyPeak = assertWavProjectCombinedResourceBudget(
+      plan,
+      project,
+      0,
+      0,
+    );
+    const completePeak = assertWavProjectCombinedResourceBudget(
+      plan,
+      project,
+      0,
+      warpResources.estimatedPeakBytes,
+    );
+    const reservationBytes = completePeak - warpResources.retainedDerivedBytes;
+    expect(completePeak).toBeGreaterThan(assetOnlyPeak);
+
+    const competing = reserveHeavyAudioResources(
+      MAX_HEAVY_AUDIO_RESOURCE_BYTES - reservationBytes + 1,
+    );
+    const resolve = vi.fn(async () => bytes);
+    const offlineContext = vi.fn(() => {
+      throw new Error('OfflineAudioContext must not be allocated');
+    });
+    const worker = vi.fn();
+    vi.stubGlobal('OfflineAudioContext', offlineContext);
+    vi.stubGlobal('Worker', worker);
+    try {
+      await expect(renderProjectToWav(project, {
+        audioAssetResolver: { resolve },
+        audioAssetCache: new AudioAssetPlaybackCache(),
+      })).rejects.toMatchObject({
+        name: 'AudioAssetPlaybackError',
+        code: 'resource-limit',
+      });
+      expect(resolve).not.toHaveBeenCalled();
+      expect(worker).not.toHaveBeenCalled();
+      expect(offlineContext).not.toHaveBeenCalled();
+    } finally {
+      competing.release();
+      cache.clearUnused();
     }
     expect(getReservedHeavyAudioResourceBytes()).toBe(0);
   });

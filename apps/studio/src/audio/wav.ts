@@ -32,11 +32,17 @@ import {
   MAX_AUDIO_ASSET_COMBINED_ESTIMATED_BYTES,
   preflightProjectAudioAssets,
   reserveProjectAudioAssetResourceBudget,
-  type AudioAssetBufferLease,
   type AudioAssetBytesResolver,
   type AudioAssetPlaybackCache,
   type PreparedAudioAssets,
 } from './audioAssetResolver';
+import {
+  acquireAudioClipPlaybackBuffers,
+  estimateAudioWarpDerivedBytes,
+  estimateAudioWarpResourcePeakBytes,
+  getAudioClipBufferCache,
+  type AudioClipPlaybackBufferLease,
+} from './audioClipBuffers';
 import {
   AudioClipPlanLimitError,
   createAudioClipPlaybackIndex,
@@ -192,6 +198,7 @@ export function assertWavCombinedResourceBudget(
   plan: WavRenderPlan,
   preparedAudio: PreparedAudioAssets,
   retainedDecodedBytes = 0,
+  derivedBytes = 0,
 ): number {
   const assets = estimatePreparedAudioResources(preparedAudio, RENDER_SAMPLE_RATE);
   const assetId = preparedAudio.assets[0]?.asset.id ?? null;
@@ -200,6 +207,7 @@ export function assertWavCombinedResourceBudget(
     assets.largestRawAssetBytes,
     assets.largestRawAssetBytes,
     retainedDecodedBytes,
+    derivedBytes,
   ], assetId);
   const renderPeakBytes = checkedAudioResourceTotal([
     plan.exportEstimatedBytes,
@@ -207,6 +215,7 @@ export function assertWavCombinedResourceBudget(
     assets.largestRawAssetBytes,
     assets.decodedBytes,
     retainedDecodedBytes,
+    derivedBytes,
   ], assetId);
   const estimatedPeakBytes = Math.max(resolvePeakBytes, renderPeakBytes);
   if (estimatedPeakBytes > MAX_WAV_TOTAL_ESTIMATED_BYTES) {
@@ -224,11 +233,13 @@ export function assertWavProjectCombinedResourceBudget(
   plan: WavRenderPlan,
   project: Project,
   retainedDecodedBytes = 0,
+  derivedBytes = estimateAudioWarpDerivedBytes(project),
 ): number {
   const assetPeak = assertProjectAudioAssetCombinedResourceBudget(
     project,
     RENDER_SAMPLE_RATE,
     retainedDecodedBytes,
+    derivedBytes,
   );
   const assets = estimateProjectAudioResources(project, RENDER_SAMPLE_RATE);
   const renderPeakBytes = checkedAudioResourceTotal([
@@ -237,6 +248,7 @@ export function assertWavProjectCombinedResourceBudget(
     assets.largestRawAssetBytes,
     assets.decodedBytes,
     retainedDecodedBytes,
+    derivedBytes,
   ]);
   const estimatedPeakBytes = Math.max(assetPeak.resolvePeakBytes, renderPeakBytes);
   if (estimatedPeakBytes > MAX_WAV_TOTAL_ESTIMATED_BYTES) {
@@ -673,6 +685,7 @@ async function renderWavWithRouting(
   assertRoutingGraphNodeBudget(project, routingPlan, 'disabled');
   const { index: musicalTime, tempo } = createProjectMusicalTime(project);
   const audioAssetCache = options.audioAssetCache ?? getAudioAssetPlaybackCache();
+  const derivedCache = getAudioClipBufferCache();
   // Unleased buffers have no reason to count against a new offline render;
   // active live sessions and in-flight decodes remain reserved and budgeted.
   audioAssetCache.clearUnused();
@@ -680,14 +693,19 @@ async function renderWavWithRouting(
   // Reserve the complete metadata-only peak atomically before resolver I/O or
   // OfflineAudioContext allocation. Success transfers it to the returned lease
   // so the platform save handoff remains covered too.
+  let warpResources = estimateAudioWarpResourcePeakBytes(
+    sourceProject,
+    derivedCache,
+  );
   const estimatedPeakBytes = assertWavProjectCombinedResourceBudget(
     plan,
     sourceProject,
     audioAssetCache.retainedDecodedBytes,
+    warpResources.estimatedPeakBytes,
   );
   const resourceReservation = reserveProjectAudioAssetResourceBudget(
     sourceProject,
-    estimatedPeakBytes,
+    estimatedPeakBytes - warpResources.retainedDerivedBytes,
   );
   let reservationTransferred = false;
 
@@ -701,10 +719,20 @@ async function renderWavWithRouting(
       cache: audioAssetCache,
       ...(options.signal ? { signal: options.signal } : {}),
     });
-    assertWavCombinedResourceBudget(
+    // Resolver I/O may overlap cache settlement. Recompute and resize the
+    // non-overlapping phase envelope before OfflineAudioContext allocation.
+    warpResources = estimateAudioWarpResourcePeakBytes(
+      sourceProject,
+      derivedCache,
+    );
+    const preparedPeakBytes = assertWavCombinedResourceBudget(
       plan,
       preparedAudio,
       audioAssetCache.retainedDecodedBytes,
+      warpResources.estimatedPeakBytes,
+    );
+    resourceReservation.resize(
+      preparedPeakBytes - warpResources.retainedDerivedBytes,
     );
 
     const ctx = new OfflineAudioContext(RENDER_CHANNELS, plan.frames, RENDER_SAMPLE_RATE);
@@ -716,13 +744,24 @@ async function renderWavWithRouting(
     const synths = new Map<string, SynthVoiceManager>();
     const drums = new Map<string, DrumVoiceManager>();
     const audioVoices = new Map<string, AudioClipVoiceManager>();
-    let audioBuffers: AudioAssetBufferLease | null = null;
+    let audioBuffers: AudioClipPlaybackBufferLease | null = null;
     let renderOutput: GainNode | null = null;
     try {
-      audioBuffers = await acquireProjectAudioBuffers(preparedAudio, ctx, {
+      const sourceBuffers = await acquireProjectAudioBuffers(preparedAudio, ctx, {
         cache: audioAssetCache,
         ...(options.signal ? { signal: options.signal } : {}),
       });
+      audioBuffers = await acquireAudioClipPlaybackBuffers(
+        sourceProject,
+        preparedAudio,
+        sourceBuffers,
+        ctx,
+        {
+          cache: derivedCache,
+          resourceBudget: resourceReservation,
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
+      );
       // Decoded buffers no longer retain the verified source payload. Releasing
       // this function's raw references keeps render/encode peak memory bounded.
       preparedAudio = { assets: [], estimatedDecodedBytes: 0 };
@@ -831,7 +870,7 @@ async function renderWavWithRouting(
 
       for (const audioPlan of audioClipPlans) {
         const voice = audioVoices.get(audioPlan.trackId);
-        const buffer = audioBuffers.buffersByAssetId.get(audioPlan.assetId);
+        const buffer = audioBuffers.bufferForPlan(audioPlan);
         if (!voice) {
           throw new AudioAssetPlaybackError(
             'asset-unavailable',

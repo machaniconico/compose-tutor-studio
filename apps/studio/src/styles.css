@@ -4145,6 +4145,276 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
   }
 }
 
+/* Audio Clip Elastic Audio: the timeline is deliberately the only horizontal scroller. */
+.audio-warp-editor {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+
+.audio-warp-editor details,
+.audio-warp-editor__body,
+.audio-timing-editor,
+.audio-pitch-editor {
+  min-width: 0;
+}
+
+.audio-warp-editor summary {
+  min-height: 52px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+}
+
+.audio-warp-editor summary[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.audio-warp-editor summary small {
+  flex: 1 1 280px;
+  color: var(--text-dim);
+}
+
+.audio-warp-editor__disabled-reason,
+.audio-warp-editor__notice,
+.audio-pitch-editor__runtime-note,
+.audio-pitch-editor__limitation,
+.audio-timing-editor > p {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  line-height: 1.5;
+}
+
+.audio-warp-editor__disabled-reason {
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.audio-warp-editor__body {
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.audio-warp-editor__tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.audio-warp-editor__tabs button,
+.audio-warp-editor__toolbar button,
+.audio-warp-editor__toolbar input,
+.audio-warp-editor__inspector input {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.audio-warp-editor__tabs button[aria-selected='true'] {
+  border-bottom: 3px solid var(--accent);
+  font-weight: 700;
+}
+
+.audio-warp-editor__timeline-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.audio-warp-editor__timeline {
+  position: relative;
+  width: max(640px, 100%);
+  min-height: 180px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent calc(12.5% - 1px),
+      color-mix(in srgb, var(--border) 55%, transparent) calc(12.5% - 1px),
+      color-mix(in srgb, var(--border) 55%, transparent) 12.5%
+    ),
+    var(--bg-panel-2);
+}
+
+.audio-warp-editor__timeline svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.audio-warp-editor__timeline svg path {
+  fill: none;
+  stroke: var(--text-dim);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.audio-pitch-editor__waveform line {
+  stroke: color-mix(in srgb, var(--text-dim) 58%, transparent);
+  stroke-width: 0.35;
+  vector-effect: non-scaling-stroke;
+}
+
+.audio-pitch-editor__pitch-curve .audio-pitch-editor__semitone-guide {
+  stroke: color-mix(in srgb, var(--border) 68%, transparent);
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.audio-warp-editor__timeline .audio-pitch-editor__pitch-trace {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.audio-pitch-editor__cursor {
+  position: absolute;
+  z-index: 1;
+  inset-block: 0;
+  width: 2px;
+  transform: translateX(-1px);
+  border-inline-start: 2px dashed var(--text);
+  pointer-events: none;
+}
+
+.audio-timing-editor__point,
+.audio-pitch-editor__region {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  min-width: 44px;
+  min-height: 44px;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--text-dim);
+  background: var(--bg-panel);
+  color: var(--text);
+  touch-action: none;
+}
+
+.audio-timing-editor__point.is-selected,
+.audio-pitch-editor__region.is-selected {
+  border: 3px solid var(--accent);
+  outline: 3px double var(--text);
+  font-weight: 800;
+}
+
+.audio-pitch-editor__region {
+  top: 56%;
+  transform: translate(-50%, -50%);
+  overflow: visible;
+}
+
+.audio-pitch-editor__region.is-low-confidence {
+  border-style: dashed;
+}
+
+.audio-pitch-editor__region small {
+  display: block;
+  font-size: 10px;
+  text-decoration: underline;
+}
+
+.audio-pitch-editor__empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.audio-warp-editor__toolbar,
+.audio-warp-editor__inspector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+}
+
+.audio-warp-editor__toolbar label,
+.audio-warp-editor__inspector label {
+  min-width: min(100%, 180px);
+  display: grid;
+  flex: 1 1 180px;
+  gap: var(--sp-1);
+}
+
+.audio-warp-editor__inspector {
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel-2);
+}
+
+.audio-pitch-editor__progress {
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.audio-pitch-editor__progress progress {
+  flex: 1 1 180px;
+  min-height: 24px;
+}
+
+.audio-pitch-editor__ab {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.audio-pitch-editor__ab button[aria-pressed='true'] {
+  border-color: var(--accent);
+  outline: 2px solid var(--text);
+  font-weight: 750;
+}
+
+.audio-warp-editor__notice {
+  min-height: 44px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-panel-2);
+}
+
+.audio-warp-editor__notice.is-error {
+  border-left-color: var(--danger);
+  font-weight: 650;
+}
+
+.audio-pitch-editor .is-low-confidence {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .audio-warp-editor__body {
+    padding: var(--sp-2);
+  }
+
+  .audio-warp-editor__toolbar,
+  .audio-warp-editor__inspector {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .audio-warp-editor__toolbar > *,
+  .audio-warp-editor__inspector > * {
+    width: 100%;
+  }
+}
+
 @media (any-pointer: coarse) {
   button,
   input,

@@ -230,7 +230,7 @@ components:
     Project:
       type: object
       description: >-
-        Current schema-v8 aggregate. lengthBeats, tempoMap, and timeSignatureMap
+        Current schema-v9 aggregate. lengthBeats, tempoMap, and timeSignatureMap
         are the musical-time authority; bpm, timeSignature, and lengthBars are
         validated compatibility mirrors. audioRouting is one normalized,
         acyclic stereo graph shared by realtime playback and offline WAV
@@ -247,6 +247,15 @@ components:
         Read/Touch/Latch/Write selection, Armed/Writing state, live gesture
         ownership, and automation-pass buffers are runtime-only and intentionally
         absent from this aggregate.
+        Audio Clip audioWarp metadata is non-destructive: it references frames
+        in immutable AudioAsset bytes. Derived PCM is played at rate 1 by live,
+        full-WAV, and selected-track WAV paths. The initial contract supports
+        direct ready non-loop clips of at most 60 seconds, canonical 48 kHz
+        PCM16 WAV mono/stereo assets, 128 timing markers, 128 monophonic pitch
+        regions, 40 ms timing segments, 0.5x through 2.0x local stretch, and
+        effective pitch correction within plus or minus 300 cents. Formant
+        preservation, polyphonic pitch, Smart Tempo, automatic quantize, and
+        phase-coherent multitrack warp are later gaps.
         Playable Audio Clip regions and one Audio planning window are each
         capped at 10000. Both live and WAV cap MIDI/drum/chord occurrences at
         256 in any rolling 0.75-beat window; WAV additionally caps its combined
@@ -285,7 +294,7 @@ components:
           maxLength: 4096
         schemaVersion:
           type: integer
-          const: 8
+          const: 9
         title:
           type: string
           maxLength: 4096
@@ -589,6 +598,7 @@ components:
                 - required: [fadeInFrames]
                 - required: [fadeOutFrames]
                 - required: [gainDb]
+                - required: [audioWarp]
         - if:
             required: [aliasOf]
           then:
@@ -607,6 +617,15 @@ components:
                 - required: [fadeInFrames]
                 - required: [fadeOutFrames]
                 - required: [gainDb]
+                - required: [audioWarp]
+        - if:
+            required: [audioWarp]
+          then:
+            properties:
+              type:
+                const: audio
+              loop:
+                const: false
       properties:
         id:
           type: string
@@ -642,7 +661,7 @@ components:
           minLength: 1
           maxLength: 4096
           description: >-
-            Linked-clip source id retained by current schema v8. MIDI/drum only;
+            Linked-clip source id retained by current schema v9. MIDI/drum only;
             the source must be
             a direct same-track, same-type non-alias clip of identical length.
             Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and
@@ -690,6 +709,93 @@ components:
           type: number
           minimum: -96
           maximum: 24
+        audioWarp:
+          $ref: '#/components/schemas/AudioWarp'
+    AudioWarp:
+      type: object
+      additionalProperties: false
+      required: [algorithm, timingEnabled, pitchEnabled, markers, pitchRegions]
+      description: >-
+        Optional clip-local non-destructive Elastic Audio edit. It is never
+        null and is valid only for a direct, non-looping Audio Clip that
+        references a ready asset. The first and last markers exactly match the
+        clip source window and beat offsets 0 and lengthBeats. Each source and
+        tempo-map target interval is at least 40 ms with local stretch from
+        0.5x through 2.0x. Absence is exactly legacy rate-1 source playback.
+      properties:
+        algorithm:
+          type: string
+          const: wsola-v1
+        timingEnabled:
+          type: boolean
+        pitchEnabled:
+          type: boolean
+        markers:
+          type: array
+          minItems: 2
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/AudioWarpMarker'
+        pitchRegions:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/AudioPitchRegion'
+    AudioWarpMarker:
+      type: object
+      additionalProperties: false
+      required: [sourceFrame, targetBeatOffset]
+      properties:
+        sourceFrame:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Absolute frame in the immutable ready AudioAsset; strictly increasing.
+        targetBeatOffset:
+          type: number
+          minimum: 0
+          description: Quarter-note beats from clip.startBeat; finite and strictly increasing.
+    AudioPitchRegion:
+      type: object
+      additionalProperties: false
+      required:
+        - sourceStartFrame
+        - sourceFrameCount
+        - sourcePitchCents
+        - targetPitchCents
+        - correctionAmount
+        - transitionFrames
+      description: >-
+        One ordered, non-overlapping half-open monophonic source region inside
+        the Audio Clip source window. Effective shift is
+        (targetPitchCents - sourcePitchCents) * correctionAmount and must remain
+        within plus or minus 300 cents. Pitch values use MIDI cents (A4 = 6900).
+      properties:
+        sourceStartFrame:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        sourceFrameCount:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        sourcePitchCents:
+          type: number
+          minimum: 0
+          maximum: 12700
+        targetPitchCents:
+          type: number
+          minimum: 0
+          maximum: 12700
+        correctionAmount:
+          type: number
+          minimum: 0
+          maximum: 1
+        transitionFrames:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: No greater than half sourceFrameCount.
     TempoMapEvent:
       type: object
       additionalProperties: false

@@ -52,6 +52,35 @@ function addAudioTrackFixture(suffix: string): string {
   return created.trackId;
 }
 
+function elasticAudioWarpFixture() {
+  return {
+    algorithm: 'wsola-v1' as const,
+    timingEnabled: true,
+    pitchEnabled: false,
+    markers: [
+      { sourceFrame: 0, targetBeatOffset: 0 },
+      { sourceFrame: 24_000, targetBeatOffset: 1 },
+      { sourceFrame: 48_000, targetBeatOffset: 2 },
+    ],
+    pitchRegions: [],
+  };
+}
+
+function elasticPitchWarpFixture() {
+  return {
+    ...elasticAudioWarpFixture(),
+    pitchEnabled: true,
+    pitchRegions: [{
+      sourceStartFrame: 4_800,
+      sourceFrameCount: 19_200,
+      sourcePitchCents: 6_930,
+      targetPitchCents: 7_000,
+      correctionAmount: 0.75,
+      transitionFrames: 480,
+    }],
+  };
+}
+
 function createRecordingAdditionFixture(snapshot: Project, suffix: string) {
   const asset: ReadyAudioAsset = {
     id: `asset-recording-${suffix}`,
@@ -224,6 +253,159 @@ describe('store metadata actions', () => {
     expect(useStore.getState().project.title).toBe('新タイトル');
 
     expect(useStore.getState().project.updatedAt >= before).toBe(true);
+  });
+});
+
+describe('Elastic Audio playback generation', () => {
+  it('keeps an exact no-op playing and stops once for an accepted edit change', () => {
+    const trackId = addAudioTrackFixture('warp-generation');
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id === trackId
+        ? {
+            ...track,
+            clips: track.clips.map((clip) => ({
+              ...clip,
+              audioWarp: elasticAudioWarpFixture(),
+            })),
+          }
+        : track),
+    }))).toBe(true);
+
+    useStore.getState().play();
+    const active = useStore.getState().transport;
+    expect(active.phase).toBe('starting');
+
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id === trackId
+        ? {
+            ...track,
+            clips: track.clips.map((clip) => ({
+              ...clip,
+              audioWarp: {
+                ...clip.audioWarp!,
+                markers: clip.audioWarp!.markers.map((marker) => ({ ...marker })),
+                pitchRegions: [],
+              },
+            })),
+          }
+        : track),
+    }))).toBe(true);
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'starting',
+      playbackRequestId: active.playbackRequestId,
+    });
+
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id === trackId
+        ? {
+            ...track,
+            clips: track.clips.map((clip) => ({
+              ...clip,
+              audioWarp: {
+                ...clip.audioWarp!,
+                markers: clip.audioWarp!.markers.map((marker, index) => index === 1
+                  ? { ...marker, targetBeatOffset: 0.75 }
+                  : marker),
+              },
+            })),
+          }
+        : track),
+    }))).toBe(true);
+    expect(useStore.getState().transport).toMatchObject({
+      phase: 'stopped',
+      playbackRequestId: active.playbackRequestId + 1,
+    });
+  });
+
+  it('switches live pitch A/B without history or persistence and preserves position', async () => {
+    const trackId = addAudioTrackFixture('warp-audition');
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id !== trackId
+        ? track
+        : {
+            ...track,
+            clips: track.clips.map((clip) => ({
+              ...clip,
+              audioWarp: elasticPitchWarpFixture(),
+            })),
+          }),
+    }))).toBe(true);
+    await useStore.getState().flushPendingSave();
+    const clipId = useStore.getState().project.tracks
+      .find((track) => track.id === trackId)?.clips[0]?.id;
+    if (!clipId) throw new Error('audition clip missing');
+    const before = useStore.getState();
+
+    expect(before.setAudioWarpAuditionClipId(clipId)).toBe(true);
+    const selected = useStore.getState();
+    expect(selected.audioWarpAuditionClipId).toBe(clipId);
+    expect(selected.project).toBe(before.project);
+    expect(selected.past).toBe(before.past);
+    expect(selected.future).toBe(before.future);
+    expect(selected.saveState.revision).toBe(before.saveState.revision);
+    expect(selected.transport.playbackRequestId).toBe(before.transport.playbackRequestId);
+
+    selected.setPosition(1);
+    selected.play();
+    const starting = useStore.getState().transport;
+    useStore.getState().confirmPlaybackStarted(starting.playbackRequestId);
+    const playing = useStore.getState().transport;
+    expect(playing).toMatchObject({ phase: 'playing', positionBeat: 1 });
+
+    expect(useStore.getState().setAudioWarpAuditionClipId(null)).toBe(true);
+    const corrected = useStore.getState();
+    expect(corrected.audioWarpAuditionClipId).toBeNull();
+    expect(corrected.transport).toMatchObject({
+      phase: 'starting',
+      positionBeat: 1,
+      playbackRequestId: playing.playbackRequestId + 1,
+    });
+    expect(corrected.project).toBe(before.project);
+    expect(corrected.past).toBe(before.past);
+    expect(corrected.saveState.revision).toBe(before.saveState.revision);
+
+    expect(corrected.setAudioWarpAuditionClipId('missing-clip')).toBe(false);
+    useStore.setState({ projectOperationBusy: true });
+    expect(useStore.getState().setAudioWarpAuditionClipId(clipId)).toBe(false);
+    useStore.setState({ projectOperationBusy: false });
+  });
+
+  it('clears an invalid pitch A/B audition across undo and keeps redo opt-in', async () => {
+    const trackId = addAudioTrackFixture('warp-audition-history');
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id !== trackId
+        ? track
+        : {
+            ...track,
+            clips: track.clips.map((clip) => ({
+              ...clip,
+              audioWarp: elasticPitchWarpFixture(),
+            })),
+          }),
+    }))).toBe(true);
+    await useStore.getState().flushPendingSave();
+    const clipId = useStore.getState().project.tracks
+      .find((track) => track.id === trackId)?.clips[0]?.id;
+    if (!clipId) throw new Error('audition history clip missing');
+
+    expect(useStore.getState().setAudioWarpAuditionClipId(clipId)).toBe(true);
+    expect(useStore.getState().audioWarpAuditionClipId).toBe(clipId);
+
+    useStore.getState().undo();
+    expect(useStore.getState().audioWarpAuditionClipId).toBeNull();
+    expect(useStore.getState().project.tracks
+      .find((track) => track.id === trackId)?.clips[0]?.audioWarp).toBeUndefined();
+
+    useStore.getState().redo();
+    expect(useStore.getState().project.tracks
+      .find((track) => track.id === trackId)?.clips[0]?.audioWarp)
+      .toEqual(elasticPitchWarpFixture());
+    expect(useStore.getState().audioWarpAuditionClipId).toBeNull();
   });
 });
 

@@ -1223,6 +1223,88 @@ fn native_v7_to_v8_master_automation_migration_is_schema_only_and_proven() {
 }
 
 #[test]
+fn native_v8_to_v9_audio_warp_is_strict_and_schema_only() {
+    let source = schema_v8_master_automation_project_value();
+    let migrated = migrate_project_value_v8_to_v9(source.clone()).expect("valid v8 migrates");
+    let mut expected = source.clone();
+    expected["schemaVersion"] = json!(9);
+    assert_eq!(migrated, expected);
+
+    let mut smuggled = source;
+    smuggled["tracks"][1]["clips"][0]["audioWarp"] = json!({});
+    assert!(migrate_project_value_v8_to_v9(smuggled).is_none());
+
+    let mut canonical = expected;
+    canonical["audioAssets"][0]["frameCount"] = json!(100_000);
+    canonical["tracks"][1]["clips"][0]["lengthBeats"] = json!(4);
+    canonical["tracks"][1]["clips"][0]["sourceFrameCount"] = json!(96_000);
+    canonical["tracks"][1]["clips"][0]["audioWarp"] = json!({
+        "algorithm": "wsola-v1",
+        "timingEnabled": true,
+        "pitchEnabled": true,
+        "markers": [
+            { "sourceFrame": 500, "targetBeatOffset": 0 },
+            { "sourceFrame": 48_500, "targetBeatOffset": 1.5 },
+            { "sourceFrame": 96_500, "targetBeatOffset": 4 }
+        ],
+        "pitchRegions": [{
+            "sourceStartFrame": 2_000,
+            "sourceFrameCount": 48_000,
+            "sourcePitchCents": 6_875,
+            "targetPitchCents": 6_900,
+            "correctionAmount": 0.8,
+            "transitionFrames": 960
+        }]
+    });
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&canonical).unwrap()
+    ));
+
+    let mut three_times_tempo_split = canonical.clone();
+    three_times_tempo_split["tracks"][1]["clips"][0]["startBeat"] = json!(0);
+    three_times_tempo_split["tracks"][1]["clips"][0]["lengthBeats"] = json!(0.1);
+    three_times_tempo_split["tracks"][1]["clips"][0]["sourceFrameCount"] = json!(4_800);
+    three_times_tempo_split["tracks"][1]["clips"][0]["audioWarp"]["markers"] = json!([
+        { "sourceFrame": 500, "targetBeatOffset": 0 },
+        { "sourceFrame": 5_300, "targetBeatOffset": 0.1 }
+    ]);
+    three_times_tempo_split["tracks"][1]["clips"][0]["audioWarp"]["pitchRegions"] = json!([]);
+    three_times_tempo_split["tempoMap"] = json!([
+        { "id": "tempo-0", "beat": 0, "bpm": 120 },
+        { "id": "tempo-1", "beat": 0.09, "bpm": 20 }
+    ]);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&three_times_tempo_split).unwrap()
+    ));
+
+    let mut short_tempo_split = three_times_tempo_split;
+    short_tempo_split["tempoMap"] = json!([
+        { "id": "tempo-0", "beat": 0, "bpm": 120 },
+        { "id": "tempo-1", "beat": 0.099, "bpm": 120 }
+    ]);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&short_tempo_split).unwrap()
+    ));
+
+    let mut looped = canonical.clone();
+    looped["tracks"][1]["clips"][0]["loop"] = json!(true);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&looped).unwrap()
+    ));
+    let mut bad_endpoint = canonical.clone();
+    bad_endpoint["tracks"][1]["clips"][0]["audioWarp"]["markers"][0]["sourceFrame"] = json!(501);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&bad_endpoint).unwrap()
+    ));
+    let mut excessive_shift = canonical;
+    excessive_shift["tracks"][1]["clips"][0]["audioWarp"]["pitchRegions"][0]["targetPitchCents"] =
+        json!(7_500);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&excessive_shift).unwrap()
+    ));
+}
+
+#[test]
 fn native_schema_v8_accepts_only_effective_master_volume_and_read_gate() {
     let fixture = schema_v8_master_automation_project_value();
     let tracks = fixture["tracks"].as_array().unwrap();
@@ -2478,6 +2560,73 @@ fn schema_v8_master_volume_automation_survives_save_and_reopen_exactly() {
     assert_eq!(
         loaded_project["automationReadState"]["disabledTrackIds"],
         json!([effective_master_id])
+    );
+    assert!(!loaded.recovered);
+}
+
+#[test]
+fn schema_v9_audio_warp_survives_save_close_reopen_load_exactly() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("projects.sqlite3");
+    let repository = NativeRepository::new(path.clone());
+    repository.initialize().expect("repository initializes");
+    let fixture_bytes = vec![0u8; 4096];
+    repository
+        .store_audio_asset(
+            audio_asset_sha256(&fixture_bytes),
+            fixture_bytes.len(),
+            fixture_bytes,
+        )
+        .expect("schema-v9 audio asset stores before project metadata");
+
+    let mut project = migrate_project_value_v8_to_v9(schema_v8_master_automation_project_value())
+        .expect("schema-v8 fixture migrates");
+    project["id"] = json!("schema-v9-audio-warp-project");
+    project["title"] = json!("Schema v9 Audio Warp");
+    project["audioAssets"][0]["frameCount"] = json!(100_000);
+    project["tracks"][1]["clips"][0]["lengthBeats"] = json!(4);
+    project["tracks"][1]["clips"][0]["sourceFrameCount"] = json!(96_000);
+    project["tracks"][1]["clips"][0]["audioWarp"] = json!({
+        "algorithm": "wsola-v1",
+        "timingEnabled": true,
+        "pitchEnabled": true,
+        "markers": [
+            { "sourceFrame": 500, "targetBeatOffset": 0 },
+            { "sourceFrame": 48_500, "targetBeatOffset": 1.5 },
+            { "sourceFrame": 96_500, "targetBeatOffset": 4 }
+        ],
+        "pitchRegions": [{
+            "sourceStartFrame": 2_000,
+            "sourceFrameCount": 48_000,
+            "sourcePitchCents": 6_875,
+            "targetPitchCents": 6_900,
+            "correctionAmount": 0.8,
+            "transitionFrames": 960
+        }]
+    });
+    let project_json = serde_json::to_string(&project).unwrap();
+    repository
+        .save(SaveRequestDto {
+            project_id: "schema-v9-audio-warp-project".to_owned(),
+            project_json,
+            activation_id: "activation-v9-audio-warp".to_owned(),
+            revision: 1,
+            write_id: "write-v9-audio-warp-1".to_owned(),
+            expected_head: ExpectedHeadDto::Empty,
+            predecessor_write_id: None,
+        })
+        .expect("schema-v9 Audio Warp project saves");
+    repository.close().expect("repository closes");
+
+    let reopened = NativeRepository::new(path);
+    reopened.initialize().expect("repository reopens");
+    let loaded = reopened
+        .load("schema-v9-audio-warp-project".to_owned())
+        .expect("schema-v9 Audio Warp project loads")
+        .expect("schema-v9 Audio Warp project exists");
+    assert_eq!(
+        serde_json::from_str::<Value>(&loaded.project_json).unwrap(),
+        project
     );
     assert!(!loaded.recovered);
 }

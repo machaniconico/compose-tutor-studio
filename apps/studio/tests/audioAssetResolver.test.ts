@@ -223,6 +223,23 @@ describe('audio asset resolver preflight', () => {
     });
   });
 
+  it('includes derived and Worker ownership in the shared combined gate', async () => {
+    const { project } = await fixture();
+    const baseline = assertProjectAudioAssetCombinedResourceBudget(
+      project,
+      48_000,
+    ).estimatedPeakBytes;
+    expect(() => assertProjectAudioAssetCombinedResourceBudget(
+      project,
+      48_000,
+      0,
+      MAX_AUDIO_ASSET_COMBINED_ESTIMATED_BYTES - baseline + 1,
+    )).toThrowError(expect.objectContaining({
+      code: 'resource-limit',
+      assetId: 'asset-1',
+    }) as AudioAssetPlaybackError);
+  });
+
   it('rejects a raw-heavy combined peak before calling the resolver', async () => {
     const { asset } = await fixture();
     const rawHeavyAsset = {

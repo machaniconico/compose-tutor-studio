@@ -33,10 +33,10 @@ describe('schema-v7 Automation Read state', () => {
     delete v6.automationReadState;
     const before = structuredClone(v6);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(8);
+    expect(CURRENT_SCHEMA_VERSION).toBe(9);
     expect(migrateProject(v6)).toEqual({
       ...v6,
-      schemaVersion: 8,
+      schemaVersion: 9,
       automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     });
     expect(v6).toEqual(before);

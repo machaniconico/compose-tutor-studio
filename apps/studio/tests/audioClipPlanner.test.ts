@@ -97,6 +97,48 @@ function project(
 }
 
 describe('audio clip playback planner', () => {
+  it('plans warped seek, fades, duration, tail, and buffer identity on derived time', () => {
+    const fixture = project(audioClip({
+      audioWarp: {
+        algorithm: 'wsola-v1',
+        timingEnabled: true,
+        pitchEnabled: false,
+        markers: [
+          { sourceFrame: 48_000, targetBeatOffset: 0 },
+          { sourceFrame: 192_000, targetBeatOffset: 8 },
+        ],
+        pitchRegions: [],
+      },
+    }));
+    const plans = planAudioClipPlaybackWindow(fixture, {
+      windowStartBeat: 2,
+      windowEndBeat: fixture.lengthBeats,
+    });
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({
+      startBeat: 2,
+      endBeat: 8,
+      sourceOffsetSeconds: 1,
+      durationSeconds: 3,
+      playbackBufferKey: {
+        kind: 'derived',
+        assetId: asset.id,
+        sampleRate: 48_000,
+        frameCount: 192_000,
+      },
+    });
+    expect(plans[0]?.gainPoints).toEqual([
+      { offsetSeconds: 0, value: audioClipGainToLinear(-6) },
+      { offsetSeconds: 2 + 1 / 3, value: audioClipGainToLinear(-6) },
+      { offsetSeconds: 3, value: 0 },
+    ]);
+    expect(planAudioClipTailSources(fixture, {
+      startBeat: 0,
+      endBeat: fixture.lengthBeats,
+    })).toEqual([{ trackId: 'audio-track', endSeconds: 4 }]);
+  });
+
   it('uses the selected source range and stops at the earlier source end', () => {
     const fixture = project(audioClip());
     const plans = planAudioClipPlaybackWindow(fixture, {
@@ -112,6 +154,11 @@ describe('audio clip playback planner', () => {
       durationSeconds: 3,
       loopStartSeconds: null,
       loopEndSeconds: null,
+      playbackBufferKey: {
+        kind: 'source',
+        assetId: asset.id,
+        checksumSha256: asset.checksumSha256,
+      },
     });
     expect(plans[0]?.gainPoints).toEqual([
       { offsetSeconds: 0, value: 0 },

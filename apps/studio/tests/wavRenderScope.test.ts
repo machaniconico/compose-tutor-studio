@@ -2,9 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   compileAudioRouting,
   validateProject,
+  type AudioClip,
   type Project,
+  type ReadyAudioAsset,
+  type Track,
 } from '@cts/project-model';
 import { createDefaultProject } from '../src/state/defaultProject';
+import {
+  createAudioClipPlaybackIndex,
+  planAudioClipPlaybackWindow,
+  type AudioClipPlaybackPlan,
+} from '../src/audio/audioClipPlanner';
+import { createProjectMusicalTime } from '../src/audio/musicalTime';
 import {
   MAX_WAV_SCHEDULE_EVENTS,
   buildWavAudioClipPlans,
@@ -16,7 +25,137 @@ import {
 } from '../src/audio/wav';
 import { getReservedHeavyAudioResourceBytes } from '../src/audio/audioResourceReservation';
 
+function elasticAudioProjectionFixture(): Readonly<{
+  project: Project;
+  trackId: string;
+  clipId: string;
+}> {
+  const base = createDefaultProject();
+  const asset: ReadyAudioAsset = {
+    id: 'elastic-parity-asset',
+    availability: 'ready',
+    checksumSha256: 'e'.repeat(64),
+    originalName: 'elastic-parity.wav',
+    mediaType: 'audio/wav',
+    byteLength: 480_044,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount: 240_000,
+  };
+  const clip: AudioClip = {
+    id: 'elastic-parity-clip',
+    trackId: 'elastic-parity-track',
+    type: 'audio',
+    startBeat: 1,
+    lengthBeats: 6,
+    loop: false,
+    audioAssetId: asset.id,
+    sourceStartFrame: 48_000,
+    sourceFrameCount: 144_000,
+    fadeInFrames: 24_000,
+    fadeOutFrames: 36_000,
+    gainDb: -4,
+    audioWarp: {
+      algorithm: 'wsola-v1',
+      timingEnabled: true,
+      pitchEnabled: false,
+      markers: [
+        { sourceFrame: 48_000, targetBeatOffset: 0 },
+        { sourceFrame: 120_000, targetBeatOffset: 2 },
+        { sourceFrame: 192_000, targetBeatOffset: 6 },
+      ],
+      pitchRegions: [],
+    },
+  };
+  const track: Track = {
+    id: clip.trackId,
+    name: 'Elastic parity',
+    type: 'audio',
+    role: 'general',
+    clips: [clip],
+    volume: 1,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: [],
+  };
+  return {
+    project: {
+      ...base,
+      bpm: 120,
+      tempoMap: [
+        { id: 'elastic-tempo-0', beat: 0, bpm: 120 },
+        { id: 'elastic-tempo-1', beat: 4, bpm: 90 },
+        { id: 'elastic-tempo-2', beat: 10, bpm: 140 },
+      ],
+      audioAssets: [...base.audioAssets, asset],
+      tracks: [...base.tracks, track],
+      audioRouting: {
+        ...base.audioRouting,
+        outputs: [
+          ...base.audioRouting.outputs,
+          { sourceTrackId: track.id, destination: { type: 'master' } },
+        ],
+      },
+    },
+    trackId: track.id,
+    clipId: clip.id,
+  };
+}
+
+function elasticPlanProjection(
+  plan: AudioClipPlaybackPlan,
+  project: Project,
+): Readonly<{
+  playbackBufferKey: AudioClipPlaybackPlan['playbackBufferKey'];
+  sourceOffsetSeconds: number;
+  durationSeconds: number;
+  startBeat: number;
+  startTimeSeconds: number;
+  gainPoints: AudioClipPlaybackPlan['gainPoints'];
+}> {
+  return {
+    playbackBufferKey: plan.playbackBufferKey,
+    sourceOffsetSeconds: plan.sourceOffsetSeconds,
+    durationSeconds: plan.durationSeconds,
+    startBeat: plan.startBeat,
+    startTimeSeconds: createProjectMusicalTime(project).tempo.beatToSeconds(plan.startBeat),
+    gainPoints: plan.gainPoints,
+  };
+}
+
 describe('WAV render scope', () => {
+  it('keeps warped live, full WAV, and selected WAV playback projections identical', () => {
+    const { project, trackId, clipId } = elasticAudioProjectionFixture();
+    const { tempo } = createProjectMusicalTime(project);
+    const livePlans = planAudioClipPlaybackWindow(project, {
+      windowStartBeat: 0,
+      windowEndBeat: project.lengthBeats,
+      tempo,
+      transportLoop: null,
+      index: createAudioClipPlaybackIndex(project, { tempo }),
+    });
+    const fullPlans = buildWavAudioClipPlans(project);
+    const selectedProject = resolveWavRenderProject(project, {
+      kind: 'selected-track',
+      trackId,
+    });
+    const selectedPlans = buildWavAudioClipPlans(selectedProject);
+    const findFixturePlan = (plans: readonly AudioClipPlaybackPlan[]) => {
+      const plan = plans.find((candidate) => candidate.clipId === clipId);
+      if (!plan) throw new Error('Elastic Audio parity fixture plan missing');
+      return plan;
+    };
+
+    expect(selectedProject.tempoMap).toBe(project.tempoMap);
+    expect(findFixturePlan(livePlans).playbackBufferKey.kind).toBe('derived');
+    const liveProjection = elasticPlanProjection(findFixturePlan(livePlans), project);
+    expect(elasticPlanProjection(findFixturePlan(fullPlans), project))
+      .toEqual(liveProjection);
+    expect(elasticPlanProjection(findFixturePlan(selectedPlans), selectedProject))
+      .toEqual(liveProjection);
+  });
+
   it('preserves the exact Project identity for a full mix', () => {
     const project = createDefaultProject();
     expect(resolveWavRenderProject(project, { kind: 'mix' })).toBe(project);
