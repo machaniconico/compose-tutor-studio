@@ -252,7 +252,11 @@ function expectPcmEqualWithinOneLsb(actual: Buffer, expected: Buffer): void {
     maxAbsoluteDelta = Math.max(maxAbsoluteDelta, absoluteDelta);
   }
 
-  expect(differingSamples).toBeLessThanOrEqual(1);
+  // OfflineAudioContext summation can cross the PCM16 rounding boundary for
+  // a sparse set of samples on different OS/CPU combinations. Keep at least
+  // 99.95% bit-identical while requiring every remaining sample within 1 LSB.
+  expect(differingSamples / Math.max(1, actualSamples.length))
+    .toBeLessThanOrEqual(0.0005);
   expect(maxAbsoluteDelta).toBeLessThanOrEqual(1);
 }
 
