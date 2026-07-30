@@ -47,7 +47,7 @@ test('keeps a usable dialog when a deferred feature chunk cannot load', async ({
   ).toBeVisible();
 });
 
-test('keeps the export lock while its deferred dialog is closed and reopened', async ({
+test('keeps the export dialog non-dismissible and locked during deferred operations', async ({
   page,
 }) => {
   await page.goto('/');
@@ -96,13 +96,16 @@ test('keeps the export lock while its deferred dialog is closed and reopened', a
     .toBe(1);
   await expect(exportDialog.getByRole('button', { name: '書き出し中…' })).toBeDisabled();
 
-  await exportDialog.getByRole('button', { name: '閉じる' }).click();
-  await expect(exportDialog).toBeHidden();
-  await openExport.click();
-  exportDialog = page.getByRole('dialog', {
-    name: '書き出し / 読み込み',
-    exact: true,
+  const pendingClose = exportDialog.getByRole('button', { name: '閉じる' });
+  await expect(pendingClose).toBeDisabled();
+  await expect(exportDialog).toHaveAttribute('aria-busy', 'true');
+  await page.keyboard.press('Escape');
+  await page.locator('.dialog-backdrop').evaluate((backdrop: HTMLElement) => {
+    backdrop.click();
   });
+  await pendingClose.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(exportDialog).toBeVisible();
+
   const pendingWav = exportDialog.getByRole('button', { name: '書き出し中…' });
   await expect(pendingWav).toBeDisabled();
   await expect(exportDialog.getByRole('button', { name: 'MIDIエクスポート' })).toBeDisabled();
@@ -125,6 +128,16 @@ test('keeps the export lock while its deferred dialog is closed and reopened', a
       .__ctsWavGate.release?.();
   });
   await expect(exportDialog.getByRole('button', { name: 'WAVエクスポート' })).toBeEnabled();
+  await expect(pendingClose).toBeEnabled();
+  await expect(exportDialog).not.toHaveAttribute('aria-busy', 'true');
+
+  await pendingClose.click();
+  await expect(exportDialog).toBeHidden();
+  await openExport.click();
+  exportDialog = page.getByRole('dialog', {
+    name: '書き出し / 読み込み',
+    exact: true,
+  });
 
   await exportDialog.getByRole('button', { name: '選択トラックをWAV' }).click();
   await expect
@@ -141,13 +154,16 @@ test('keeps the export lock while its deferred dialog is closed and reopened', a
   ).toBeDisabled();
   await expect(exportDialog.getByRole('button', { name: 'WAVエクスポート' })).toBeDisabled();
 
-  await exportDialog.getByRole('button', { name: '閉じる' }).click();
-  await expect(exportDialog).toBeHidden();
-  await openExport.click();
-  exportDialog = page.getByRole('dialog', {
-    name: '書き出し / 読み込み',
-    exact: true,
+  const pendingTrackClose = exportDialog.getByRole('button', { name: '閉じる' });
+  await expect(pendingTrackClose).toBeDisabled();
+  await expect(exportDialog).toHaveAttribute('aria-busy', 'true');
+  await page.keyboard.press('Escape');
+  await page.locator('.dialog-backdrop').evaluate((backdrop: HTMLElement) => {
+    backdrop.click();
   });
+  await pendingTrackClose.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(exportDialog).toBeVisible();
+
   const pendingTrackWav = exportDialog.getByRole('button', {
     name: '選択トラックを書き出し中…',
   });
@@ -173,4 +189,6 @@ test('keeps the export lock while its deferred dialog is closed and reopened', a
   await expect(
     exportDialog.getByRole('button', { name: '選択トラックをWAV' }),
   ).toBeEnabled();
+  await expect(pendingTrackClose).toBeEnabled();
+  await expect(exportDialog).not.toHaveAttribute('aria-busy', 'true');
 });
