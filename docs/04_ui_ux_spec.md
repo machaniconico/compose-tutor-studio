@@ -245,11 +245,12 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - タイミングlaneはpointをnative buttonとして公開し、選択状態を`aria-pressed`とoutlineで示す。Home / End、PageUp / PageDownでpoint選択、左右で0.01拍、Alt+左右で0.001拍の移動、Deleteで削除できる。始点 / 終点は動かせない理由をinline alertで伝える
 - 単音pitchは明示的な「音程を解析」から始め、進捗とcancelを`aria-live`で通知する。解析後は実データから作ったbounded waveform、pitch trace、半音guide、選択位置cursorを同じ時間軸へ表示し、regionをnative button、pitch / 補正量をlabel付きcontrolとして操作できる
 - 解析候補を外しただけの時は「まだプロジェクトは変更していません」と通知する。補正の確定、split / merge、削除 / resetはProject変更の有無を区別し、採用時だけUndo 1回と保存を発生させる
+- 「音程を変えても音色を保つ」checkboxはnative accessible nameをそのまま使い、保存済みformant modeをoff / preserveへ切り替える。候補がない時とbusy時はnative `disabled`にし、最小windowでも視認・pointer操作・keyboard focusできる。mode切替は1 Undo / save revisionであり、A/Bの選択をresetしない
 - 「ピッチ補正前」「補正後」の2 buttonは現在状態を`aria-pressed`で示す。A/Bは選択Clipのpitch correctionだけをlive再生中の一時snapshotから外し、タイミング補正と再生位置を保つ。「書き出しや保存内容は変わらない」と常時説明し、ProjectのBypass controlに見せない
 - 録音、保存、Project切替などのbusy中はtab、解析、point / region、数値入力、A/Bをnative `disabled`にし、panel本体を`aria-disabled`にする。開始済み解析とpointer previewはcancelし、busy解除後も同じProject / Clip / activationなら直前のcontrolへfocusを戻す。対象が変わった時は古いfocusや解析結果を移さない
 - ready素材がない、素材がmissing / changed / unavailable、loop Clipではdisclosureを開けず、理由と可能な対処を同じEditorに表示する。linked Clip / take folderにはこのAudio Clip用disclosureを出さず、60秒超や非canonical素材は解析または確定前に説明付きで拒否する
 - 320px幅ではdocumentとtablistを横overflowさせず、音声timelineだけを内部横scrollする。pointer対象は44px相当、focus ringは背景と十分に区別し、波形・pitch線・色だけを操作の正本にしない
-- formant / vibrato、polyphonic pitch、take folder / loop-cycle、phase-coherent multitrack、audio quantize / groove、Smart Tempoを示す予約controlは置かない
+- manual formant / vibrato編集、polyphonic pitch、take folder / loop-cycle、phase-coherent multitrack、audio quantize / groove、Smart Tempoを示す予約controlは置かない。off / preserveは合成音声で確認済みだが、実声のライセンス済みブラインドA/BまたはMUSHRAとunsupported rate / extreme shiftの品質を保証する表示は置かない
 
 ## 3. ナビゲーション
 

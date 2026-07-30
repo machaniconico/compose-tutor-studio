@@ -1396,6 +1396,40 @@ export async function acquireRuntimeProjectAudioBuffers(
   project: Project,
   context: AudioContext,
   isCurrent: () => boolean,
+  externalSignal?: AbortSignal,
+): Promise<AudioClipPlaybackBufferLease> {
+  const controller = new AbortController();
+  const generation = useStore.getState().transport.playbackRequestId;
+  const abort = (): void => controller.abort();
+  externalSignal?.addEventListener('abort', abort, { once: true });
+  if (externalSignal?.aborted) controller.abort();
+  const unsubscribe = useStore.subscribe((state) => {
+    if (
+      state.transport.playbackRequestId !== generation
+      || state.transport.phase === 'stopped'
+      || !isCurrent()
+    ) controller.abort();
+  });
+  try {
+    return await acquireRuntimeProjectAudioBuffersForGeneration(
+      project,
+      context,
+      isCurrent,
+      generation,
+      controller.signal,
+    );
+  } finally {
+    unsubscribe();
+    externalSignal?.removeEventListener('abort', abort);
+  }
+}
+
+async function acquireRuntimeProjectAudioBuffersForGeneration(
+  project: Project,
+  context: AudioContext,
+  isCurrent: () => boolean,
+  generation: number,
+  signal: AbortSignal,
 ): Promise<AudioClipPlaybackBufferLease> {
   const audioAssetCache = getAudioAssetPlaybackCache();
   const derivedCache = getAudioClipBufferCache();
@@ -1411,6 +1445,8 @@ export async function acquireRuntimeProjectAudioBuffers(
       { assets: [], estimatedDecodedBytes: 0 },
       source,
       context,
+      { signal, generation, currentGeneration: () =>
+        useStore.getState().transport.playbackRequestId },
     );
   }
 
@@ -1455,7 +1491,6 @@ export async function acquireRuntimeProjectAudioBuffers(
       sourceBuffers.release();
       throw new CancelledPlaybackRequest();
     }
-    const generation = useStore.getState().transport.playbackRequestId;
     const audioBuffers = await acquireAudioClipPlaybackBuffers(
       project,
       preparedAudio,
@@ -1464,6 +1499,7 @@ export async function acquireRuntimeProjectAudioBuffers(
       {
         cache: derivedCache,
         resourceBudget: reservation,
+        signal,
         generation,
         currentGeneration: () => useStore.getState().transport.playbackRequestId,
       },
@@ -1637,7 +1673,12 @@ async function createRuntimeSessionImpl(
   const synths = new Map<string, SynthVoiceManager>();
   const drums = new Map<string, DrumVoiceManager>();
   const audioVoices = new Map<string, AudioClipVoiceManager>();
-  const audioBuffers = await acquireRuntimeProjectAudioBuffers(project, context, isCurrent);
+  const audioBuffers = await acquireRuntimeProjectAudioBuffers(
+    project,
+    context,
+    isCurrent,
+    synchronizedIntent?.signal,
+  );
   // Byte I/O and decode may have taken long enough for non-topological state
   // to change without superseding this request. Adopt the latest mix, seek
   // position, and metronome value only after the final await. Loop/topology

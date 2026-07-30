@@ -1305,6 +1305,68 @@ fn native_v8_to_v9_audio_warp_is_strict_and_schema_only() {
 }
 
 #[test]
+fn native_v9_to_v10_formant_mode_is_pure_strict_and_backward_compatible() {
+    let source = schema_v8_master_automation_project_value();
+    let mut v9 = migrate_project_value_v8_to_v9(source).expect("valid v8 migrates");
+    v9["audioAssets"][0]["frameCount"] = json!(100_000);
+    v9["tracks"][1]["clips"][0]["lengthBeats"] = json!(4);
+    v9["tracks"][1]["clips"][0]["sourceFrameCount"] = json!(96_000);
+    v9["tracks"][1]["clips"][0]["audioWarp"] = json!({
+        "algorithm": "wsola-v1",
+        "timingEnabled": true,
+        "pitchEnabled": true,
+        "markers": [
+            { "sourceFrame": 500, "targetBeatOffset": 0 },
+            { "sourceFrame": 48_500, "targetBeatOffset": 1.5 },
+            { "sourceFrame": 96_500, "targetBeatOffset": 4 }
+        ],
+        "pitchRegions": []
+    });
+    let before = v9.clone();
+    let migrated = migrate_project_value_v9_to_v10(v9.clone()).expect("valid v9 migrates");
+    assert_eq!(v9, before, "migration input must remain immutable");
+    assert_eq!(migrated["schemaVersion"], json!(10));
+    assert_eq!(
+        migrated["tracks"][1]["clips"][0]["audioWarp"]["formantMode"],
+        json!("off")
+    );
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&migrated).unwrap()
+    ));
+
+    let mut smuggled = before.clone();
+    smuggled["tracks"][1]["clips"][0]["audioWarp"]["formantMode"] = json!("preserve");
+    assert!(migrate_project_value_v9_to_v10(smuggled).is_none());
+
+    let mut preserve = migrated.clone();
+    preserve["tracks"][1]["clips"][0]["audioWarp"]["formantMode"] = json!("preserve");
+    assert!(validate_project_file_json(
+        &serde_json::to_vec(&preserve).unwrap()
+    ));
+
+    let mut missing = migrated.clone();
+    missing["tracks"][1]["clips"][0]["audioWarp"]
+        .as_object_mut()
+        .unwrap()
+        .remove("formantMode");
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&missing).unwrap()
+    ));
+
+    let mut unknown_value = migrated.clone();
+    unknown_value["tracks"][1]["clips"][0]["audioWarp"]["formantMode"] = json!("robot");
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&unknown_value).unwrap()
+    ));
+
+    let mut unknown_key = migrated;
+    unknown_key["tracks"][1]["clips"][0]["audioWarp"]["formantStrength"] = json!(1);
+    assert!(!validate_project_file_json(
+        &serde_json::to_vec(&unknown_key).unwrap()
+    ));
+}
+
+#[test]
 fn native_schema_v8_accepts_only_effective_master_volume_and_read_gate() {
     let fixture = schema_v8_master_automation_project_value();
     let tracks = fixture["tracks"].as_array().unwrap();
@@ -2565,7 +2627,7 @@ fn schema_v8_master_volume_automation_survives_save_and_reopen_exactly() {
 }
 
 #[test]
-fn schema_v9_audio_warp_survives_save_close_reopen_load_exactly() {
+fn schema_v10_audio_warp_survives_save_close_reopen_load_exactly() {
     let directory = tempfile::tempdir().expect("temp directory");
     let path = directory.path().join("projects.sqlite3");
     let repository = NativeRepository::new(path.clone());
@@ -2579,15 +2641,17 @@ fn schema_v9_audio_warp_survives_save_close_reopen_load_exactly() {
         )
         .expect("schema-v9 audio asset stores before project metadata");
 
-    let mut project = migrate_project_value_v8_to_v9(schema_v8_master_automation_project_value())
+    let v9 = migrate_project_value_v8_to_v9(schema_v8_master_automation_project_value())
         .expect("schema-v8 fixture migrates");
-    project["id"] = json!("schema-v9-audio-warp-project");
-    project["title"] = json!("Schema v9 Audio Warp");
+    let mut project = migrate_project_value_v9_to_v10(v9).expect("schema-v9 fixture migrates");
+    project["id"] = json!("schema-v10-audio-warp-project");
+    project["title"] = json!("Schema v10 Audio Warp");
     project["audioAssets"][0]["frameCount"] = json!(100_000);
     project["tracks"][1]["clips"][0]["lengthBeats"] = json!(4);
     project["tracks"][1]["clips"][0]["sourceFrameCount"] = json!(96_000);
     project["tracks"][1]["clips"][0]["audioWarp"] = json!({
         "algorithm": "wsola-v1",
+        "formantMode": "preserve",
         "timingEnabled": true,
         "pitchEnabled": true,
         "markers": [
@@ -2607,23 +2671,23 @@ fn schema_v9_audio_warp_survives_save_close_reopen_load_exactly() {
     let project_json = serde_json::to_string(&project).unwrap();
     repository
         .save(SaveRequestDto {
-            project_id: "schema-v9-audio-warp-project".to_owned(),
+            project_id: "schema-v10-audio-warp-project".to_owned(),
             project_json,
-            activation_id: "activation-v9-audio-warp".to_owned(),
+            activation_id: "activation-v10-audio-warp".to_owned(),
             revision: 1,
-            write_id: "write-v9-audio-warp-1".to_owned(),
+            write_id: "write-v10-audio-warp-1".to_owned(),
             expected_head: ExpectedHeadDto::Empty,
             predecessor_write_id: None,
         })
-        .expect("schema-v9 Audio Warp project saves");
+        .expect("schema-v10 Audio Warp project saves");
     repository.close().expect("repository closes");
 
     let reopened = NativeRepository::new(path);
     reopened.initialize().expect("repository reopens");
     let loaded = reopened
-        .load("schema-v9-audio-warp-project".to_owned())
-        .expect("schema-v9 Audio Warp project loads")
-        .expect("schema-v9 Audio Warp project exists");
+        .load("schema-v10-audio-warp-project".to_owned())
+        .expect("schema-v10 Audio Warp project loads")
+        .expect("schema-v10 Audio Warp project exists");
     assert_eq!(
         serde_json::from_str::<Value>(&loaded.project_json).unwrap(),
         project

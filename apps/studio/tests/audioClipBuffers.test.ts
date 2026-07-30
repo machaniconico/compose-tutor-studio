@@ -41,7 +41,8 @@ import {
 
 function request(key: string, frames = 4): AudioWarpRenderRequest {
   return {
-    algorithmVersion: 'wsola-v1/dsp-1',
+    algorithmVersion: 'wsola-v1/dsp-2',
+    formantMode: 'off' as const,
     assetId: 'asset',
     checksumSha256: key.padEnd(64, 'a').slice(0, 64),
     sourceSampleRate: 48_000,
@@ -257,6 +258,7 @@ function warpProject(): {
     gainDb: 0,
     audioWarp: {
       algorithm: 'wsola-v1',
+      formantMode: 'off' as const,
       timingEnabled: true,
       pitchEnabled: false,
       markers: [
@@ -328,6 +330,73 @@ function contextStub(): BaseAudioContext {
   } as unknown as BaseAudioContext;
 }
 
+class ControlledAudioWarpWorker {
+  static instances: ControlledAudioWarpWorker[] = [];
+  readonly messages: unknown[] = [];
+  terminateCount = 0;
+  private readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+
+  constructor(..._args: unknown[]) {
+    ControlledAudioWarpWorker.instances.push(this);
+  }
+
+  postMessage(message: unknown): void {
+    this.messages.push(message);
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  terminate(): void {
+    this.terminateCount += 1;
+  }
+
+  emitRendered(): void {
+    const render = this.messages.find(
+      (message) => (message as { type?: string }).type === 'render',
+    ) as {
+      id: number;
+      generation: number;
+      request: AudioWarpRenderRequest;
+    } | undefined;
+    if (!render) throw new Error('render message missing');
+    const event = {
+      data: {
+        type: 'rendered',
+        id: render.id,
+        generation: render.generation,
+        pcm: {
+          sampleRate: render.request.targetSampleRate,
+          frameCount: render.request.outputFrameCount,
+          channelCount: render.request.channelCount,
+          channels: Array.from(
+            { length: render.request.channelCount },
+            () => new ArrayBuffer(render.request.outputFrameCount * 4),
+          ),
+        },
+      },
+    } as MessageEvent;
+    for (const listener of this.listeners.get('message') ?? []) {
+      if (typeof listener === 'function') listener(event);
+      else listener.handleEvent(event);
+    }
+  }
+}
+
+function sourceLease(): AudioAssetBufferLease {
+  return {
+    buffersByAssetId: new Map(),
+    release: vi.fn(),
+  };
+}
+
 function advertisedBoundaryProject(): Project {
   const fixture = warpProject();
   const frameCount = 60 * 48_000;
@@ -348,6 +417,7 @@ function advertisedBoundaryProject(): Project {
   clip.fadeOutFrames = 0;
   clip.audioWarp = {
     algorithm: 'wsola-v1',
+    formantMode: 'off' as const,
     timingEnabled: true,
     pitchEnabled: false,
     markers: [
@@ -359,7 +429,117 @@ function advertisedBoundaryProject(): Project {
   return fixture.project;
 }
 
+function setPreserveFormantMode(project: Project): void {
+  const clip = project.tracks[0]?.clips[0];
+  if (!clip || clip.type !== 'audio' || !clip.audioWarp) {
+    throw new Error('preserve fixture requires one edited Audio Clip');
+  }
+  clip.audioWarp = { ...clip.audioWarp, formantMode: 'preserve' };
+}
+
 describe('Elastic Audio resource ownership boundary', () => {
+  it('keeps a coalesced Worker alive when one public acquisition cancels', async () => {
+    const fixture = warpProject();
+    const cache = new AudioClipBufferCache(1024 * 1024);
+    const baseline = getReservedHeavyAudioResourceBytes();
+    const firstSource = sourceLease();
+    const secondSource = sourceLease();
+    const firstAbort = new AbortController();
+    ControlledAudioWarpWorker.instances = [];
+    vi.stubGlobal('Worker', ControlledAudioWarpWorker);
+
+    let secondLease: Awaited<ReturnType<typeof acquireAudioClipPlaybackBuffers>> | null = null;
+    try {
+      const first = acquireAudioClipPlaybackBuffers(
+        fixture.project,
+        fixture.prepared,
+        firstSource,
+        contextStub(),
+        { cache, signal: firstAbort.signal },
+      );
+      const second = acquireAudioClipPlaybackBuffers(
+        fixture.project,
+        fixture.prepared,
+        secondSource,
+        contextStub(),
+        { cache },
+      );
+      const secondSettled = second.then(
+        (lease) => ({ status: 'fulfilled' as const, lease }),
+        (error: unknown) => ({ status: 'rejected' as const, error }),
+      );
+      await vi.waitFor(() => {
+        expect(ControlledAudioWarpWorker.instances).toHaveLength(1);
+        expect(ControlledAudioWarpWorker.instances[0]!.messages.some(
+          (message) => (message as { type?: string }).type === 'render',
+        )).toBe(true);
+      });
+
+      firstAbort.abort();
+      await expect(first).rejects.toMatchObject({ code: 'cancelled' });
+      expect(firstSource.release).toHaveBeenCalledOnce();
+      expect(ControlledAudioWarpWorker.instances[0]!.terminateCount).toBe(0);
+      expect(cache.entryCount).toBe(1);
+
+      ControlledAudioWarpWorker.instances[0]!.emitRendered();
+      const outcome = await secondSettled;
+      expect(outcome.status).toBe('fulfilled');
+      if (outcome.status !== 'fulfilled') throw outcome.error;
+      secondLease = outcome.lease;
+      expect(ControlledAudioWarpWorker.instances[0]!.terminateCount).toBe(1);
+      expect(cache.entryCount).toBe(1);
+      expect(secondSource.release).not.toHaveBeenCalled();
+    } finally {
+      secondLease?.release();
+      cache.clearUnused();
+      vi.unstubAllGlobals();
+    }
+    expect(secondSource.release).toHaveBeenCalledOnce();
+    expect(cache.entryCount).toBe(0);
+    expect(cache.retainedDerivedBytes).toBe(0);
+    expect(getReservedHeavyAudioResourceBytes()).toBe(baseline);
+  });
+
+  it('terminates the Worker only when the final public waiter cancels', async () => {
+    const fixture = warpProject();
+    const cache = new AudioClipBufferCache(1024 * 1024);
+    const baseline = getReservedHeavyAudioResourceBytes();
+    const source = sourceLease();
+    const controller = new AbortController();
+    ControlledAudioWarpWorker.instances = [];
+    vi.stubGlobal('Worker', ControlledAudioWarpWorker);
+
+    try {
+      const pending = acquireAudioClipPlaybackBuffers(
+        fixture.project,
+        fixture.prepared,
+        source,
+        contextStub(),
+        { cache, signal: controller.signal },
+      );
+      await vi.waitFor(() => {
+        expect(ControlledAudioWarpWorker.instances).toHaveLength(1);
+        expect(ControlledAudioWarpWorker.instances[0]!.messages.some(
+          (message) => (message as { type?: string }).type === 'render',
+        )).toBe(true);
+      });
+
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+      expect(ControlledAudioWarpWorker.instances[0]!.terminateCount).toBe(1);
+      ControlledAudioWarpWorker.instances[0]!.emitRendered();
+      await Promise.resolve();
+      expect(ControlledAudioWarpWorker.instances[0]!.terminateCount).toBe(1);
+      expect(source.release).toHaveBeenCalledOnce();
+      expect(cache.entryCount).toBe(0);
+      expect(cache.retainedDerivedBytes).toBe(0);
+      expect(getReservedHeavyAudioResourceBytes()).toBe(baseline);
+    } finally {
+      cache.clearUnused();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('accepts the advertised 60-second stereo 2x boundary and rejects one byte less headroom', () => {
     const baseline = getReservedHeavyAudioResourceBytes();
     const project = advertisedBoundaryProject();
@@ -468,6 +648,107 @@ describe('Elastic Audio resource ownership boundary', () => {
     expect(getReservedHeavyAudioResourceBytes() - baseline).toBe(retainedBytes);
     cache.clearUnused();
     expect(getReservedHeavyAudioResourceBytes()).toBe(baseline);
+  });
+
+  it('coalesces and retains a preserve-mode derivation through the public buffer acquisition', async () => {
+    const fixture = warpProject();
+    setPreserveFormantMode(fixture.project);
+    const cache = new AudioClipBufferCache(1024 * 1024);
+    const renderer = vi.fn(async (candidate: AudioWarpRenderRequest) =>
+      pcm(candidate.outputFrameCount));
+
+    const [first, second] = await Promise.all([
+      acquireAudioClipPlaybackBuffers(
+        fixture.project,
+        fixture.prepared,
+        sourceLease(),
+        contextStub(),
+        { cache, renderer },
+      ),
+      acquireAudioClipPlaybackBuffers(
+        fixture.project,
+        fixture.prepared,
+        sourceLease(),
+        contextStub(),
+        { cache, renderer },
+      ),
+    ]);
+    expect(renderer).toHaveBeenCalledTimes(1);
+    expect(renderer.mock.calls[0]?.[0]).toMatchObject({ formantMode: 'preserve' });
+    expect(first.derivedBuffersByKey.keys().next().value)
+      .toBe(second.derivedBuffersByKey.keys().next().value);
+
+    first.release();
+    second.release();
+    const retained = cache.retainedDerivedBytes;
+    const third = await acquireAudioClipPlaybackBuffers(
+      fixture.project,
+      fixture.prepared,
+      sourceLease(),
+      contextStub(),
+      { cache, renderer },
+    );
+    expect(renderer).toHaveBeenCalledTimes(1);
+    expect(cache.retainedDerivedBytes).toBe(retained);
+    third.release();
+    cache.clearUnused();
+  });
+
+  it('accepts the exact preserve working budget and rejects one byte less before rendering', async () => {
+    const successful = warpProject();
+    setPreserveFormantMode(successful.project);
+    const request = compileAudioWarpRenderRequests(successful.project)[0]!;
+    const cache = new AudioClipBufferCache(1024 * 1024);
+    const resources = estimateAudioWarpResourcePeakBytes(successful.project, cache);
+    const renderer = vi.fn(async (candidate: AudioWarpRenderRequest) =>
+      pcm(candidate.outputFrameCount));
+    const exactBudget = reserveHeavyAudioResourceBudget(resources.additionalPeakBytes);
+    let successfulLease: Awaited<ReturnType<typeof acquireAudioClipPlaybackBuffers>> | null = null;
+    try {
+      successfulLease = await acquireAudioClipPlaybackBuffers(
+        successful.project,
+        successful.prepared,
+        successful.source,
+        contextStub(),
+        { cache, renderer, resourceBudget: exactBudget },
+      );
+      expect(renderer).toHaveBeenCalledTimes(1);
+      expect(estimateAudioWarpRenderWorkingBytes(request)).toBeGreaterThan(0);
+    } finally {
+      successfulLease?.release();
+      exactBudget.release();
+      cache.clearUnused();
+    }
+
+    const rejected = warpProject();
+    setPreserveFormantMode(rejected.project);
+    const rejectedCache = new AudioClipBufferCache(1024 * 1024);
+    const rejectedResources = estimateAudioWarpResourcePeakBytes(rejected.project, rejectedCache);
+    const undersizedBudget = reserveHeavyAudioResourceBudget(
+      rejectedResources.additionalPeakBytes - 1,
+    );
+    const rejectedRenderer = vi.fn(async (candidate: AudioWarpRenderRequest) =>
+      pcm(candidate.outputFrameCount));
+    try {
+      await expect(acquireAudioClipPlaybackBuffers(
+        rejected.project,
+        rejected.prepared,
+        rejected.source,
+        contextStub(),
+        { cache: rejectedCache, renderer: rejectedRenderer, resourceBudget: undersizedBudget },
+      )).rejects.toMatchObject({ code: 'resource-limit' });
+      expect(rejectedRenderer).not.toHaveBeenCalled();
+    } finally {
+      undersizedBudget.release();
+      rejectedCache.clearUnused();
+    }
+  });
+
+  it('enforces the raw derived PCM 128 MiB ceiling through the production size helper', () => {
+    const exactFrames = 128 * 1024 * 1024 / (2 * Float32Array.BYTES_PER_ELEMENT);
+    expect(derivedPcmBytes(exactFrames, 2)).toBe(128 * 1024 * 1024);
+    expect(() => derivedPcmBytes(exactFrames + 1, 2))
+      .toThrowError(expect.objectContaining({ code: 'resource-limit' }));
   });
 
   it('fails an undersized claim before constructing the Worker', async () => {

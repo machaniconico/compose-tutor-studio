@@ -101,6 +101,7 @@ describe('audio clip playback planner', () => {
     const fixture = project(audioClip({
       audioWarp: {
         algorithm: 'wsola-v1',
+        formantMode: 'off' as const,
         timingEnabled: true,
         pitchEnabled: false,
         markers: [

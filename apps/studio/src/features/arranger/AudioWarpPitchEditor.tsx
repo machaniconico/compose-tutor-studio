@@ -5,12 +5,13 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
-import type {
-  AudioClip,
-  AudioWarp,
-  AudioWarpEditErrorCode,
-  Project,
-  ReadyAudioAsset,
+import {
+  createLinearAudioWarp,
+  type AudioClip,
+  type AudioWarp,
+  type AudioWarpEditErrorCode,
+  type Project,
+  type ReadyAudioAsset,
 } from '@cts/project-model';
 import { setStudioAudioClipWarp } from '../../state/audioTrackActions';
 import { useStore } from '../../state/store';
@@ -40,19 +41,7 @@ export function audioWarpEditErrorMessage(code: AudioWarpEditErrorCode): string 
 }
 
 export function linearAudioWarp(clip: AudioClip): AudioWarp {
-  return {
-    algorithm: 'wsola-v1',
-    timingEnabled: true,
-    pitchEnabled: true,
-    markers: [
-      { sourceFrame: clip.sourceStartFrame, targetBeatOffset: 0 },
-      {
-        sourceFrame: clip.sourceStartFrame + clip.sourceFrameCount,
-        targetBeatOffset: clip.lengthBeats,
-      },
-    ],
-    pitchRegions: [],
-  };
+  return createLinearAudioWarp(clip);
 }
 
 type Props = Readonly<{
@@ -119,7 +108,12 @@ export function AudioWarpPitchEditor({
       setNotice({ kind: 'error', message: blockedReason });
       return false;
     }
-    const result = setStudioAudioClipWarp(clip.id, next);
+    const result = setStudioAudioClipWarp(clip.id, next, {
+      project,
+      clip,
+      activationId,
+      audioAssetId: asset?.id ?? '',
+    });
     if (!result.ok) {
       setNotice({
         kind: 'error',

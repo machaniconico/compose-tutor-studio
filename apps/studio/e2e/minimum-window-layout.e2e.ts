@@ -153,6 +153,13 @@ test('keeps Elastic Audio controls stacked with only its timeline scrolling hori
   });
   const editor = page.getByRole('region', { name: '選択オーディオクリップの編集' });
   await editor.locator('.audio-warp-editor summary').click();
+  await editor.getByRole('tab', { name: '単音ピッチ', exact: true }).click();
+  const formantMode = editor.getByLabel('音程を変えても音色を保つ', {
+    exact: true,
+  });
+  await expect(formantMode).toBeVisible();
+  await expect(formantMode).toBeDisabled();
+  await editor.getByRole('tab', { name: 'タイミング', exact: true }).click();
 
   for (const viewport of [
     { width: 1_024, height: 640 },

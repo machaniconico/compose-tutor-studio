@@ -970,6 +970,9 @@ export function validateProject(project: Project): ValidationResult {
             if (warp.algorithm !== 'wsola-v1') {
               push(`${warpPath}.algorithm`, 'algorithm must be wsola-v1');
             }
+            if (warp.formantMode !== 'off' && warp.formantMode !== 'preserve') {
+              push(`${warpPath}.formantMode`, 'formantMode must be off or preserve');
+            }
             if (warp.markers.length < 2 || warp.markers.length > MAX_AUDIO_WARP_MARKERS) {
               push(
                 `${warpPath}.markers`,

@@ -144,8 +144,10 @@ export class AudioWarpWorkerClient {
       };
       if (options.signal) {
         pending.abort = () => {
-          this.rejectPending(id, pending, cancelled());
-          this.worker.postMessage({ type: 'cancel', generation: this.beginGeneration() });
+          // A synchronous CPU-bound Worker cannot observe a queued cancel message.
+          // Termination is the operation-level cancellation boundary.
+          this.beginGeneration();
+          this.dispose();
         };
         options.signal.addEventListener('abort', pending.abort, { once: true });
       }
@@ -344,5 +346,7 @@ function hasExactKeys(
 }
 
 function cancelled(message = 'Elastic Audio render was cancelled.'): AudioWarpDspError {
-  return new AudioWarpDspError('cancelled', message);
+  const error = new AudioWarpDspError('cancelled', message);
+  error.name = 'AbortError';
+  return error;
 }

@@ -6,6 +6,7 @@ import {
   appendAudioTrackClip,
   createAudioTrackClip,
   createEmptyProject,
+  createLinearAudioWarp,
   deleteAudioClip,
   duplicateAudioClip,
   encodeProjectJson,
@@ -869,6 +870,45 @@ describe('Audio Clip timeline and source editing', () => {
 });
 
 describe('Audio Clip split, duplicate and delete', () => {
+  it('preserves clip-wide formant mode through trim, split, and duplicate', () => {
+    const makeEdited = () => {
+      const fixture = audioFixture();
+      fixture.clip.audioWarp = createLinearAudioWarp(fixture.clip);
+      return fixture;
+    };
+
+    const leftFixture = makeEdited();
+    const left = trimAudioClipLeft(leftFixture.project, leftFixture.clip.id, 1, t1);
+    expect(left.ok && findClip(left.project, leftFixture.clip.id)?.clip.audioWarp?.formantMode)
+      .toBe('preserve');
+
+    const rightFixture = makeEdited();
+    const right = trimAudioClipRight(rightFixture.project, rightFixture.clip.id, 3, t1);
+    expect(right.ok && findClip(right.project, rightFixture.clip.id)?.clip.audioWarp?.formantMode)
+      .toBe('preserve');
+
+    const splitFixture = makeEdited();
+    const split = splitAudioClip(splitFixture.project, splitFixture.clip.id, {
+      splitBeat: 1,
+      rightClipId: 'formant-right',
+    }, t1);
+    expect(split.ok).toBe(true);
+    if (split.ok) {
+      expect(findClip(split.project, splitFixture.clip.id)?.clip.audioWarp?.formantMode)
+        .toBe('preserve');
+      expect(findClip(split.project, split.rightClipId)?.clip.audioWarp?.formantMode)
+        .toBe('preserve');
+    }
+
+    const duplicateFixture = makeEdited();
+    const duplicated = duplicateAudioClip(duplicateFixture.project, duplicateFixture.clip.id, {
+      startBeat: 4,
+      id: 'formant-copy',
+    }, t1);
+    expect(duplicated.ok && findClip(duplicated.project, 'formant-copy')?.clip.audioWarp?.formantMode)
+      .toBe('preserve');
+  });
+
   it('splits source ranges and keeps fades only at the two original outer edges', () => {
     const fixture = audioFixture({ fadeInFrames: 1_000, fadeOutFrames: 2_000 });
     const before = structuredClone(fixture.project);

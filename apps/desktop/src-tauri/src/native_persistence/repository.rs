@@ -43,7 +43,7 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 9;
+const PROJECT_SCHEMA_VERSION: u64 = 10;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
@@ -740,6 +740,7 @@ struct ClipDto {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AudioWarpDto {
     algorithm: String,
+    formant_mode: Option<String>,
     #[serde(rename = "timingEnabled")]
     _timing_enabled: bool,
     #[serde(rename = "pitchEnabled")]
@@ -3468,6 +3469,7 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
             6 => migrate_project_value_v6_to_v7(project)?,
             7 => migrate_project_value_v7_to_v8(project)?,
             8 => migrate_project_value_v8_to_v9(project)?,
+            9 => migrate_project_value_v9_to_v10(project)?,
             _ => return None,
         };
         version += 1;
@@ -3847,6 +3849,39 @@ fn migrate_project_value_v8_to_v9(mut project: Value) -> Option<Value> {
     project
         .as_object_mut()?
         .insert("schemaVersion".to_owned(), Value::from(9));
+    Some(project)
+}
+
+/** v10 persists clip-wide formant handling while preserving all v9 audio. */
+fn migrate_project_value_v9_to_v10(mut project: Value) -> Option<Value> {
+    if project.get("schemaVersion").and_then(Value::as_u64) != Some(9)
+        || validate_project(&project).is_err()
+    {
+        return None;
+    }
+    if let Some(Value::Array(tracks)) = project.get_mut("tracks") {
+        for track in tracks {
+            let Some(Value::Array(clips)) = track
+                .as_object_mut()
+                .and_then(|record| record.get_mut("clips"))
+            else {
+                continue;
+            };
+            for clip in clips {
+                let Some(warp) = clip
+                    .as_object_mut()
+                    .and_then(|record| record.get_mut("audioWarp"))
+                    .and_then(Value::as_object_mut)
+                else {
+                    continue;
+                };
+                warp.insert("formantMode".to_owned(), Value::String("off".to_owned()));
+            }
+        }
+    }
+    project
+        .as_object_mut()?
+        .insert("schemaVersion".to_owned(), Value::from(10));
     Some(project)
 }
 
@@ -8401,6 +8436,12 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                             const MAX_PITCH_REGIONS: usize = 128;
                             const MIN_SEGMENT_SECONDS: f64 = 0.04;
                             if project.schema_version < 9
+                                || (project.schema_version < 10 && warp.formant_mode.is_some())
+                                || (project.schema_version >= 10
+                                    && !matches!(
+                                        warp.formant_mode.as_deref(),
+                                        Some("off" | "preserve")
+                                    ))
                                 || clip.looped
                                 || warp.algorithm != "wsola-v1"
                                 || warp.markers.len() < 2

@@ -36,6 +36,7 @@ function fixture(): Readonly<{ project: Project; clip: AudioClip }> {
             ...clip,
             audioWarp: {
               algorithm: 'wsola-v1',
+              formantMode: 'off' as const,
               timingEnabled: true,
               pitchEnabled: true,
               markers: [

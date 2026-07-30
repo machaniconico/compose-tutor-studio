@@ -8,6 +8,7 @@ import {
   MIN_AUDIO_WARP_STRETCH,
   iterateAudioWarpTimingSegments,
   type AudioPitchRegion,
+  type AudioWarpFormantMode,
   type Project,
   type ReadyAudioAsset,
   type TempoMapEvent,
@@ -15,11 +16,154 @@ import {
 } from '@cts/project-model';
 import { createProjectMusicalTime } from './musicalTime';
 
-export const AUDIO_WARP_RENDER_ALGORITHM_VERSION = 'wsola-v1/dsp-1';
+export const AUDIO_WARP_RENDER_ALGORITHM_VERSION = 'wsola-v1/dsp-2';
 export const MAX_DERIVED_AUDIO_PCM_BYTES = 128 * 1024 * 1024;
+export const MAX_AUDIO_WARP_SHARED_HEAVY_BYTES = 384 * 1024 * 1024;
+export const AUDIO_WARP_FORMANT_SCRATCH_BYTES = 147_456;
 export const MAX_AUDIO_WARP_RENDER_SECONDS = 60;
 export const MAX_COMPILED_AUDIO_WARP_KNOTS =
   MAX_AUDIO_WARP_MARKERS + MAX_TEMPO_MAP_EVENTS;
+
+export type AudioWarpFormantResourceReason =
+  | 'invalid-projection'
+  | 'derived-ceiling'
+  | 'shared-heavy';
+
+export type AudioWarpFormantResourcePlan = Readonly<{
+  accepted: boolean;
+  reason: AudioWarpFormantResourceReason | null;
+  sourceBytes: number;
+  outputBytes: number;
+  sourcePeakBytes: number;
+  outputPeakBytes: number;
+  scratchBytes: number;
+  processingPeakBytes: number;
+  sharedPeakBytes: number;
+  fftSize: 0 | 2048;
+  hopSize: 0 | 1024;
+  radix2Stages: 0 | 11;
+  workUnits: number;
+}>;
+
+/** Allocation-free projection shared by every live and export consumer. */
+export function computeAudioWarpFormantResourcePlan(
+  projection: Readonly<{
+    sourceBytes: number;
+    outputBytes: number;
+    outerReservationBytes?: number;
+    outputFrames?: number;
+    channelCount?: number;
+    sampleRate?: number;
+  }>,
+): AudioWarpFormantResourcePlan {
+  const sourceBytes = projection.sourceBytes;
+  const outputBytes = projection.outputBytes;
+  const outer = projection.outerReservationBytes ?? 0;
+  const supported = projection.sampleRate === undefined
+    || projection.sampleRate === 44_100
+    || projection.sampleRate === 48_000;
+  const base = {
+    sourceBytes,
+    outputBytes,
+    sourcePeakBytes: 0,
+    outputPeakBytes: 0,
+    scratchBytes: supported ? AUDIO_WARP_FORMANT_SCRATCH_BYTES : 0,
+    processingPeakBytes: 0,
+    sharedPeakBytes: 0,
+    fftSize: supported ? 2048 as const : 0 as const,
+    hopSize: supported ? 1024 as const : 0 as const,
+    radix2Stages: supported ? 11 as const : 0 as const,
+    workUnits: 0,
+  };
+  if ([sourceBytes, outputBytes, outer].some(
+    (value) => !Number.isSafeInteger(value) || value < 0,
+  )) return Object.freeze({ ...base, accepted: false, reason: 'invalid-projection' });
+  if (outputBytes > MAX_DERIVED_AUDIO_PCM_BYTES) {
+    return Object.freeze({ ...base, accepted: false, reason: 'derived-ceiling' });
+  }
+  const sourcePeakBytes = checkedProjectionProduct(sourceBytes, 4);
+  const outputPeakBytes = checkedProjectionProduct(outputBytes, 9);
+  const processingPeakBytes = sourcePeakBytes === null || outputPeakBytes === null
+    ? null
+    : checkedProjectionSum([sourcePeakBytes, outputPeakBytes, base.scratchBytes]);
+  const sharedPeakBytes = processingPeakBytes === null
+    ? null
+    : checkedProjectionSum([outer, processingPeakBytes]);
+  const outputFrames = projection.outputFrames ?? 0;
+  const channelCount = projection.channelCount ?? 0;
+  const hasWorkProjection = projection.outputFrames !== undefined
+    || projection.channelCount !== undefined;
+  let workUnits: number | null = 0;
+  if (
+    supported
+    && Number.isSafeInteger(outputFrames)
+    && outputFrames >= 0
+    && (channelCount === 1 || channelCount === 2)
+  ) {
+    const blocks = Math.ceil(outputFrames / 1024);
+    const maximumLag = Math.ceil((projection.sampleRate ?? 48_000) / 70);
+    const maximumHarmonics = Math.floor(5_000 / 70);
+    const projected = [
+      checkedProjectionProduct(blocks, 11, 2048, 2 + 2 * channelCount),
+      checkedProjectionProduct(outputFrames, maximumLag),
+      checkedProjectionProduct(blocks, 2048, maximumHarmonics, channelCount),
+      checkedProjectionProduct(blocks, 8_192, 13, channelCount),
+      checkedProjectionProduct(outputFrames, maximumHarmonics, 4 + 4 * channelCount),
+      checkedProjectionProduct(blocks, 2_000, maximumHarmonics, 10),
+    ];
+    workUnits = projected.some((value) => value === null)
+      ? null
+      : checkedProjectionSum(projected as number[]);
+  } else if (supported && hasWorkProjection) {
+    workUnits = null;
+  }
+  if (
+    sourcePeakBytes === null
+    || outputPeakBytes === null
+    || processingPeakBytes === null
+    || sharedPeakBytes === null
+    || workUnits === null
+  ) {
+    return Object.freeze({ ...base, accepted: false, reason: 'invalid-projection' });
+  }
+  const plan = {
+    ...base,
+    sourcePeakBytes,
+    outputPeakBytes,
+    processingPeakBytes,
+    sharedPeakBytes,
+    workUnits,
+  };
+  return sharedPeakBytes > MAX_AUDIO_WARP_SHARED_HEAVY_BYTES
+    ? Object.freeze({ ...plan, accepted: false, reason: 'shared-heavy' })
+    : Object.freeze({ ...plan, accepted: true, reason: null });
+}
+
+function checkedProjectionProduct(...values: number[]): number | null {
+  let result = 1;
+  for (const value of values) {
+    if (
+      !Number.isSafeInteger(value)
+      || value < 0
+      || (value !== 0 && result > Number.MAX_SAFE_INTEGER / value)
+    ) return null;
+    result *= value;
+  }
+  return Number.isSafeInteger(result) ? result : null;
+}
+
+function checkedProjectionSum(values: readonly number[]): number | null {
+  let result = 0;
+  for (const value of values) {
+    if (
+      !Number.isSafeInteger(value)
+      || value < 0
+      || result > Number.MAX_SAFE_INTEGER - value
+    ) return null;
+    result += value;
+  }
+  return result;
+}
 
 export type AudioWarpPlanErrorCode =
   | 'invalid-project'
@@ -57,6 +201,7 @@ export type CompiledAudioPitchRegion = Readonly<AudioPitchRegion & {
 
 export type AudioWarpRenderRequest = Readonly<{
   algorithmVersion: typeof AUDIO_WARP_RENDER_ALGORITHM_VERSION;
+  formantMode: AudioWarpFormantMode;
   assetId: string;
   checksumSha256: string;
   sourceSampleRate: number;
@@ -79,6 +224,7 @@ export type AudioWarpRenderRequestIndex = Readonly<{
 
 const AUDIO_WARP_RENDER_REQUEST_KEYS = Object.freeze([
   'algorithmVersion',
+  'formantMode',
   'assetId',
   'checksumSha256',
   'sourceSampleRate',
@@ -121,6 +267,7 @@ export function isValidAudioWarpRenderRequest(
   if (!record(value) || !hasExactKeys(value, AUDIO_WARP_RENDER_REQUEST_KEYS)) return false;
   if (
     value.algorithmVersion !== AUDIO_WARP_RENDER_ALGORITHM_VERSION
+    || (value.formantMode !== 'off' && value.formantMode !== 'preserve')
     || typeof value.assetId !== 'string'
     || value.assetId.length === 0
     || typeof value.checksumSha256 !== 'string'
@@ -453,6 +600,7 @@ function compileOne(
     : [];
   const identity = {
     algorithmVersion: AUDIO_WARP_RENDER_ALGORITHM_VERSION,
+    formantMode: warp.formantMode,
     checksumSha256: asset.checksumSha256,
     sourceWindow: [clip.sourceStartFrame, clip.sourceFrameCount],
     sourceSampleRate: asset.sampleRate,
@@ -474,6 +622,7 @@ function compileOne(
   const cacheKey = stableAudioWarpCacheKey(identity);
   const request: AudioWarpRenderRequest = Object.freeze({
     algorithmVersion: AUDIO_WARP_RENDER_ALGORITHM_VERSION,
+    formantMode: warp.formantMode,
     assetId: asset.id,
     checksumSha256: asset.checksumSha256,
     sourceSampleRate: asset.sampleRate,

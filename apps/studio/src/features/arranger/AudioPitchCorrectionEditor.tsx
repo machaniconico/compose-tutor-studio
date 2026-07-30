@@ -759,6 +759,25 @@ export function AudioPitchCorrectionEditor({
       ) : null}
 
       <div className="audio-warp-editor__toolbar" role="group" aria-label="音程の一括補正">
+        <label>
+          <input
+            type="checkbox"
+            checked={warp.formantMode === 'preserve'}
+            disabled={disabled || phase === 'analyzing' || regions.length === 0}
+            onChange={(event) => {
+              if (disabled || phase === 'analyzing' || regions.length === 0) return;
+              onCommit({
+                ...warp,
+                formantMode: event.currentTarget.checked ? 'preserve' : 'off',
+                pitchRegions: baseRegions(),
+              }, '音色保持モードを更新しました。');
+            }}
+          />
+          音程を変えても音色を保つ
+        </label>
+        <span className="audio-warp-editor__hint">
+          素材によって効果が変わります。補正前と補正後を聴き比べて確認してください。
+        </span>
         <button
           type="button"
           disabled={disabled || regions.length === 0}

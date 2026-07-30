@@ -2911,7 +2911,27 @@ export function setStudioAudioClipLoop(
 export function setStudioAudioClipWarp(
   clipId: string,
   audioWarp: AudioWarp | undefined,
+  expected?: Readonly<{
+    project: Project;
+    clip: Readonly<Project['tracks'][number]['clips'][number]>;
+    activationId: string;
+    audioAssetId: string;
+  }>,
 ): StudioAudioClipCommandResult {
+  if (expected) {
+    const state = useStore.getState();
+    const currentClip = state.project.tracks
+      .flatMap((track) => track.clips)
+      .find((clip) => clip.id === clipId);
+    if (
+      state.project !== expected.project
+      || state.saveState.activationId !== expected.activationId
+      || state.projectOperationBusy
+      || state.audioRecordingOperationId !== null
+      || currentClip !== expected.clip
+      || currentClip.audioAssetId !== expected.audioAssetId
+    ) return failed('commit-rejected');
+  }
   return runAudioMutation((project) => setAudioClipWarp(project, clipId, audioWarp));
 }
 

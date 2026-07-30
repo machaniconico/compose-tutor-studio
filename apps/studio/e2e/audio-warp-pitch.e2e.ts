@@ -1,6 +1,13 @@
 import { expect, test, type Download, type Page } from '@playwright/test';
 import { createAudioWarpPitchFixture } from './fixtures/audio-warp-fixture';
 
+type LiveCapture = Readonly<{
+  length: number;
+  sampleRate: number;
+  hash: number;
+  frequencyHz: number;
+}>;
+
 async function dismissWelcome(page: Page): Promise<void> {
   const welcome = page.getByRole('dialog', { name: 'ようこそ' });
   if (await welcome.isVisible()) {
@@ -56,6 +63,20 @@ async function waitForSaved(page: Page): Promise<void> {
   });
 }
 
+async function reloadAudioWarpPitchEditor(page: Page) {
+  await page.reload();
+  await dismissWelcome(page);
+  await page.getByRole('button', {
+    name: 'Elastic Voice トラックを選択',
+    exact: true,
+  }).click();
+  await page.getByRole('tab', { name: 'アレンジ', exact: true }).click();
+  const editor = page.getByRole('region', { name: '選択オーディオクリップの編集' });
+  await editor.locator('.audio-warp-editor summary').click();
+  await editor.getByRole('tab', { name: '単音ピッチ', exact: true }).click();
+  return editor;
+}
+
 function expectPcm16WithinOneLsb(actual: Buffer, expected: Buffer): void {
   expect(actual.length).toBe(expected.length);
   expect(actual.subarray(0, 44)).toEqual(expected.subarray(0, 44));
@@ -80,14 +101,41 @@ function dominantFrequencyHz(
   const frameCount = Math.floor((wav.length - 44) / bytesPerFrame);
   const start = Math.max(1, Math.min(frameCount - 1, Math.round(startSeconds * sampleRate)));
   const end = Math.max(start + 1, Math.min(frameCount, Math.round(endSeconds * sampleRate)));
-  let previous = wav.readInt16LE(44 + (start - 1) * bytesPerFrame);
-  let crossings = 0;
-  for (let frame = start; frame < end; frame += 1) {
-    const sample = wav.readInt16LE(44 + frame * bytesPerFrame);
-    if (previous <= 0 && sample > 0) crossings += 1;
-    previous = sample;
+  const minimumLag = Math.floor(sampleRate / 160);
+  const maximumLag = Math.ceil(sampleRate / 80);
+  const scores = new Float64Array(maximumLag + 1);
+  let bestLag = minimumLag;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
+    let cross = 0;
+    let leftEnergy = 0;
+    let rightEnergy = 0;
+    for (let frame = start; frame + lag < end; frame += 1) {
+      const left = wav.readInt16LE(44 + frame * bytesPerFrame);
+      const right = wav.readInt16LE(44 + (frame + lag) * bytesPerFrame);
+      cross += left * right;
+      leftEnergy += left * left;
+      rightEnergy += right * right;
+    }
+    const score = cross / Math.sqrt(Math.max(1, leftEnergy * rightEnergy));
+    scores[lag] = score;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLag = lag;
+    }
   }
-  return crossings / ((end - start) / sampleRate);
+  const previous = scores[Math.max(minimumLag, bestLag - 1)]!;
+  const center = scores[bestLag]!;
+  const next = scores[Math.min(maximumLag, bestLag + 1)]!;
+  const denominator = previous - 2 * center + next;
+  const offset = Math.abs(denominator) < 1e-12
+    ? 0
+    : Math.max(-0.5, Math.min(0.5, 0.5 * (previous - next) / denominator));
+  return sampleRate / (bestLag + offset);
+}
+
+function centsError(actualHz: number, expectedHz: number): number {
+  return Math.abs(1_200 * Math.log2(actualHz / expectedHz));
 }
 
 function quietestWindowFrame(
@@ -151,23 +199,51 @@ async function installLiveAudioCapture(page: Page): Promise<void> {
           channel.length,
           Math.max(startFrame + 1, Math.round(buffer.sampleRate * 1.25)),
         );
-        let previous = channel[startFrame - 1] ?? 0;
-        let crossings = 0;
         let hash = 2_166_136_261;
         for (let frame = startFrame; frame < endFrame; frame += 1) {
           const sample = channel[frame] ?? 0;
-          if (previous <= 0 && sample > 0) crossings += 1;
-          previous = sample;
           if ((frame - startFrame) % 97 === 0) {
             hash ^= Math.round((sample + 1) * 32_767);
             hash = Math.imul(hash, 16_777_619) >>> 0;
           }
         }
+        const minimumLag = Math.floor(buffer.sampleRate / 160);
+        const maximumLag = Math.ceil(buffer.sampleRate / 80);
+        const scores = new Float64Array(maximumLag + 1);
+        let bestLag = minimumLag;
+        let bestScore = Number.NEGATIVE_INFINITY;
+        for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
+          let cross = 0;
+          let leftEnergy = 0;
+          let rightEnergy = 0;
+          for (let frame = startFrame; frame + lag < endFrame; frame += 1) {
+            const left = channel[frame] ?? 0;
+            const right = channel[frame + lag] ?? 0;
+            cross += left * right;
+            leftEnergy += left * left;
+            rightEnergy += right * right;
+          }
+          const score = cross / Math.sqrt(Math.max(1e-24, leftEnergy * rightEnergy));
+          scores[lag] = score;
+          if (score > bestScore) {
+            bestScore = score;
+            bestLag = lag;
+          }
+        }
+        const previousScore = scores[Math.max(minimumLag, bestLag - 1)] ?? bestScore;
+        const nextScore = scores[Math.min(maximumLag, bestLag + 1)] ?? bestScore;
+        const denominator = previousScore - 2 * bestScore + nextScore;
+        const lagOffset = Math.abs(denominator) < 1e-12
+          ? 0
+          : Math.max(
+              -0.5,
+              Math.min(0.5, 0.5 * (previousScore - nextScore) / denominator),
+            );
         captureWindow.__elasticAudioCaptures?.push({
           length: buffer.length,
           sampleRate: buffer.sampleRate,
           hash,
-          frequencyHz: crossings / ((endFrame - startFrame) / buffer.sampleRate),
+          frequencyHz: buffer.sampleRate / (bestLag + lagOffset),
         });
       }
       if (duration !== undefined) {
@@ -179,6 +255,45 @@ async function installLiveAudioCapture(page: Page): Promise<void> {
       }
     };
   });
+}
+
+async function clearLiveAudioCapture(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as Window & { __elasticAudioCaptures?: unknown[] })
+      .__elasticAudioCaptures = [];
+  });
+}
+
+async function readLatestLiveAudioCapture(page: Page): Promise<LiveCapture | undefined> {
+  return page.evaluate(() => {
+    const captures = (window as Window & {
+      __elasticAudioCaptures?: LiveCapture[];
+    }).__elasticAudioCaptures ?? [];
+    return captures.at(-1);
+  });
+}
+
+async function captureLiveAudio(page: Page): Promise<LiveCapture> {
+  await clearLiveAudioCapture(page);
+  await page.getByRole('button', { name: '再生', exact: true }).click();
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { __elasticAudioCaptures?: unknown[] })
+      .__elasticAudioCaptures?.length ?? 0), {
+    timeout: 20_000,
+  }).toBeGreaterThan(0);
+  const capture = await readLatestLiveAudioCapture(page);
+  await page.getByRole('button', { name: '一時停止', exact: true }).click();
+  if (!capture) throw new Error('Expected an AudioBufferSourceNode capture.');
+  return capture;
+}
+
+function pcm16Digest(wav: Buffer): string {
+  let hash = 2_166_136_261;
+  for (let offset = 44; offset < wav.length; offset += 1) {
+    hash ^= wav[offset]!;
+    hash = Math.imul(hash, 16_777_619) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 async function visibleTimelineTargetMinimum(
@@ -411,9 +526,11 @@ test('edits and persists local accessible timing and monophonic pitch correction
   );
   const timingFrequency = dominantFrequencyHz(timingOnlySelected, 0.35, 1.25);
   const correctedFrequency = dominantFrequencyHz(pitchCorrectedSelected, 0.35, 1.25);
-  expect(Math.abs(timingFrequency - 440)).toBeLessThan(8);
-  expect(Math.abs(correctedFrequency - 466.164)).toBeLessThan(8);
-  expect(correctedFrequency - timingFrequency).toBeGreaterThan(15);
+  const expectedSourceFrequency = 110;
+  const expectedCorrectedFrequency = expectedSourceFrequency * 2 ** (1 / 12);
+  expect(centsError(timingFrequency, expectedSourceFrequency)).toBeLessThanOrEqual(35);
+  expect(centsError(correctedFrequency, expectedCorrectedFrequency)).toBeLessThanOrEqual(35);
+  expect(correctedFrequency).toBeGreaterThan(timingFrequency * 1.04);
   expect(Math.abs(
     quietestWindowFrame(timingOnlySelected, 1.5, 2.7)
       - quietestWindowFrame(pitchCorrectedSelected, 1.5, 2.7),
@@ -434,15 +551,7 @@ test('edits and persists local accessible timing and monophonic pitch correction
 
   await page.keyboard.press('Control+S');
   await expect(page.locator('#project-save-status')).toContainText('保存済み');
-  await page.reload();
-  await dismissWelcome(page);
-  await page.getByRole('button', {
-    name: 'Elastic Voice トラックを選択',
-    exact: true,
-  }).click();
-  await page.getByRole('tab', { name: 'アレンジ', exact: true }).click();
-  const reloaded = page.getByRole('region', { name: '選択オーディオクリップの編集' });
-  await reloaded.locator('.audio-warp-editor summary').click();
+  let reloaded = await reloadAudioWarpPitchEditor(page);
   const reloadedTimingTab = reloaded.getByRole('tab', {
     name: 'タイミング',
     exact: true,
@@ -451,8 +560,74 @@ test('edits and persists local accessible timing and monophonic pitch correction
     name: '単音ピッチ',
     exact: true,
   });
-  await reloadedPitchTab.click();
   await expect(reloaded.getByLabel('補正量（0〜100%）', { exact: true })).toHaveValue('100');
+
+  // The only production-facing formant control must select materially distinct
+  // public render results, then restore its exact saved modes through history.
+  let formantMode = reloaded.getByLabel('音程を変えても音色を保つ', {
+    exact: true,
+  });
+  await expect(formantMode).toBeChecked();
+  await formantMode.uncheck();
+  await expect(formantMode).not.toBeChecked();
+  await waitForSaved(page);
+  const offLive = await captureLiveAudio(page);
+  const offFull = await exportWav(page, 'WAVエクスポート');
+  const offSelected = await exportWav(page, '選択トラックをWAV');
+
+  reloaded = await reloadAudioWarpPitchEditor(page);
+  formantMode = reloaded.getByLabel('音程を変えても音色を保つ', {
+    exact: true,
+  });
+  await expect(formantMode).not.toBeChecked();
+  const reloadedOffLive = await captureLiveAudio(page);
+  const reloadedOffFull = await exportWav(page, 'WAVエクスポート');
+  const reloadedOffSelected = await exportWav(page, '選択トラックをWAV');
+  expect(reloadedOffLive).toEqual(offLive);
+  expectPcm16WithinOneLsb(reloadedOffFull, offFull);
+  expectPcm16WithinOneLsb(reloadedOffSelected, offSelected);
+
+  await formantMode.check();
+  await expect(formantMode).toBeChecked();
+  await waitForSaved(page);
+  const preserveLive = await captureLiveAudio(page);
+  const preserveFull = await exportWav(page, 'WAVエクスポート');
+  const preserveSelected = await exportWav(page, '選択トラックをWAV');
+  expect(preserveLive.length).toBe(offLive.length);
+  expect(preserveLive.sampleRate).toBe(offLive.sampleRate);
+  expect(preserveLive.hash).not.toBe(offLive.hash);
+  expect(pcm16Digest(preserveSelected)).not.toBe(pcm16Digest(offSelected));
+  expect(pcm16Digest(preserveFull)).not.toBe(pcm16Digest(offFull));
+  expectPcm16WithinOneLsb(offFull, offSelected);
+  expectPcm16WithinOneLsb(preserveFull, preserveSelected);
+
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
+  await expect(formantMode).not.toBeChecked();
+  await waitForSaved(page);
+  const undoneLive = await captureLiveAudio(page);
+  const undoneSelected = await exportWav(page, '選択トラックをWAV');
+  expect(undoneLive.hash).toBe(offLive.hash);
+  expectPcm16WithinOneLsb(undoneSelected, offSelected);
+
+  await page.getByRole('button', { name: 'やり直す', exact: true }).click();
+  await expect(formantMode).toBeChecked();
+  await waitForSaved(page);
+  const redoneLive = await captureLiveAudio(page);
+  const redoneSelected = await exportWav(page, '選択トラックをWAV');
+  expect(redoneLive.hash).toBe(preserveLive.hash);
+  expectPcm16WithinOneLsb(redoneSelected, preserveSelected);
+
+  reloaded = await reloadAudioWarpPitchEditor(page);
+  formantMode = reloaded.getByLabel('音程を変えても音色を保つ', {
+    exact: true,
+  });
+  await expect(formantMode).toBeChecked();
+  const reloadedPreserveLive = await captureLiveAudio(page);
+  const reloadedPreserveFull = await exportWav(page, 'WAVエクスポート');
+  const reloadedPreserveSelected = await exportWav(page, '選択トラックをWAV');
+  expect(reloadedPreserveLive).toEqual(preserveLive);
+  expectPcm16WithinOneLsb(reloadedPreserveFull, preserveFull);
+  expectPcm16WithinOneLsb(reloadedPreserveSelected, preserveSelected);
 
   const beforePitch = reloaded.getByRole('button', {
     name: 'ピッチ補正前',
@@ -516,8 +691,12 @@ test('edits and persists local accessible timing and monophonic pitch correction
   expect(correctedLive?.length).toBe(beforeLive?.length);
   expect(correctedLive?.sampleRate).toBe(beforeLive?.sampleRate);
   expect(correctedLive?.hash).not.toBe(beforeLive?.hash);
-  expect((correctedLive?.frequencyHz ?? 0) - (beforeLive?.frequencyHz ?? 0))
-    .toBeGreaterThan(15);
+  expect(centsError(beforeLive?.frequencyHz ?? 0, expectedSourceFrequency))
+    .toBeLessThanOrEqual(35);
+  expect(centsError(correctedLive?.frequencyHz ?? 0, expectedCorrectedFrequency))
+    .toBeLessThanOrEqual(35);
+  expect(correctedLive?.frequencyHz ?? 0)
+    .toBeGreaterThan((beforeLive?.frequencyHz ?? 0) * 1.04);
   await pause.click();
 
   const fullFirst = await exportWav(page, 'WAVエクスポート');
@@ -548,6 +727,12 @@ test('edits and persists local accessible timing and monophonic pitch correction
     await expect(
       reloaded.locator('[aria-label^="音程区間 "][tabindex="0"]'),
     ).toHaveCount(1);
+    const compactFormantMode = reloaded.getByLabel('音程を変えても音色を保つ', {
+      exact: true,
+    });
+    await expect(compactFormantMode).toBeEnabled();
+    await compactFormantMode.focus();
+    await expect(compactFormantMode).toBeFocused();
     expect(await visibleTimelineTargetMinimum(
       page,
       '.audio-pitch-editor__region',

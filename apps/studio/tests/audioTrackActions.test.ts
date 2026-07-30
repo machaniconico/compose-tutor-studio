@@ -2388,6 +2388,7 @@ describe('Studio Audio Clip commands', () => {
     if (!clip || clip.type !== 'audio') throw new Error('audio clip missing');
     const warp = {
       algorithm: 'wsola-v1' as const,
+      formantMode: 'off' as const,
       timingEnabled: true,
       pitchEnabled: true,
       markers: [
@@ -2442,6 +2443,83 @@ describe('Studio Audio Clip commands', () => {
     useStore.getState().redo();
     expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
       .find((candidate) => candidate.id === clipId)?.audioWarp).toEqual(afterCommitWarp);
+
+    const beforeMode = useStore.getState();
+    const currentClip = beforeMode.project.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)!;
+    const preserveWarp = { ...afterCommitWarp!, formantMode: 'preserve' as const };
+    expect(actions.setStudioAudioClipWarp(clipId, preserveWarp, {
+      project: beforeMode.project,
+      clip: currentClip,
+      activationId: beforeMode.saveState.activationId,
+      audioAssetId: currentClip.audioAssetId!,
+    })).toMatchObject({ ok: true, changed: true });
+    expect(useStore.getState().past).toHaveLength(beforeMode.past.length + 1);
+    expect(useStore.getState().saveState.revision).toBe(beforeMode.saveState.revision + 1);
+    expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)?.audioWarp?.formantMode).toBe('preserve');
+    useStore.getState().undo();
+    expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)?.audioWarp?.formantMode).toBe('off');
+    useStore.getState().redo();
+    expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)?.audioWarp?.formantMode).toBe('preserve');
+  });
+
+  it('rejects stale and busy formant gestures before Project/history/revision changes', async () => {
+    const { result: imported } = await importFixture();
+    const before = useStore.getState();
+    const clip = before.project.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === imported.clipId)!;
+    const warp = {
+      algorithm: 'wsola-v1' as const,
+      formantMode: 'preserve' as const,
+      timingEnabled: true,
+      pitchEnabled: true,
+      markers: [
+        { sourceFrame: clip.sourceStartFrame!, targetBeatOffset: 0 },
+        {
+          sourceFrame: clip.sourceStartFrame! + clip.sourceFrameCount!,
+          targetBeatOffset: clip.lengthBeats,
+        },
+      ],
+      pitchRegions: [],
+    };
+    const snapshot = {
+      project: before.project,
+      history: before.past,
+      revision: before.saveState.revision,
+      auditionClipId: before.audioWarpAuditionClipId,
+      transport: before.transport,
+    };
+    const validExpected = {
+      project: before.project,
+      clip,
+      activationId: before.saveState.activationId,
+      audioAssetId: clip.audioAssetId!,
+    };
+    for (const expected of [
+      { ...validExpected, project: { ...before.project } },
+      { ...validExpected, activationId: before.saveState.activationId + 1 },
+      { ...validExpected, clip: { ...clip } },
+      { ...validExpected, audioAssetId: `${clip.audioAssetId}:stale` },
+    ]) {
+      expect(actions.setStudioAudioClipWarp(imported.clipId, warp, expected))
+        .toEqual({ ok: false, code: 'commit-rejected' });
+    }
+    useStore.setState({ projectOperationBusy: true });
+    expect(actions.setStudioAudioClipWarp(imported.clipId, warp, validExpected))
+      .toEqual({ ok: false, code: 'commit-rejected' });
+    useStore.setState({ projectOperationBusy: false });
+    useStore.setState({ audioRecordingOperationId: 999_001 });
+    expect(actions.setStudioAudioClipWarp(imported.clipId, warp, validExpected))
+      .toEqual({ ok: false, code: 'commit-rejected' });
+    useStore.setState({ audioRecordingOperationId: null });
+    expect(useStore.getState().project).toBe(snapshot.project);
+    expect(useStore.getState().past).toBe(snapshot.history);
+    expect(useStore.getState().saveState.revision).toBe(snapshot.revision);
+    expect(useStore.getState().audioWarpAuditionClipId).toBe(snapshot.auditionClipId);
+    expect(useStore.getState().transport).toBe(snapshot.transport);
   });
 
   it('rejects an invalid warp without stopping playback or adding history', async () => {
@@ -2457,6 +2535,7 @@ describe('Studio Audio Clip commands', () => {
 
     const rejected = actions.setStudioAudioClipWarp(clipId, {
       algorithm: 'wsola-v1',
+      formantMode: 'off' as const,
       timingEnabled: true,
       pitchEnabled: true,
       markers: [
@@ -2483,6 +2562,7 @@ describe('Studio Audio Clip commands', () => {
     if (!original) throw new Error('audio clip missing');
     const warp = {
       algorithm: 'wsola-v1' as const,
+      formantMode: 'off' as const,
       timingEnabled: true,
       pitchEnabled: true,
       markers: [

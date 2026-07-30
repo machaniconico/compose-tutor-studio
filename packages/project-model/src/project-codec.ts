@@ -437,9 +437,11 @@ function decodeAudioWarp(
   decoder: StructureDecoder,
   value: unknown,
   path: string,
+  schemaVersion = CURRENT_SCHEMA_VERSION,
 ): AudioWarp {
   const record = decoder.record(value, path, [
     'algorithm',
+    ...(schemaVersion >= 10 ? ['formantMode'] : []),
     'timingEnabled',
     'pitchEnabled',
     'markers',
@@ -451,6 +453,13 @@ function decodeAudioWarp(
       AUDIO_WARP_ALGORITHMS,
       `${path}.algorithm`,
     ),
+    formantMode: schemaVersion >= 10
+      ? decoder.member(
+          decoder.required(record, 'formantMode', `${path}.formantMode`),
+          ['off', 'preserve'],
+          `${path}.formantMode`,
+        )
+      : 'off',
     timingEnabled: decoder.boolean(
       decoder.required(record, 'timingEnabled', `${path}.timingEnabled`),
       `${path}.timingEnabled`,
@@ -541,7 +550,7 @@ function decodeClip(
       ? decoder.number(record.gainDb, `${path}.gainDb`)
       : undefined;
   const audioWarp = schemaVersion >= 9 && Object.prototype.hasOwnProperty.call(record, 'audioWarp')
-    ? decodeAudioWarp(decoder, record.audioWarp, `${path}.audioWarp`)
+    ? decodeAudioWarp(decoder, record.audioWarp, `${path}.audioWarp`, schemaVersion)
     : undefined;
   return {
     id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
@@ -994,7 +1003,7 @@ function inspectLegacyAutomationLane(
   decoder: StructureDecoder,
   value: unknown,
   path: string,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
 ): AutomationTarget {
   const record = decoder.record(
     value,
@@ -1297,7 +1306,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
 /** Reject fields that were not part of the declared legacy transport shape. */
 function inspectLegacyProjectStructure(
   input: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
 ): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
@@ -1503,7 +1512,7 @@ export function decodeProject(input: unknown): ProjectDecodeResult {
   if (version.version < CURRENT_SCHEMA_VERSION) {
     const legacyIssues = inspectLegacyProjectStructure(
       input,
-      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
+      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
     );
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };
