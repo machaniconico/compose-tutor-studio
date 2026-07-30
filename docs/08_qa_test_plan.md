@@ -179,6 +179,21 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 - document全体に横overflowがなく音声timelineだけが内部scrollし、44px target、ARIA tab / panel、native disabled、削除 / busy解除後focusを満たす
 - UIとstatusにはmanual formant / vibrato編集、polyphonic pitch、take folder / loop-cycle、phase-coherent multitrack、auto quantize / groove、Smart Tempoを対応済みと示す文言やcontrolがない。off / preserveは合成formant-rich fixtureでactive preserve処理へ到達すること、実声のライセンス済みブラインドA/BまたはMUSHRAとunsupported rate / extreme shift品質は未達であることを確認する
 
+### E2E-008: 音声素材を含むPortable Projectを持ち運ぶ
+
+1. browserで自動生成した短いPCM16 WAVをAudio Trackへ読み込み、Clip編集後に`音声素材を含む持ち運び用 (.ctsbundle)`から書き出す
+2. storageを共有しない新しいbrowser contextでbundleを読み込み、fresh Project ID、Track / Clip / asset metadata、再生可能な同一PCMを確認する
+3. `.ctsproj.json`のmetadata-only roundtripも別操作で行い、accept属性、説明、download拡張子が混線しないことを確認する
+4. magic、version、flags、reserved、manifest / Project length、asset count、total length、manifest canonical順、Project checksum、各payload checksumを1条件ずつ破損して読み込む
+5. open/save cancel、128 MiB total、512 KiB manifest、16 MiB Project、384 MiB予約競合、repository store / receipt / adoption失敗を発生させる
+
+期待結果:
+
+- export前にoperation全体のexact size projectionを完了し、超過はrepository read / bundle allocation / download前に拒否する
+- importは全bytes検証後だけstoreを始め、全receipt一致後だけfresh-ID copyへ1回切り替える。失敗・cancelでは現在Project、history、revision、選択が不変で、成功時だけ新しいProjectが再生できる
+- source / destination contextともbaseURL以外のHTTP(S)、WebSocket、sendBeaconを1件も発生させず、fixtureはrepositoryへ埋め込まずtest内で生成する
+- native cancel wireはopen `[0x00]`、save `{ status: "cancelled" }`で、成功toast、repository store、Project置換を発生させない
+
 ## 5. 音声テスト
 
 | テスト | 内容 |
@@ -433,7 +448,8 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - Audio Clipの配置・左右trim・gain・fade・loop・split・duplicate・deleteをproduction UIで操作し、frame source rangeどおりlive / offlineで再生する。loop中left trim / splitは理由付きdisabled / typed rejectにする
 - playable Audio Clip region / 1 windowの10,000件、WAV全source合計10,000件、offline asset working set 384 MiBの境界±1を検査する。region超過はgraph前に拒否し、live window超過は当該windowを部分scheduleせず停止する。WAV超過は`OfflineAudioContext`と部分fileを作らない
 - import / live startup / WAVの共有384 MiB予約を競合させ、先行予約中の後発処理がresolver / decode / `OfflineAudioContext`を呼ばず型付き拒否されることを検査する。WAVはencode後も予約中で、nativeのBlob read / IPC中とWeb object URL handoff中の競合を拒否し、saved / cancelled / download-started / errorの全経路で予約をexactly once解放する
-- `.ctsproj.json`単体にbinaryを同梱しないことを事前表示し、repositoryに同じobjectがないimportは現在Projectを置換しない。Web IndexedDBのgeneration-aware orphan GCは未実装の既知制約として扱う
+- `.ctsproj.json`単体にbinaryを同梱しないことを事前表示し、repositoryに同じobjectがないimportは現在Projectを置換しない。音声素材の持ち運びには`.ctsbundle`を案内し、両形式のsection / accept / operation IDを混同しない
+- `.ctsbundle`は32-byte header、512 KiB manifest、16 MiB Project、128 MiB total、384 MiB予約を境界±1で検査する。exportはchecked operation projection後にだけrepository read / allocation、importはcanonical Projectと全payloadのlength / checksum検証後にだけstore、全receipt一致後にだけfresh-ID adoptionへ進む。失敗・cancelは現在Project / history / revisionを不変にし、full validation後のstore / adoption失敗で未参照objectが残り得る一方、部分Projectは作らない。Web IndexedDBのgeneration-aware orphan GCは未実装の既知制約として扱う
 
 ### 7.7 Batch 6b stereo Bus / send regression gate
 
@@ -547,6 +563,8 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 各OSのunsigned release bundleから起動し、開発serverやtest WebDriverを使わずに確認する。pickerで選んだ絶対pathや保存先pathは画面、console、IPC responseへ表示しない。
 
 - schema v4の`.ctsproj.json`をnative pickerで開き、曲名・tempo / 拍子mapとmirrors・Track role・ノート・コード・AudioAsset / Automation / routing metadataが一致する。同checksum objectがapp-owned repositoryに存在するfixtureではAudio Clipも再生でき、存在しないfixtureは現在Projectを置換せず「JSONに音声は含まれない」と表示する
+- 自動生成したWAVを持つProjectを`.ctsbundle`へ保存し、storageを共有しないprocessで読み込む。全assetが再生でき、top-level Project IDだけがfresh copyで、元のbundle bytes / manifest ordering / payload checksumは一致する
+- `.ctsbundle` open cancelのexact `[0x00]`とsave cancelのexact `{ status: "cancelled" }`で、repository store、Project置換、history / revision、成功toast、保存先fileが発生しない。破損header / manifest、truncation / trailing bytes、128 MiB超過も元Project不変で拒否する
 - Busを2段接続し、main outputとpre/post-fader sendを保存・再読込・Undo / Redoする。live/WAVで同じ経路とtailになり、循環、disabled / gain 0を含む潜在循環、16 send / 1,024 edge超過は既存Projectを変えず拒否する
 - 不正JSON、future schema、16 MiB超過projectを拒否し、元プロジェクトを変更しない
 - `.mid` / `.midi`をnative pickerで開き、Format 0 / 1のmixed channelが複数Trackとして順序どおり追加される。無効header、8 MiB超過、128 Track超過、commit拒否は元Project・選択・表示を変更せず拒否する
@@ -555,7 +573,7 @@ Audio Trackを「利用可能」と判定する継続gateは次のとおり。�
 - 実入力でbounded Auto Punchの独立in / out locatorとpre / post-rollを使い、punch-in exact frame、対象Trackだけのhalf-open gate、punch-out後のnatural post-roll、正 / 負 / 0 latency補正、empty / spanning / exact-folder adoptionを波形比較する。Undo 1回と再起動後のlive / WAV、permission / device loss / disk full / close時のProject不変をmacOS / Windows / Linuxで確認する
 - invalid UTF-8、duration 0、未完了Note On、孤立Note Off、画面外note、drum fallback、非対応metadataの複数warningを発生させ、成功件数とwarning詳細をキーボードとscreen readerで確認できる
 - native picker応答とimport commitを意図的に遅延し、処理中のProject dialogで全Project操作とX / Escape / backdropがdisabledになり、warning成功後はunlockされた全warning result cardを確認してから閉じられる
-- project / MIDI / WAVを書き出し、既存fileへの上書き確認、cancel、権限拒否、空き容量不足を初心者向けに処理する
+- project / portable project / MIDI / WAVを書き出し、既存fileへの上書き確認、cancel、権限拒否、空き容量不足を初心者向けに処理する
 - 書き出したprojectを再読込し、書き出したMIDI/WAVをOS標準または独立playerで開ける
 - pickerと保存dialogへ提示する候補名が240 UTF-8 bytes以内で、予約名・区切り文字・末尾dot/spaceを安全化する
 - 編集直後にwindow closeを要求し、保存完了後だけ終了する。保存失敗時はwindowが残り、再試行できる

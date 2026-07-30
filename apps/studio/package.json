@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@cts/midi-io": "workspace:*",
+    "@cts/project-bundle": "workspace:*",
     "@cts/project-persistence": "workspace:*",
     "@cts/project-model": "workspace:*",
     "@cts/theory-engine": "workspace:*",

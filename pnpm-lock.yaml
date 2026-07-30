@@ -72,6 +72,9 @@ importers:
       '@cts/midi-io':
         specifier: workspace:*
         version: link:../../packages/midi-io
+      '@cts/project-bundle':
+        specifier: workspace:*
+        version: link:../../packages/project-bundle
       '@cts/project-model':
         specifier: workspace:*
         version: link:../../packages/project-model
@@ -123,6 +126,19 @@ importers:
         version: 3.2.6(@types/node@20.19.43)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)
 
   packages/midi-io:
+    dependencies:
+      '@cts/project-model':
+        specifier: workspace:*
+        version: link:../project-model
+    devDependencies:
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.1.0
+        version: 3.2.6(@types/node@20.19.43)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)
+
+  packages/project-bundle:
     dependencies:
       '@cts/project-model':
         specifier: workspace:*

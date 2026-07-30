@@ -205,10 +205,57 @@ main actual handleを検証した直後、最初のschema/WAL accessより前に
 - native WebView E2E（自動）: 保存済みprojectと、onboarding・tutorial・emergency recovery namespaceを含むlocal/session sentinelをUI操作で消去する。SQLite family/marker不在、app data外sentinel維持、close handoff、正しいmarkerからの「完全な保存済みDB」「単独sidecar」起動再開、最後の空再起動を別process間で検査する。
 - native WebView E2E（配布前3OS）: 自動testはincognito WebViewのため、production profileのcache/cookie、branch・future/unreadable・exact archiveの全組合せ、実際の外部export fileが変わらないことはsigned candidateで検査する。
 
-## 9. 現在の制約
+## 9. Portable Project Bundle protocol
+
+### 9.1 Format boundary
+
+`.ctsproj.json`は16 MiB以下のcompact canonical Project metadataをexact roundtripし、Audio Asset binaryを同梱しない。対応objectが同じrepositoryに存在しない単体JSON importは現在Projectを置換しない。音声素材を含めて別端末へ移す明示操作では`.ctsbundle` v1を使う。
+
+`.ctsbundle`の並びは`header → manifest → Project → asset payloads`である。headerはexact 32 bytesかつlittle-endianとする。
+
+| offset | 型 | v1値 |
+|---:|---|---|
+| 0..7 | 8 bytes | ASCII `CTSBNDL1` |
+| 8..9 | u16 LE | version `1` |
+| 10..11 | u16 LE | flags `0` |
+| 12..15 | u32 LE | manifest byte length |
+| 16..19 | u32 LE | canonical Project JSON byte length |
+| 20..23 | u32 LE | distinct asset count |
+| 24..27 | u32 LE | file全体のexact byte length |
+| 28..31 | u32 LE | reserved `0` |
+
+manifestはBOMなしcanonical UTF-8 JSONで、rootのexact keyを`format / version / project / assets`、Project descriptorとasset descriptorのexact keyを`byteLength / checksumSha256`とする。`format = "ctsbundle"`、`version = 1`。ProjectのAudioAssetはchecksum、availability、IDの順でcanonical化し、manifest asset descriptorとpayloadはlowercase SHA-256昇順にする。同じchecksumと同じbyte length / media type / sample rate / channel count / frame countを持つ複数Project entityはID / originalNameを保持したまま1 payloadへdeduplicateする。同checksumでこれらのdecode metadataが矛盾する場合は拒否する。
+
+### 9.2 Limits and operation reservation
+
+- manifestは512 KiB以下、canonical Project JSONは16 MiB以下、個々のassetとfile全体は128 MiB以下とする
+- encode前に32-byte header、manifest、Project、全distinct payloadのexact lengthをsafe integerでchecked加算する。operation全体が128 MiBを1 byteでも超える場合はrepository read、Web download、native IPC、output buffer allocationより前に拒否する
+- unresolved AudioAsset、asset count超過、不正checksum / length、同checksumのmetadata conflictもpayload read前に拒否する
+- rendererはportable operation開始時に384 MiBをprocess-wideの重い音声処理台帳から排他予約し、取得できなければcodec / repository / file handoffへ進まない。これはappが制御するcopyの保守的envelopeであり、Web Crypto / Blob / Tauri内部を含むprocess RSSやclone-freeを保証する値ではない
+
+### 9.3 Encode, native file boundary, and cancellation
+
+exportは全distinct repository objectのexact lengthとSHA-256を検証した後だけfinal bufferを返す。decoderは入力bundleのmanifest / Project / payloadをsubarrayでborrowし、decoder専用のwhole-bundle copyを作らない。magic、version、flags、reserved、declared total、manifest canonicality、Project codec、descriptor一致、全length / SHA-256、trailing bytes不在を全て検証する。
+
+native exportは専用`file_export_project_bundle` commandへraw binaryを渡す。RustはTauri `Request`のborrowed bodyをsize、32-byte header、manifest structureまで検証してJSON/base64 payloadを拒否した後、dialogとblocking atomic writeをまたぐcommand-owned cloneをexact 1回だけ作る。borrowを`await`越しに保持せず、検証前cloneやnative ownership moveを主張しない。保存先はOS pickerで取得し、temp write成功後だけatomic replaceする。
+
+native openはfile metadataとstack上の32-byte headerを検証してから最終response envelopeを1回確保し、absolute pathを返さない。wire contractは次のexact shapeである。
+
+- open cancel: `[0x00]`
+- open success: `[0x01][filenameLengthLE u32][UTF-8 basename][bundle bytes]`
+- save result: `{ status: "saved" }`または`{ status: "cancelled" }`
+
+browser/nativeのopen/save cancelは成功・失敗toast、repository store、Project adoption、history、revisionを発生させず、予約をexactly once解放する。
+
+### 9.4 Import transaction and orphan boundary
+
+rendererはheader、manifest、canonical Project、全payloadのlength / SHA-256 / exact終端をfull validationしてから、distinct payloadをcontent-addressed repositoryへstoreする。全store receiptのchecksumとbyte lengthがdescriptorに一致した後だけ、top-level Project IDをfresh IDへcloneし、現在Projectを1回のatomic adoptionで置換する。検証、store、receipt、ID作成、adoptionの失敗では現在Project、history、revision、selectionを変更せず、欠損objectを参照するProjectや部分Projectを作らない。
+
+repositoryにはportable import用のdelete / rollback APIがない。したがってfull validation後の2件目以降のstore、receipt、adoption失敗では、先に保存したimmutable objectが未参照で残り得る。nativeはretained generation / branch / draftをrootにしたgeneration-aware GCを持つ。Web IndexedDBのgeneration-aware orphan GCは未実装の既知制約であり、将来のGCはfuture / corrupt evidenceがあれば削除をfail closedにする。Elastic Audio解析 / 派生PCM、A/B状態、ハミングの録音PCM、カラオケ作成の一時PCMは再生成可能またはtool-localでありbundleへ含めない。
+
+## 10. 現在の制約
 
 - localStorage自体にはatomic compare-and-swapがないため、Web Locks非対応ブラウザではcanonical更新を無効化する。完全なmulti-writer保証の次段階はTauri/SQLite transactionで行う。
-- ブラウザ版JSONはcompact canonical payloadで保存・通常書出し・緊急書出し・再読込を同じ16MB上限に揃える。AudioAsset metadataとAudio Clip `audioWarp`（formantModeを含む）はcurrent schema v10 JSON、実binaryはIndexedDBへ保存し、現行の`.ctsproj.json`には同梱しない。Elastic Audioの派生PCMも再生成可能なruntime cacheでありbundleへ含めない。binaryを`assets/`へ同梱するportable project bundleは未実装の将来案である。単体JSONのimportは対応objectが同じrepositoryに存在しない限り現在Projectを置換しない。
 - untrusted projectはUI展開前に、最大256小節かつ8192四分音符拍、拍子分子32、128 steps/bar、128 tracks、20,000 events/clip、最小event長1/960拍などの実用上限を検証する。track colorは外部URLを解釈できないhex色だけを許可する。
 - Tauri版はSQLite正本へ切替済み。旧localStorage snapshotはcontent checksumだけを信用せず、全key/value/checksumをnative側で再検証し、候補のsource provenanceを証明してからmigration version単位でatomic公開する。future/corrupt recordは診断として保持し、decoder更新時はmigration versionを上げて再評価する。
 - native repositoryはlegacy persistence migration v1〜v5を受理し、同一snapshot/projectでは完了済みの最高versionだけをlive authorityとして扱う。これはProject schemaとは別のSQLite移行protocol versionであり、現行protocol v5はpayloadをProject schema `v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10`のcanonical metadataへ変換する。protocol v4の完了markerがあってもv5 statusは別物としてexact raw archiveを再評価する。v5候補をstageしただけでは完了済みv4 authorityを置き換えず、process再起動後もv4をliveに保つ。v5の全project結果をatomic完了した後だけv5 authorityへ切り替える。旧v4の未完了stagingもimmutableな監査証跡として保持するがauthorityにはしない。これにより旧projectのunsupported/migration診断や旧branch/headはlive判定から外れる一方、異なるsnapshotのsticky evidenceとexact raw archiveは保持される。未完了の上位protocol versionは下位versionを置き換えず、未知の将来versionがrunまたはstagingに残るdatabaseは初期化・全操作ともmutation前にfail closedする。rendererとnativeはcurrent schema v10 metadataを検証する。

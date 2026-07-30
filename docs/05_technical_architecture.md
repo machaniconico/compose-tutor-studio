@@ -114,6 +114,19 @@ Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/R
 - Audio Clipのpitch解析、versioned WSOLA派生PCM Worker、content-addressed single-flight LRU
 - Transient center-vocal reduction and PCM 16-bit WAV encode
 
+### 4.5 project-bundle
+
+責務:
+
+- `.ctsbundle` v1のdeterministic size projection、encode / decode、header / manifest canonicality検証
+- canonical Projectとdistinct ready Audio Asset payloadのSHA-256順格納
+- 128 MiB total、512 KiB manifest、16 MiB Project JSON、asset count / exact lengthのallocation前検査
+- decode完了まで入力bufferをborrowするpayload view
+
+非責務:
+
+- repositoryへのstore、fresh Project ID採用、file picker、native path、derived audio cache
+
 ## 5. データフロー
 
 ### 5.1 ノート追加
@@ -453,17 +466,18 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 ### 7.2 デスクトップ永続化
 
-MVPの正本はapp data directory内の`projects-v1.sqlite3`。Project集約はUI都合の正規化tableへ分解せず、`project-model` codecが生成したversioned canonical JSON snapshotとして保持する。ユーザーが持ち運ぶ交換形式は、codecで再検証する単一の`.ctsproj.json`ファイルであり、正本DBそのものやOS pathはrendererへ公開しない。
+MVPの正本はapp data directory内の`projects-v1.sqlite3`。Project集約はUI都合の正規化tableへ分解せず、`project-model` codecが生成したversioned canonical JSON snapshotとして保持する。正本DBそのものやOS pathはrendererへ公開しない。
 
-schema v10のAudioAsset metadata、Audio Clip / Audio Take frame payload、Audio Clipの`audioWarp`（formantModeを含む）、AutomationLane bypass、Global / TrackまたはMaster Read、AudioRoutingはcanonical JSON、音声binaryは別のapplication-owned content-addressed repositoryへ保存する。Elastic Audioの解析候補・解析表示・派生PCM cache・A/B状態は永続化しない。binaryはProject採用前に確定し、Project save / crash draft前に存在・length・checksumを再検証する。起動時staging recoveryとgeneration-aware GCでcrash後のpartial / orphanを整理する。下記はfutureのper-song bundle proposalであり、現行の`.ctsproj.json`へbinaryは同梱しない。
+交換形式は目的別に2つある。
 
-```text
-MySong.ctsproj/       # future proposal
-  project.sqlite
-  assets/
-  exports/
-  metadata.json
-```
+- `.ctsproj.json`: 16 MiB以下のcanonical Project metadata。AudioAsset descriptorをexact roundtripするがbinaryを同梱しない。対応objectが同じrepositoryにないimportは現在Projectを置換しない
+- `.ctsbundle` v1: 32-byte little-endian header、512 KiB以下のcanonical manifest、16 MiB以下のcanonical Project JSON、checksum昇順のdistinct ready Audio Asset payloadからなるpathless container。file全体は128 MiB以下で、SQLite、absolute path、Elastic Audio解析 / 派生PCM、A/B状態、その他の再生成可能cacheを含めない
+
+`project-bundle` codecは`header + manifest + Project + distinct payloads`をsafe integerで事前合算し、operation全体が128 MiBを超える候補をrepository read / output allocation前に拒否する。rendererは同時に存在し得るapp-controlled copyの保守的envelopeとして384 MiBを予約する。import decodeは入力bufferのsubarrayをborrowし、whole-bundle decoder copyを作らず、header / manifest / canonical Project / 全payloadのlength・SHA-256・exact終端を検証する。
+
+native export commandはTauri `Request`のborrowed raw bodyをsize・header・manifest structureまで検証してから、dialog / blocking atomic writeをまたぐcommand-owned cloneをexact 1回だけ作る。native openはstack上の32-byte headerとfile metadataを検証してから`[0x01][filenameLengthLE][basename][bundle]`用bufferを確保し、cancelはexact `[0x00]`を返す。saveは`{ status: "saved" | "cancelled" }`を返す。JSON/base64 IPC、任意path、検証前cloneは許可しない。
+
+renderer importはbundle全体を検証してからdistinct payloadをcontent-addressed repositoryへstoreし、全receiptのchecksum / byte length一致後だけfresh Project IDへcloneして1回のProject adoptionを行う。検証・store・receipt・adoptionの失敗またはcancelでは現在Project、history、revisionを変えない。repositoryにrollback/delete APIはないため、full validation後の後続store / adoption失敗ではimmutableな未参照objectが残り得る。nativeはgeneration-aware GCを持つが、Web generation-aware orphan GCは既知制約である。
 
 ### 7.3 互換性
 
@@ -504,6 +518,7 @@ MySong.ctsproj/       # future proposal
 - production CSPからlocalhost WebSocketを除外し、Vite HMRだけdev CSPで許可
 - protected tag preflightはproduction / development security object、`main` capability全件、window / build / package identity、root / Studio / Desktopの全scripts・build tool依存・`pnpm-workspace.yaml`内のoverrides / 依存build script許可、内部package manifest / export、Tauri bundle全体をexact allowlistで固定する。production commandはpackage名filterではなくworkspace実pathを使う。isolation patternを含む未知security key、重複workspace package、platform Tauri override / repository Cargo config、npmrc / pnpmfile、Studioからrepo rootまでにある自動探索PostCSS configを禁止し、`pnpm-workspace.yaml` / `pnpm-lock.yaml` / `vite.config.ts` / `build.rs`はregular fileかつ改行正規化SHA-256一致、`public/`はexact `_redirects`だけを許可する。依存installはlifecycle scriptを無効化し、各署名OS jobがsecret読込前にclean worktreeとrelease policyを再検証する
 - 依存install後のrelease policy testは正規TOML parse結果からCargoのfeature・dependency・target・build targetをexact比較し、Studio / packagesのTS/JS source graph、relative import / export / require / dynamic importのroot境界、Vite config、単一source entry、Rustのsource graph / FFI / network APIを実repository上で検査する。`fetch` / XHR / WebSocket / EventSource / beacon / WebRTC / WebTransport / Worker、HTTP/STUN/TURN、protocol-relative URL / meta refresh、未許可Cargo target、source-root外`#[path]` / `include!`を拒否する
+- Portable Bundle docs gateは実装定数と文書を照合し、32-byte header、512 KiB manifest、16 MiB Project、128 MiB total、384 MiB renderer予約、operation全体の事前拒否、native borrowed validation + one bounded clone、cancel wire、validation-before-store、all-receipts-before-fresh-ID adoption、orphan GC制約の欠落や「未実装」への退行を拒否する
 - Vite build直後は最終`dist`を明示的な`production` / `e2e` profileで再検査する。productionはHTMLを`index.html`と`index-<hash>.js`の1組だけ、E2Eは`index.html` / fatal fixtureと`app-<hash>.js` / `fatal-boundary-<hash>.js`の2組だけに限定し、参照entryの実在、exact `_redirects`、許可済みCSS / HTML / JS以外の出力、symlink / size境界、RTC・socket系primitive、protocol-relative / 未許可remote URLを検査する。通常Web build、Desktop smoke / bundle、3OS CI、signed macOS / Windows / Linux buildの各platform-specific出力で実行する
 - bundle identifier `com.composetutor.studio` と `useHttpsScheme: true` はpackage/app data/origin互換性のため初回release前から固定
 - 任意ファイルアクセスを制限
@@ -513,7 +528,7 @@ MySong.ctsproj/       # future proposal
 
 ## 10. CI/CD
 
-- Web: typecheck、unit/integration、production build、Playwright Chromium E2E
+- Web: Combined仕様書の再生成差分とPortable Bundle docs contract、typecheck、unit/integration、production build、Playwright Chromium E2E
 - Desktop 3OS: rustfmt、clippy `-D warnings`、Rust test、unsigned production bundle（Linux AppImage / macOS app / Windows NSIS）build
 - Desktop 3OS: test専用embedded WebDriverによる実WebView smoke
 - Supply chain: pnpm audit、Linux RustSec audit、npm/Cargo/GitHub Actionsのweekly Dependabot更新
@@ -540,7 +555,7 @@ MySong.ctsproj/       # future proposal
 | Stem separation | 将来検証 | ローカル/クラウドモデルの速度・品質・権利評価 |
 | Web Audio Asset orphan GC | IndexedDB保存・検証・deduplicateは実装済み、generation-aware GCはnativeのみ | browser Project generationとIndexedDBを同一origin lock下で走査し、future/corrupt evidence時に削除を止める設計を追加 |
 | Audio Clip loop phase | source range反復、right trim、live/WAV parityは実装済み。loop中left trim / splitは無効 | persisted phase fieldとmigrationを追加してからeditor / planner / exportを同時に有効化 |
-| Portable Project bundle | `.ctsproj.json`はmetadata only | content manifest、zip-slip/size検証、deduplicate import、atomic adoptionを別Batchで定義 |
+| Portable Project bundle | `.ctsbundle` v1をWeb/nativeへ接続済み。canonical manifest、128 MiB total、事前size projection、全payload検証、deduplicate store、fresh-ID atomic adoptionを持つ | Web generation-aware orphan GCと3OS signed candidateでの大容量実機検証を継続する |
 
 デスクトップシェル、test隔離、署名前条件の詳細は`docs/12_desktop_shell.md`を参照する。
 

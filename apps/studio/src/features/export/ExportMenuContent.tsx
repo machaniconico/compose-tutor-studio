@@ -33,6 +33,22 @@ import {
   selectedTrackWavFileName,
 } from './trackWavExport';
 import { cloneProjectForImport } from './projectImport';
+import {
+  exportPortableProjectBundle,
+  importPortableProjectBundle,
+} from './portableProjectBundle';
+import {
+  MAX_PORTABLE_PROJECT_BUNDLE_BYTES,
+  PORTABLE_PROJECT_BUNDLE_EXTENSION,
+  PORTABLE_PROJECT_BUNDLE_MIME_TYPE,
+  PortableProjectBundleError,
+} from '@cts/project-bundle';
+import {
+  reservePortableProjectBundleResources,
+} from './portableProjectBundleReservation';
+import {
+  portableProjectBundleFailureMessage,
+} from './portableProjectBundleErrors';
 import { studioRuntime } from '../../platform/runtime';
 import {
   NativeFileGatewayError,
@@ -103,6 +119,7 @@ export function ExportMenuContent({
   finishOperation,
 }: ExportMenuContentProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const portableFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const project = useStore((s) => s.project);
   const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
@@ -273,6 +290,106 @@ export function ExportMenuContent({
     }
   };
 
+  const exportPortableProjectFile = async () => {
+    const operation = 'portable-project-export' satisfies ExportOperation;
+    if (!beginOperation(operation)) return;
+    let reservation: ReturnType<typeof reservePortableProjectBundleResources> | undefined;
+    try {
+      reservation = reservePortableProjectBundleResources();
+      const bytes = await exportPortableProjectBundle(project, studioRuntime.audioAssets, {
+        reservation,
+      });
+      if (isNative) {
+        const result = await nativeFileGateway.exportProjectBundle(
+          bytes,
+          `${stem}${PORTABLE_PROJECT_BUNDLE_EXTENSION}`,
+          reservation,
+        );
+        if (result.status === 'cancelled') return;
+      } else {
+        await downloadBlobAndWaitForHandoff(
+          new Blob([bytes], { type: PORTABLE_PROJECT_BUNDLE_MIME_TYPE }),
+          `${stem}${PORTABLE_PROJECT_BUNDLE_EXTENSION}`,
+        );
+      }
+      pushToast('音声込みポータブルプロジェクトを書き出しました。', 'success');
+    } catch (error) {
+      const message = portableProjectBundleFailureMessage(error, 'export');
+      if (message !== null) pushToast(message, 'error');
+    } finally {
+      reservation?.release();
+      finishOperation(operation);
+    }
+  };
+
+  const adoptPortableProject = async (
+    input: Uint8Array,
+    reservation: ReturnType<typeof reservePortableProjectBundleResources>,
+    expectedProject: typeof project,
+  ): Promise<void> => {
+    if (useStore.getState().project !== expectedProject) {
+      throw new PortableProjectBundleError('adoption-failed');
+    }
+    const replaced = await importPortableProjectBundle(input, {
+      createProjectId: () => uid('project'),
+      replaceProject: (importedProject) => {
+        const state = useStore.getState();
+        if (state.project !== expectedProject) return Promise.resolve(false);
+        return replaceProject(importedProject);
+      },
+      reservation,
+    });
+    if (!replaced) throw new PortableProjectBundleError('adoption-failed');
+    onDone();
+    const saveFailed = useStore.getState().saveState.phase === 'error';
+    pushToast(
+      saveFailed
+        ? '音声込みプロジェクトを読み込みましたが、まだ端末に保存できていません。'
+        : '音声込みプロジェクトをコピーとして読み込みました。',
+      saveFailed ? 'error' : 'success',
+    );
+  };
+
+  const onImportPortableFile = async (file: File) => {
+    const fileSize = file.size;
+    if (fileSize > MAX_PORTABLE_PROJECT_BUNDLE_BYTES) {
+      pushToast('ポータブルプロジェクトが大きすぎます（上限128MB）。', 'error');
+      return;
+    }
+    const operation = 'portable-project-import' satisfies ExportOperation;
+    if (!beginOperation(operation)) return;
+    let reservation: ReturnType<typeof reservePortableProjectBundleResources> | undefined;
+    try {
+      reservation = reservePortableProjectBundleResources(fileSize);
+      const input = new Uint8Array(await file.arrayBuffer());
+      await adoptPortableProject(input, reservation, project);
+    } catch (error) {
+      const message = portableProjectBundleFailureMessage(error, 'import');
+      if (message !== null) pushToast(message, 'error');
+    } finally {
+      reservation?.release();
+      finishOperation(operation);
+    }
+  };
+
+  const importPortableProjectFromNative = async () => {
+    const operation = 'portable-project-import' satisfies ExportOperation;
+    if (!beginOperation(operation)) return;
+    let reservation: ReturnType<typeof reservePortableProjectBundleResources> | undefined;
+    try {
+      reservation = reservePortableProjectBundleResources();
+      const result = await nativeFileGateway.openProjectBundle(reservation);
+      if (result.status === 'cancelled') return;
+      await adoptPortableProject(result.bytes, reservation, project);
+    } catch (error) {
+      const message = portableProjectBundleFailureMessage(error, 'import');
+      if (message !== null) pushToast(message, 'error');
+    } finally {
+      reservation?.release();
+      finishOperation(operation);
+    }
+  };
+
   return (
     <div className="export-menu">
             <section className="export-menu__group">
@@ -313,7 +430,7 @@ export function ExportMenuContent({
             </section>
 
             <section className="export-menu__group">
-              <p className="panel-section__title">プロジェクトファイル</p>
+              <p className="panel-section__title">編集情報のみ (.ctsproj.json)</p>
               <div className="export-menu__row">
                 <button
                   type="button"
@@ -348,6 +465,50 @@ export function ExportMenuContent({
                 .ctsproj.jsonには編集情報だけを書き出し、Audio Trackの音声本体は含みません。同じ端末の素材保存領域がある場合に、別のコピーとして読み込んで編集できます。
               </p>
             </section>
+
+            <section className="export-menu__group">
+                <p className="panel-section__title">
+                  音声込みポータブル ({PORTABLE_PROJECT_BUNDLE_EXTENSION})
+                </p>
+                <div className="export-menu__row">
+                  <button
+                    type="button"
+                    onClick={() => void exportPortableProjectFile()}
+                    disabled={operationBusy}
+                  >
+                    音声込みポータブルを書き出し
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isNative) void importPortableProjectFromNative();
+                      else portableFileInputRef.current?.click();
+                    }}
+                    disabled={operationBusy}
+                  >
+                    音声込みポータブルを読み込み
+                  </button>
+                </div>
+                {!isNative ? (
+                  <input
+                    ref={portableFileInputRef}
+                    type="file"
+                    accept={`${PORTABLE_PROJECT_BUNDLE_EXTENSION},${PORTABLE_PROJECT_BUNDLE_MIME_TYPE}`}
+                    style={{ display: 'none' }}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void onImportPortableFile(file);
+                      event.target.value = '';
+                    }}
+                  />
+                ) : null}
+                <p className="export-menu__hint">
+                  Audio Trackの音声本体も含め、1つのファイルとして別のブラウザーへ持ち運べます。上限は128MBです。
+                </p>
+                <p className="export-menu__hint">
+                  録音・読み込んだ元の音声素材を含みます。第三者へ渡すと素材も共有されるため、自作音源または共有の許諾がある音源だけを含めてください。アプリが自動で外部送信することはありません。
+                </p>
+              </section>
     </div>
   );
 }

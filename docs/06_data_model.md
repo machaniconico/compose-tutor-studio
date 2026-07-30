@@ -287,7 +287,15 @@ Project走査順のraw scheduleは一時projectionであり、時間順を保証
 
 ### 2.2 Project aggregateとMIDI projection
 
-`.ctsproj.json`はversioned project-model codecが扱うProject集約そのものであり、MVPでexact roundtripを保証する唯一の交換形式である。MIDIはProjectの別schemaではなく、他アプリとの相互運用に使うlossyなnormalized projectionとして扱う。
+`.ctsproj.json`はversioned project-model codecが扱うProject集約そのものであり、metadataのexact roundtrip形式である。`.ctsbundle` v1は同じcanonical Projectに全ready Audio Asset payloadを添えた持ち運び用containerで、import時は新しいtop-level Project IDを持つコピーとして採用する。どちらもProject schemaを増やさず、MIDIはProjectの別schemaではなく、他アプリとの相互運用に使うlossyなnormalized projectionとして扱う。
+
+### 2.2.1 Portable Project Bundle projection
+
+`.ctsbundle`はProject entityではなく、`Project + repository objects`から決定的に導出するexport projectionである。32-byte header、512 KiB以下のcanonical manifest、16 MiB以下のcanonical Project JSON、lowercase SHA-256昇順のdistinct payloadを連結し、全体を128 MiB以下に制限する。header / manifest / Project / 全payloadのexact lengthをsafe integerで事前合算し、超過、unresolved asset、同checksumでbyte length / media type / sample rate / channel count / frame countが矛盾するmetadataをrepository read・全体buffer確保前に拒否する。
+
+同checksumかつ同decode metadataの複数`ReadyAudioAsset`はProject内の独立ID / originalNameを保持したままmanifestでは1 descriptor・1 payloadへdeduplicateする。Projectの`audioAssets`はchecksum、availability、IDの順、manifest descriptorとpayloadはchecksum順にcanonical化する。decoderは入力bundleのpayload subarrayをborrowし、magic / version / flags / reserved / manifest keys / canonical JSON / Project codec / exact lengths / SHA-256 / payload終端を全て検証してから返す。
+
+importはfull validation後にdistinct payloadをcontent-addressed repositoryへ保存し、全store receiptがchecksum / byte lengthと一致した後だけfresh Project IDのcopyを1回採用する。失敗やcancelでは現在Project / history / revisionを変えない。repositoryにdelete/rollback APIがないため、検証後のstoreまたはadoption失敗でimmutableな未参照objectが残ることは許容するが、欠損objectを参照するProjectや部分Projectは作らない。Elastic Audio派生PCM、解析候補、ハミング録音PCM、カラオケ作成の一時PCMはこのprojectionへ含めない。
 
 | MIDI source / output | Projectへの対応 | exactに扱う範囲 |
 |---|---|---|
@@ -457,7 +465,7 @@ Audio Clipは`aliasOf`を持たず、`audioAssetId`、`sourceStartFrame`、`sour
 
 `loop=true`はsource rangeを外側timeline windowまで反復する。現在のschemaにはloop phase fieldがないため、loop中left trim / splitはdomain errorにし、bytesや暗黙phaseを推測しない。shared live/offline plannerがseek、transport loop、variable tempo、fade位相を一時sliceへ解決し、このsliceはProjectへ保存しない。
 
-binaryの存在・checksum診断もruntime stateである。`audioAssetIssues[id] = missing | changed | unavailable`はUIと再生preflightで使うが、`ReadyAudioAsset.availability`を自動変更しない。`.ctsproj.json`は上記metadataだけをexact roundtripしbinaryを同梱しない。
+binaryの存在・checksum診断もruntime stateである。`audioAssetIssues[id] = missing | changed | unavailable`はUIと再生preflightで使うが、`ReadyAudioAsset.availability`を自動変更しない。`.ctsproj.json`は上記metadataだけをexact roundtripしbinaryを同梱しない。binaryを持ち運ぶ明示操作だけが`.ctsbundle`を生成し、current schema Projectと全ready objectを検証済みcopyとして同梱する。
 
 ## 3. SQLite v2スキーマ
 

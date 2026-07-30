@@ -1,0 +1,7 @@
+[
+  { "name": "unsupported-version", "offset": 8, "kind": "uint16", "value": 2, "code": "unsupported-version" },
+  { "name": "nonzero-flags", "offset": 10, "kind": "uint16", "value": 1, "code": "invalid-header" },
+  { "name": "asset-count-mismatch", "offset": 20, "kind": "uint32", "value": 1, "code": "length-mismatch" },
+  { "name": "declared-total-truncated", "offset": 24, "kind": "uint32", "value": 31, "code": "invalid-header" },
+  { "name": "nonzero-reserved", "offset": 28, "kind": "uint32", "value": 1, "code": "invalid-header" }
+]

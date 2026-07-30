@@ -63,6 +63,7 @@
 | US-016 | 作曲者として、音量やパンの変化を一時的に外して元のTrack設定と聴き比べたい | Must | non-Masterのvolume / panとeffective Masterの出力volumeをRead / Bypassで切り替え、Bypass中もpointを保持・編集できる。live再生とWAVはBypass時にTrack scalarを使い、Undo / Redo・保存 / 再読込後も同じ状態になる |
 | US-017 | 作曲者として、再生しながらミキサー操作をオートメーションへ記録したい | Must | non-Master Trackの音量 / パンとeffective Masterの出力音量についてRead / Touch / Latch / Writeを選び、Touchは操作中だけ、Latchは最初の操作からパンチアウトまで、Writeは再生開始から対応targetを記録できる。Master Writeは音量だけを扱う。1 passをProject変更・Undo・保存revision各1回で確定し、Writeは警告確認後だけ有効化して確定後Touchへ戻る。modeと記録中状態はruntime-only、確定curveだけを保存する |
 | US-018 | 作曲者として、録音済みの単音Audio Clipのタイミングと音程を元素材を壊さず整えたい | Must | 対応するready・非loop Audio Clipでタイミングpointと単音pitch regionを編集し、Undo / Redo・保存 / 再読込後も同じ結果になる。補正前 / 補正後を同じタイミングで試聴でき、live・全体WAV・選択Track WAVが同じ派生PCMを使う |
+| US-019 | 作曲者として、音声素材を含む曲を別端末へ安全に持ち運びたい | Must | canonical Projectと全ready Audio Assetを1つの`.ctsbundle`へ書き出し、別repositoryへ読み込んでも全payload検証と保存receipt照合後だけfresh Project IDのコピーとして開ける |
 
 ## 3. MVP機能範囲
 
@@ -116,7 +117,9 @@
 - MIDI書き出し
 - WAV書き出し
 - ボーカル軽減後のカラオケ用PCM 16-bit WAV書き出し
-- プロジェクトJSON/SQLite保存
+- 編集情報だけをexact roundtripする`.ctsproj.json`（16 MiB以下）。Audio Asset binaryは同梱せず、同じrepositoryに対応objectがない読み込みでは現在のProjectを置換しない
+- canonical Projectと全ready Audio Assetを持ち運ぶ`.ctsbundle` v1（header 32 bytes、manifest 512 KiB以下、Project JSON 16 MiB以下、file全体128 MiB以下）。derived cacheや一時音声は同梱しない
+- Webのlocal repository / TauriのSQLiteへの自動保存
 
 ## 4. MVPから外す範囲
 
@@ -143,6 +146,7 @@
 | 安定性 | 音声開始/中断 | 開始完了前は再生中と表示せず、失敗・出力中断後も編集を保持して再試行できる |
 | 安定性 | Audio Asset | 1 object 128 MiB以下、canonical 48 kHz / 1〜2 channel PCM16 WAV、SHA-256と実byte lengthを保存・読込・再生前に照合する。decode済みcacheは256 MiB以下 |
 | 安定性 | Elastic Audio | 1 Clipの編集対象は60秒以下、派生PCMとcacheは128 MiB以下。Worker処理と他の重い音声処理を共有384 MiB台帳で事前予約し、cancel / Project切替 / stale結果ではProjectや出力を変更しない |
+| 安定性 | Portable Project Bundle | operation開始前にheader + manifest + Project + distinct asset payloadの合計をchecked integerで算出し、128 MiB超過をrepository read / bundle allocation前に拒否する。rendererは384 MiBを予約し、importは全bytesを検証して全保存receiptが一致した後だけfresh-ID copyを採用する |
 | 互換性 | OS | Windows/macOS 優先 |
 | アクセシビリティ | キーボード操作 | 主要操作はショートカット対応。単一文字キーは対応コントロールへのフォーカス中だけ有効にする |
 | プライバシー | ローカル保存 | デフォルトではプロジェクトを外部送信しない |
@@ -155,6 +159,7 @@
 - 8小節のコード進行に対して、ドラム、ベース、メロディを作成できる
 - レッスンの開始、判定、完了、進捗保存ができる
 - MIDI/WAVを書き出せる
+- `.ctsproj.json`を「編集情報のみ」、`.ctsbundle`を「音声素材を含む持ち運び用」として別操作で書き出し・読み込みできる。cancel、破損、上限超過、repository失敗では現在のProject、履歴、revisionを変更しない
 - 選択した楽器・ドラム・Audio Trackを、保存済みmute/soloを無視しつつ到達可能な下流Bus、send、effects、automation、Master音量込みの単一WAVとして書き出せる。Bus/Master stem、batch、range、bit depth、MP3/M4A、加算再構成は対象外とする
 - 利用許諾のあるステレオ音源から、ローカル処理でカラオケ用WAVを作成できる
 - instrument / drum / Audio / Bus Trackの管理と音色・routing変更が、Master保護、schema v4学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
