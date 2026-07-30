@@ -115,6 +115,7 @@ export type AudioClip = Clip & {
 
 export type AudioWarp = {
   algorithm: 'wsola-v1';
+  formantMode: 'off' | 'preserve';
   timingEnabled: boolean;
   pitchEnabled: boolean;
   markers: AudioWarpMarker[];
@@ -247,9 +248,9 @@ export type ChordEvent = {
 };
 ```
 
-### 2.1 Project schema v9（current）
+### 2.1 Project schema v10（current）
 
-- `schemaVersion`のcurrent valueは`9`。decodeはversionごとにrequired field、unknown field、型、有限値、整数、範囲を厳密検証し、`v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8 → v9`の順にpureかつ決定的にmigrationする。
+- `schemaVersion`のcurrent valueは`10`。decodeはversionごとにrequired field、unknown field、型、有限値、整数、範囲を厳密検証し、`v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10`の順にpureかつ決定的にmigrationする。
 - v3では`Project.lengthBeats`を曲長の正本、`tempoMap` / `timeSignatureMap`を時間変換の正本とする。mapはbeat 0から始まり、IDを含む昇順event列として保存する。`bpm`、`timeSignature`、`lengthBars`は旧consumer用の互換mirrorであり、それぞれ先頭tempo、先頭拍子、拍子mapから算出した実小節数と一致しなければならない。
 - `compileMusicalTime`でimmutable indexを作り、`beatToSecondsAt` / `secondsToBeatAt` / `secondsBetweenBeats` / `barToBeatAt` / `beatToBarPosition`を共通変換境界とする。従来の固定tempo用`beatToSeconds(bpm)`は互換APIとして残す。
 - Trackの意味は`role`が正本であり、runtimeで名前から推測しない。`general`は予約名を含め自由に改名でき、改名でroleは変わらない。学習role Trackの削除は保護し、Track複製時のroleは`general`にする。
@@ -263,9 +264,10 @@ export type ChordEvent = {
 - v6→v7は`automationReadState: { globalEnabled: true, disabledTrackIds: [] }`だけを追加し、Track、scalar、lane、pointと可聴結果を変えない。v6へのfield混入、v7の欠落 / null / 型違い / 重複 / Master / missing Track / unknown field / 非canonical順を拒否する。
 - v7→v8は`schemaVersion`だけを更新し、v7で不正だったMaster automation / Read IDを移行時に許容しない。canonical v8だけが最初のeffective Masterのvolume target / Read IDを追加で許容し、Master pan、later Master、missing Track、重複 / 非canonical順を拒否する。
 - v8→v9も`schemaVersion`だけを更新し、既存のAudio Clip、Automation、routing、takeと可聴結果を変えない。canonical v9だけがAudio Clipのoptional `audioWarp`を受理し、v8以下へのfield混入をunknown fieldとして拒否する。
-- TypeScript codecとnative Rust境界は同じcanonical schema v9 JSONを検証・migration・保存する。AudioAsset binary、Elastic Audioの解析候補 / 表示用waveform / pitch frame、派生PCM cache、A/B状態はJSONへ埋め込まず、保存済み`audioWarp`はchecksum / byte lengthでapp-owned repositoryのimmutable objectを参照する。
+- v9→v10は既存`audioWarp`に`formantMode: 'off'`を決定的に追加して既存の可聴結果を変えない。canonical v10は`off | preserve`を必須とし、v9のfield混入、v10での欠落 / unknown値 / unknown keyを拒否する。
+- TypeScript codecとnative Rust境界は同じcanonical schema v10 JSONを検証・migration・保存する。AudioAsset binary、Elastic Audioの解析候補 / 表示用waveform / pitch frame、派生PCM cache、A/B状態はJSONへ埋め込まず、保存済み`audioWarp`はchecksum / byte lengthでapp-owned repositoryのimmutable objectを参照する。
 
-linked Clipのv2契約はcurrent v9でも次のとおり維持する。
+linked Clipのv2契約はcurrent v10でも次のとおり維持する。
 
 - v2の`aliasOf`はMIDI / Drum Clipだけが持てる。同じTrack・同じtype・同じ`lengthBeats`の非alias正本Clipを直接参照し、自己参照、dangling、別Track/type、chain/cycleを禁止する。
 - 正本だけが`notes`または`drumEvents` / `stepsPerBar` / `drumGroove`を所有する。aliasはこれらと`audioAssetId`を省略し、`id` / `trackId` / `type` / `startBeat` / `lengthBeats` / `loop` / `aliasOf`だけを保存する。
@@ -400,20 +402,20 @@ production Editorが変更する正本は既存の`Project.tempoMap`と`Project.
 - Track削除は所有folderをcascade除去し、Track複製はfolder / take / segmentへfresh IDを発行してassetを共有する。AudioAsset GCはAudio Clipだけでなく全take参照もrootとして数える
 - liveとoffline WAVはfolderを一時的なAudio regionへ正規化して既存Audio Clip plannerへ渡す。選択takeだけを鳴らし、spliceは`crossfadeMs`を境界中心に半分ずつ延長したlinear overlap、persist済みtake fadeはslice長へ再正規化せずtake-local時間のままtruncateする
 - MIDI exportはtake audioを出力しないが、壊れたv5 aggregateを無視せず独立validationで`invalid-project`として拒否する
-- fixed-pass Audio cycleとbounded Auto Punchのexact-window folder生成はv5で導入されcurrent schema v9へ継承された同じtake aggregateを使う。Quick Punch、automatic input monitoring、cycleとの併用、disk streaming、arbitrary overlaps、MIDI comping、multi-input、named comps、flatten / bounceはschema / UIの対応済み範囲に含めない
+- fixed-pass Audio cycleとbounded Auto Punchのexact-window folder生成はv5で導入されcurrent schema v10へ継承された同じtake aggregateを使う。Quick Punch、automatic input monitoring、cycleとの併用、disk streaming、arbitrary overlaps、MIDI comping、multi-input、named comps、flatten / bounceはschema / UIの対応済み範囲に含めない
 
-### 2.6.5 Audio Clip timing / monophonic pitch編集（schema v9）
+### 2.6.5 Audio Clip timing / monophonic pitch編集（schema v10）
 
-`AudioClip.audioWarp`はimmutableなAudioAsset binaryへ作用する非破壊metadataで、未編集Clipでは省略できる。保存されるのはalgorithm、timing / pitchの有効状態、timing marker、確定pitch regionだけである。解析候補、解析waveform / pitch frame、selection、zoom、cursor、pointer preview、focus、Worker generation、派生PCM cache、補正前 / 補正後のA/Bはruntime-onlyで、Project / history / revision / SQLite / `.ctsproj.json`へ保存しない。
+`AudioClip.audioWarp`はimmutableなAudioAsset binaryへ作用する非破壊metadataで、未編集Clipでは省略できる。保存されるのはalgorithm、`formantMode`、timing / pitchの有効状態、timing marker、確定pitch regionだけである。解析候補、解析waveform / pitch frame、selection、zoom、cursor、pointer preview、focus、Worker generation、派生PCM cache、補正前 / 補正後のA/Bはruntime-onlyで、Project / history / revision / SQLite / `.ctsproj.json`へ保存しない。
 
 - `algorithm`は現在`wsola-v1`だけを受理する。`audioWarp`はreadyなcanonical 48 kHz mono/stereo PCM16 WAVを参照する非loop Audio Clipだけが持て、対象source windowは60秒以下とする。MIDI / drum / automation Clip、linked Clip、unresolved asset、loop Clip、AudioTakeFolderのtakeには保存しない
 - `markers`は2〜128件で、`sourceFrame`と`targetBeatOffset`をそれぞれ厳密昇順にする。先頭はClipの`sourceStartFrame` / 0 beat、末尾はsource window終端 / `lengthBeats`にexact一致する。隣接source / target区間は40 ms以上、tempo mapで求めたtarget秒数 ÷ source秒数は0.5〜2の範囲とする
 - `pitchRegions`は0〜128件で、source window内をsource frame昇順・非重複にする。`sourcePitchCents` / `targetPitchCents`は0〜12,700、`correctionAmount`は0〜1で、`(target - source) × amount`の実効shiftを±300 cent以内にする。`transitionFrames`は非負safe integerでregion長の半分以下とする
-- timing / pitchの各enabled flagがfalseでもmarker / regionは保持する。pitch A/Bは永続flagを変更せずlive用snapshotだけで`pitchEnabled: false`にする。WAVは常に保存済みflagを使う
+- timing / pitchの各enabled flagがfalseでもmarker / regionは保持する。`formantMode`は`off | preserve`の保存済み値で、Undo / Redoとreload後も保持し、canonical request / cache key / live / WAVへ反映する。pitch A/Bは永続flagやformantModeを変更せずlive用snapshotだけで`pitchEnabled: false`にする。WAVは常に保存済みflagを使う
 - left / right trimは残るsource windowへmarker / regionをcropし、始終点をexactに作り直す。splitは左右へpartitionして両Clipのsource frame / target beatをrebaseする。audioWarp付きClipのloop化、take folder化、Auto Punchのspanning Clip変換はmetadataの意味を保てないため候補をatomicに拒否する
 - accepted editはAudio Clipの`audioWarp`だけを含むcandidate全体をcanonical codecで検証し、1 gesture = 1 Project change / 1 Undo / 1 save revisionとする。解析だけ、semantic no-op、invalid / busy / staleではProject参照と履歴を変えない
 - live、全体WAV、選択Track WAVは保存済みmetadataとAudioAsset checksumから同じversioned派生PCM requestを作る。派生PCMは永続正本ではなく再生成可能なcontent-addressed cacheである
-- formant preservation / editing、vibrato editing、polyphonic pitch、take folder / loop-cycle warp、phase-coherent multitrack stretch、audio quantize / groove extraction、audio follow / Smart Tempoのfieldはcurrent schema v9に定義しない
+- manual formant editing、vibrato editing、polyphonic pitch、take folder / loop-cycle warp、phase-coherent multitrack stretch、audio quantize / groove extraction、audio follow / Smart Tempoのfieldはcurrent schema v10に定義しない。off / preserveの実声品質、unsupported rate、極端なpitch shiftは別品質gateでありschema fieldではない
 
 ### 2.7 Track管理とpreset（schema v4）
 

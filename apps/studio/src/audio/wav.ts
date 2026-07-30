@@ -41,6 +41,7 @@ import {
   estimateAudioWarpDerivedBytes,
   estimateAudioWarpResourcePeakBytes,
   getAudioClipBufferCache,
+  type AudioClipBufferCache,
   type AudioClipPlaybackBufferLease,
 } from './audioClipBuffers';
 import {
@@ -457,6 +458,7 @@ export function buildWavAudioClipPlans(project: Project): AudioClipPlaybackPlan[
 export type WavRenderOptions = Readonly<{
   audioAssetResolver?: AudioAssetBytesResolver | null;
   audioAssetCache?: AudioAssetPlaybackCache;
+  audioClipBufferCache?: AudioClipBufferCache;
   signal?: AbortSignal;
 }>;
 
@@ -685,7 +687,7 @@ async function renderWavWithRouting(
   assertRoutingGraphNodeBudget(project, routingPlan, 'disabled');
   const { index: musicalTime, tempo } = createProjectMusicalTime(project);
   const audioAssetCache = options.audioAssetCache ?? getAudioAssetPlaybackCache();
-  const derivedCache = getAudioClipBufferCache();
+  const derivedCache = options.audioClipBufferCache ?? getAudioClipBufferCache();
   // Unleased buffers have no reason to count against a new offline render;
   // active live sessions and in-flight decodes remain reserved and budgeted.
   audioAssetCache.clearUnused();

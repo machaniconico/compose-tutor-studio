@@ -18,6 +18,7 @@ function sourcePcm(values: readonly number[] = []): Float32Array {
 
 class FakeWorker implements AudioWarpWorkerLike {
   readonly messages: unknown[] = [];
+  terminateCount = 0;
   private readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
 
   postMessage(message: unknown): void {
@@ -34,6 +35,10 @@ class FakeWorker implements AudioWarpWorkerLike {
     this.listeners.get(type)?.delete(listener);
   }
 
+  terminate(): void {
+    this.terminateCount += 1;
+  }
+
   emit(data: unknown): void {
     const event = { data } as MessageEvent;
     for (const listener of this.listeners.get('message') ?? []) {
@@ -45,7 +50,8 @@ class FakeWorker implements AudioWarpWorkerLike {
 
 function request(): AudioWarpRenderRequest {
   return {
-    algorithmVersion: 'wsola-v1/dsp-1',
+    algorithmVersion: 'wsola-v1/dsp-2',
+    formantMode: 'off' as const,
     assetId: 'asset',
     checksumSha256: 'a'.repeat(64),
     sourceSampleRate: 48_000,
@@ -167,7 +173,8 @@ describe('audio warp Worker client', () => {
     }, { signal: controller.signal });
     const sent = worker.messages[0] as { id: number; generation: number };
     controller.abort();
-    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError', code: 'cancelled' });
+    expect(worker.terminateCount).toBe(1);
     worker.emit({
       type: 'rendered',
       id: sent.id,
@@ -179,6 +186,7 @@ describe('audio warp Worker client', () => {
         channels: [new ArrayBuffer(16)],
       },
     });
+    expect(worker.terminateCount).toBe(1);
   });
 
   it('rejects a malformed matching result instead of leaving ownership pending', async () => {

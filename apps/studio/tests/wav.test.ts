@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  compileAudioRouting,
   CURRENT_SCHEMA_VERSION,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   ScheduleEventLimitError,
 } from '@cts/project-model';
-import type { AudioClip, Clip, DrumEvent, Project, Track } from '@cts/project-model';
+import type {
+  AudioClip,
+  Clip,
+  DrumEvent,
+  Project,
+  ReadyAudioAsset,
+  Track,
+} from '@cts/project-model';
 import {
   buildScheduleEvents,
   type DrumScheduleEvent,
@@ -13,6 +21,8 @@ import {
 import {
   AudioAssetPlaybackCache,
   AudioAssetPlaybackError,
+  getAudioAssetPlaybackCache,
+  setAudioAssetBytesResolver,
   sha256Hex,
 } from '../src/audio/audioAssetResolver';
 import {
@@ -21,9 +31,14 @@ import {
   reserveHeavyAudioResources,
 } from '../src/audio/audioResourceReservation';
 import {
+  AudioClipBufferCache,
   estimateAudioWarpResourcePeakBytes,
   getAudioClipBufferCache,
+  type DerivedAudioBufferLease,
 } from '../src/audio/audioClipBuffers';
+import { compileAudioWarpRenderRequests } from '../src/audio/audioWarpPlan';
+import { resolveAudioRoutingMix } from '../src/audio/graph';
+import { acquireRuntimeProjectAudioBuffers } from '../src/audio/playback';
 import {
   nextEventsInWindow,
 } from '../src/audio/scheduler';
@@ -44,9 +59,12 @@ import {
   planWavRender,
   renderProjectToWav,
   renderSelectedTrackToWav,
+  resolveSelectedTrackRoutingMix,
+  resolveWavRenderProject,
   scheduleWavFinalFade,
 } from '../src/audio/wav';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from '../src/audio/masterBus';
+import { useStore } from '../src/state/store';
 
 type DrumGrooveSettings = {
   swing: number;
@@ -153,6 +171,29 @@ function projectWithMasterOnly(): Project {
   };
 }
 
+function canonicalMonoPcm16Wav(frameCount: number): Uint8Array {
+  const bytes = new Uint8Array(44 + frameCount * Int16Array.BYTES_PER_ELEMENT);
+  const view = new DataView(bytes.buffer);
+  for (const [offset, value] of [[0, 'RIFF'], [8, 'WAVE'], [12, 'fmt '], [36, 'data']] as const) {
+    for (let index = 0; index < value.length; index += 1) {
+      bytes[offset + index] = value.charCodeAt(index);
+    }
+  }
+  view.setUint32(4, bytes.byteLength - 8, true);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 48_000, true);
+  view.setUint32(28, 96_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  view.setUint32(40, frameCount * 2, true);
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    view.setInt16(44 + frame * 2, Math.round(Math.sin(frame / 17) * 12_000), true);
+  }
+  return bytes;
+}
+
 async function projectWithAudioClip(bytes: Uint8Array): Promise<Project> {
   const checksumSha256 = await sha256Hex(bytes);
   return {
@@ -200,6 +241,103 @@ async function projectWithAudioClip(bytes: Uint8Array): Promise<Project> {
       sends: [],
     },
   };
+}
+
+class DeterministicAudioWarpWorker {
+  static instances: DeterministicAudioWarpWorker[] = [];
+  readonly messages: unknown[] = [];
+  private readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+
+  constructor() {
+    DeterministicAudioWarpWorker.instances.push(this);
+  }
+
+  postMessage(message: unknown): void {
+    this.messages.push(message);
+    const candidate = message as {
+      type?: string;
+      id?: number;
+      generation?: number;
+      request?: {
+        targetSampleRate: number;
+        outputFrameCount: number;
+        channelCount: number;
+      };
+    };
+    if (candidate.type !== 'render' || !candidate.request) return;
+    const channels = Array.from(
+      { length: candidate.request.channelCount },
+      (_, channel) => Float32Array.from(
+        { length: candidate.request!.outputFrameCount },
+        (_unused, frame) => ((frame + channel * 7) % 31 - 15) / 16,
+      ).buffer,
+    );
+    queueMicrotask(() => {
+      const event = {
+        data: {
+          type: 'rendered',
+          id: candidate.id,
+          generation: candidate.generation,
+          pcm: {
+            sampleRate: candidate.request!.targetSampleRate,
+            frameCount: candidate.request!.outputFrameCount,
+            channelCount: candidate.request!.channelCount,
+            channels,
+          },
+        },
+      } as MessageEvent;
+      for (const listener of this.listeners.get('message') ?? []) {
+        if (typeof listener === 'function') listener(event);
+        else listener.handleEvent(event);
+      }
+    });
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  terminate(): void {}
+}
+
+function liveAudioContext(frameCount: number) {
+  return {
+    sampleRate: 48_000,
+    state: 'running',
+    decodeAudioData: vi.fn(async () => ({
+      duration: frameCount / 48_000,
+      length: frameCount,
+      sampleRate: 48_000,
+      numberOfChannels: 1,
+      getChannelData: () => new Float32Array(frameCount),
+    }) as unknown as AudioBuffer),
+    createBuffer: vi.fn((channels: number, frames: number, sampleRate: number) => ({
+      duration: frames / sampleRate,
+      length: frames,
+      sampleRate,
+      numberOfChannels: channels,
+      copyToChannel: vi.fn(),
+    }) as unknown as AudioBuffer),
+  } as unknown as AudioContext;
+}
+
+async function float32ChannelsSha256(
+  channels: readonly Float32Array[],
+): Promise<string> {
+  const totalBytes = channels.reduce((total, channel) => total + channel.byteLength, 0);
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const channel of channels) {
+    bytes.set(new Uint8Array(channel.buffer, channel.byteOffset, channel.byteLength), offset);
+    offset += channel.byteLength;
+  }
+  return sha256Hex(bytes);
 }
 
 function installOfflineContext(startRendering: () => Promise<AudioBuffer>) {
@@ -343,6 +481,19 @@ function installAudioClipOfflineContext() {
       sources.push(source);
       return source;
     }),
+    createBuffer: vi.fn((channels: number, frames: number, sampleRate: number) => {
+      const copied = Array.from({ length: channels }, () => new Float32Array(frames));
+      return {
+        numberOfChannels: channels,
+        length: frames,
+        sampleRate,
+        duration: frames / sampleRate,
+        copyToChannel: (source: Float32Array, channel: number) => {
+          copied[channel]!.set(source);
+        },
+        copied,
+      } as unknown as AudioBuffer;
+    }),
     decodeAudioData: vi.fn(async () => decoded),
     startRendering: vi.fn(async () => rendered),
   };
@@ -353,6 +504,128 @@ function installAudioClipOfflineContext() {
     }),
   );
   return { context, sources, gains, destination };
+}
+
+function enablePreserveWarp(project: Project): AudioClip {
+  project.lengthBars = 1;
+  project.lengthBeats = 4;
+  project.bpm = 240;
+  project.tempoMap = [{ id: 'wav-preserve-tempo', beat: 0, bpm: 240 }];
+  const clip = project.tracks[0]?.clips[0];
+  if (!clip || clip.type !== 'audio') throw new Error('Audio fixture clip required');
+  const audioClip = clip as AudioClip;
+  audioClip.startBeat = 0;
+  audioClip.lengthBeats = 4;
+  audioClip.loop = false;
+  audioClip.audioWarp = {
+    algorithm: 'wsola-v1',
+    formantMode: 'preserve',
+    timingEnabled: true,
+    pitchEnabled: true,
+    markers: [
+      { sourceFrame: audioClip.sourceStartFrame, targetBeatOffset: 0 },
+      {
+        sourceFrame: audioClip.sourceStartFrame + audioClip.sourceFrameCount,
+        targetBeatOffset: 4,
+      },
+    ],
+    pitchRegions: [{
+      sourceStartFrame: audioClip.sourceStartFrame,
+      sourceFrameCount: audioClip.sourceFrameCount,
+      sourcePitchCents: 6_900,
+      targetPitchCents: 7_000,
+      correctionAmount: 1,
+      transitionFrames: 0,
+    }],
+  };
+  return audioClip;
+}
+
+async function addSecondaryCanonicalAudioTrack(
+  project: Project,
+  bytes: Uint8Array,
+): Promise<ReadyAudioAsset> {
+  const asset: ReadyAudioAsset = {
+    id: 'wav-secondary-asset',
+    availability: 'ready',
+    checksumSha256: await sha256Hex(bytes),
+    originalName: 'secondary.wav',
+    mediaType: 'audio/wav',
+    byteLength: bytes.byteLength,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount: 48_000,
+  };
+  project.audioAssets = [...project.audioAssets, asset];
+  project.tracks = [...project.tracks, {
+    id: 'wav-secondary-track',
+    name: 'Secondary Audio',
+    type: 'audio',
+    role: 'general',
+    clips: [{
+      id: 'wav-secondary-clip',
+      trackId: 'wav-secondary-track',
+      type: 'audio',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      audioAssetId: asset.id,
+      sourceStartFrame: 0,
+      sourceFrameCount: 48_000,
+      fadeInFrames: 0,
+      fadeOutFrames: 0,
+      gainDb: 0,
+    }],
+    volume: 1,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: [],
+  }];
+  project.audioRouting = {
+    ...project.audioRouting,
+    outputs: [
+      ...project.audioRouting.outputs,
+      { sourceTrackId: 'wav-secondary-track', destination: { type: 'master' } },
+    ],
+  };
+  return asset;
+}
+
+function wavScopeResourceThreshold(
+  project: Project,
+  scope: Readonly<
+    | { kind: 'mix' }
+    | { kind: 'selected-track'; trackId: string }
+  >,
+): Readonly<{ sourceProject: Project; thresholdBytes: number }> {
+  const sourceProject = resolveWavRenderProject(project, scope);
+  const compiled = compileAudioRouting(project);
+  if (!compiled.ok) throw new Error('WAV threshold fixture routing must compile');
+  const routingMix = scope.kind === 'mix'
+    ? resolveAudioRoutingMix(project, compiled.plan)
+    : resolveSelectedTrackRoutingMix(project, scope.trackId, compiled.plan);
+  const renderPlan = planWavRender(
+    project,
+    buildWavScheduleEvents(sourceProject),
+    buildWavAudioClipPlans(sourceProject),
+    {
+      plan: compiled.plan,
+      audibleChannelIds: routingMix.audibleChannelIds,
+      activeEdgeIds: routingMix.activeEdgeIds,
+    },
+  );
+  const freshCache = new AudioClipBufferCache();
+  const warpResources = estimateAudioWarpResourcePeakBytes(sourceProject, freshCache);
+  return {
+    sourceProject,
+    thresholdBytes: assertWavProjectCombinedResourceBudget(
+      renderPlan,
+      sourceProject,
+      0,
+      warpResources.estimatedPeakBytes,
+    ) - warpResources.retainedDerivedBytes,
+  };
 }
 
 afterEach(() => {
@@ -1022,77 +1295,149 @@ describe('WAV render allocation budget', () => {
     expect(getReservedHeavyAudioResourceBytes()).toBe(0);
   });
 
-  it('reserves the Elastic Worker peak before resolver, Worker, or OfflineAudioContext allocation', async () => {
-    const bytes = Uint8Array.from([1, 2, 3, 4]);
+  it('enforces each scoped preserve WAV T boundary before any T-1 allocation', async () => {
+    const bytes = canonicalMonoPcm16Wav(48_000);
+    const secondaryBytes = canonicalMonoPcm16Wav(48_000);
+    new DataView(secondaryBytes.buffer).setInt16(44, 1_234, true);
     const project = await projectWithAudioClip(bytes);
-    project.lengthBars = 1;
-    project.lengthBeats = 4;
-    project.bpm = 240;
-    project.tempoMap = [{ id: 'wav-elastic-tempo', beat: 0, bpm: 240 }];
-    const clip = project.tracks[0]!.clips[0];
-    if (!clip || clip.type !== 'audio') throw new Error('audio fixture clip required');
-    const audioClip = clip as AudioClip;
-    audioClip.startBeat = 0;
-    audioClip.lengthBeats = 4;
-    audioClip.loop = false;
-    audioClip.audioWarp = {
-      algorithm: 'wsola-v1',
-      timingEnabled: true,
-      pitchEnabled: false,
-      markers: [
-        { sourceFrame: audioClip.sourceStartFrame, targetBeatOffset: 0 },
-        {
-          sourceFrame: audioClip.sourceStartFrame + audioClip.sourceFrameCount,
-          targetBeatOffset: 4,
-        },
-      ],
-      pitchRegions: [],
-    };
+    const audioClip = enablePreserveWarp(project);
+    const secondaryAsset = await addSecondaryCanonicalAudioTrack(project, secondaryBytes);
+    const bytesByAssetId = new Map([
+      ['wav-audio-asset', bytes],
+      [secondaryAsset.id, secondaryBytes],
+    ]);
     const cache = getAudioClipBufferCache();
+    const defaultAssetCache = getAudioAssetPlaybackCache();
     cache.clearUnused();
-    const plan = planWavRender(project);
-    const warpResources = estimateAudioWarpResourcePeakBytes(project, cache);
-    const assetOnlyPeak = assertWavProjectCombinedResourceBudget(
-      plan,
-      project,
-      0,
-      0,
-    );
-    const completePeak = assertWavProjectCombinedResourceBudget(
-      plan,
-      project,
-      0,
-      warpResources.estimatedPeakBytes,
-    );
-    const reservationBytes = completePeak - warpResources.retainedDerivedBytes;
-    expect(completePeak).toBeGreaterThan(assetOnlyPeak);
-
-    const competing = reserveHeavyAudioResources(
-      MAX_HEAVY_AUDIO_RESOURCE_BYTES - reservationBytes + 1,
-    );
-    const resolve = vi.fn(async () => bytes);
-    const offlineContext = vi.fn(() => {
-      throw new Error('OfflineAudioContext must not be allocated');
-    });
-    const worker = vi.fn();
-    vi.stubGlobal('OfflineAudioContext', offlineContext);
-    vi.stubGlobal('Worker', worker);
-    try {
-      await expect(renderProjectToWav(project, {
-        audioAssetResolver: { resolve },
-        audioAssetCache: new AudioAssetPlaybackCache(),
-      })).rejects.toMatchObject({
-        name: 'AudioAssetPlaybackError',
-        code: 'resource-limit',
-      });
-      expect(resolve).not.toHaveBeenCalled();
-      expect(worker).not.toHaveBeenCalled();
-      expect(offlineContext).not.toHaveBeenCalled();
-    } finally {
-      competing.release();
-      cache.clearUnused();
-    }
+    defaultAssetCache.clearUnused();
     expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+
+    const consumers = [
+      {
+        name: 'full',
+        scope: { kind: 'mix' } as const,
+        render: (
+          assetCache: AudioAssetPlaybackCache,
+          derivedCache: AudioClipBufferCache,
+          resolve: (
+            asset: ReadyAudioAsset,
+          ) => Promise<Uint8Array>,
+        ) => renderProjectToWav(project, {
+          audioAssetResolver: { resolve },
+          audioAssetCache: assetCache,
+          audioClipBufferCache: derivedCache,
+        }),
+      },
+      {
+        name: 'selected',
+        scope: { kind: 'selected-track', trackId: audioClip.trackId } as const,
+        render: (
+          assetCache: AudioAssetPlaybackCache,
+          derivedCache: AudioClipBufferCache,
+          resolve: (
+            asset: ReadyAudioAsset,
+          ) => Promise<Uint8Array>,
+        ) => renderSelectedTrackToWav(
+          project,
+          audioClip.trackId,
+          {
+            audioAssetResolver: { resolve },
+            audioAssetCache: assetCache,
+            audioClipBufferCache: derivedCache,
+          },
+        ),
+      },
+    ];
+    const thresholds = consumers.map((consumer) => ({
+      ...consumer,
+      ...wavScopeResourceThreshold(project, consumer.scope),
+    }));
+    expect(thresholds[0]!.sourceProject).toBe(project);
+    expect(thresholds[1]!.sourceProject).not.toBe(project);
+    expect(thresholds[0]!.thresholdBytes).toBeGreaterThan(
+      thresholds[1]!.thresholdBytes,
+    );
+
+    for (const consumer of thresholds) {
+      for (const remaining of [null, consumer.thresholdBytes] as const) {
+        cache.clearUnused();
+        defaultAssetCache.clearUnused();
+        const assetCache = new AudioAssetPlaybackCache();
+        const derivedCache = new AudioClipBufferCache();
+        const resolve = vi.fn(async (asset: ReadyAudioAsset) => {
+          const resolved = bytesByAssetId.get(asset.id);
+          if (!resolved) throw new Error(`Unexpected asset ${asset.id}`);
+          return resolved;
+        });
+        DeterministicAudioWarpWorker.instances = [];
+        vi.stubGlobal('Worker', DeterministicAudioWarpWorker);
+        const { context } = installAudioClipOfflineContext();
+        const competing = remaining === null
+          ? null
+          : reserveHeavyAudioResources(
+            MAX_HEAVY_AUDIO_RESOURCE_BYTES - remaining,
+          );
+        let rendered: Awaited<ReturnType<typeof renderProjectToWav>> | null = null;
+        try {
+          rendered = await consumer.render(assetCache, derivedCache, resolve);
+          expect(resolve).toHaveBeenCalled();
+          expect(DeterministicAudioWarpWorker.instances).toHaveLength(1);
+          expect(context.createBuffer).toHaveBeenCalled();
+          expect(derivedCache.entryCount).toBe(1);
+          rendered.release();
+          derivedCache.clearUnused();
+          assetCache.clearUnused();
+          competing?.release();
+          expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+        } finally {
+          rendered?.release();
+          derivedCache.clearUnused();
+          assetCache.clearUnused();
+          competing?.release();
+        }
+      }
+
+      cache.clearUnused();
+      defaultAssetCache.clearUnused();
+      const assetCache = new AudioAssetPlaybackCache();
+      const derivedCache = new AudioClipBufferCache();
+      const resolve = vi.fn(async (asset: ReadyAudioAsset) => {
+        const resolved = bytesByAssetId.get(asset.id);
+        if (!resolved) throw new Error(`Unexpected asset ${asset.id}`);
+        return resolved;
+      });
+      const createBuffer = vi.fn();
+      const offlineContext = vi.fn(() => ({ createBuffer }));
+      DeterministicAudioWarpWorker.instances = [];
+      vi.stubGlobal('OfflineAudioContext', offlineContext);
+      vi.stubGlobal('Worker', DeterministicAudioWarpWorker);
+      const acquireSpy = vi.spyOn(AudioClipBufferCache.prototype, 'acquire');
+      const competing = reserveHeavyAudioResources(
+        MAX_HEAVY_AUDIO_RESOURCE_BYTES - consumer.thresholdBytes + 1,
+      );
+      try {
+        await expect(consumer.render(assetCache, derivedCache, resolve)).rejects.toMatchObject({
+          name: 'AudioAssetPlaybackError',
+          code: 'resource-limit',
+        });
+        expect(resolve, `${consumer.name} resolver`).not.toHaveBeenCalled();
+        expect(DeterministicAudioWarpWorker.instances).toHaveLength(0);
+        expect(offlineContext).not.toHaveBeenCalled();
+        expect(createBuffer).not.toHaveBeenCalled();
+        expect(acquireSpy).not.toHaveBeenCalled();
+        expect(derivedCache.entryCount).toBe(0);
+        expect(derivedCache.retainedDerivedBytes).toBe(0);
+        expect(assetCache.retainedDecodedBytes).toBe(0);
+        expect(defaultAssetCache.retainedDecodedBytes).toBe(0);
+        expect(getReservedHeavyAudioResourceBytes()).toBe(competing.bytes);
+      } finally {
+        acquireSpy.mockRestore();
+        competing.release();
+        derivedCache.clearUnused();
+        assetCache.clearUnused();
+      }
+      expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+    }
   });
 
   it('rejects an hours-long valid timeline before constructing OfflineAudioContext', () => {
@@ -1460,6 +1805,115 @@ describe('WAV Audio Clip integration', () => {
     // ownership remains with TrackGraph and never reaches the destination.
     expect(clipGain?.disconnectCalls).toBe(1);
     expect(destination.disconnectCalls).toBe(0);
+  });
+
+  it('shares one public live preserve derivation with full and selected-track WAV exports', async () => {
+    const bytes = canonicalMonoPcm16Wav(48_000);
+    const project = await projectWithAudioClip(bytes);
+    const clip = enablePreserveWarp(project);
+    const [request] = compileAudioWarpRenderRequests(project);
+    if (!request) throw new Error('preserve render request required');
+    const cache = getAudioClipBufferCache();
+    const audioAssetCache = getAudioAssetPlaybackCache();
+    cache.clearUnused();
+    audioAssetCache.clearUnused();
+    DeterministicAudioWarpWorker.instances = [];
+    vi.stubGlobal('Worker', DeterministicAudioWarpWorker);
+    const resolve = vi.fn(async () => bytes);
+    const releaseResolver = setAudioAssetBytesResolver({ resolve });
+    const acquireSpy = vi.spyOn(AudioClipBufferCache.prototype, 'acquire');
+    const original = useStore.getState();
+    useStore.setState({
+      project,
+      transport: {
+        ...original.transport,
+        phase: 'starting',
+        isPlaying: false,
+        playbackRequestId: original.transport.playbackRequestId + 1,
+      },
+    });
+    let liveLease: Awaited<ReturnType<typeof acquireRuntimeProjectAudioBuffers>> | null = null;
+    let fullRender: Awaited<ReturnType<typeof renderProjectToWav>> | null = null;
+    let selectedRender: Awaited<ReturnType<typeof renderSelectedTrackToWav>> | null = null;
+
+    try {
+      liveLease = await acquireRuntimeProjectAudioBuffers(
+        project,
+        liveAudioContext(48_000),
+        () => true,
+      );
+      installAudioClipOfflineContext();
+      fullRender = await renderProjectToWav(project, {
+        audioAssetResolver: { resolve },
+        audioAssetCache: new AudioAssetPlaybackCache(),
+      });
+      installAudioClipOfflineContext();
+      selectedRender = await renderSelectedTrackToWav(project, clip.trackId, {
+        audioAssetResolver: { resolve },
+        audioAssetCache: new AudioAssetPlaybackCache(),
+      });
+
+      expect(acquireSpy).toHaveBeenCalledTimes(3);
+      const cacheKeys = acquireSpy.mock.calls.map(([candidate]) => candidate.cacheKey);
+      expect(cacheKeys).toEqual([
+        request.cacheKey,
+        request.cacheKey,
+        request.cacheKey,
+      ]);
+      const derivedLeases = await Promise.all(
+        acquireSpy.mock.results.map(({ value }) => (
+          value as Promise<DerivedAudioBufferLease>
+        )),
+      );
+      expect(derivedLeases.map(({ key }) => key)).toEqual(cacheKeys);
+      expect(derivedLeases[1]!.pcm).toBe(derivedLeases[0]!.pcm);
+      expect(derivedLeases[2]!.pcm).toBe(derivedLeases[0]!.pcm);
+      for (const { pcm } of derivedLeases) {
+        expect(pcm).toMatchObject({
+          sampleRate: request.targetSampleRate,
+          frameCount: request.outputFrameCount,
+          channelCount: request.channelCount,
+        });
+        expect(pcm.channels).toHaveLength(request.channelCount);
+        expect(pcm.channels.every((channel) => channel.length === request.outputFrameCount))
+          .toBe(true);
+      }
+      const pcmHashes = await Promise.all(
+        derivedLeases.map(({ pcm }) => float32ChannelsSha256(pcm.channels)),
+      );
+      expect(new Set(pcmHashes).size).toBe(1);
+      const renderMessages = DeterministicAudioWarpWorker.instances.flatMap(
+        ({ messages }) => messages.filter(
+          (message) => (message as { type?: string }).type === 'render',
+        ),
+      );
+      expect(DeterministicAudioWarpWorker.instances).toHaveLength(1);
+      expect(renderMessages).toHaveLength(1);
+      expect(cache.entryCount).toBe(1);
+
+      fullRender.release();
+      selectedRender.release();
+      expect(cache.entryCount).toBe(1);
+      liveLease.release();
+      cache.clearUnused();
+      audioAssetCache.clearUnused();
+      expect(cache.entryCount).toBe(0);
+      expect(cache.retainedDerivedBytes).toBe(0);
+      expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+    } finally {
+      fullRender?.release();
+      selectedRender?.release();
+      liveLease?.release();
+      releaseResolver();
+      cache.clearUnused();
+      audioAssetCache.clearUnused();
+      acquireSpy.mockRestore();
+      vi.unstubAllGlobals();
+      useStore.setState({
+        project: original.project,
+        transport: original.transport,
+      });
+    }
   });
 
   it('uses the Track scalar for a bypassed lane in offline WAV scheduling', async () => {

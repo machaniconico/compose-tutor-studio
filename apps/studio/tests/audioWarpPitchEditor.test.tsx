@@ -71,10 +71,12 @@ vi.mock('react', async (importOriginal) => {
 type ElementProps = {
   children?: ReactNode;
   role?: string;
+  type?: string;
   tabIndex?: number;
   'aria-label'?: string;
   disabled?: boolean;
   onClick?: () => void;
+  onChange?: (event: { currentTarget: { checked: boolean } }) => void;
   onFocus?: () => void;
   onKeyDown?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   onPointerDown?: (event: unknown) => void;
@@ -200,6 +202,9 @@ describe('AudioWarpPitchEditor accessibility shell', () => {
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain('一度に一音だけ鳴る素材向け');
     expect(html).toContain('音程をローカル解析');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('音程を変えても音色を保つ');
+    expect(html).toContain('補正前と補正後を聴き比べて確認してください');
     expect(html).toContain('解析をキャンセル');
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain('role="status"');
@@ -556,6 +561,63 @@ describe('AudioWarpPitchEditor accessibility shell', () => {
       'pitchRegions.0.confidence',
     );
     expect((hooks.states[0] as AudioClipAnalysisResult).regions).toHaveLength(2);
+  });
+
+  it('commits the native formant checkbox and every visible canonical candidate atomically', () => {
+    const { project, clip } = fixture();
+    const analysis = analysisFixture();
+    hooks.states = [analysis, 'idle', 0, 0, 1];
+    const onCommit = vi.fn(() => true);
+    const tree = AudioPitchCorrectionEditor({
+      project,
+      clip,
+      asset,
+      warp: { ...linearAudioWarp(clip), formantMode: 'off' },
+      disabled: false,
+      comparePitchBefore: false,
+      onComparePitchBeforeChange: vi.fn(() => true),
+      onCommit,
+      onNotice: vi.fn(),
+    });
+    const checkbox = findAll(
+      tree,
+      (element) => element.type === 'input' && element.props.type === 'checkbox',
+    )[0];
+    expect(checkbox?.props.disabled).toBe(false);
+
+    checkbox?.props.onChange?.({ currentTarget: { checked: true } });
+
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(onCommit).toHaveBeenCalledWith({
+      ...linearAudioWarp(clip),
+      formantMode: 'preserve',
+      pitchRegions: analysis.regions.map(({ confidence: _confidence, ...region }) => region),
+    }, '音色保持モードを更新しました。');
+  });
+
+  it('disables the formant checkbox while local analysis owns the visible candidates', () => {
+    const { project, clip } = fixture();
+    hooks.states = [analysisFixture(), 'analyzing', 0.5, 0, 1];
+    const onCommit = vi.fn(() => true);
+    const tree = AudioPitchCorrectionEditor({
+      project,
+      clip,
+      asset,
+      warp: { ...linearAudioWarp(clip), formantMode: 'off' },
+      disabled: false,
+      comparePitchBefore: false,
+      onComparePitchBeforeChange: vi.fn(() => true),
+      onCommit,
+      onNotice: vi.fn(),
+    });
+    const checkbox = findAll(
+      tree,
+      (element) => element.type === 'input' && element.props.type === 'checkbox',
+    )[0];
+
+    expect(checkbox?.props.disabled).toBe(true);
+    checkbox?.props.onChange?.({ currentTarget: { checked: true } });
+    expect(onCommit).not.toHaveBeenCalled();
   });
 
   it('documents the runtime-only analysis boundary next to the pitch controls', () => {

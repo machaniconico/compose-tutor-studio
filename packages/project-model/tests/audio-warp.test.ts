@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addAudioWarpTimingPoint,
+  audioWarpsEqual,
   beatToSourceFrame,
   cropAudioWarp,
   mergeAudioPitchRegions,
@@ -19,6 +20,7 @@ import {
 function warp(): AudioWarp {
   return {
     algorithm: 'wsola-v1',
+    formantMode: 'preserve',
     timingEnabled: true,
     pitchEnabled: true,
     markers: [
@@ -87,11 +89,20 @@ describe('Audio Warp pure mapping and edits', () => {
     const cropped = cropAudioWarp(original, 34_000, 82_000);
     expect(cropped.markers[0]).toEqual({ sourceFrame: 34_000, targetBeatOffset: 0 });
     expect(cropped.markers.at(-1)).toEqual({ sourceFrame: 82_000, targetBeatOffset: 2 });
+    expect(cropped.formantMode).toBe('preserve');
     const partitioned = partitionAudioWarp(original, 58_000);
+    expect(partitioned.left.formantMode).toBe('preserve');
+    expect(partitioned.right.formantMode).toBe('preserve');
     expect(partitioned.left.markers.at(-1)?.sourceFrame).toBe(58_000);
     expect(partitioned.right.markers[0]).toEqual({
       sourceFrame: 58_000,
       targetBeatOffset: 0,
     });
+  });
+
+  it('includes formantMode in semantic equality', () => {
+    const original = warp();
+    expect(audioWarpsEqual(original, { ...original })).toBe(true);
+    expect(audioWarpsEqual(original, { ...original, formantMode: 'off' })).toBe(false);
   });
 });

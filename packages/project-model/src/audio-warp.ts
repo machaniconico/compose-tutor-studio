@@ -7,11 +7,32 @@ import {
   MIN_AUDIO_WARP_STRETCH,
 } from './limits';
 import type {
+  AudioClip,
   AudioPitchRegion,
   AudioWarp,
   AudioWarpMarker,
   TempoMapEvent,
 } from './types';
+
+/** New edits opt into formant preservation; migrations explicitly choose off. */
+export function createLinearAudioWarp(
+  clip: Pick<AudioClip, 'sourceStartFrame' | 'sourceFrameCount' | 'lengthBeats'>,
+): AudioWarp {
+  return {
+    algorithm: 'wsola-v1',
+    formantMode: 'preserve',
+    timingEnabled: true,
+    pitchEnabled: true,
+    markers: [
+      { sourceFrame: clip.sourceStartFrame, targetBeatOffset: 0 },
+      {
+        sourceFrame: clip.sourceStartFrame + clip.sourceFrameCount,
+        targetBeatOffset: clip.lengthBeats,
+      },
+    ],
+    pitchRegions: [],
+  };
+}
 
 export type AudioWarpEditErrorCode =
   | 'invalid-marker'
@@ -61,6 +82,7 @@ function cloneWarp(warp: AudioWarp): AudioWarp {
 
 export function audioWarpsEqual(left: AudioWarp, right: AudioWarp): boolean {
   return left.algorithm === right.algorithm
+    && left.formantMode === right.formantMode
     && left.timingEnabled === right.timingEnabled
     && left.pitchEnabled === right.pitchEnabled
     && left.markers.length === right.markers.length

@@ -4,7 +4,9 @@ import { LocalStorageProjectRepository, type SaveRequest } from '../src';
 import { makeProject, TestStorage } from './helpers';
 
 describe('Audio Warp persistence', () => {
-  it('survives browser save-close-reopen-load exactly', async () => {
+  it.each(['off', 'preserve'] as const)(
+    'survives browser save-close-reopen-load exactly with formantMode=%s',
+    async (formantMode) => {
     const storage = new TestStorage();
     const project = makeProject('Audio Warp roundtrip');
     const track = createTrack('Voice', 'audio');
@@ -23,6 +25,7 @@ describe('Audio Warp persistence', () => {
       gainDb: 0,
       audioWarp: {
         algorithm: 'wsola-v1',
+        formantMode,
         timingEnabled: true,
         pitchEnabled: true,
         markers: [
@@ -76,5 +79,6 @@ describe('Audio Warp persistence', () => {
       const loadedClip = loaded.value.project.tracks.at(-1)!.clips[0] as AudioClip;
       expect(loadedClip.audioWarp).toEqual(clip.audioWarp);
     }
-  });
+    },
+  );
 });

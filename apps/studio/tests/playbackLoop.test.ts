@@ -7,10 +7,17 @@ import {
 } from '@cts/project-model';
 import {
   AudioAssetPlaybackError,
+  assertProjectAudioAssetCombinedResourceBudget,
+  getAudioAssetPlaybackCache,
   setAudioAssetBytesResolver,
   sha256Hex,
 } from '../src/audio/audioAssetResolver';
+import {
+  estimateAudioWarpResourcePeakBytes,
+  getAudioClipBufferCache,
+} from '../src/audio/audioClipBuffers';
 import { AudioClipPlanLimitError } from '../src/audio/audioClipPlanner';
+import { compileAudioWarpRenderRequests } from '../src/audio/audioWarpPlan';
 import {
   MAX_HEAVY_AUDIO_RESOURCE_BYTES,
   getReservedHeavyAudioResourceBytes,
@@ -31,6 +38,13 @@ import {
 import { AudioRoutingGraphError } from '../src/audio/graph';
 import { useStore } from '../src/state/store';
 
+vi.mock('../src/audio/audioWarpThread', () => ({
+  createLocalAudioWarpThread: () => Reflect.construct(
+    globalThis.Worker as unknown as new () => Worker,
+    [],
+  ),
+}));
+
 function projectWithReadyAudioAsset(checksumSha256 = '0'.repeat(64)) {
   const asset: ReadyAudioAsset = {
     id: 'live-race-asset',
@@ -46,6 +60,129 @@ function projectWithReadyAudioAsset(checksumSha256 = '0'.repeat(64)) {
   const result = createAudioTrackClip(createEmptyProject(), asset);
   if (!result.ok) throw new Error(result.error.code);
   return result.project;
+}
+
+function canonicalWav(frameCount: number): Uint8Array {
+  const bytes = new Uint8Array(44 + frameCount * Int16Array.BYTES_PER_ELEMENT);
+  const view = new DataView(bytes.buffer);
+  for (const [offset, value] of [[0, 'RIFF'], [8, 'WAVE'], [12, 'fmt '], [36, 'data']] as const) {
+    for (let index = 0; index < value.length; index += 1) {
+      bytes[offset + index] = value.charCodeAt(index);
+    }
+  }
+  view.setUint32(4, bytes.byteLength - 8, true);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 48_000, true);
+  view.setUint32(28, 96_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  view.setUint32(40, frameCount * 2, true);
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    view.setInt16(44 + frame * 2, Math.round(Math.sin(frame / 17) * 12_000), true);
+  }
+  return bytes;
+}
+
+async function liveWarpFixture() {
+  const frameCount = 9_600;
+  const bytes = canonicalWav(frameCount);
+  const asset: ReadyAudioAsset = {
+    id: 'live-warp-asset',
+    availability: 'ready',
+    checksumSha256: await sha256Hex(bytes),
+    originalName: 'live-warp.wav',
+    mediaType: 'audio/wav',
+    byteLength: bytes.byteLength,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount,
+  };
+  const result = createAudioTrackClip(createEmptyProject(), asset);
+  if (!result.ok) throw new Error(result.error.code);
+  const clip = result.project.tracks.flatMap((track) => track.clips)
+    .find((candidate) => candidate.type === 'audio');
+  if (!clip || clip.type !== 'audio') throw new Error('audio clip missing');
+  clip.audioWarp = {
+    algorithm: 'wsola-v1',
+    formantMode: 'preserve',
+    timingEnabled: true,
+    pitchEnabled: true,
+    markers: [
+      { sourceFrame: 0, targetBeatOffset: 0 },
+      { sourceFrame: frameCount, targetBeatOffset: clip.lengthBeats },
+    ],
+    pitchRegions: [{
+      sourceStartFrame: 0,
+      sourceFrameCount: frameCount,
+      sourcePitchCents: 6_900,
+      targetPitchCents: 7_000,
+      correctionAmount: 1,
+      transitionFrames: 0,
+    }],
+  };
+  return { project: result.project, bytes };
+}
+
+class CpuBoundWorker {
+  static instances: CpuBoundWorker[] = [];
+  static completeRenders = false;
+  readonly messages: unknown[] = [];
+  terminateCount = 0;
+  private readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+
+  constructor() {
+    CpuBoundWorker.instances.push(this);
+  }
+
+  postMessage(message: unknown): void {
+    this.messages.push(message);
+    const candidate = message as {
+      type?: string;
+      id?: number;
+      generation?: number;
+      request?: { targetSampleRate: number; outputFrameCount: number; channelCount: number };
+    };
+    if (CpuBoundWorker.completeRenders && candidate.type === 'render' && candidate.request) {
+      queueMicrotask(() => {
+        const event = {
+          data: {
+            type: 'rendered',
+            id: candidate.id,
+            generation: candidate.generation,
+            pcm: {
+              sampleRate: candidate.request!.targetSampleRate,
+              frameCount: candidate.request!.outputFrameCount,
+              channelCount: candidate.request!.channelCount,
+              channels: Array.from(
+                { length: candidate.request!.channelCount },
+                () => new ArrayBuffer(candidate.request!.outputFrameCount * 4),
+              ),
+            },
+          },
+        } as MessageEvent;
+        for (const listener of this.listeners.get('message') ?? []) {
+          if (typeof listener === 'function') listener(event);
+          else listener.handleEvent(event);
+        }
+      });
+    }
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  terminate(): void {
+    this.terminateCount += 1;
+  }
 }
 
 describe('normalizeTransportLoop', () => {
@@ -280,6 +417,204 @@ describe('classifyPlaybackStartFailure', () => {
 });
 
 describe('live heavy-audio reservation', () => {
+  it.each(['supersede', 'stop', 'external-abort'] as const)(
+    'terminates a CPU-bound formant Worker and leaves no partial live ownership on %s',
+    async (operation) => {
+      const { project, bytes } = await liveWarpFixture();
+      useStore.setState({
+        project,
+        projectOperationBusy: false,
+        audioRecordingOperationId: null,
+      });
+      useStore.getState().stop();
+      const clip = project.tracks.flatMap((track) => track.clips)
+        .find((candidate) => candidate.type === 'audio');
+      if (!clip || clip.type !== 'audio' || !clip.audioWarp) {
+        throw new Error('audio warp clip missing');
+      }
+      const accepted = useStore.getState();
+      expect(compileAudioWarpRenderRequests(accepted.project)).toHaveLength(1);
+      const resolve = vi.fn(async () => bytes);
+      const releaseResolver = setAudioAssetBytesResolver({ resolve });
+      const external = new AbortController();
+      CpuBoundWorker.instances = [];
+      CpuBoundWorker.completeRenders = false;
+      vi.stubGlobal('Worker', CpuBoundWorker);
+      getAudioAssetPlaybackCache().clearUnused();
+      getAudioClipBufferCache().clearUnused();
+      const context = {
+        sampleRate: 48_000,
+        state: 'running',
+        decodeAudioData: vi.fn(async () => ({
+          length: 9_600,
+          duration: 0.2,
+          sampleRate: 48_000,
+          numberOfChannels: 1,
+        }) as AudioBuffer),
+        createBuffer: vi.fn((_channels: number, length: number, sampleRate: number) => ({
+          length,
+          sampleRate,
+          numberOfChannels: 1,
+          copyToChannel: vi.fn(),
+        }) as unknown as AudioBuffer),
+      } as unknown as AudioContext;
+      const transport = useStore.getState().transport;
+      useStore.setState({
+        transport: {
+          ...transport,
+          phase: 'starting',
+          isPlaying: false,
+          playbackRequestId: transport.playbackRequestId + 1,
+        },
+      });
+      try {
+        const pending = acquireRuntimeProjectAudioBuffers(
+          accepted.project,
+          context,
+          () => true,
+          external.signal,
+        );
+        await vi.waitFor(() => {
+          expect(CpuBoundWorker.instances).toHaveLength(1);
+          expect(CpuBoundWorker.instances[0]!.messages.some(
+            (message) => (message as { type?: string }).type === 'render',
+          )).toBe(true);
+        });
+        if (operation === 'external-abort') {
+          external.abort();
+        } else if (operation === 'stop') {
+          useStore.getState().stop();
+        } else {
+          const current = useStore.getState().transport;
+          useStore.setState({
+            transport: {
+              ...current,
+              playbackRequestId: current.playbackRequestId + 1,
+            },
+          });
+        }
+        await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+        expect(CpuBoundWorker.instances[0]!.terminateCount).toBe(1);
+        expect(getAudioClipBufferCache().entryCount).toBe(0);
+        expect(getAudioClipBufferCache().retainedDerivedBytes).toBe(0);
+        expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+        expect(useStore.getState().project).toBe(accepted.project);
+        expect(useStore.getState().past).toBe(accepted.past);
+        expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
+          .find((candidate) => candidate.id === clip.id)?.audioWarp?.formantMode)
+          .toBe('preserve');
+
+        // A terminated operation Worker never remains reachable through the
+        // cache. The next acquisition must create a fresh Worker and may only
+        // adopt that fresh operation's result.
+        CpuBoundWorker.completeRenders = true;
+        const current = useStore.getState().transport;
+        useStore.setState({
+          transport: {
+            ...current,
+            phase: 'starting',
+            isPlaying: false,
+            playbackRequestId: current.playbackRequestId + 1,
+          },
+        });
+        const nextLease = await acquireRuntimeProjectAudioBuffers(
+          accepted.project,
+          context,
+          () => true,
+        );
+        expect(CpuBoundWorker.instances).toHaveLength(2);
+        expect(CpuBoundWorker.instances[1]).not.toBe(CpuBoundWorker.instances[0]);
+        nextLease.release();
+        getAudioClipBufferCache().clearUnused();
+        expect(getAudioClipBufferCache().entryCount).toBe(0);
+      } finally {
+        releaseResolver();
+        getAudioAssetPlaybackCache().clearUnused();
+        getAudioClipBufferCache().clearUnused();
+        vi.unstubAllGlobals();
+        useStore.getState().stop();
+      }
+    },
+  );
+
+  it('uses the production combined T_live boundary before resolver, Worker, and AudioBuffer work', async () => {
+    const { project, bytes } = await liveWarpFixture();
+    getAudioAssetPlaybackCache().clearUnused();
+    getAudioClipBufferCache().clearUnused();
+    const warpPeak = estimateAudioWarpResourcePeakBytes(project).estimatedPeakBytes;
+    const total = assertProjectAudioAssetCombinedResourceBudget(
+      project,
+      48_000,
+      0,
+      warpPeak,
+    ).estimatedPeakBytes;
+    const createBuffer = vi.fn((_channels: number, length: number, sampleRate: number) => ({
+      length,
+      sampleRate,
+      numberOfChannels: 1,
+      copyToChannel: vi.fn(),
+    }) as unknown as AudioBuffer);
+    const context = {
+      sampleRate: 48_000,
+      state: 'running',
+      decodeAudioData: vi.fn(async () => ({
+        length: 9_600,
+        duration: 0.2,
+        sampleRate: 48_000,
+        numberOfChannels: 1,
+      }) as AudioBuffer),
+      createBuffer,
+    } as unknown as AudioContext;
+    vi.stubGlobal('Worker', CpuBoundWorker);
+    for (const remaining of [total, total - 1]) {
+      CpuBoundWorker.instances = [];
+      CpuBoundWorker.completeRenders = true;
+      const resolve = vi.fn(async () => bytes);
+      const releaseResolver = setAudioAssetBytesResolver({ resolve });
+      const outer = reserveHeavyAudioResources(
+        MAX_HEAVY_AUDIO_RESOURCE_BYTES - remaining,
+      );
+      const transport = useStore.getState().transport;
+      useStore.setState({
+        project,
+        transport: {
+          ...transport,
+          phase: 'starting',
+          isPlaying: false,
+          playbackRequestId: transport.playbackRequestId + 1,
+        },
+      });
+      try {
+        const createBufferCallsBefore = createBuffer.mock.calls.length;
+        const pending = acquireRuntimeProjectAudioBuffers(
+          project,
+          context,
+          () => true,
+        );
+        if (remaining === total) {
+          const lease = await pending;
+          expect(resolve).toHaveBeenCalledOnce();
+          expect(CpuBoundWorker.instances).toHaveLength(1);
+          expect(context.createBuffer).toHaveBeenCalled();
+          lease.release();
+        } else {
+          await expect(pending).rejects.toMatchObject({ code: 'resource-limit' });
+          expect(resolve).not.toHaveBeenCalled();
+          expect(CpuBoundWorker.instances).toHaveLength(0);
+          expect(createBuffer.mock.calls).toHaveLength(createBufferCallsBefore);
+        }
+      } finally {
+        releaseResolver();
+        outer.release();
+        getAudioAssetPlaybackCache().clearUnused();
+        getAudioClipBufferCache().clearUnused();
+        useStore.getState().stop();
+      }
+      expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+    }
+    vi.unstubAllGlobals();
+  });
+
   it('rejects a competing startup before resolver I/O', async () => {
     const first = reserveHeavyAudioResources(MAX_HEAVY_AUDIO_RESOURCE_BYTES - 1);
     const resolve = vi.fn(async () => Uint8Array.from([1, 2, 3, 4]));

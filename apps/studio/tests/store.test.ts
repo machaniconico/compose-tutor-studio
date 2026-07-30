@@ -55,6 +55,7 @@ function addAudioTrackFixture(suffix: string): string {
 function elasticAudioWarpFixture() {
   return {
     algorithm: 'wsola-v1' as const,
+    formantMode: 'off' as const,
     timingEnabled: true,
     pitchEnabled: false,
     markers: [

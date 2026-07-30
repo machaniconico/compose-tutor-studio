@@ -293,6 +293,37 @@ function migrateV8ToV9(
   };
 }
 
+/** Preserve v9 audio exactly by disabling the newly persisted formant processor. */
+function migrateV9ToV10(
+  project: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const tracks = Array.isArray(project.tracks)
+    ? project.tracks.map((track) => {
+        if (typeof track !== 'object' || track === null || Array.isArray(track)) return track;
+        const trackRecord = track as Readonly<Record<string, unknown>>;
+        const clips = Array.isArray(trackRecord.clips)
+          ? trackRecord.clips.map((clip) => {
+              if (typeof clip !== 'object' || clip === null || Array.isArray(clip)) return clip;
+              const clipRecord = clip as Readonly<Record<string, unknown>>;
+              const warp = clipRecord.audioWarp;
+              if (typeof warp !== 'object' || warp === null || Array.isArray(warp)) {
+                return { ...clipRecord };
+              }
+              return {
+                ...clipRecord,
+                audioWarp: {
+                  ...(warp as Readonly<Record<string, unknown>>),
+                  formantMode: 'off',
+                },
+              };
+            })
+          : trackRecord.clips;
+        return { ...trackRecord, clips };
+      })
+    : project.tracks;
+  return { ...project, schemaVersion: 10, tracks };
+}
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 1, to: 2, migrate: migrateV1ToV2 },
   { from: 2, to: 3, migrate: migrateV2ToV3 },
@@ -302,6 +333,7 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 6, to: 7, migrate: migrateV6ToV7 },
   { from: 7, to: 8, migrate: migrateV7ToV8 },
   { from: 8, to: 9, migrate: migrateV8ToV9 },
+  { from: 9, to: 10, migrate: migrateV9ToV10 },
 ]);
 
 export type ProjectMigrationErrorCode =

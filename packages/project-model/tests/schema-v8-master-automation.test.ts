@@ -48,8 +48,8 @@ describe('schema-v8 effective-Master volume automation', () => {
     const { project } = projectWithCompatibilityMaster();
     const v7 = { ...structuredClone(project), schemaVersion: 7 };
     const migrated = migrateProject(v7);
-    expect(CURRENT_SCHEMA_VERSION).toBe(9);
-    expect(migrated).toEqual({ ...v7, schemaVersion: 9 });
+    expect(CURRENT_SCHEMA_VERSION).toBe(10);
+    expect(migrated).toEqual({ ...v7, schemaVersion: 10 });
   });
 
   it('rejects every Master automation lane and Read id during legacy-v7 inspection', () => {

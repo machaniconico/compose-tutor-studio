@@ -84,7 +84,7 @@
 - Pattern/Clip: 1〜4小節単位の素材を組み合わせる
 - Track管理（部分実装）: instrument / drum / stereo Bus追加、音源fileからのAudio Track追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v4の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない。Folder / Stackは後続とする
 - Audio Clip: app-ownedな48 kHz mono/stereo PCM 16-bit WAVへ正規化し、移動、trim、gain、fade、loop、split、独立複製、削除を非破壊に行う。loop中は位相fieldがまだないためleft trimとsplitを無効にする
-- Elastic Audio（初期スライス）: ready・非loopのAudio Clipに、source frameと曲上のbeatを対応付けるタイミングpoint、単音pitch region、補正量を非破壊metadataとして保存する。解析波形とpitch候補を確認して編集し、補正前 / 補正後を同じタイミングで試聴できる。formant / vibrato編集、polyphonic pitch、take folder / loop-cycle、複数Trackの位相をそろえたstretch、自動クオンタイズ / groove抽出は後続とする
+- Elastic Audio（初期スライス）: ready・非loopのAudio Clipに、source frameと曲上のbeatを対応付けるタイミングpoint、単音pitch region、補正量、schema v10の`formantMode: 'off' | 'preserve'`を非破壊metadataとして保存する。「音程を変えても音色を保つ」はoff / preserveを切り替え、Undo / Redo、保存 / 再読込、live、全体WAV、選択Track WAVに同じWSOLA派生PCM経路で反映する。manual formant editing、vibrato編集、polyphonic pitch、極端なrate / shiftの品質保証、take folder / loop-cycle、複数Trackの位相をそろえたstretch、自動クオンタイズ / groove抽出は後続とする。実声品質はライセンス済み音声のブラインドA/BまたはMUSHRAで別途評価する
 - Audio Take Comp: 同一Audio Track・同一時間窓の既存非loop Clipをschema v5のtake folderへまとめるほか、明示loop範囲を2〜128回だけ連続録音した各周をexact Audio Assetとして自動take folder化する。bounded Auto Punchでは空き範囲へexact Clipを置くか、範囲を覆う既存Clip / exact folderへ新takeを非破壊追加して全域採用する。生成全体を1 gesture = 1 Undoで保存する
 
 ### 3.3 Learning
@@ -130,7 +130,7 @@
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
 | VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
 | Quick Punch / 長時間streaming / 複数入力 / MIDI・named comp | 単一入力の伴奏同期録音、物理loopback実測校正、既存Clipの手動take folder化、明示loopの固定pass cycle capture、pre/post-roll付きbounded Auto Punchと非破壊take採用までは持つ。disk streaming、既存再生を継続したまま任意時点でin/outするQuick Punch、自動input monitoring、複数入力、MIDI comp、複数の名前付きcomp / flattenは持たない | boundedなlocal captureを3OS実機で検証した後、長時間streaming、Quick Punch、複数I/Oを独立gateで追加する |
-| 高度なAudio time / pitch編集 | 60秒以内のready・非loop Clipに対するmanual timing pointと単音pitch correctionまでは利用可能。formant保持 / 編集、vibrato編集、polyphonic pitch、take folder / loop-cycleへのwarp、phase-coherent multitrack、audio quantize / groove抽出、audio follow / Smart Tempoは持たない | 初期スライスの音質・live/WAV parity・3OS性能を固定した後、用途ごとに独立した品質gateで追加する |
+| 高度なAudio time / pitch編集 | 60秒以内のready・非loop Clipに対するmanual timing point、単音pitch correction、formant off / preserveは利用可能。manual formant編集、vibrato編集、polyphonic pitch、unsupported rate / extreme shift品質、実声のライセンス済みブラインドA/BまたはMUSHRA、take folder / loop-cycleへのwarp、phase-coherent multitrack、audio quantize / groove抽出、audio follow / Smart Tempoは持たない | 初期スライスの音質・live/WAV parity・3OS性能を固定した後、用途ごとに独立した品質gateで追加する |
 | 高度なAutomation target / mode | non-Master Trackのvolume / panとeffective Masterのoutput volumeに対するRead / Touch / Latch / Write、Global / TrackまたはMaster / lane Read gateまでは利用可能。Master pan、later Master、insert / send / tempo、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass管理は持たない | 現行passのfailure atomicityと実機操作を固定した後、target追加と高度modeを別々のgateで追加 |
 
 ## 5. 非機能要件

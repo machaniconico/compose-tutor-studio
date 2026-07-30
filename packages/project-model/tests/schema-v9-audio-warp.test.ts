@@ -41,6 +41,7 @@ function fixture(): { project: Project; clip: AudioClip; warp: AudioWarp } {
   };
   const warp: AudioWarp = {
     algorithm: 'wsola-v1',
+    formantMode: 'preserve',
     timingEnabled: true,
     pitchEnabled: true,
     markers: [
@@ -85,8 +86,8 @@ describe('schema-v9 Audio Warp', () => {
     v8.schemaVersion = 8;
     const tracks = v8.tracks as Array<{ clips: Array<Record<string, unknown>> }>;
     delete tracks.at(-1)!.clips[0]!.audioWarp;
-    expect(CURRENT_SCHEMA_VERSION).toBe(9);
-    expect(migrateProject(v8)).toEqual({ ...v8, schemaVersion: 9 });
+    expect(CURRENT_SCHEMA_VERSION).toBe(10);
+    expect(migrateProject(v8)).toEqual({ ...v8, schemaVersion: 10 });
 
     tracks.at(-1)!.clips[0]!.audioWarp = {};
     const smuggled = decodeProject(v8);

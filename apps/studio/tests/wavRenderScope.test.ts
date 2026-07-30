@@ -13,6 +13,7 @@ import {
   planAudioClipPlaybackWindow,
   type AudioClipPlaybackPlan,
 } from '../src/audio/audioClipPlanner';
+import { compileAudioWarpRenderRequestIndex } from '../src/audio/audioWarpPlan';
 import { createProjectMusicalTime } from '../src/audio/musicalTime';
 import {
   MAX_WAV_SCHEDULE_EVENTS,
@@ -57,14 +58,22 @@ function elasticAudioProjectionFixture(): Readonly<{
     gainDb: -4,
     audioWarp: {
       algorithm: 'wsola-v1',
+      formantMode: 'preserve' as const,
       timingEnabled: true,
-      pitchEnabled: false,
+      pitchEnabled: true,
       markers: [
         { sourceFrame: 48_000, targetBeatOffset: 0 },
         { sourceFrame: 120_000, targetBeatOffset: 2 },
         { sourceFrame: 192_000, targetBeatOffset: 6 },
       ],
-      pitchRegions: [],
+      pitchRegions: [{
+        sourceStartFrame: 48_000,
+        sourceFrameCount: 144_000,
+        sourcePitchCents: 6_900,
+        targetPitchCents: 7_000,
+        correctionAmount: 1,
+        transitionFrames: 0,
+      }],
     },
   };
   const track: Track = {
@@ -154,6 +163,25 @@ describe('WAV render scope', () => {
       .toEqual(liveProjection);
     expect(elasticPlanProjection(findFixturePlan(selectedPlans), selectedProject))
       .toEqual(liveProjection);
+
+    const liveRequest = createAudioClipPlaybackIndex(project).warpRequestsByClipId.get(clipId);
+    const fullRequest = compileAudioWarpRenderRequestIndex(project).byClipId.get(clipId);
+    const selectedRequest = compileAudioWarpRenderRequestIndex(selectedProject).byClipId.get(clipId);
+    expect(liveRequest).toBeDefined();
+    expect(fullRequest).toBeDefined();
+    expect(selectedRequest).toBeDefined();
+    expect(fullRequest?.cacheKey).toBe(liveRequest?.cacheKey);
+    expect(selectedRequest?.cacheKey).toBe(liveRequest?.cacheKey);
+    expect(liveRequest?.formantMode).toBe('preserve');
+
+    const offProject = structuredClone(project);
+    const offClip = offProject.tracks.find((track) => track.id === trackId)?.clips[0];
+    if (!offClip || offClip.type !== 'audio' || !offClip.audioWarp) {
+      throw new Error('formant cache-key fixture clip missing');
+    }
+    offClip.audioWarp = { ...offClip.audioWarp, formantMode: 'off' };
+    expect(compileAudioWarpRenderRequestIndex(offProject).byClipId.get(clipId)?.cacheKey)
+      .not.toBe(liveRequest?.cacheKey);
   });
 
   it('preserves the exact Project identity for a full mix', () => {

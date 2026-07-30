@@ -107,6 +107,7 @@ export type Clip = {
 };
 
 export type AudioWarpAlgorithm = 'wsola-v1';
+export type AudioWarpFormantMode = 'off' | 'preserve';
 
 export type AudioWarpMarker = Readonly<{
   /** Absolute frame in the immutable ready AudioAsset. */
@@ -127,6 +128,8 @@ export type AudioPitchRegion = Readonly<{
 
 export type AudioWarp = Readonly<{
   algorithm: AudioWarpAlgorithm;
+  /** Clip-wide vocal resonance handling for pitch correction. */
+  formantMode: AudioWarpFormantMode;
   timingEnabled: boolean;
   pitchEnabled: boolean;
   markers: readonly AudioWarpMarker[];

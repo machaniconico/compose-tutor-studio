@@ -1,6 +1,7 @@
 import {
   MAX_DERIVED_AUDIO_PCM_BYTES,
   compileAudioWarpRenderRequestIndex,
+  computeAudioWarpFormantResourcePlan,
   type AudioWarpRenderRequest,
 } from './audioWarpPlan';
 import {
@@ -267,22 +268,22 @@ export function estimateAudioWarpRenderWorkingBytes(
     request.outputFrameCount,
     request.channelCount,
   );
-  try {
-    return checkedHeavyAudioResourceTotal([
-      sourceBytes,
-      sourceBytes,
-      sourceBytes,
-      sourceBytes,
-      outputBytes,
-      outputBytes,
-      outputBytes,
-      outputBytes,
-      outputBytes,
-    ]);
-  } catch (error) {
-    if (!(error instanceof AudioResourceReservationError)) throw error;
+  const legacyPeak = () => checkedWarpTotal([
+    sourceBytes, sourceBytes, sourceBytes, sourceBytes,
+    outputBytes, outputBytes, outputBytes, outputBytes, outputBytes,
+  ]);
+  if (request.formantMode === 'off') return legacyPeak();
+  const plan = computeAudioWarpFormantResourcePlan({
+    sourceBytes,
+    outputBytes,
+    outputFrames: request.outputFrameCount,
+    channelCount: request.channelCount,
+    sampleRate: request.targetSampleRate,
+  });
+  if (!plan.accepted) {
     throw new AudioWarpDspError('resource-limit', 'Elastic Audio working memory overflowed.');
   }
+  return plan.processingPeakBytes;
 }
 
 export const AudioWarpDerivedPcmCache = AudioClipBufferCache;
@@ -342,10 +343,6 @@ export async function acquireAudioClipPlaybackBuffers(
   const playbackBufferReservations: HeavyAudioResourceReservation[] = [];
   const buffers = new Map<string, AudioBuffer>();
   const acquiredCacheKeys = new Set<string>();
-  const workerOwnership: {
-    client: AudioWarpWorkerClient | null;
-    generation: number | undefined;
-  } = { client: null, generation: undefined };
   try {
     for (const group of groupRequestsByCanonicalWindow(compiled.requests)) {
       let canonicalWindow: CanonicalPcm16 | null = null;
@@ -366,6 +363,10 @@ export async function acquireAudioClipPlaybackBuffers(
           const lease = await cache.acquire(
             request,
             async (candidate, signal) => {
+              // Cancellation can race with canonical-window preparation or the
+              // lazy Worker import. Do not construct a new operation Worker
+              // after the owning playback generation has already ended.
+              if (signal?.aborted) throw cancelled();
               if (!canonicalWindow) {
                 canonicalOwnership.reservation = reserveCanonicalWindow(
                   candidate,
@@ -397,14 +398,22 @@ export async function acquireAudioClipPlaybackBuffers(
               if (options.renderer) {
                 return options.renderer(windowRequest, sourceWindow, signal);
               }
-              if (!workerOwnership.client) {
-                workerOwnership.client = await createWorkerClient();
-                workerOwnership.generation = workerOwnership.client.beginGeneration();
+              // The cache entry owns this Worker render. A caller that joins
+              // the same entry may outlive the caller that created it, so only
+              // the cache's zero-waiter signal may end CPU work.
+              const client = await createWorkerClient(signal);
+              try {
+                if (signal?.aborted) {
+                  throw cancelled();
+                }
+                const generation = client.beginGeneration();
+                return await client.render(windowRequest, sourceWindow, {
+                  ...(signal ? { signal } : {}),
+                  generation,
+                });
+              } finally {
+                client.dispose();
               }
-              return workerOwnership.client.render(windowRequest, sourceWindow, {
-                ...(signal ? { signal } : {}),
-                generation: workerOwnership.generation!,
-              });
             },
             {
               ...(options.signal ? { signal: options.signal } : {}),
@@ -438,8 +447,6 @@ export async function acquireAudioClipPlaybackBuffers(
     source.release();
     cache.clearUnused();
     throw normalizeWarpError(error);
-  } finally {
-    workerOwnership.client?.dispose();
   }
 }
 
@@ -655,11 +662,13 @@ function normalizeWarpError(error: unknown): AudioWarpDspError {
   return new AudioWarpDspError('invalid-pcm', 'Elastic Audio preparation failed.');
 }
 
-async function createWorkerClient(): Promise<AudioWarpWorkerClient> {
+async function createWorkerClient(signal?: AbortSignal): Promise<AudioWarpWorkerClient> {
   try {
     const { createLocalAudioWarpThread } = await import('./audioWarpThread');
+    if (signal?.aborted) throw cancelled();
     return new AudioWarpWorkerClient(createLocalAudioWarpThread());
-  } catch {
+  } catch (error) {
+    if (error instanceof AudioWarpDspError) throw error;
     throw new AudioWarpDspError(
       'invalid-pcm',
       'Elastic Audio Worker is unavailable in this browser.',
