@@ -1,5 +1,5 @@
 use atomicwrites::{AllowOverwrite, AtomicFile};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{Read, Write},
@@ -20,11 +20,18 @@ const PROJECT_MAX_BYTES: usize = 16 * 1024 * 1024;
 const MIDI_MAX_BYTES: usize = 8 * 1024 * 1024;
 const WAV_MAX_BYTES: usize = 192 * 1024 * 1024;
 const SOURCE_AUDIO_MAX_BYTES: usize = 128 * 1024 * 1024;
+const PROJECT_BUNDLE_MAX_BYTES: usize = 128 * 1024 * 1024;
+const PROJECT_BUNDLE_MANIFEST_MAX_BYTES: usize = 512 * 1024;
+const PROJECT_BUNDLE_HEADER_BYTES: usize = 32;
+const PROJECT_BUNDLE_MAGIC: &[u8; 8] = b"CTSBNDL1";
+const PROJECT_BUNDLE_VERSION: u16 = 1;
+const MAX_PROJECT_BUNDLE_ASSETS: usize = 4_096;
 const MAX_SOURCE_AUDIO_STRUCTURE_ITEMS: usize = 100_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FileFormat {
     Project,
+    ProjectBundle,
     Midi,
     Wav,
     SourceAudio,
@@ -42,6 +49,7 @@ impl FileFormat {
     fn maximum_bytes(self) -> usize {
         match self {
             Self::Project => PROJECT_MAX_BYTES,
+            Self::ProjectBundle => PROJECT_BUNDLE_MAX_BYTES,
             Self::Midi => MIDI_MAX_BYTES,
             Self::Wav => WAV_MAX_BYTES,
             Self::SourceAudio => SOURCE_AUDIO_MAX_BYTES,
@@ -51,6 +59,7 @@ impl FileFormat {
     fn filter_name(self) -> &'static str {
         match self {
             Self::Project => "Compose Tutor project",
+            Self::ProjectBundle => "Compose Tutor portable project",
             Self::Midi => "MIDI file",
             Self::Wav => "WAV audio",
             Self::SourceAudio => "Supported audio",
@@ -60,6 +69,7 @@ impl FileFormat {
     fn filter_extensions(self) -> &'static [&'static str] {
         match self {
             Self::Project => &["ctsproj.json", "json"],
+            Self::ProjectBundle => &["ctsbundle"],
             Self::Midi => &["mid", "midi"],
             Self::Wav => &["wav"],
             Self::SourceAudio => &["wav", "mp3", "m4a", "aac"],
@@ -69,6 +79,7 @@ impl FileFormat {
     fn open_title(self) -> &'static str {
         match self {
             Self::Project => "Open a Compose Tutor project",
+            Self::ProjectBundle => "Open a portable Compose Tutor project",
             Self::Midi => "Import a MIDI file",
             Self::Wav => "Open a WAV file",
             Self::SourceAudio => "Open source audio",
@@ -78,6 +89,7 @@ impl FileFormat {
     fn save_title(self) -> &'static str {
         match self {
             Self::Project => "Export Compose Tutor project",
+            Self::ProjectBundle => "Export portable Compose Tutor project",
             Self::Midi => "Export MIDI file",
             Self::Wav => "Export WAV audio",
             Self::SourceAudio => "Export source audio",
@@ -92,6 +104,7 @@ pub(crate) enum NativeFileErrorCode {
     InvalidRequest,
     InvalidFilename,
     InvalidFile,
+    UnsupportedVersion,
     FileTooLarge,
     DialogUnavailable,
     ReadFailed,
@@ -164,6 +177,7 @@ fn extension_start(format: FileFormat, file_name: &str) -> Option<usize> {
     match format {
         FileFormat::Project => ascii_suffix_start(file_name, ".ctsproj.json")
             .or_else(|| ascii_suffix_start(file_name, ".json")),
+        FileFormat::ProjectBundle => ascii_suffix_start(file_name, ".ctsbundle"),
         FileFormat::Midi => {
             ascii_suffix_start(file_name, ".midi").or_else(|| ascii_suffix_start(file_name, ".mid"))
         }
@@ -189,6 +203,7 @@ fn has_expected_extension(format: FileFormat, file_name: &str) -> bool {
     match format {
         // The renderer deliberately accepts any JSON project filename on open.
         FileFormat::Project => ascii_suffix_start(file_name, ".json").is_some(),
+        FileFormat::ProjectBundle => ascii_suffix_start(file_name, ".ctsbundle").is_some(),
         FileFormat::Midi => extension_start(format, file_name).is_some(),
         FileFormat::Wav => ascii_suffix_start(file_name, ".wav").is_some(),
         FileFormat::SourceAudio => source_audio_format(file_name).is_some(),
@@ -853,10 +868,116 @@ fn source_audio_magic_matches(format: SourceAudioFormat, bytes: &[u8]) -> bool {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectBundleManifest<'a> {
+    format: &'a str,
+    version: u16,
+    #[serde(borrow)]
+    project: ProjectBundleProjectDescriptor<'a>,
+    #[serde(borrow)]
+    assets: Vec<ProjectBundleAssetDescriptor<'a>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProjectBundleProjectDescriptor<'a> {
+    byte_length: usize,
+    #[serde(rename = "checksumSha256")]
+    _checksum_sha256: &'a str,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProjectBundleAssetDescriptor<'a> {
+    #[serde(rename = "checksumSha256")]
+    _checksum_sha256: &'a str,
+    byte_length: usize,
+}
+
+fn project_bundle_u16(header: &[u8; PROJECT_BUNDLE_HEADER_BYTES], offset: usize) -> u16 {
+    u16::from_le_bytes(header[offset..offset + 2].try_into().unwrap())
+}
+
+fn project_bundle_u32(header: &[u8; PROJECT_BUNDLE_HEADER_BYTES], offset: usize) -> u32 {
+    u32::from_le_bytes(header[offset..offset + 4].try_into().unwrap())
+}
+
+fn validate_project_bundle_header(
+    header: &[u8; PROJECT_BUNDLE_HEADER_BYTES],
+    exact_total_length: usize,
+) -> FileResult<()> {
+    if exact_total_length > PROJECT_BUNDLE_MAX_BYTES {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge));
+    }
+    if exact_total_length < PROJECT_BUNDLE_HEADER_BYTES || &header[..8] != PROJECT_BUNDLE_MAGIC {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile));
+    }
+    if project_bundle_u16(header, 8) != PROJECT_BUNDLE_VERSION {
+        return Err(NativeFileErrorDto::new(
+            NativeFileErrorCode::UnsupportedVersion,
+        ));
+    }
+    let manifest_length = project_bundle_u32(header, 12) as usize;
+    let project_length = project_bundle_u32(header, 16) as usize;
+    if manifest_length > PROJECT_BUNDLE_MANIFEST_MAX_BYTES || project_length > PROJECT_MAX_BYTES {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge));
+    }
+    if project_bundle_u16(header, 10) != 0
+        || project_bundle_u32(header, 28) != 0
+        || project_bundle_u32(header, 24) as usize != exact_total_length
+    {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile));
+    }
+    let metadata_length = PROJECT_BUNDLE_HEADER_BYTES
+        .checked_add(manifest_length)
+        .and_then(|value| value.checked_add(project_length))
+        .ok_or_else(|| NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile))?;
+    if metadata_length > exact_total_length
+        || project_bundle_u32(header, 20) as usize > MAX_PROJECT_BUNDLE_ASSETS
+    {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile));
+    }
+    Ok(())
+}
+
+fn validate_project_bundle_bytes(bytes: &[u8]) -> FileResult<()> {
+    if bytes.len() < PROJECT_BUNDLE_HEADER_BYTES {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile));
+    }
+    let header: &[u8; PROJECT_BUNDLE_HEADER_BYTES] = bytes[..PROJECT_BUNDLE_HEADER_BYTES]
+        .try_into()
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile))?;
+    validate_project_bundle_header(header, bytes.len())?;
+    let manifest_length = project_bundle_u32(header, 12) as usize;
+    let project_length = project_bundle_u32(header, 16) as usize;
+    let manifest_end = PROJECT_BUNDLE_HEADER_BYTES + manifest_length;
+    let project_end = manifest_end + project_length;
+    let manifest: ProjectBundleManifest<'_> =
+        serde_json::from_slice(&bytes[PROJECT_BUNDLE_HEADER_BYTES..manifest_end])
+            .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile))?;
+    let payload_end = manifest
+        .assets
+        .iter()
+        .try_fold(project_end, |total, asset| {
+            total.checked_add(asset.byte_length)
+        });
+    if manifest.format != "ctsbundle"
+        || manifest.version != PROJECT_BUNDLE_VERSION
+        || manifest.project.byte_length != project_length
+        || manifest.assets.len() != project_bundle_u32(header, 20) as usize
+        || payload_end != Some(bytes.len())
+    {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile));
+    }
+    Ok(())
+}
+
 fn validate_file_bytes(format: FileFormat, bytes: &[u8]) -> FileResult<()> {
     validate_payload_size(format, bytes.len())?;
     let valid = match format {
         FileFormat::Project => crate::native_persistence::validate_project_file_json(bytes),
+        FileFormat::ProjectBundle => return validate_project_bundle_bytes(bytes),
         FileFormat::Midi => bytes.len() >= 14 && has_ascii(bytes, 0, b"MThd"),
         FileFormat::Wav => {
             bytes.len() >= 12 && has_ascii(bytes, 0, b"RIFF") && has_ascii(bytes, 8, b"WAVE")
@@ -897,6 +1018,25 @@ fn clone_bounded_raw_body(body: &InvokeBody, format: FileFormat) -> FileResult<V
     // workers without retaining an IPC borrow across `.await` points.
     validate_payload_size(format, bytes.len())?;
     Ok(bytes.clone())
+}
+
+fn clone_validated_project_bundle_raw_body_with_observer(
+    body: &InvokeBody,
+    mut observe: impl FnMut(&'static str),
+) -> FileResult<Vec<u8>> {
+    let InvokeBody::Raw(bytes) = body else {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidRequest));
+    };
+    observe("borrowed-size");
+    validate_payload_size(FileFormat::ProjectBundle, bytes.len())?;
+    observe("borrowed-header");
+    validate_project_bundle_bytes(bytes)?;
+    observe("clone");
+    Ok(bytes.clone())
+}
+
+fn clone_validated_project_bundle_raw_body(body: &InvokeBody) -> FileResult<Vec<u8>> {
+    clone_validated_project_bundle_raw_body_with_observer(body, |_| {})
 }
 
 fn cancelled_open_envelope() -> Vec<u8> {
@@ -948,8 +1088,72 @@ fn read_selected_file(format: FileFormat, path: &Path) -> FileResult<Vec<u8>> {
     opened_file_envelope(format, file_name, &bytes)
 }
 
+fn read_selected_project_bundle_with_observer(
+    path: &Path,
+    mut observe: impl FnMut(&'static str),
+) -> FileResult<Vec<u8>> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| NativeFileErrorDto::new(NativeFileErrorCode::InvalidFilename))?;
+    validate_open_file_name(FileFormat::ProjectBundle, file_name)?;
+    let mut file =
+        File::open(path).map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::ReadFailed))?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::ReadFailed))?;
+    observe("metadata");
+    if !metadata.is_file() {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::ReadFailed));
+    }
+    let file_length = usize::try_from(metadata.len())
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge))?;
+    if file_length > PROJECT_BUNDLE_MAX_BYTES {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge));
+    }
+    if file_length < PROJECT_BUNDLE_HEADER_BYTES {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile));
+    }
+    let mut header = [0_u8; PROJECT_BUNDLE_HEADER_BYTES];
+    file.read_exact(&mut header)
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::ReadFailed))?;
+    observe("stack-header");
+    validate_project_bundle_header(&header, file_length)?;
+
+    let file_name_length = u32::try_from(file_name.len())
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::InvalidFilename))?;
+    let envelope_length = 5_usize
+        .checked_add(file_name.len())
+        .and_then(|value| value.checked_add(file_length))
+        .ok_or_else(|| NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge))?;
+    observe("allocate-envelope");
+    let mut envelope = vec![0_u8; envelope_length];
+    envelope[0] = 1;
+    envelope[1..5].copy_from_slice(&file_name_length.to_le_bytes());
+    envelope[5..5 + file_name.len()].copy_from_slice(file_name.as_bytes());
+    let bundle_start = 5 + file_name.len();
+    envelope[bundle_start..bundle_start + PROJECT_BUNDLE_HEADER_BYTES].copy_from_slice(&header);
+    file.read_exact(&mut envelope[bundle_start + PROJECT_BUNDLE_HEADER_BYTES..])
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::ReadFailed))?;
+    let mut trailing_probe = [0_u8; 1];
+    if file
+        .read(&mut trailing_probe)
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::ReadFailed))?
+        != 0
+    {
+        return Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile));
+    }
+    validate_project_bundle_bytes(&envelope[bundle_start..])?;
+    Ok(envelope)
+}
+
+fn read_selected_project_bundle(path: &Path) -> FileResult<Vec<u8>> {
+    read_selected_project_bundle_with_observer(path, |_| {})
+}
+
 fn open_selected_file(format: FileFormat, path: Option<PathBuf>) -> FileResult<Vec<u8>> {
     match path {
+        Some(path) if format == FileFormat::ProjectBundle => read_selected_project_bundle(&path),
         Some(path) => read_selected_file(format, &path),
         None => Ok(cancelled_open_envelope()),
     }
@@ -992,7 +1196,10 @@ fn atomic_replace_with(
 }
 
 fn atomic_replace(path: &Path, bytes: &[u8]) -> FileResult<()> {
-    atomic_replace_with(path, |file| file.write_all(bytes))
+    atomic_replace_with(path, |file| {
+        file.write_all(bytes)?;
+        file.flush()
+    })
 }
 
 fn write_selected_file(
@@ -1014,6 +1221,14 @@ async fn choose_open_path(
     window: &WebviewWindow,
     format: FileFormat,
 ) -> FileResult<Option<PathBuf>> {
+    #[cfg(feature = "native-test")]
+    if format == FileFormat::ProjectBundle {
+        if let Some(selected) =
+            native_test_project_bundle_picker("CTS_NATIVE_TEST_PROJECT_BUNDLE_OPEN_PATH", false)
+        {
+            return selected;
+        }
+    }
     let (sender, mut receiver) = tauri::async_runtime::channel(1);
     let dialog = window
         .dialog()
@@ -1041,6 +1256,14 @@ async fn choose_save_path(
     format: FileFormat,
     suggested_file_name: String,
 ) -> FileResult<Option<PathBuf>> {
+    #[cfg(feature = "native-test")]
+    if format == FileFormat::ProjectBundle {
+        if let Some(selected) =
+            native_test_project_bundle_picker("CTS_NATIVE_TEST_PROJECT_BUNDLE_SAVE_PATH", true)
+        {
+            return selected;
+        }
+    }
     let (sender, mut receiver) = tauri::async_runtime::channel(1);
     let dialog = window
         .dialog()
@@ -1062,6 +1285,84 @@ async fn choose_save_path(
                 .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::DialogUnavailable))
         })
         .transpose()
+}
+
+#[cfg(feature = "native-test")]
+fn record_native_test_project_bundle_picker(
+    root: &Path,
+    require_fresh_path: bool,
+) -> FileResult<()> {
+    let (proof_name, proof_body) = if require_fresh_path {
+        (".project-bundle-save.invoked", b"save\n".as_slice())
+    } else {
+        (".project-bundle-open.invoked", b"open\n".as_slice())
+    };
+    let proof_path = root.join(proof_name);
+    let mut proof = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(proof_path)
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::DialogUnavailable))?;
+    proof
+        .write_all(proof_body)
+        .and_then(|_| proof.sync_all())
+        .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::DialogUnavailable))
+}
+
+#[cfg(feature = "native-test")]
+fn native_test_project_bundle_picker(
+    variable: &str,
+    require_fresh_path: bool,
+) -> Option<FileResult<Option<PathBuf>>> {
+    let configured = std::env::var_os(variable)?;
+    let root = match std::env::var_os("CTS_NATIVE_TEST_PROJECT_BUNDLE_ROOT") {
+        Some(root) => PathBuf::from(root),
+        None => {
+            return Some(Err(NativeFileErrorDto::new(
+                NativeFileErrorCode::DialogUnavailable,
+            )))
+        }
+    };
+    let root = match root.canonicalize() {
+        Ok(root) => root,
+        Err(_) => {
+            return Some(Err(NativeFileErrorDto::new(
+                NativeFileErrorCode::DialogUnavailable,
+            )))
+        }
+    };
+    if configured == "cancel" {
+        return Some(
+            record_native_test_project_bundle_picker(&root, require_fresh_path).map(|_| None),
+        );
+    }
+    let selected = PathBuf::from(configured);
+    let Some(parent) = selected.parent() else {
+        return Some(Err(NativeFileErrorDto::new(
+            NativeFileErrorCode::DialogUnavailable,
+        )));
+    };
+    let parent = match parent.canonicalize() {
+        Ok(parent) => parent,
+        Err(_) => {
+            return Some(Err(NativeFileErrorDto::new(
+                NativeFileErrorCode::DialogUnavailable,
+            )))
+        }
+    };
+    if !selected.is_absolute()
+        || parent != root
+        || validate_selected_save_path(FileFormat::ProjectBundle, &selected).is_err()
+        || (require_fresh_path && selected.exists())
+        || (!require_fresh_path && !selected.is_file())
+    {
+        return Some(Err(NativeFileErrorDto::new(
+            NativeFileErrorCode::DialogUnavailable,
+        )));
+    }
+    Some(
+        record_native_test_project_bundle_picker(&root, require_fresh_path).map(|_| Some(selected)),
+    )
 }
 
 async fn open_file(window: WebviewWindow, format: FileFormat) -> FileResult<Response> {
@@ -1094,9 +1395,32 @@ async fn export_file(
         .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::WriteFailed))?
 }
 
+async fn export_project_bundle(
+    window: WebviewWindow,
+    request: Request<'_>,
+) -> FileResult<SaveFileResult> {
+    ensure_main_caller(&window)?;
+    let suggested_file_name = suggested_file_name(&request, FileFormat::ProjectBundle)?;
+    // Tauri 2.11 exposes InvokeBody::Raw through a borrow. Validate that borrow
+    // completely, reject JSON, then make the one bounded command-owned clone
+    // needed to cross the dialog and blocking-write await points.
+    let bytes = clone_validated_project_bundle_raw_body(request.body())?;
+    let path = choose_save_path(&window, FileFormat::ProjectBundle, suggested_file_name).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        write_selected_file(FileFormat::ProjectBundle, path, &bytes)
+    })
+    .await
+    .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::WriteFailed))?
+}
+
 #[tauri::command]
 pub(crate) async fn file_open_project(window: WebviewWindow) -> FileResult<Response> {
     open_file(window, FileFormat::Project).await
+}
+
+#[tauri::command]
+pub(crate) async fn file_open_project_bundle(window: WebviewWindow) -> FileResult<Response> {
+    open_file(window, FileFormat::ProjectBundle).await
 }
 
 #[tauri::command]
@@ -1115,6 +1439,14 @@ pub(crate) async fn file_export_project(
     request: Request<'_>,
 ) -> FileResult<SaveFileResult> {
     export_file(window, request, FileFormat::Project).await
+}
+
+#[tauri::command]
+pub(crate) async fn file_export_project_bundle(
+    window: WebviewWindow,
+    request: Request<'_>,
+) -> FileResult<SaveFileResult> {
+    export_project_bundle(window, request).await
 }
 
 #[tauri::command]
@@ -1291,6 +1623,60 @@ mod tests {
         vec![0xff, 0xf1, 0x50, 0x80, 0x01, 0x1f, 0xfc, 0]
     }
 
+    fn project_bundle_header(
+        manifest_length: usize,
+        project_length: usize,
+        asset_count: usize,
+        total_length: usize,
+    ) -> [u8; PROJECT_BUNDLE_HEADER_BYTES] {
+        let mut header = [0_u8; PROJECT_BUNDLE_HEADER_BYTES];
+        header[..8].copy_from_slice(PROJECT_BUNDLE_MAGIC);
+        header[8..10].copy_from_slice(&PROJECT_BUNDLE_VERSION.to_le_bytes());
+        header[12..16].copy_from_slice(&(manifest_length as u32).to_le_bytes());
+        header[16..20].copy_from_slice(&(project_length as u32).to_le_bytes());
+        header[20..24].copy_from_slice(&(asset_count as u32).to_le_bytes());
+        header[24..28].copy_from_slice(&(total_length as u32).to_le_bytes());
+        header
+    }
+
+    fn project_bundle_with_manifest(manifest: serde_json::Value) -> Vec<u8> {
+        let project = b"{}";
+        let asset_count = manifest["assets"].as_array().unwrap().len();
+        let payload_length = manifest["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|asset| asset["byteLength"].as_u64().unwrap() as usize)
+            .sum::<usize>();
+        let manifest = manifest.to_string().into_bytes();
+        let total = PROJECT_BUNDLE_HEADER_BYTES + manifest.len() + project.len() + payload_length;
+        let mut bytes = vec![0_u8; total];
+        bytes[..PROJECT_BUNDLE_HEADER_BYTES].copy_from_slice(&project_bundle_header(
+            manifest.len(),
+            project.len(),
+            asset_count,
+            total,
+        ));
+        bytes[PROJECT_BUNDLE_HEADER_BYTES..PROJECT_BUNDLE_HEADER_BYTES + manifest.len()]
+            .copy_from_slice(&manifest);
+        bytes[PROJECT_BUNDLE_HEADER_BYTES + manifest.len()
+            ..PROJECT_BUNDLE_HEADER_BYTES + manifest.len() + project.len()]
+            .copy_from_slice(project);
+        bytes
+    }
+
+    fn valid_project_bundle() -> Vec<u8> {
+        project_bundle_with_manifest(serde_json::json!({
+            "format": "ctsbundle",
+            "version": 1,
+            "project": {
+                "byteLength": 2,
+                "checksumSha256": "0".repeat(64),
+            },
+            "assets": [],
+        }))
+    }
+
     #[test]
     fn accepts_only_the_main_window_label() {
         assert_eq!(ensure_main_caller_label("main"), Ok(()));
@@ -1301,6 +1687,329 @@ mod tests {
             ))
         );
         assert!(ensure_main_caller_label("Main").is_err());
+    }
+
+    #[test]
+    fn project_bundle_header_enforces_magic_version_flags_reserved_and_exact_total() {
+        let valid = valid_project_bundle();
+        assert!(validate_project_bundle_bytes(&valid).is_ok());
+        let mut unsupported_version = valid.clone();
+        unsupported_version[8..10].copy_from_slice(&2_u16.to_le_bytes());
+        assert_eq!(
+            validate_project_bundle_bytes(&unsupported_version),
+            Err(NativeFileErrorDto::new(
+                NativeFileErrorCode::UnsupportedVersion
+            ))
+        );
+        for mutate in [
+            (0, 0_u32),
+            (10, 1_u32),
+            (24, (valid.len() - 1) as u32),
+            (28, 1_u32),
+        ] {
+            let mut bytes = valid.clone();
+            match mutate.0 {
+                0 => bytes[0] = 0,
+                8 | 10 => {
+                    bytes[mutate.0..mutate.0 + 2].copy_from_slice(&(mutate.1 as u16).to_le_bytes())
+                }
+                offset => bytes[offset..offset + 4].copy_from_slice(&mutate.1.to_le_bytes()),
+            }
+            assert!(validate_project_bundle_bytes(&bytes).is_err());
+        }
+        let mut exact_cap_header = [0_u8; PROJECT_BUNDLE_HEADER_BYTES];
+        exact_cap_header[..8].copy_from_slice(PROJECT_BUNDLE_MAGIC);
+        exact_cap_header[8..10].copy_from_slice(&PROJECT_BUNDLE_VERSION.to_le_bytes());
+        exact_cap_header[24..28].copy_from_slice(&(PROJECT_BUNDLE_MAX_BYTES as u32).to_le_bytes());
+        assert!(
+            validate_project_bundle_header(&exact_cap_header, PROJECT_BUNDLE_MAX_BYTES).is_ok()
+        );
+        assert_eq!(
+            validate_project_bundle_header(&exact_cap_header, PROJECT_BUNDLE_MAX_BYTES + 1,),
+            Err(NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge))
+        );
+
+        let exact_manifest_total = PROJECT_BUNDLE_HEADER_BYTES + PROJECT_BUNDLE_MANIFEST_MAX_BYTES;
+        let exact_manifest_header = project_bundle_header(
+            PROJECT_BUNDLE_MANIFEST_MAX_BYTES,
+            0,
+            0,
+            exact_manifest_total,
+        );
+        assert!(
+            validate_project_bundle_header(&exact_manifest_header, exact_manifest_total).is_ok()
+        );
+        let oversized_manifest_total = exact_manifest_total + 1;
+        let oversized_manifest_header = project_bundle_header(
+            PROJECT_BUNDLE_MANIFEST_MAX_BYTES + 1,
+            0,
+            0,
+            oversized_manifest_total,
+        );
+        assert_eq!(
+            validate_project_bundle_header(&oversized_manifest_header, oversized_manifest_total),
+            Err(NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge))
+        );
+
+        let exact_project_total = PROJECT_BUNDLE_HEADER_BYTES + PROJECT_MAX_BYTES;
+        let exact_project_header =
+            project_bundle_header(0, PROJECT_MAX_BYTES, 0, exact_project_total);
+        assert!(validate_project_bundle_header(&exact_project_header, exact_project_total).is_ok());
+        let oversized_project_header =
+            project_bundle_header(0, PROJECT_MAX_BYTES + 1, 0, exact_project_total + 1);
+        assert_eq!(
+            validate_project_bundle_header(&oversized_project_header, exact_project_total + 1),
+            Err(NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge))
+        );
+    }
+
+    #[test]
+    fn project_bundle_manifest_uses_strict_schema_and_rejects_unknown_fields() {
+        for manifest in [
+            serde_json::json!({
+                "format": "ctsbundle",
+                "version": 1,
+                "project": {
+                    "byteLength": 2,
+                    "checksumSha256": "0".repeat(64),
+                },
+                "assets": [],
+                "unexpected": true,
+            }),
+            serde_json::json!({
+                "format": "ctsbundle",
+                "version": 1,
+                "project": {
+                    "byteLength": 2,
+                    "checksumSha256": "0".repeat(64),
+                    "unexpected": true,
+                },
+                "assets": [],
+            }),
+            serde_json::json!({
+                "format": "ctsbundle",
+                "version": 1,
+                "project": {
+                    "byteLength": 2,
+                    "checksumSha256": "0".repeat(64),
+                },
+                "assets": [{
+                    "checksumSha256": "1".repeat(64),
+                    "byteLength": 1,
+                    "unexpected": true,
+                }],
+            }),
+        ] {
+            assert_eq!(
+                validate_project_bundle_bytes(&project_bundle_with_manifest(manifest)),
+                Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidFile))
+            );
+        }
+    }
+
+    #[test]
+    fn project_bundle_fixture_cases_match_the_codec_rejections() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../packages/project-bundle/fixtures/header-v1-cases.json"
+        ))
+        .unwrap();
+        for case in cases.as_array().unwrap() {
+            let mut bytes = valid_project_bundle();
+            let offset = case["offset"].as_u64().unwrap() as usize;
+            let value = case["value"].as_u64().unwrap();
+            match case["kind"].as_str().unwrap() {
+                "uint16" => {
+                    bytes[offset..offset + 2].copy_from_slice(&(value as u16).to_le_bytes())
+                }
+                "uint32" => {
+                    bytes[offset..offset + 4].copy_from_slice(&(value as u32).to_le_bytes())
+                }
+                kind => panic!("unexpected fixture kind {kind}"),
+            }
+            assert!(
+                validate_project_bundle_bytes(&bytes).is_err(),
+                "accepted fixture {}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn project_bundle_open_allocates_only_after_metadata_and_stack_header_validation() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable.ctsbundle");
+        let bundle = valid_project_bundle();
+        fs::write(&path, &bundle).unwrap();
+        let mut events = Vec::new();
+        let envelope =
+            read_selected_project_bundle_with_observer(&path, |event| events.push(event)).unwrap();
+        assert_eq!(events, ["metadata", "stack-header", "allocate-envelope"]);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| **event == "allocate-envelope")
+                .count(),
+            1
+        );
+        let name_length = u32::from_le_bytes(envelope[1..5].try_into().unwrap()) as usize;
+        assert_eq!(&envelope[5..5 + name_length], b"portable.ctsbundle");
+        assert_eq!(&envelope[5 + name_length..], bundle);
+
+        let mut invalid = bundle.clone();
+        invalid[0] = b'X';
+        fs::write(&path, invalid).unwrap();
+        events.clear();
+        assert!(
+            read_selected_project_bundle_with_observer(&path, |event| events.push(event)).is_err()
+        );
+        assert_eq!(events, ["metadata", "stack-header"]);
+
+        let oversized_manifest_total =
+            PROJECT_BUNDLE_HEADER_BYTES + PROJECT_BUNDLE_MANIFEST_MAX_BYTES + 1;
+        let oversized_manifest_header = project_bundle_header(
+            PROJECT_BUNDLE_MANIFEST_MAX_BYTES + 1,
+            0,
+            0,
+            oversized_manifest_total,
+        );
+        let mut oversized_manifest_file = File::create(&path).unwrap();
+        oversized_manifest_file
+            .write_all(&oversized_manifest_header)
+            .unwrap();
+        oversized_manifest_file
+            .set_len(oversized_manifest_total as u64)
+            .unwrap();
+        drop(oversized_manifest_file);
+        events.clear();
+        assert_eq!(
+            read_selected_project_bundle_with_observer(&path, |event| events.push(event)),
+            Err(NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge))
+        );
+        assert_eq!(events, ["metadata", "stack-header"]);
+    }
+
+    #[test]
+    fn project_bundle_open_rejects_extension_truncation_trailing_and_declared_mismatch() {
+        let directory = tempdir().unwrap();
+        let valid = valid_project_bundle();
+        let wrong_extension = directory.path().join("portable.bin");
+        fs::write(&wrong_extension, &valid).unwrap();
+        assert!(read_selected_project_bundle(&wrong_extension).is_err());
+
+        let path = directory.path().join("portable.ctsbundle");
+        fs::write(&path, &valid[..PROJECT_BUNDLE_HEADER_BYTES - 1]).unwrap();
+        assert!(read_selected_project_bundle(&path).is_err());
+        fs::write(&path, &valid[..valid.len() - 1]).unwrap();
+        assert!(read_selected_project_bundle(&path).is_err());
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        fs::write(&path, trailing).unwrap();
+        assert!(read_selected_project_bundle(&path).is_err());
+        let mut mismatch = valid.clone();
+        mismatch[24..28].copy_from_slice(&((valid.len() - 1) as u32).to_le_bytes());
+        fs::write(&path, mismatch).unwrap();
+        assert!(read_selected_project_bundle(&path).is_err());
+    }
+
+    #[test]
+    fn project_bundle_export_validates_borrowed_raw_then_clones_exactly_once() {
+        let valid = valid_project_bundle();
+        let mut events = Vec::new();
+        let cloned = clone_validated_project_bundle_raw_body_with_observer(
+            &InvokeBody::Raw(valid.clone()),
+            |event| events.push(event),
+        )
+        .unwrap();
+        assert_eq!(cloned, valid);
+        assert_eq!(events, ["borrowed-size", "borrowed-header", "clone"]);
+        assert_eq!(events.iter().filter(|event| **event == "clone").count(), 1);
+
+        events.clear();
+        assert_eq!(
+            clone_validated_project_bundle_raw_body_with_observer(
+                &InvokeBody::Json(serde_json::json!([])),
+                |event| events.push(event),
+            ),
+            Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidRequest))
+        );
+        assert!(events.is_empty());
+
+        let mut invalid = valid.clone();
+        invalid[0] = 0;
+        assert!(clone_validated_project_bundle_raw_body_with_observer(
+            &InvokeBody::Raw(invalid),
+            |event| events.push(event),
+        )
+        .is_err());
+        assert!(!events.contains(&"clone"));
+
+        let oversized_manifest_total =
+            PROJECT_BUNDLE_HEADER_BYTES + PROJECT_BUNDLE_MANIFEST_MAX_BYTES + 1;
+        let mut oversized_manifest = vec![0_u8; oversized_manifest_total];
+        oversized_manifest[..PROJECT_BUNDLE_HEADER_BYTES].copy_from_slice(&project_bundle_header(
+            PROJECT_BUNDLE_MANIFEST_MAX_BYTES + 1,
+            0,
+            0,
+            oversized_manifest_total,
+        ));
+        events.clear();
+        assert_eq!(
+            clone_validated_project_bundle_raw_body_with_observer(
+                &InvokeBody::Raw(oversized_manifest),
+                |event| events.push(event),
+            ),
+            Err(NativeFileErrorDto::new(NativeFileErrorCode::FileTooLarge))
+        );
+        assert_eq!(events, ["borrowed-size", "borrowed-header"]);
+    }
+
+    #[test]
+    fn project_bundle_cancel_envelope_is_exactly_one_zero_byte() {
+        assert_eq!(
+            open_selected_file(FileFormat::ProjectBundle, None).unwrap(),
+            vec![0]
+        );
+    }
+
+    #[cfg(feature = "native-test")]
+    #[test]
+    fn project_bundle_test_picker_records_fresh_open_and_save_proofs() {
+        let directory = tempdir().unwrap();
+        record_native_test_project_bundle_picker(directory.path(), false).unwrap();
+        record_native_test_project_bundle_picker(directory.path(), true).unwrap();
+        assert_eq!(
+            fs::read(directory.path().join(".project-bundle-open.invoked")).unwrap(),
+            b"open\n"
+        );
+        assert_eq!(
+            fs::read(directory.path().join(".project-bundle-save.invoked")).unwrap(),
+            b"save\n"
+        );
+        assert_eq!(
+            record_native_test_project_bundle_picker(directory.path(), false),
+            Err(NativeFileErrorDto::new(
+                NativeFileErrorCode::DialogUnavailable
+            ))
+        );
+    }
+
+    #[test]
+    fn project_bundle_atomic_failure_leaves_no_final_or_temporary_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable.ctsbundle");
+        let result = atomic_replace_with(&path, |temporary| {
+            temporary.write_all(b"partial")?;
+            temporary.flush()?;
+            Err(std::io::Error::other(
+                "injected project bundle write failure",
+            ))
+        });
+        assert_eq!(
+            result,
+            Err(NativeFileErrorDto::new(NativeFileErrorCode::WriteFailed))
+        );
+        assert!(!path.exists());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
     }
 
     #[test]
@@ -1318,6 +2027,10 @@ mod tests {
             (NativeFileErrorCode::InvalidRequest, "invalid-request"),
             (NativeFileErrorCode::InvalidFilename, "invalid-filename"),
             (NativeFileErrorCode::InvalidFile, "invalid-file"),
+            (
+                NativeFileErrorCode::UnsupportedVersion,
+                "unsupported-version",
+            ),
             (NativeFileErrorCode::FileTooLarge, "file-too-large"),
             (NativeFileErrorCode::DialogUnavailable, "dialog-unavailable"),
             (NativeFileErrorCode::ReadFailed, "read-failed"),

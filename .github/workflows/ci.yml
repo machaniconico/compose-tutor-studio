@@ -53,6 +53,11 @@ jobs:
           pnpm audit --prod --audit-level high
           pnpm audit --dev --audit-level high --ignore GHSA-mh99-v99m-4gvg
 
+      - name: Validate generated and Portable Bundle documentation
+        run: |
+          pnpm docs:combine:check
+          pnpm docs:portable-bundle:check
+
       - name: Typecheck
         run: pnpm typecheck
 

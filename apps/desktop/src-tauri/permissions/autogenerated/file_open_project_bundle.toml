@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-file-open-project-bundle"
+description = "Enables the file_open_project_bundle command without any pre-configured scope."
+commands.allow = ["file_open_project_bundle"]
+
+[[permission]]
+identifier = "deny-file-open-project-bundle"
+description = "Denies the file_open_project_bundle command without any pre-configured scope."
+commands.deny = ["file_open_project_bundle"]

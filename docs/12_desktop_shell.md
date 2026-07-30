@@ -9,7 +9,7 @@
 - Vite HMR付きのnative開発起動
 - production executableと各OSのunsigned bundle生成
 - SQLite v2 transactionによる通常保存、debounce前crash-draft保護、旧localStorageのfail-closed移行
-- Rust所有のOS file pickerによるproject/MIDI/source audio読込とproject/MIDI/WAV atomic書出し
+- Rust所有のOS file pickerによるproject/portable project/MIDI/source audio読込とproject/portable project/MIDI/WAV atomic書出し
 - Assistantのハミング変換とAudio Track録音向けaudio-onlyマイク入力。ハミングの録音PCMはrenderer memoryだけに保持し、Audio Track録音はcanonical Assetだけをrepositoryへ保存する。Record Armと入力device IDはruntime-onlyでProjectへ保存しない
 - macOS WKWebViewで画面描画、再生/停止、SQLite保存、保護ACK直後の`SIGKILL`、process再起動復元を自動検証
 - marker付き二段階protocolによるapp-owned local dataの全消去と、クラッシュ後の起動前再開
@@ -47,7 +47,9 @@ bundle IDまたはschemeは公開後に変えない。native正本はbundle ID�
 - `test:release-policy`は正規TOML parserでCargo feature、direct / build / target dependency、lib / bin / build targetをexact比較する。Studio / packagesのTS / JS source graphとrelative import境界をAST検査し、`fetch`、XHR、WebSocket、EventSource、beacon、WebRTC、WebTransport、Worker、HTTP / STUN / TURN、protocol-relative URL、meta refreshを拒否する。Rustはnetwork crate / std socket、未許可libc / windows-sys、source symlink、root外`#[path]`、conditional path、`include!`を拒否する。fixtureだけでなく現在repository自体を同じtest内で走査する。
 - `renderer-assets` gateは必須の`production` / `e2e` profileでHTMLとhashed entryのexact inventoryを分離し、参照entryの実在、exact `_redirects`、CSS / HTML / JS以外の出力、symlink / file-count / byte境界、RTC・socket primitive、protocol-relative / 未許可remote URLを検査する。Studio production / E2E build、Desktop smoke / bundle、通常3OS CI、signed macOS / Windows / Linux buildの直後にそれぞれ実行し、platform-specificな生成物を署名・staging前に止める。
 
-native file commandはRust内でpickerとI/Oを完結し、pathをrendererへ返さない。raw payloadはformat magic / structureと16 MiB project / 8 MiB MIDI / 128 MiB source audio / 192 MiB WAV上限を再検証し、候補名をUTF-8 240 bytesへ制限してatomic overwriteする。`file_open_audio`はWAV / MP3 / M4A / AACだけを専用permissionで許可し、basenameとbounded bytesだけを返す。
+native file commandはRust内でpickerとI/Oを完結し、pathをrendererへ返さない。raw payloadはformat magic / structureと16 MiB project / 128 MiB portable project / 8 MiB MIDI / 128 MiB source audio / 192 MiB WAV上限を再検証し、候補名をUTF-8 240 bytesへ制限してatomic overwriteする。`file_open_audio`はWAV / MP3 / M4A / AACだけを専用permissionで許可し、basenameとbounded bytesだけを返す。
+
+`.ctsbundle`は専用`file_open_project_bundle` / `file_export_project_bundle` commandとpermissionを使う。openはfile metadataとstack上の32-byte header（`CTSBNDL1`、version 1、flags/reserved 0、512 KiB以下manifest、16 MiB以下Project、exact total）を検証してから、basenameと最大128 MiBのbundleを1つのbinary envelopeへ確保する。exportはTauri `Request`のborrowed raw bodyをsize / header / manifest structureまで検証してから、dialog / blocking atomic writeをまたぐcommand-owned cloneをexact 1回だけ作る。JSON/base64 IPC、任意path、検証前cloneは拒否する。cancel wireはopen `[0x00]`、save `{ status: "cancelled" }`であり、atomic replace前のcancelはfileを作らない。
 
 ## 4. Test-only WebDriver isolation
 
@@ -62,7 +64,7 @@ macOSを含む実WebView検証にはTauri公式が案内するWebdriverIO embedd
 
 embedded serverはtest featureでだけcompileされ、さらに`WDIO_EMBEDDED_SERVER=true`で起動したときだけ登録される。test WebViewはincognitoで起動し、productionのlocalStorage/cacheを読み書きしない。bundle IDの違いだけをdata分離の根拠にはしない。production rendererにはWDIO frontend plugin、global Tauri API、WDIO IPC permissionを追加しない。
 
-native-test binaryは`src-tauri/target/native-test/release`へ分離する。通常の`src-tauri/target/release`を上書きしないため、E2E失敗・中断後もtest server入りbinaryを配布pathへ残さない。embedded WebDriver portは実行ごとに空きportを割り当て、SQLite data directoryも実行ごとのOS tempへ隔離する。`write` / `restore` / `normal-close` / `normal-close-restart` / owned SIGKILL process / `sigkill-restart` / `sigkill-second-restart` / `erase` / `blank-restart`を連続実行し、保存復元と再出現防止を証明する。owned process内で編集し、現在revisionの保護済み表示と編集から1秒未満を確認した直後、親harnessが所有するexact child PIDだけへ`SIGKILL`する。`sigkill-restart`で復元と新しい通常保存、`sigkill-second-restart`で保存一覧1件、回復branchなし、新しい保存内容の維持まで確認する。親への`SIGINT`/`SIGTERM`はexact childの停止とlistener清掃へ転送し、孤児process、lock、portを残さない。normal-closeはWebDriverの`destroy()`直結closeを使わず、`native-test`featureだけが読む絶対pathの64桁ランダムtoken fileを外部からatomic生成し、Tauriの`window.close()`で実`CloseRequested`を発行する。renderer向けtest commandやraw close/destroy権限は追加しない。marker起動再開は同じ実binaryをWebDriver未登録で直接起動し、正常終了を要求する。全隔離directoryは終了後に削除する。
+native-test binaryは`src-tauri/target/native-test/release`へ分離する。通常の`src-tauri/target/release`を上書きしないため、E2E失敗・中断後もtest server入りbinaryを配布pathへ残さない。embedded WebDriver portは実行ごとに空きportを割り当て、SQLite data directoryも実行ごとのOS tempへ隔離する。`write` / `restore` / `bundle-export` / `bundle-import` / `bundle-open-cancel` / `bundle-save-cancel` / `normal-close` / `normal-close-restart` / owned SIGKILL process / `sigkill-restart` / `sigkill-second-restart` / `erase` / `blank-restart`を連続実行し、portable roundtrip / cancel、保存復元、再出現防止を証明する。owned process内で編集し、現在revisionの保護済み表示と編集から1秒未満を確認した直後、親harnessが所有するexact child PIDだけへ`SIGKILL`する。`sigkill-restart`で復元と新しい通常保存、`sigkill-second-restart`で保存一覧1件、回復branchなし、新しい保存内容の維持まで確認する。親への`SIGINT`/`SIGTERM`はexact childの停止とlistener清掃へ転送し、孤児process、lock、portを残さない。normal-closeはWebDriverの`destroy()`直結closeを使わず、`native-test`featureだけが読む絶対pathの64桁ランダムtoken fileを外部からatomic生成し、Tauriの`window.close()`で実`CloseRequested`を発行する。renderer向けtest commandやraw close/destroy権限は追加しない。marker起動再開は同じ実binaryをWebDriver未登録で直接起動し、正常終了を要求する。全隔離directoryは終了後に削除する。
 
 normal-closeとUI eraseの自動testは、durable flushまたはstorage消去を観測してからnative close handoffを証明できるよう、`native-test` feature内に限り環境変数で50〜5000 msの終了猶予を指定できる。本番binaryは環境変数をcompileせず50 ms固定で、renderer向けtest APIやpath公開commandは追加しない。自発終了後はWDIOの汎用`DELETE /session`が接続拒否になるため、全UI/storage/server停止assertの後だけtest workerが予測不能tokenのproofをapp data外へatomic生成する。harnessは、その実行だけに渡したpath/tokenが完全一致するときに限り各close phaseの終了code 1を期待済みteardownとして受理し、proof前の失敗は通常どおり全体を失敗させる。
 
@@ -81,6 +83,8 @@ pnpm desktop:test:release-policy
 pnpm desktop:e2e:native
 pnpm desktop:build:smoke
 pnpm desktop:size:check
+pnpm docs:combine:check
+pnpm docs:portable-bundle:check
 pnpm verify:desktop
 ```
 
@@ -105,8 +109,9 @@ pnpm verify:desktop
 13. 全消去後の別processではSQLite正本由来の旧titleと保存一覧が戻らない。
 14. source audio pickerはWAV / MP3 / M4A / AACだけを受理し、絶対pathをrendererへ返さず、128 MiB超過と明白な拡張子 / container不一致をRustで予備拒否する。rendererは受け取ったbytesをWeb入力と同じ厳格parserで再検証する。
 15. microphoneは同一originのaudio-only要求だけを許可し、video / mixed要求を拒否する。signed candidateではmacOS / Windows / Linux各OSで初回許可、拒否後のfile fallback、再許可、システム既定 / 列挙済み入力のexact選択、`devicechange`、Record Arm先への追記、録音停止、device切断を手動smokeする。
+16. self-generated WAVを含むProjectを`.ctsbundle`へatomic exportし、storageを共有しないactivationへimportしてfresh Project IDと再生可能な同一payloadを得る。open `[0x00]` / save `{ status: "cancelled" }`のcancelではrepository / Project / history / revision / final fileを変更しない。
 
-renderer-only Playwright E2Eは引き続き初回曲、MIDI/WAV/project export、競合・破損復旧を広く検査する。OS picker自体はRust helper testと手動3OS smokeで確認し、自動native E2Eはpathを公開するtest backdoorをproductionへ入れない。
+renderer-only Playwright E2Eは引き続き初回曲、MIDI/WAV/project/portable project export、storage非共有のportable import、競合・破損復旧を広く検査する。portable source / destinationではnavigation前からHTTP(S) / WebSocket / sendBeaconを監視し、baseURL以外の通信を拒否する。OS picker自体はRust helper testと手動3OS smokeで確認し、自動native E2Eはpathを公開するtest backdoorをproductionへ入れない。
 
 この自動testはproduction profileを保護するためincognito WebViewを使う。したがって`clearAllBrowsingData()`のproduction profile上のcache/cookie残存までは証明せず、signed candidateの3OS手動smokeで補完する。
 
@@ -141,7 +146,7 @@ repository初期化のsingle-flightは失敗時だけ解除し、保存の再試
 
 起動時はApp、close guard、repository初期化、legacy migrationより先に`persistence_get_erase_all_status`を呼ぶ。pending markerまたはstatus判定失敗があれば編集画面をmountせず、専用recovery screenだけを表示する。pendingでは同じ`eraseId`の`prepare`を再実行して中断したdatabase-family削除を完了してから、WebView cleanup→marker完了→終了を再開する。失敗時は画面を閉じない。これによりnative databaseだけが消え、renderer emergency recovery/tutorial/onboardingから内容が再作成されるraceを防ぐ。
 
-対象はCompose Tutor Studioのapp dataと現在のWebView profileであり、app data外へ書き出したproject/MIDI/WAVには触れない。OS backup、filesystem snapshot、SSD wear levelingに残るbytesのforensic/secure eraseは保証しない。
+対象はCompose Tutor Studioのapp dataと現在のWebView profileであり、app data外へ書き出したproject/portable project/MIDI/WAVには触れない。`.ctsbundle`は元Audio Asset bytesを含む外部fileなので、利用者が別途削除する。OS backup、filesystem snapshot、SSD wear levelingに残るbytesのforensic/secure eraseは保証しない。
 
 marker付き再開はprocess crashを対象とする。Unixではmarker作成・database family削除・marker削除の親directoryを同期するが、Windowsの通常file deleteに対するdirectory metadata write-throughは未実装であり、突然の電源断直後までのdelete永続性は保証範囲外である。配布前QAでは通常終了・強制process終了を検査し、power-loss/実NTFS検証またはwrite-through tombstoneは後続hardeningとして扱う。
 

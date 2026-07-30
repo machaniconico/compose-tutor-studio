@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import {
   lstat,
@@ -28,6 +28,10 @@ const nativeTestBinary = path.join(nativeTestTargetDir, 'release', executableNam
 const databaseFileName = 'projects-v1.sqlite3';
 const databaseFamilySuffixes = ['', '-wal', '-shm', '-journal'];
 const eraseMarkerFileName = 'erase-all-v1.json';
+const portablePickerProofFileNames = {
+  open: '.project-bundle-open.invoked',
+  save: '.project-bundle-save.invoked',
+};
 const recoveryEraseIds = [
   'erase-11111111-1111-4111-8111-111111111111',
   'erase-22222222-2222-4222-8222-222222222222',
@@ -444,6 +448,74 @@ function eraseMarkerBytes(eraseId) {
   );
 }
 
+async function portableBundleAssetChecksum(filePath) {
+  const bytes = await readFile(filePath);
+  if (bytes.length < 32 || bytes.subarray(0, 8).toString('utf8') !== 'CTSBNDL1') {
+    throw new Error('Native portable E2E did not create a valid bundle header');
+  }
+  const manifestLength = bytes.readUInt32LE(12);
+  const manifest = JSON.parse(
+    bytes.subarray(32, 32 + manifestLength).toString('utf8'),
+  );
+  const checksum = manifest?.assets?.[0]?.checksumSha256;
+  if (typeof checksum !== 'string' || !/^[a-f0-9]{64}$/.test(checksum)) {
+    throw new Error('Native portable E2E bundle has no verified asset checksum');
+  }
+  return checksum;
+}
+
+function portablePickerProofPaths(root) {
+  return {
+    open: path.join(root, portablePickerProofFileNames.open),
+    save: path.join(root, portablePickerProofFileNames.save),
+  };
+}
+
+async function resetPortablePickerProofs(root) {
+  await Promise.all(
+    Object.values(portablePickerProofPaths(root))
+      .map((proofPath) => rm(proofPath, { force: true })),
+  );
+}
+
+async function assertPortablePickerProofs(root, context) {
+  const proofs = portablePickerProofPaths(root);
+  for (const [kind, proofPath] of Object.entries(proofs)) {
+    let contents;
+    try {
+      contents = await readFile(proofPath, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        throw new Error(`${context} did not invoke the native ${kind} picker`);
+      }
+      throw error;
+    }
+    if (contents !== `${kind}\n`) {
+      throw new Error(`${context} left an invalid native ${kind} picker proof`);
+    }
+  }
+}
+
+function portableAudioObjectPath(dataDirectory, checksum) {
+  return path.join(dataDirectory, 'audio-assets-v1', 'sha256', checksum);
+}
+
+async function assertPortableAudioObject(dataDirectory, checksum, context) {
+  const objectPath = portableAudioObjectPath(dataDirectory, checksum);
+  let bytes;
+  try {
+    bytes = await readFile(objectPath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(`${context} did not persist the imported audio object`);
+    }
+    throw error;
+  }
+  if (createHash('sha256').update(bytes).digest('hex') !== checksum) {
+    throw new Error(`${context} persisted an audio object with the wrong checksum`);
+  }
+}
+
 async function snapshotDatabaseFamily(dataDirectory) {
   const snapshot = new Map();
   for (const suffix of databaseFamilySuffixes) {
@@ -553,6 +625,78 @@ try {
 
     await runWdioPhase('write', nativeTestDataDirectory);
     await runWdioPhase('restore', nativeTestDataDirectory);
+
+    const portableRoot = await makeTemporaryDirectory('cts-native-e2e-portable-files-');
+    const portableExportData = await makeTemporaryDirectory(
+      'cts-native-e2e-portable-export-',
+    );
+    const portableImportData = await makeTemporaryDirectory(
+      'cts-native-e2e-portable-import-',
+    );
+    const portableCancelData = await makeTemporaryDirectory(
+      'cts-native-e2e-portable-cancel-',
+    );
+    const portableTitle = `Native Portable ${randomBytes(12).toString('hex')}`;
+    const seedBundlePath = path.join(portableRoot, 'seed.ctsbundle');
+    const exportedBundlePath = path.join(portableRoot, 'exported.ctsbundle');
+    const reexportedBundlePath = path.join(portableRoot, 'reexported.ctsbundle');
+    const cancelledFinalPath = path.join(portableRoot, 'cancelled.ctsbundle');
+    await resetPortablePickerProofs(portableRoot);
+    await runWdioPhase('bundle-export', portableExportData, {
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_ROOT: portableRoot,
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_OPEN_PATH: seedBundlePath,
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_SAVE_PATH: exportedBundlePath,
+      CTS_NATIVE_E2E_PROJECT_BUNDLE_TITLE: portableTitle,
+    });
+    await assertPortablePickerProofs(portableRoot, 'Native portable export phase');
+    const portableChecksum = await portableBundleAssetChecksum(exportedBundlePath);
+    await assertPortableAudioObject(
+      portableExportData,
+      portableChecksum,
+      'Native portable export phase',
+    );
+    const importedAudioObject = portableAudioObjectPath(
+      portableImportData,
+      portableChecksum,
+    );
+    await assertPathsAbsent(
+      [importedAudioObject],
+      'Native portable storage-isolation precondition',
+    );
+    await resetPortablePickerProofs(portableRoot);
+    await runWdioPhase('bundle-import', portableImportData, {
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_ROOT: portableRoot,
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_OPEN_PATH: exportedBundlePath,
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_SAVE_PATH: reexportedBundlePath,
+      CTS_NATIVE_E2E_PROJECT_BUNDLE_CHECKSUM: portableChecksum,
+      CTS_NATIVE_E2E_PROJECT_BUNDLE_TITLE: portableTitle,
+    });
+    await assertPortablePickerProofs(portableRoot, 'Native portable import phase');
+    await assertPortableAudioObject(
+      portableImportData,
+      portableChecksum,
+      'Native portable import phase',
+    );
+    await assertPortableAudioObject(
+      portableExportData,
+      portableChecksum,
+      'Native portable export isolation control',
+    );
+    await resetPortablePickerProofs(portableRoot);
+    await runWdioPhase('bundle-cancel', portableCancelData, {
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_ROOT: portableRoot,
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_OPEN_PATH: 'cancel',
+      CTS_NATIVE_TEST_PROJECT_BUNDLE_SAVE_PATH: 'cancel',
+      CTS_NATIVE_E2E_PROJECT_BUNDLE_CANCEL_FINAL_PATH: cancelledFinalPath,
+    });
+    await assertPortablePickerProofs(portableRoot, 'Native portable cancel phase');
+    await assertPathsAbsent(
+      [
+        cancelledFinalPath,
+        portableAudioObjectPath(portableCancelData, portableChecksum),
+      ],
+      'Native portable cancellation',
+    );
 
     const normalCloseTitle = `Native Close ${randomBytes(12).toString('hex')}`;
     const normalCloseRequest = {

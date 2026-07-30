@@ -179,9 +179,11 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - メトロノームはMaster volumeに追従し、Master meterはpost-faderの実出力レベルを表示する
 - Track Listで変更したcanonical synth音色は保存済みProjectを正本とし、次のライブ再生とWAV書き出しで同じ音色を使う。Masterとdrum Trackにはsynth音色selectorを表示しない
 
-### 2.7 Project / MIDI交換
+### 2.7 Project / Portable Project / MIDI交換
 
-- Project menuでは、`.ctsproj.json`を「曲をexactに再編集する形式」、MIDIを「他アプリとの音符中心の交換形式」と説明する。MIDIへclip / loop / alias / preset / effects / mute / solo / groove / section / chord semanticsの完全復元を示唆しない
+- Project menuでは、metadata-onlyの操作を`編集情報のみ (.ctsproj.json)`、音声素材を含む操作を`音声素材を含む持ち運び用 (.ctsbundle)`として別section・別button・別file acceptへ分ける。`.ctsproj.json`は「曲の編集情報をexactに交換するが音声fileは含まない」、`.ctsbundle`は「利用中の音声素材を含む別端末用コピー」と操作前に説明する
+- `.ctsbundle` export/import中はProject dialog全体を`aria-busy`にし、384 MiB予約の取得からWeb downloadまたはnative saved/cancelled/error settlementまで他の重い音声処理とProject操作を競合させない。cancelは成功toastを出さず、import前の曲・選択・履歴を保つ
+- Project menuでは、MIDIを「他アプリとの音符中心の交換形式」と説明する。MIDIへclip / loop / alias / preset / effects / mute / solo / groove / section / chord semanticsの完全復元を示唆しない
 - MIDI書き出しで量子化後の同一Track・同一音程が重なる場合はfile dialog / browser downloadへ進まず、「同じ音程のノートが重なっているためMIDIを書き出せません。重なりを短くするか、1つのノートにまとめてください。」とerror alertで案内する
 - MIDI importは現在の曲へ加算し、BPM / 拍子 / key / scaleを変更しない。完了statusは単数のTrack名ではなく、`Nトラック・M音を追加しました`を読み上げる
 - 成功後は先頭の追加Track / Clipを選択し、drumならDrum Editor、instrumentならPiano Rollを表示する。C2〜C6外のnoteは保持するが画面外であることを件数付きで知らせる
@@ -317,6 +319,10 @@ Chord Track のコンテキスト内操作:
 | 音声補正の解析 / Worker失敗 | cancel、stale Project / Clip、Worker protocol、非有限PCM、memory上限を区別し、古い解析・派生PCMを表示 / 再生 / WAVへ採用しない。再試行できる場合は同じpanelへ導線を残す |
 | 音声補正中の競合 | 録音・保存・Project切替中は実controlを`disabled`にし、解析とpointer previewを中止する。Projectが同じまま解除された時だけ直前のfocusを回復し、Project / history / revisionは変更しない |
 | Project JSONへ音声がない | `.ctsproj.json`は音声binaryを同梱しないことをimport前に説明し、対応objectがlocal repositoryにない場合は現在のProjectを置換しない |
+| Portable Project読み込み中 | `.ctsbundle`のheader、manifest、Project、全Audio Assetのlength / SHA-256を検証してから素材を保存し、全receipt一致後だけfresh-IDのコピーへ切り替えることを表示する。処理中は別Project操作と暗黙dismissを無効にする |
+| Portable Projectが大きすぎる / 破損 | file全体128 MiB、manifest 512 KiB、Project JSON 16 MiBのどの上限か、またはmagic / version / canonical順 / length / checksumのどの整合性を満たさないかをboundedな説明へ変換し、現在の曲・履歴・revisionが変わっていないことを伝える |
+| Portable Projectの素材保存 / 採用失敗 | 全bytes検証後のcontent-addressed保存またはreceipt照合、fresh-ID採用のどこで失敗したかを区別する。現在Projectは置換しない。既に保存済みのimmutable objectが未参照で残り得ることを内部制約として扱い、欠損素材を参照する部分Projectは表示しない |
+| Portable Projectのcancel | Web file選択、native open、native saveのcancelはいずれも成功・失敗toastを出さず、repository store、Project置換、履歴、revisionを発生させない |
 | カラオケ音源が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、5分以下、stereoという条件と、端末codecでdecodeできなかった可能性を分けて案内する |
 | カラオケ音源がmono / near-mono | stereo中央定位の差分を利用する処理であることを説明し、左右に広がりのあるstereo音源を案内する |
 | ボーカル軽減の品質 | 声が残る場合や中央の楽器も弱くなる場合があることを失敗扱いにせず、preset比較とA/B試聴を案内する |

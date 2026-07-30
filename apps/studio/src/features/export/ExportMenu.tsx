@@ -10,7 +10,9 @@ export type ExportOperation =
   | 'wav-export'
   | 'track-wav-export'
   | 'project-export'
-  | 'project-import';
+  | 'project-import'
+  | 'portable-project-export'
+  | 'portable-project-import';
 
 type ExportMenuContentProps = {
   onDone: () => void;
@@ -46,6 +48,10 @@ export function ExportMenu() {
     setActiveOperation(null);
   }, []);
 
+  const closeMenu = useCallback((): void => {
+    if (operationRef.current === null) setOpen(false);
+  }, []);
+
   const preload = (): void => {
     void loadExportMenuContent().catch(() => undefined);
   };
@@ -62,7 +68,11 @@ export function ExportMenu() {
       </button>
 
       {open ? (
-        <Dialog title="書き出し / 読み込み" onClose={() => setOpen(false)}>
+        <Dialog
+          title="書き出し / 読み込み"
+          onClose={closeMenu}
+          closeDisabled={activeOperation !== null}
+        >
           <DeferredFeature
             load={loadExportMenuContent}
             componentProps={{

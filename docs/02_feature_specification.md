@@ -4,7 +4,7 @@
 
 | モジュール | 機能 | MVP | 説明 |
 |---|---|---:|---|
-| Project | 新規作成/保存/読み込み | Yes | WebはlocalStorage repository、Tauriはapplication-owned SQLiteへ自動保存。Project集約をexact roundtripできる交換形式は`.ctsproj.json`だけ |
+| Project | 新規作成/保存/読み込み | Yes | WebはlocalStorage repository、Tauriはapplication-owned SQLiteへ自動保存。`.ctsproj.json`はProject metadataのexact交換、`.ctsbundle` v1はcanonical Projectとready Audio Assetを含む持ち運び用コピー |
 | Template | 作曲テンプレート | Yes | 8小節、16小節、BGM、ジングル等 |
 | Chord Track | コードタイムライン | Yes | 小節単位でコードを置く。機能と候補を表示 |
 | Chord Palette | コード候補 | Yes | ダイアトニック、代理、借用、セカンダリ候補 |
@@ -277,7 +277,7 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - liveとoffline WAVは共通のAudio Clip window plannerを使い、seek途中、transport loop、Clip loop、variable tempo、source frame range、gain、fadeを同じhalf-open windowへ解決する。Audio Trackはsynth voiceを作らず、decoded AudioBufferをTrack graphへrate 1.0で接続する。再生前に対象assetを全件preflightし、途中までgraph / WAVを作った状態で欠落を発見しない
 - raw objectのchecksum / length検証とdecode cacheを共有し、raw preflightとdecoded PCMは各256 MiB以下に制限する。missing / changed / unavailable / decode / resource超過は型付きに分類し、Track / Clip単位の説明と再読み込み手段を表示する。metadataを自動的に`unresolved`へ書き換えたり、同名の別fileへ黙って置換したりしない
 - liveは実AudioContext sample rate確定後、resolver I/OとTrack graph生成前に未使用decoded LRUを解放し、active / in-flight cacheだけを保持量へ数える。resolve/hash phaseは`raw合計 + 2 × 最大raw + retained decoded`、decode phaseは`raw合計 + 最大raw decode copy + target-rate decoded合計 + retained decoded`をchecked加算し、大きい方が384 MiBを越えるProjectを型付きで拒否する
-- `.ctsproj.json`はcurrent schema v10 metadata、Audio Clipの`audioWarp`（保存済み`formantMode`を含む）、automation bypass、Global / TrackまたはMaster Read、確定済みautomation curve、audio take folder、audio routingのexact交換形式だが、Elastic Audioの解析結果 / 派生PCM / A/B状態、Read / Touch / Latch / Writeの選択、Armed / Writing、gesture所有権とAudioAsset binaryを同梱しない。単体JSONを別端末・別profileで開く場合は、対応binaryが既に同じcontent-addressed repositoryに存在する時だけreadyとして採用し、それ以外は既存Projectを変更せず非同梱を説明する。per-song bundleは引き続き将来案である
+- `.ctsproj.json`はcurrent schema v10 metadata、Audio Clipの`audioWarp`（保存済み`formantMode`を含む）、automation bypass、Global / TrackまたはMaster Read、確定済みautomation curve、audio take folder、audio routingのexact交換形式だが、Elastic Audioの解析結果 / 派生PCM / A/B状態、Read / Touch / Latch / Writeの選択、Armed / Writing、gesture所有権とAudioAsset binaryを同梱しない。単体JSONを別端末・別profileで開く場合は、対応binaryが既に同じcontent-addressed repositoryに存在する時だけreadyとして採用し、それ以外は既存Projectを変更せず非同梱を説明する。音声素材を含めて持ち運ぶ場合は、下記の`.ctsbundle` v1を別操作で使う
 
 ### 7.7 Audio Track録音 / Record Arm
 
@@ -423,13 +423,17 @@ Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生pass�
 - 各drum subvoice gainはsource stopと同じAudioParam時刻で0にし、main-threadの`ended` cleanupがfilter tailを切る時刻にPCMを依存させない
 - テール長はPCMをsilence scanする値ではなく、source / effectパラメータから保守的に導出する。40秒capへ達する病的な多段insertは最後50msでfadeする。同じapp buildのpinned Chromiumでは同一Projectの再WAV書き出しを全bytes一致とし、seedだけ変えたfixtureではevent planを保ったままPCMが変わることを確認する。browser / OS / WebView / sample rateが異なるWeb Audio実装間のPCM bit identityは保証しない
 
-### 10.3 Project Bundle（将来案、MVP未実装）
+### 10.3 Portable Project Bundle（`.ctsbundle` v1、実装済み）
 
-- 下記は持ち運び可能なbinary同梱形式として検討する研究案であり、現行MVPの保存・入出力形式ではない。app-owned repositoryにAudio Assetを保存できることと、bundleとして同梱できることを混同しない
-- `project.sqlite`
-- `assets/`
-- `exports/`
-- `metadata.json`
+- `.ctsproj.json`は16 MiB以下のcanonical Project metadataだけを扱う。`.ctsbundle`は同じcanonical Projectと、そのProjectが参照する全ready Audio Assetを1つのpathless binary containerへ格納する持ち運び用形式である。SQLite、absolute path、Elastic Audio派生PCM、解析cache、A/B状態、ハミングの録音PCM、カラオケ作成の一時PCMは含めない
+- file layoutは`32-byte header → canonical UTF-8 manifest JSON → canonical Project JSON → distinct asset payloads`である。headerはlittle-endianで、0..7が`CTSBNDL1`、8..9がversion `1`、10..11がflags `0`、12..15がmanifest length、16..19がProject length、20..23がasset count、24..27がfile全体のexact length、28..31がreserved `0`である
+- manifestのexact keyは`format / version / project / assets`、Project descriptorと各asset descriptorのexact keyは`byteLength / checksumSha256`である。`format`は`ctsbundle`、`version`は`1`。Project内のAudioAssetはchecksum、availability、IDの順でcanonical化し、distinct payloadとmanifest asset descriptorはlowercase SHA-256の昇順に並べる。同じchecksumと同じdecode metadataを持つProject entityは1 payloadへdeduplicateするが、byte length / media type / sample rate / channel count / frame countが矛盾する同checksumは拒否する
+- manifestは512 KiB以下、Project JSONは16 MiB以下、個々のassetとheader・manifest・Project・全payloadを含むfile全体は128 MiB以下とする。exportはsafe-integer checked sumでoperation全体のexact byte lengthをrepository readと出力buffer確保より前に算出し、1 byteでも超える候補、unresolved asset、asset数超過を部分読込なしで拒否する
+- rendererはexport/import operation全体に384 MiBの排他予約を取り、予約できない場合はcodec、repository、file handoffへ進まない。この値はWeb Crypto / Blob / Tauri内部の全process RSS copy数を断定するものではなく、appが制御する同時処理の保守的な上限である
+- exportは全distinct repository objectのlengthとSHA-256を照合した後だけbundleを完成する。Webは`.ctsbundle` download、nativeは専用command `file_export_project_bundle`へraw binaryを渡す。nativeはTauri `Request`のborrowed raw bodyをsize・header・manifest structureまで検証してから、dialogとblocking atomic writeをまたぐために必要なcommand-owned copyをexact 1回だけ作る。JSON/base64 IPC、renderer path指定、検証前cloneは使わない
+- native open cancelは1 byteの`[0x00]`、成功は`[0x01][filenameLengthLE u32][UTF-8 basename][bundle bytes]`を返し、absolute pathを返さない。native saveはexact `{ status: "saved" | "cancelled" }`を返す。open/save cancelはいずれも成功toast、repository store、Project置換、履歴、revisionを発生させない
+- importはheader、manifest canonicality、Project codec、exact lengths、全SHA-256、payload終端、Projectのready AudioAsset descriptorとの一致を全て検証してからrepository storeを始める。payload viewは入力bundleをborrowするため、decoderだけのためのwhole-bundle copyは作らない。全distinct payloadのstore receiptがchecksum / lengthと一致した後だけfresh Project IDへcloneし、現在Projectを1回のatomic adoptionで置換する
+- repositoryはcontent-addressed objectのdelete/rollback APIを持たない。full validation後の後続storeまたはadoption失敗ではimmutableな未参照objectが残り得るが、欠損objectを参照するProjectや部分採用Projectは作らない。nativeはgeneration-aware GCを持ち、Webのgeneration-aware orphan GCは既知の後続制約として明示する
 
 ## 11. MIDI Import
 

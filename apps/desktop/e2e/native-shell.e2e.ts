@@ -1,6 +1,17 @@
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { $, browser, expect } from '@wdio/globals';
+import {
+  decodePortableProjectBundle,
+  encodePortableProjectBundle,
+} from '../../../packages/project-bundle/src/index';
+import {
+  createEmptyProject,
+  type Project,
+  type ReadyAudioAsset,
+  type Track,
+} from '../../../packages/project-model/src/index';
 
 const PROJECT_TITLE = 'Native WebView Smoke';
 const NATIVE_RESULTS_DIR = path.resolve('test-results/native');
@@ -21,6 +32,13 @@ const NORMAL_CLOSE_REQUEST_TOKEN = process.env.CTS_NATIVE_E2E_NORMAL_CLOSE_REQUE
 const SIGKILL_BASELINE_TITLE = process.env.CTS_NATIVE_E2E_SIGKILL_BASELINE_TITLE;
 const SIGKILL_PENDING_TITLE = process.env.CTS_NATIVE_E2E_SIGKILL_PENDING_TITLE;
 const SIGKILL_WRITABLE_TITLE = process.env.CTS_NATIVE_E2E_SIGKILL_WRITABLE_TITLE;
+const PROJECT_BUNDLE_OPEN_PATH = process.env.CTS_NATIVE_TEST_PROJECT_BUNDLE_OPEN_PATH;
+const PROJECT_BUNDLE_SAVE_PATH = process.env.CTS_NATIVE_TEST_PROJECT_BUNDLE_SAVE_PATH;
+const PROJECT_BUNDLE_ROOT = process.env.CTS_NATIVE_TEST_PROJECT_BUNDLE_ROOT;
+const PROJECT_BUNDLE_CHECKSUM = process.env.CTS_NATIVE_E2E_PROJECT_BUNDLE_CHECKSUM;
+const PROJECT_BUNDLE_TITLE = process.env.CTS_NATIVE_E2E_PROJECT_BUNDLE_TITLE;
+const PROJECT_BUNDLE_CANCEL_FINAL_PATH =
+  process.env.CTS_NATIVE_E2E_PROJECT_BUNDLE_CANCEL_FINAL_PATH;
 
 if (
   ![
@@ -32,9 +50,133 @@ if (
     'sigkill-second-restart',
     'erase',
     'blank-restart',
+    'bundle-export',
+    'bundle-import',
+    'bundle-cancel',
   ].includes(E2E_PHASE)
 ) {
   throw new Error(`Unsupported CTS_NATIVE_E2E_PHASE: ${E2E_PHASE}`);
+}
+
+function syntheticWav(): Uint8Array {
+  const frameCount = 480;
+  const bytes = new Uint8Array(44 + frameCount * 2);
+  const view = new DataView(bytes.buffer);
+  bytes.set(Buffer.from('RIFF'), 0);
+  view.setUint32(4, bytes.byteLength - 8, true);
+  bytes.set(Buffer.from('WAVEfmt '), 8);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 48_000, true);
+  view.setUint32(28, 96_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  bytes.set(Buffer.from('data'), 36);
+  view.setUint32(40, frameCount * 2, true);
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    view.setInt16(44 + frame * 2, Math.round(Math.sin(frame / 8) * 8_000), true);
+  }
+  return bytes;
+}
+
+async function writeSyntheticBundle(filePath: string, title: string): Promise<string> {
+  const wav = syntheticWav();
+  const checksumSha256 = createHash('sha256').update(wav).digest('hex');
+  const asset: ReadyAudioAsset = {
+    id: 'asset-native-portable',
+    availability: 'ready',
+    checksumSha256,
+    originalName: 'self-authored-sine.wav',
+    mediaType: 'audio/wav',
+    byteLength: wav.byteLength,
+    sampleRate: 48_000,
+    channelCount: 1,
+    frameCount: 480,
+  };
+  const project = createEmptyProject({ title });
+  const track: Track = {
+    id: 'track-native-portable',
+    name: 'Portable WAV',
+    type: 'audio',
+    role: 'general',
+    clips: [{
+      id: 'clip-native-portable',
+      trackId: 'track-native-portable',
+      type: 'audio',
+      startBeat: 0,
+      lengthBeats: 0.01,
+      loop: false,
+      audioAssetId: asset.id,
+      sourceStartFrame: 0,
+      sourceFrameCount: asset.frameCount,
+      fadeInFrames: 0,
+      fadeOutFrames: 0,
+      gainDb: 0,
+    }],
+    volume: 0.8,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: [],
+  };
+  const portableProject: Project = {
+    ...project,
+    audioAssets: [asset],
+    tracks: [...project.tracks.slice(0, -1), track, project.tracks.at(-1)!],
+    audioRouting: {
+      ...project.audioRouting,
+      outputs: [
+        ...project.audioRouting.outputs,
+        { sourceTrackId: track.id, destination: { type: 'master' } },
+      ],
+    },
+  };
+  const bundle = await encodePortableProjectBundle(portableProject, {
+    read: async () => wav,
+  });
+  await writeFile(filePath, bundle, { flag: 'wx' });
+  return checksumSha256;
+}
+
+async function openExportMenu(): Promise<void> {
+  await (await $('button=書き出し')).click();
+  await (await $('button=音声込みポータブルを読み込み')).waitForDisplayed({
+    timeout: 10_000,
+  });
+}
+
+async function waitForPath(filePath: string): Promise<void> {
+  await browser.waitUntil(
+    async () => {
+      try {
+        await access(filePath);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 15_000, interval: 50, timeoutMsg: `Native file was not created: ${filePath}` },
+  );
+}
+
+async function waitForProjectBundlePickerProof(kind: 'open' | 'save'): Promise<void> {
+  if (!PROJECT_BUNDLE_ROOT || !path.isAbsolute(PROJECT_BUNDLE_ROOT)) {
+    throw new Error('Native portable picker proof root is unavailable');
+  }
+  const proofPath = path.join(
+    PROJECT_BUNDLE_ROOT,
+    `.project-bundle-${kind}.invoked`,
+  );
+  await waitForPath(proofPath);
+  expect(await readFile(proofPath, 'utf8')).toBe(`${kind}\n`);
+}
+
+async function decodeBundleFile(filePath: string) {
+  const bytes = await readFile(filePath);
+  return decodePortableProjectBundle(
+    new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+  );
 }
 
 async function waitForStudio(): Promise<void> {
@@ -232,6 +374,108 @@ describe('Compose Tutor Studio native shell', () => {
       timeoutMsg: 'Bundled tutorial chunk did not load',
     });
   });
+
+  if (E2E_PHASE === 'bundle-export') {
+    it('imports a self-authored WAV fixture and exports it through the native bundle path', async () => {
+      if (
+        !PROJECT_BUNDLE_OPEN_PATH
+        || !PROJECT_BUNDLE_SAVE_PATH
+        || !PROJECT_BUNDLE_TITLE
+      ) {
+        throw new Error('Native portable export paths are unavailable');
+      }
+      const checksum = await writeSyntheticBundle(
+        PROJECT_BUNDLE_OPEN_PATH,
+        PROJECT_BUNDLE_TITLE,
+      );
+      const seed = await decodeBundleFile(PROJECT_BUNDLE_OPEN_PATH);
+
+      await openExportMenu();
+      await (await $('button=音声込みポータブルを読み込み')).click();
+      await waitForProjectBundlePickerProof('open');
+      await expect(await $('input[aria-label="プロジェクト名"]')).toHaveValue(
+        PROJECT_BUNDLE_TITLE,
+      );
+      await openExportMenu();
+      await (await $('button=音声込みポータブルを書き出し')).click();
+      await waitForProjectBundlePickerProof('save');
+      await waitForPath(PROJECT_BUNDLE_SAVE_PATH);
+
+      const exported = await decodeBundleFile(PROJECT_BUNDLE_SAVE_PATH);
+      expect(exported.project.id).not.toBe(seed.project.id);
+      expect(exported.project.audioAssets).toHaveLength(1);
+      expect(exported.project.audioAssets[0]).toMatchObject({
+        availability: 'ready',
+        checksumSha256: checksum,
+      });
+      expect(exported.assets[0]?.checksumSha256).toBe(checksum);
+    });
+  }
+
+  if (E2E_PHASE === 'bundle-import') {
+    it('adopts the native bundle in a storage-isolated activation with another fresh Project ID', async () => {
+      if (
+        !PROJECT_BUNDLE_OPEN_PATH
+        || !PROJECT_BUNDLE_SAVE_PATH
+        || !PROJECT_BUNDLE_CHECKSUM
+        || !PROJECT_BUNDLE_TITLE
+      ) {
+        throw new Error('Native portable import paths are unavailable');
+      }
+      const previous = await decodeBundleFile(PROJECT_BUNDLE_OPEN_PATH);
+      await openExportMenu();
+      await (await $('button=音声込みポータブルを読み込み')).click();
+      await waitForProjectBundlePickerProof('open');
+      await expect(await $('input[aria-label="プロジェクト名"]')).toHaveValue(
+        PROJECT_BUNDLE_TITLE,
+      );
+      await openExportMenu();
+      await (await $('button=音声込みポータブルを書き出し')).click();
+      await waitForProjectBundlePickerProof('save');
+      await waitForPath(PROJECT_BUNDLE_SAVE_PATH);
+
+      const reexported = await decodeBundleFile(PROJECT_BUNDLE_SAVE_PATH);
+      expect(reexported.project.id).not.toBe(previous.project.id);
+      expect(reexported.project.audioAssets[0]).toMatchObject({
+        availability: 'ready',
+        checksumSha256: PROJECT_BUNDLE_CHECKSUM,
+      });
+      expect(reexported.assets[0]?.checksumSha256).toBe(PROJECT_BUNDLE_CHECKSUM);
+    });
+  }
+
+  if (E2E_PHASE === 'bundle-cancel') {
+    it('keeps Project and filesystem unchanged for native open and save cancellation', async () => {
+      if (!PROJECT_BUNDLE_CANCEL_FINAL_PATH) {
+        throw new Error('Native portable cancel proof path is unavailable');
+      }
+      const title = await $('input[aria-label="プロジェクト名"]');
+      const originalTitle = await title.getValue();
+      await openExportMenu();
+      const importButton = await $('button=音声込みポータブルを読み込み');
+      const exportButton = await $('button=音声込みポータブルを書き出し');
+      await importButton.click();
+      await waitForProjectBundlePickerProof('open');
+      await importButton.waitForEnabled({ timeout: 10_000 });
+      await expect(title).toHaveValue(originalTitle);
+      const bodyAfterOpenCancel = await (await $('body')).getText();
+      expect(bodyAfterOpenCancel).not.toContain(
+        '音声込みプロジェクトをコピーとして読み込みました。',
+      );
+      expect(bodyAfterOpenCancel).not.toContain(
+        '音声込みプロジェクトを読み込みましたが、まだ端末に保存できていません。',
+      );
+
+      await exportButton.click();
+      await waitForProjectBundlePickerProof('save');
+      await exportButton.waitForEnabled({ timeout: 10_000 });
+      await expect(title).toHaveValue(originalTitle);
+      await expect(access(PROJECT_BUNDLE_CANCEL_FINAL_PATH)).rejects.toThrow();
+      const bodyText = await (await $('body')).getText();
+      expect(bodyText).not.toContain('音声込みポータブルプロジェクトを書き出しました。');
+      expect(bodyText).not.toContain('ポータブルプロジェクトを安全に検証できませんでした');
+    });
+  }
 
   if (E2E_PHASE === 'write') it('plays, stops, and commits through the SQLite repository', async () => {
     const title = await $('input[aria-label="プロジェクト名"]');

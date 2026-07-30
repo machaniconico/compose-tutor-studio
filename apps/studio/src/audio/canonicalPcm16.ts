@@ -30,6 +30,12 @@ export type CanonicalPcm16Expectation = Readonly<{
   frameCount?: number;
 }>;
 
+export type CanonicalPcm16Metadata = Readonly<{
+  sampleRate: number;
+  channelCount: 1 | 2;
+  frameCount: number;
+}>;
+
 export type CanonicalPcm16Window = Readonly<{
   startFrame: number;
   frameCount: number;
@@ -176,6 +182,19 @@ function inspectCanonicalPcm16(
     channelCount,
     frameCount,
   };
+}
+
+/**
+ * Validate the complete canonical WAV container and return only its metadata.
+ * Unlike parseCanonicalPcm16 this does not allocate decoded Float32 channels.
+ */
+export function inspectCanonicalPcm16Metadata(
+  bytes: Uint8Array,
+  expected: CanonicalPcm16Expectation = {},
+): CanonicalPcm16Metadata {
+  const { sampleRate, channelCount, frameCount } =
+    inspectCanonicalPcm16(bytes, expected);
+  return Object.freeze({ sampleRate, channelCount, frameCount });
 }
 
 function decodeCanonicalPcm16Window(
