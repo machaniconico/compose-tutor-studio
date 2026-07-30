@@ -58,15 +58,17 @@ let masterMeter:
     }
   | null = null;
 
-function clearMasterMeter(): void {
+function clearMasterMeter(disconnectSource = true): void {
   const current = masterMeter;
   if (!current) return;
   masterMeter = null;
   meterAnalysers.delete(current.trackId);
-  try {
-    current.source.disconnect(current.analyser);
-  } catch {
-    // already disconnected
+  if (disconnectSource) {
+    try {
+      current.source.disconnect(current.analyser);
+    } catch {
+      // already disconnected
+    }
   }
   try {
     current.analyser.disconnect();
@@ -84,9 +86,12 @@ function clearMasterMeter(): void {
  * Release the live master meter only when the caller still owns its source.
  * Offline graphs never install meters, so exporting cannot disturb this state.
  */
-export function disposeMasterMeter(source: AudioNode): void {
+export function disposeMasterMeter(
+  source: AudioNode,
+  options: Readonly<{ disconnectSource?: boolean }> = {},
+): void {
   if (masterMeter?.source !== source) return;
-  clearMasterMeter();
+  clearMasterMeter(options.disconnectSource ?? true);
 }
 
 function createMeterAnalyser(ctx: BaseAudioContext): AnalyserNode | null {
@@ -880,6 +885,7 @@ export function buildTrackGraphs(
   metering: 'live' | 'disabled',
   suppliedPlan?: CompiledAudioRoutingPlan,
   suppliedMix?: ResolvedAudioRoutingMix,
+  masterMeterSource: AudioNode = master,
 ): Map<string, TrackGraph> {
   const legacyTracks = Array.isArray(source) ? source : null;
   const project = legacyTracks ? null : source as Project;
@@ -894,7 +900,7 @@ export function buildTrackGraphs(
   if (metering === 'live') {
     installMasterMeter(
       ctx,
-      master,
+      masterMeterSource,
       tracks.find((track) => track.type === 'master')?.id ?? null,
     );
   }
@@ -955,7 +961,7 @@ export function buildTrackGraphs(
   } catch (error) {
     for (const graph of graphs.values()) graph.dispose();
     graphs.clear();
-    if (metering === 'live') disposeMasterMeter(master);
+    if (metering === 'live') disposeMasterMeter(masterMeterSource);
     throw error;
   }
 }

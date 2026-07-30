@@ -3,6 +3,7 @@
 
 import { makeId } from './ids';
 import { isLearningTrack } from './learning-track';
+import { effectiveMasterTrackId } from './automation-targets';
 import { encodeProjectJson, MAX_PROJECT_STRING_LENGTH } from './project-codec';
 import { projectLengthBeats } from './time';
 import type { ProjectCodecIssue } from './project-codec';
@@ -112,10 +113,13 @@ function reconcileAutomationReadState(
   tracks: readonly Track[],
 ): Project['automationReadState'] {
   const disabled = new Set(project.automationReadState.disabledTrackIds);
+  const effectiveMasterId = effectiveMasterTrackId({ tracks });
   return {
     globalEnabled: project.automationReadState.globalEnabled,
     disabledTrackIds: tracks
-      .filter((track) => track.type !== 'master' && disabled.has(track.id))
+      .filter((track) =>
+        (track.type !== 'master' || track.id === effectiveMasterId)
+        && disabled.has(track.id))
       .map((track) => track.id),
   };
 }

@@ -1529,6 +1529,73 @@ describe('WAV Audio Clip integration', () => {
     }
   });
 
+  it('applies the same effective Master volume curve to mix and selected bounce', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    project.tracks.push({
+      id: 'wav-master',
+      name: 'Master',
+      type: 'master',
+      role: 'general',
+      clips: [],
+      volume: 0.9,
+      pan: 0,
+      mute: false,
+      solo: false,
+      effects: [],
+    });
+    project.automationLanes = [{
+      id: 'wav-master-volume-lane',
+      bypassed: false,
+      target: { type: 'track-volume', trackId: 'wav-master' },
+      points: [
+        { id: 'master-point-0', beat: 0, value: 0.35, interpolation: 'linear' },
+        { id: 'master-point-1', beat: 2, value: 0.8, interpolation: 'hold' },
+      ],
+    }];
+
+    const renderCommands = async (selected: boolean) => {
+      const offline = installAudioClipOfflineContext();
+      const rendered = selected
+        ? await renderSelectedTrackToWav(project, 'wav-audio-track', {
+          audioAssetResolver: { resolve: async () => bytes },
+        })
+        : await renderProjectToWav(project, {
+          audioAssetResolver: { resolve: async () => bytes },
+        });
+      rendered.release();
+      return offline.gains[0]?.gain.commands ?? [];
+    };
+
+    const mixCommands = await renderCommands(false);
+    vi.unstubAllGlobals();
+    const selectedCommands = await renderCommands(true);
+
+    expect(selectedCommands).toEqual(mixCommands);
+    expect(mixCommands).toContainEqual({ kind: 'set', value: 0.35, time: 0 });
+    expect(mixCommands).toContainEqual({ kind: 'linear', value: 0.8, time: 1 });
+
+    vi.unstubAllGlobals();
+    const disabledContext = installAudioClipOfflineContext();
+    const disabled = await renderProjectToWav({
+      ...project,
+      automationReadState: {
+        globalEnabled: true,
+        disabledTrackIds: ['wav-master'],
+      },
+    }, {
+      audioAssetResolver: { resolve: async () => bytes },
+    });
+    disabled.release();
+    const disabledMasterCommands = disabledContext.gains[0]?.gain.commands ?? [];
+    expect(disabledMasterCommands).toContainEqual({
+      kind: 'set',
+      value: 0.9,
+      time: 0,
+    });
+    expect(disabledMasterCommands.some((command) => command.value === 0.35)).toBe(false);
+  });
+
   it('does not schedule automation for a Track outside the selected routing closure', async () => {
     const bytes = Uint8Array.from([1, 2, 3, 4]);
     const project = await projectWithAudioClip(bytes);

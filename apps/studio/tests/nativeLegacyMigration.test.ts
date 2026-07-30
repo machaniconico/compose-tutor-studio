@@ -64,7 +64,7 @@ function migrateArchivedCorpusProjectJson(projectJson: string): string {
   if (
     project.schemaVersion !== LEGACY_MIGRATION_VERSION - 1
     || LEGACY_MIGRATION_VERSION !== 5
-    || CURRENT_SCHEMA_VERSION !== 7
+    || CURRENT_SCHEMA_VERSION !== 8
     || Object.prototype.hasOwnProperty.call(project, 'audioTakeFolders')
   ) {
     throw new Error('archived legacy corpus is not an unmigrated schema-v4 project');

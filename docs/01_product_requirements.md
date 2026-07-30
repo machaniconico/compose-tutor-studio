@@ -60,8 +60,8 @@
 | US-013 | 作曲者として、手元の音声を曲へ置いて非破壊編集したい | Must | WAV / MP3 / M4A / AACをAudio Trackへ読み込み、移動、左右trim、gain、fade、loop、split、独立複製、削除をUndo/Redoでき、live再生・WAV・再読込で同じ範囲を使う |
 | US-014 | 作曲者として、マイク入力を新規または既存のAudio Trackへ録音したい | Must | Audio Trackを1件だけ録音待機にでき、システム既定または列挙された入力を選び、通常は現在playheadから1 Clip、明示loop時は2〜128回の固定passを連続録音して自動take folderとして採用できる。さらに明示Punch範囲ではpre/post-roll付きのbounded Auto Punchを行い、既存素材を旧takeとして残して新takeを採用する。いずれもasset-first・Undo 1回、途中停止・失敗・cancelはProject不変とする |
 | US-015 | 作曲者として、同じ区間を複数回録った素材から良い部分をつないで仕上げたい | Must | 同一Audio Track・同一時間窓の既存Clipを非破壊take folderへまとめ、複数範囲を別takeへ切り替え、境界調整・未使用take削除・Undo/Redo・保存/再読込・live/WAVで同じcompを使える |
-| US-016 | 作曲者として、音量やパンの変化を一時的に外して元のTrack設定と聴き比べたい | Must | volume / panのAutomation laneをRead / Bypassで切り替え、Bypass中もpointを保持・編集できる。live再生とWAVはBypass時にTrack scalarを使い、Undo / Redo・保存 / 再読込後も同じ状態になる |
-| US-017 | 作曲者として、再生しながらミキサー操作をオートメーションへ記録したい | Must | non-Master TrackごとにRead / Touch / Latch / Writeを選び、Touchは操作中だけ、Latchは最初の操作からパンチアウトまで、Writeは再生開始から音量とパンの両方を記録できる。1 passをProject変更・Undo・保存revision各1回で確定し、Writeは警告確認後だけ有効化して確定後Touchへ戻る。modeと記録中状態はruntime-only、確定curveだけを保存する |
+| US-016 | 作曲者として、音量やパンの変化を一時的に外して元のTrack設定と聴き比べたい | Must | non-Masterのvolume / panとeffective Masterの出力volumeをRead / Bypassで切り替え、Bypass中もpointを保持・編集できる。live再生とWAVはBypass時にTrack scalarを使い、Undo / Redo・保存 / 再読込後も同じ状態になる |
+| US-017 | 作曲者として、再生しながらミキサー操作をオートメーションへ記録したい | Must | non-Master Trackの音量 / パンとeffective Masterの出力音量についてRead / Touch / Latch / Writeを選び、Touchは操作中だけ、Latchは最初の操作からパンチアウトまで、Writeは再生開始から対応targetを記録できる。Master Writeは音量だけを扱う。1 passをProject変更・Undo・保存revision各1回で確定し、Writeは警告確認後だけ有効化して確定後Touchへ戻る。modeと記録中状態はruntime-only、確定curveだけを保存する |
 
 ## 3. MVP機能範囲
 
@@ -105,8 +105,8 @@
 - 0.5〜60秒の単一マイク入力録音。録音待機なしでは新規Audio Track、録音待機中の既存Audio Trackでは同Trackへ追加する。loop OFF / punch OFFは1 Clip、loop ONは2〜128固定pass、punch ONは録音待機中の既存Audio Trackへ明示`[in, out)`だけを録るbounded Auto Punchとする。Punchはloopと排他で、pre-rollから伴奏、future render frameのinでcapture、out＋正latency tailでcapture完了、post-roll自然完了の両方を確認してから採用する。60秒上限は正のlatency tailを含み、途中停止・cancel・unmount・失敗では全体を破棄する。録音待機、入力device、loop / punch locator、roll / pass指定はruntime-onlyでProjectへ保存しない
 - WAV/MP3/M4A/AACのステレオ音源を使う、ローカル完結の中央定位ボーカル軽減
 - stereo Bus、各non-Masterのmain output、pre/post-fader send / return。循環は候補Project採用前に拒否し、live再生とoffline WAVで同じrouting graphを使う
-- non-Master Trackのvolume / pan Automation lane。pointのhold / linear curve編集、parameter-lane Read / Bypass、Track / Global Readを保存・Undoできる。いずれかのRead gateが無効ならpointを破棄せず、live再生とoffline WAVの両方で対象Track scalarを使う
-- Track別のRead / Touch / Latch / Write。再生pass中はミキサー / Track Listの音量・パン操作を一時bufferへ記録し、停止、自然終了、seek、loop右端などのパンチアウトでcurveを1回だけ確定する。mode、Armed / Writing、pointer / keyboard gesture所有権はruntime-onlyで、Project切替・再読込時はReadへ戻す
+- non-Master Trackのvolume / panとeffective Masterのoutput volume Automation lane。pointのhold / linear curve編集、parameter-lane Read / Bypass、TrackまたはMaster / Global Readを保存・Undoできる。いずれかのRead gateが無効ならpointを破棄せず、live再生とoffline WAVの両方で対象Track scalarを使う
+- 対応Track別のRead / Touch / Latch / Write。再生pass中はミキサー / Track Listの音量・パン操作を一時bufferへ記録し、停止、自然終了、seek、loop右端などのパンチアウトでcurveを1回だけ確定する。effective Masterは音量だけを記録する。mode、Armed / Writing、pointer / keyboard gesture所有権はruntime-onlyで、Project切替・再読込時はReadへ戻す
 
 ### 3.5 Export
 
@@ -127,7 +127,7 @@
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
 | VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
 | Quick Punch / 長時間streaming / 複数入力 / MIDI・named comp | 単一入力の伴奏同期録音、物理loopback実測校正、既存Clipの手動take folder化、明示loopの固定pass cycle capture、pre/post-roll付きbounded Auto Punchと非破壊take採用までは持つ。disk streaming、既存再生を継続したまま任意時点でin/outするQuick Punch、自動input monitoring、複数入力、MIDI comp、複数の名前付きcomp / flattenは持たない | boundedなlocal captureを3OS実機で検証した後、長時間streaming、Quick Punch、複数I/Oを独立gateで追加する |
-| 高度なAutomation target / mode | non-Master Trackのvolume / panに対するRead / Touch / Latch / Write、Global / Track / lane Read gateまでは利用可能。Master、insert / send / tempo、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass管理は持たない | 現行passのfailure atomicityと実機操作を固定した後、target追加と高度modeを別々のgateで追加 |
+| 高度なAutomation target / mode | non-Master Trackのvolume / panとeffective Masterのoutput volumeに対するRead / Touch / Latch / Write、Global / TrackまたはMaster / lane Read gateまでは利用可能。Master pan、later Master、insert / send / tempo、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass管理は持たない | 現行passのfailure atomicityと実機操作を固定した後、target追加と高度modeを別々のgateで追加 |
 
 ## 5. 非機能要件
 

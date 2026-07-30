@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import type { Track } from '@cts/project-model';
+import {
+  effectiveMasterTrackId,
+  type Track,
+} from '@cts/project-model';
 import { useStore } from '../../state/store';
 import { useAutomationGesture } from '../automation/useAutomationGesture';
 import { AddTrackDialog } from './AddTrackDialog';
@@ -16,8 +19,9 @@ import {
 /** Left column listing tracks with volume plus sound-track mute/solo controls. */
 export function TrackList() {
   const [addOpen, setAddOpen] = useState(false);
-  const tracks = useStore((s) => s.project.tracks);
-  const audioAssets = useStore((s) => s.project.audioAssets);
+  const project = useStore((s) => s.project);
+  const tracks = project.tracks;
+  const audioAssets = project.audioAssets;
   const audioAssetIssues = useStore((s) => s.audioAssetIssues);
   const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
   const selectTrack = useStore((s) => s.selectTrack);
@@ -27,6 +31,7 @@ export function TrackList() {
   const recordingControlsBusy = useStore(
     (s) => s.projectOperationBusy || s.audioRecordingOperationId !== null,
   );
+  const masterTrackId = effectiveMasterTrackId(project);
 
   return (
     <nav className="track-list" aria-label="トラック一覧">
@@ -94,6 +99,7 @@ export function TrackList() {
                 armed={armedAudioTrackId === track.id}
                 recordingControlsBusy={recordingControlsBusy}
                 setAudioTrackArmed={setAudioTrackArmed}
+                masterVolumeAutomationSupported={track.id === masterTrackId}
               />
             </li>
           );
@@ -115,6 +121,7 @@ function TrackMixControls(props: Readonly<{
   armed: boolean;
   recordingControlsBusy: boolean;
   setAudioTrackArmed: (trackId: string) => boolean;
+  masterVolumeAutomationSupported: boolean;
 }>) {
   const {
     track,
@@ -122,24 +129,36 @@ function TrackMixControls(props: Readonly<{
     armed,
     recordingControlsBusy,
     setAudioTrackArmed,
+    masterVolumeAutomationSupported,
   } = props;
   const setTrackVolume = useStore((state) => state.setTrackVolume);
   const setTrackPan = useStore((state) => state.setTrackPan);
   const toggleMute = useStore((state) => state.toggleMute);
   const toggleSolo = useStore((state) => state.toggleSolo);
+  const isMaster = track.type === 'master';
   const volumeGesture = useAutomationGesture({
     trackId: track.id,
     targetType: 'track-volume',
+    scalarValue: track.volume,
+    followReadAutomation: isMaster && masterVolumeAutomationSupported,
     setScalar: (value) => setTrackVolume(track.id, value),
   });
   const panGesture = useAutomationGesture({
     trackId: track.id,
     targetType: 'track-pan',
+    scalarValue: track.pan,
     setScalar: (value) => setTrackPan(track.id, value),
   });
+  const {
+    displayValue: displayedVolume,
+    ...volumeGestureProps
+  } = volumeGesture;
+  const {
+    displayValue: displayedPan,
+    ...panGestureProps
+  } = panGesture;
   const automationDescriptionId =
     `track-list-automation-${encodeURIComponent(track.id)}`;
-  const isMaster = track.type === 'master';
 
   return (
     <div className="track-row__controls">
@@ -148,12 +167,10 @@ function TrackMixControls(props: Readonly<{
         min={0}
         max={2}
         step={0.01}
-        value={track.volume}
+        value={displayedVolume}
         aria-label={`${accessibleName} 音量`}
-        aria-describedby={isMaster ? undefined : automationDescriptionId}
-        {...(isMaster
-          ? { onChange: (event) => setTrackVolume(track.id, Number(event.target.value)) }
-          : volumeGesture)}
+        aria-describedby={automationDescriptionId}
+        {...volumeGestureProps}
       />
       {!isMaster ? (
         <input
@@ -161,18 +178,20 @@ function TrackMixControls(props: Readonly<{
           min={-1}
           max={1}
           step={0.01}
-          value={track.pan}
+          value={displayedPan}
           aria-label={`${accessibleName} パン`}
           aria-describedby={automationDescriptionId}
-          {...panGesture}
+          {...panGestureProps}
         />
       ) : null}
-      {!isMaster ? (
-        <span id={automationDescriptionId} className="visually-hidden">
-          {accessibleName}、トラックID {track.id}。再生中のTouch、Latch、Writeでは
-          オートメーションジェスチャーとして記録します。
-        </span>
-      ) : null}
+      <span id={automationDescriptionId} className="visually-hidden">
+        {accessibleName}、トラックID {track.id}。
+        {isMaster
+          ? masterVolumeAutomationSupported
+            ? 'Master出力音量。再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。'
+            : 'この追加Masterの音量はオートメーション記録に対応していません。'
+          : '再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。'}
+      </span>
       {track.type === 'audio' ? (
         <button
           type="button"

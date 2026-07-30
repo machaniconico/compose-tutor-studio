@@ -11,6 +11,7 @@ const studioStyles = readFileSync(
 
 let useStore: typeof import('../src/state/store')['useStore'];
 let TrackList: typeof import('../src/features/tracklist/TrackList')['TrackList'];
+let MixerStrip: typeof import('../src/features/mixer/MixerStrip')['MixerStrip'];
 let focusTrackAddControl: typeof import('../src/features/tracklist/trackPresentation')['focusTrackAddControl'];
 let accessibleTrackName: typeof import('../src/features/tracklist/trackPresentation')['accessibleTrackName'];
 
@@ -18,6 +19,7 @@ beforeAll(async () => {
   installLocalStorage();
   ({ useStore } = await import('../src/state/store'));
   ({ TrackList } = await import('../src/features/tracklist/TrackList'));
+  ({ MixerStrip } = await import('../src/features/mixer/MixerStrip'));
   ({ accessibleTrackName, focusTrackAddControl } = await import('../src/features/tracklist/trackPresentation'));
 });
 
@@ -81,6 +83,13 @@ describe('TrackList mixer controls', () => {
     const masterRowRemainder = html.slice(masterStart);
 
     expect(masterRowRemainder).toContain('aria-label="Master 音量"');
+    expect(masterRowRemainder).toMatch(
+      /aria-label="Master 音量"[^>]*aria-describedby="track-list-automation-[^"]+"/,
+    );
+    expect(masterRowRemainder).toContain('Master出力音量。');
+    expect(masterRowRemainder).toContain(
+      '再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。',
+    );
     expect(masterRowRemainder).not.toContain('aria-label="Master パン"');
     expect(masterRowRemainder).not.toContain('title="ミュート"');
     expect(masterRowRemainder).not.toContain('title="ソロ"');
@@ -91,6 +100,138 @@ describe('TrackList mixer controls', () => {
     expect(html.match(/title="ミュート"/g) ?? []).toHaveLength(nonMasterCount);
     expect(html.match(/title="ソロ"/g) ?? []).toHaveLength(nonMasterCount);
   });
+
+  it('moves the Track List Master fader with enabled Read automation', () => {
+    const state = useStore.getState();
+    const master = state.project.tracks.find((track) => track.type === 'master');
+    if (!master) throw new Error('Master fixture missing');
+    const project = {
+      ...state.project,
+      tracks: state.project.tracks.map((track) =>
+        track.id === master.id ? { ...track, volume: 0.9 } : track),
+      automationLanes: [{
+        id: 'track-list-master-read-lane',
+        bypassed: false,
+        target: { type: 'track-volume' as const, trackId: master.id },
+        points: [{
+          id: 'track-list-master-read-point',
+          beat: 0,
+          value: 0.42,
+          interpolation: 'hold' as const,
+        }],
+      }],
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
+    };
+    useStore.setState({
+      project,
+      transport: {
+        ...state.transport,
+        phase: 'playing',
+        isPlaying: true,
+        positionBeat: 1,
+      },
+    });
+    Object.assign(useStore.getInitialState(), useStore.getState());
+
+    const html = renderToStaticMarkup(<TrackList />);
+    expect(html).toMatch(
+      /<input[^>]*aria-label="Master 音量"[^>]*value="0\.42"/,
+    );
+  });
+
+  it.each(['touch', 'latch', 'write'] as const)(
+    'shares one live Master %s value with the Track List and Mixer faders',
+    (mode) => {
+    const state = useStore.getState();
+    const master = state.project.tracks.find((track) => track.type === 'master');
+    if (!master) throw new Error('Master fixture missing');
+    useStore.setState({
+      project: {
+        ...state.project,
+        automationLanes: [{
+          id: 'shared-master-gesture-lane',
+          bypassed: false,
+          target: { type: 'track-volume', trackId: master.id },
+          points: [{
+            id: 'shared-master-gesture-point',
+            beat: 0,
+            value: 0.35,
+            interpolation: 'hold',
+          }],
+        }],
+        automationReadState: { globalEnabled: true, disabledTrackIds: [] },
+      },
+    });
+    expect(useStore.getState().setTrackAutomationMode(master.id, mode)).toBe(true);
+    useStore.getState().play();
+    const requestId = useStore.getState().transport.playbackRequestId;
+    const graph = {
+      beginOverride: vi.fn(),
+      updateOverride: vi.fn(),
+      releaseTouchOverride: vi.fn(),
+      resumeOverride: vi.fn(),
+    };
+    expect(useStore.getState().attachAutomationPlaybackRuntime(
+      requestId,
+      () => 2,
+      graph,
+    )).toBe(true);
+    useStore.getState().confirmPlaybackStarted(requestId);
+    useStore.getState().updatePlaybackPosition(requestId, 2);
+    expect(useStore.getState().beginAutomationGesture({
+      type: 'track-volume',
+      trackId: master.id,
+    }, 1.25)).toBe(true);
+    Object.assign(useStore.getInitialState(), useStore.getState());
+
+    const touchedHtml = renderToStaticMarkup(
+      <>
+        <TrackList />
+        <MixerStrip />
+      </>,
+    );
+    const touchedMasterFaders = touchedHtml.match(
+      /<input[^>]*aria-label="Master 音量"[^>]*>/g,
+    ) ?? [];
+    expect(touchedMasterFaders).toHaveLength(2);
+    expect(touchedMasterFaders.every((fader) =>
+      fader.includes('value="1.25"'))).toBe(true);
+
+    expect(useStore.getState().updateAutomationGesture({
+      type: 'track-volume',
+      trackId: master.id,
+    }, 1.4)).toBe(true);
+    Object.assign(useStore.getInitialState(), useStore.getState());
+    const updatedHtml = renderToStaticMarkup(
+      <>
+        <TrackList />
+        <MixerStrip />
+      </>,
+    );
+    expect(
+      updatedHtml.match(/<input[^>]*aria-label="Master 音量"[^>]*value="1\.4"/g)
+      ?? [],
+    ).toHaveLength(2);
+
+    expect(useStore.getState().endAutomationGesture({
+      type: 'track-volume',
+      trackId: master.id,
+    })).toBe(true);
+    Object.assign(useStore.getInitialState(), useStore.getState());
+    const releasedHtml = renderToStaticMarkup(
+      <>
+        <TrackList />
+        <MixerStrip />
+      </>,
+    );
+    const releasedValue = mode === 'touch' ? '0\\.35' : '1\\.4';
+    expect(releasedHtml.match(new RegExp(
+      `<input[^>]*aria-label="Master 音量"[^>]*value="${releasedValue}"`,
+      'g',
+    )) ?? []).toHaveLength(2);
+    useStore.getState().stop();
+    },
+  );
 
   it('names every mute and solo control with its owning track', () => {
     const html = renderToStaticMarkup(<TrackList />);

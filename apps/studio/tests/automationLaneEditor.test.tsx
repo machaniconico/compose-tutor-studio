@@ -349,7 +349,7 @@ describe('AutomationLaneEditor accessibility rendering', () => {
     }, 0)).toBeGreaterThanOrEqual(20_000);
   });
 
-  it('renders explicit no-track, Master, and disabled states', () => {
+  it('renders no-track, effective/secondary Master, and disabled states', () => {
     useStore.getState().selectTrack(null);
     syncServerSnapshot();
     expect(renderToStaticMarkup(<AutomationLaneEditor />)).toContain(
@@ -363,10 +363,35 @@ describe('AutomationLaneEditor accessibility rendering', () => {
     useStore.getState().selectTrack(master.id);
     syncServerSnapshot();
     const masterHtml = renderToStaticMarkup(<AutomationLaneEditor />);
+    expect(masterHtml).toContain('Master出力音量');
+    expect(masterHtml).toContain('Master Read: オン');
     expect(masterHtml).toContain(
-      '通常トラックまたはBusを選択してください。',
+      'aria-label="Master出力音量オートメーションレーン"',
     );
-    expect(masterHtml).not.toContain('再生位置に点を追加');
+    expect(masterHtml).toContain('>再生位置に点を追加</button>');
+    expect(masterHtml).not.toContain('>パン</button>');
+    for (const mode of ['Read', 'Touch', 'Latch', 'Write']) {
+      expect(masterHtml).toContain(`>${mode}</button>`);
+    }
+
+    const secondaryMaster = {
+      ...structuredClone(master),
+      id: 'secondary-master-lane-editor',
+      name: 'Secondary Master',
+    };
+    useStore.setState({
+      project: {
+        ...useStore.getState().project,
+        tracks: [...useStore.getState().project.tracks, secondaryMaster],
+      },
+    });
+    useStore.getState().selectTrack(secondaryMaster.id);
+    syncServerSnapshot();
+    const secondaryMasterHtml = renderToStaticMarkup(<AutomationLaneEditor />);
+    expect(secondaryMasterHtml).toContain(
+      'この追加Masterはオートメーションに対応していません。',
+    );
+    expect(secondaryMasterHtml).not.toContain('再生位置に点を追加');
 
     const editableTrackId = selectedEditableTrackId();
     expect(

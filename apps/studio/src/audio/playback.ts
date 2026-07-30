@@ -7,6 +7,7 @@
 
 import {
   compileAudioRouting,
+  effectiveMasterTrackId,
   MAX_AUDIO_TAKES_PER_FOLDER,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
@@ -59,14 +60,20 @@ import {
   AudioRoutingGraphError,
   assertRoutingGraphNodeBudget,
   buildTrackGraphs,
+  disposeMasterMeter,
   resolveAudioRoutingMix,
   type TrackGraph,
 } from './graph';
 import {
-  applyMasterMix,
   hasLiveMixChanged,
   hasLiveRoutingMixChanged,
+  resolveMasterMix,
 } from './mixState';
+import {
+  buildSessionMasterGraph,
+  type MasterAutomationGraph,
+  type SessionMasterGraph,
+} from './masterAutomationGraph';
 import {
   createProjectMusicalTime,
   mappedBeatDurationSeconds,
@@ -113,7 +120,13 @@ const SYNCHRONIZED_ANCHOR_POLL_MS = 8;
 type RuntimeSession = PlaybackSession & {
   requestId: number;
   scheduler: Scheduler;
+  /** Session input/output drain stage, upstream of the persisted Master fader. */
+  output: GainNode;
+  /** Persisted Master fader; retained as `master` for runtime call-site clarity. */
   master: GainNode;
+  /** Application-wide output/calibration stage, held at unity for playback. */
+  engineMaster: GainNode;
+  masterAutomation: MasterAutomationGraph;
   graphs: Map<string, TrackGraph>;
   synths: Map<string, SynthVoiceManager>;
   drums: Map<string, DrumVoiceManager>;
@@ -824,15 +837,6 @@ export function beginRuntimeNaturalDrain(controls: NaturalDrainControls): () => 
   };
 }
 
-/** Cancel a finished/cancelled drain's master automation before reusing the engine. */
-export function restoreRuntimeMaster(
-  master: GainNode,
-  tracks: readonly Track[],
-  when: number,
-): void {
-  applyMasterMix(master, tracks, when, 'immediate');
-}
-
 /**
  * Dispose audio captured from an obsolete Project topology, including a
  * naturally draining session whose transport is already stopped.
@@ -888,6 +892,118 @@ export function automationReadScalarCommitPreservesRuntimeSession(
   return marker !== null
     && marker.playbackRequestId === previousRequestId
     && previousRequestId === nextRequestId;
+}
+
+function effectiveMasterTrack(project: Project): Track | null {
+  const trackId = effectiveMasterTrackId(project);
+  return trackId === null
+    ? null
+    : project.tracks.find((track) => track.id === trackId) ?? null;
+}
+
+function isEffectiveMasterVolumeTarget(
+  project: Project,
+  target: AutomationTarget,
+): boolean {
+  const master = effectiveMasterTrack(project);
+  return master !== null
+    && target.trackId === master.id
+    && target.type === 'track-volume';
+}
+
+function hasEnabledMasterVolumeLane(project: Project): boolean {
+  const master = effectiveMasterTrack(project);
+  if (!master) return false;
+  const lane = automationLaneForTrack(
+    project.automationLanes,
+    master.id,
+    'track-volume',
+  );
+  return lane !== null
+    && isAutomationReadEnabled(project.automationReadState, lane);
+}
+
+function applyRuntimeReadScalarMixState(
+  session: RuntimeSession,
+  project: Project,
+  targets: readonly AutomationTarget[],
+  when: number,
+): boolean {
+  const master = effectiveMasterTrack(project);
+  const targetsForMasterId = master
+    ? targets.filter((target) => target.trackId === master.id)
+    : [];
+  const masterTargets = targets.filter((target) =>
+    isEffectiveMasterVolumeTarget(project, target));
+  const trackTargets = targets.filter((target) =>
+    !isEffectiveMasterVolumeTarget(project, target));
+
+  if (targetsForMasterId.length !== masterTargets.length) return false;
+  if (masterTargets.length > 0) {
+    if (hasEnabledMasterVolumeLane(project)) {
+      return false;
+    }
+    if (session.masterAutomation.isAutomationOverridden(when)) {
+      throw new Error('A manual automation override owns the Master fader.');
+    }
+  }
+
+  if (!applyReadScalarMixState(
+    session.graphs,
+    project,
+    trackTargets,
+    when,
+    session.routingPlan,
+  )) {
+    return false;
+  }
+
+  if (masterTargets.length > 0) {
+    if (
+      !master
+      || !session.masterAutomation.applyScalar(master.volume, when, 'smoothed')
+    ) {
+      throw new Error('The live Master fader is unavailable.');
+    }
+  }
+  return true;
+}
+
+function replaceRuntimePlaybackAtCurrentPosition(
+  playbackRequestId: number,
+  exactPositionBeat: number,
+): boolean {
+  const before = useStore.getState();
+  if (
+    before.transport.phase === 'stopped'
+    || before.transport.playbackRequestId !== playbackRequestId
+    || !Number.isFinite(exactPositionBeat)
+    || exactPositionBeat < 0
+  ) {
+    return false;
+  }
+  before.updatePlaybackPosition(playbackRequestId, exactPositionBeat);
+  const synchronized = useStore.getState();
+  if (
+    synchronized.transport.phase !== 'playing'
+    || synchronized.transport.playbackRequestId !== playbackRequestId
+    || synchronized.transport.positionBeat !== exactPositionBeat
+  ) {
+    return false;
+  }
+  synchronized.interruptPlayback(playbackRequestId, 'interrupted');
+  const stopped = useStore.getState();
+  if (
+    stopped.transport.phase !== 'stopped'
+    || stopped.transport.playbackRequestId === playbackRequestId
+    || stopped.transport.positionBeat !== exactPositionBeat
+  ) {
+    return false;
+  }
+  stopped.play();
+  const replacement = useStore.getState().transport;
+  return replacement.phase === 'starting'
+    && replacement.positionBeat === exactPositionBeat;
 }
 
 /**
@@ -964,18 +1080,24 @@ export function initAudioBridge(): () => void {
       const session = controller.activeSession;
       if (!session?.scheduler.isRunning) return;
       try {
-        const applied = applyReadScalarMixState(
-          session.graphs,
+        const applied = applyRuntimeReadScalarMixState(
+          session,
           next.project,
           next.automationReadScalarCommit!.targets,
           getAudioEngine().now(),
-          session.routingPlan,
         );
         if (!applied) {
-          useStore.getState().interruptPlayback(
+          const replaced = replaceRuntimePlaybackAtCurrentPosition(
             next.transport.playbackRequestId,
-            'interrupted',
+            session.scheduler.currentBeat(),
           );
+          if (!replaced) {
+            const current = useStore.getState();
+            current.interruptPlayback(
+              current.transport.playbackRequestId,
+              'interrupted',
+            );
+          }
         }
       } catch {
         useStore.getState().interruptPlayback(
@@ -1014,8 +1136,22 @@ export function initAudioBridge(): () => void {
       next.project.audioRouting,
     );
     if (!trackMixChanged && !routingMixChanged) return;
+    const previousMasterMix = resolveMasterMix(previous.project.tracks);
+    const nextMasterMix = resolveMasterMix(next.project.tracks);
+    const masterMixChanged = previousMasterMix.trackId !== nextMasterMix.trackId
+      || previousMasterMix.gain !== nextMasterMix.gain;
     const session = controller.activeSession;
     if (!session?.scheduler.isRunning) return;
+    if (masterMixChanged && hasEnabledMasterVolumeLane(next.project)) {
+      // Changing the base scalar changes the value before the first point and
+      // after loop wrap. Rebuild from the accepted Project instead of
+      // cancelling just part of the frozen Master lookahead.
+      useStore.getState().interruptPlayback(
+        next.transport.playbackRequestId,
+        'interrupted',
+      );
+      return;
+    }
     try {
       // Effect edits are live updates, so they must satisfy the same static-node
       // budget as startup before Master or any channel is mutated.
@@ -1032,7 +1168,16 @@ export function initAudioBridge(): () => void {
         session.everAudibleEdgeIds.add(edgeId);
       }
       const now = getAudioEngine().now();
-      applyMasterMix(session.master, next.project.tracks, now, 'smoothed');
+      if (
+        masterMixChanged
+        && !session.masterAutomation.applyScalar(
+          nextMasterMix.gain,
+          now,
+          'smoothed',
+        )
+      ) {
+        throw new Error('A manual automation override owns the Master fader.');
+      }
       if (trackMixChanged) {
         applyMixState(session.graphs, next.project, now, session.routingPlan);
       } else {
@@ -1359,7 +1504,11 @@ async function createRuntimeSessionImpl(
   void contextActivation.catch(() => {
     // The authoritative rejection is awaited below if this request survives.
   });
-  const { context, master, contextGeneration } = await contextActivation;
+  const {
+    context,
+    master: engineMaster,
+    contextGeneration,
+  } = await contextActivation;
   if (!isCurrent()) throw new CancelledPlaybackRequest();
   if (String(context.state) !== 'running') {
     throw new Error(`AudioContext did not enter the running state (${String(context.state)}).`);
@@ -1420,6 +1569,7 @@ async function createRuntimeSessionImpl(
   }
 
   let graphs = new Map<string, TrackGraph>();
+  let sessionMasterGraph: SessionMasterGraph | null = null;
   const synths = new Map<string, SynthVoiceManager>();
   const drums = new Map<string, DrumVoiceManager>();
   const audioVoices = new Map<string, AudioClipVoiceManager>();
@@ -1536,23 +1686,28 @@ async function createRuntimeSessionImpl(
       }
     }
     graphs.clear();
-    try {
-      // Natural drain fades the shared master only while this generation owns
-      // it. Restore the current project value and cancel pending fade events so
-      // a later preview or replacement session never inherits silence.
-      restoreRuntimeMaster(master, useStore.getState().project.tracks, engine.now());
-    } catch {
-      // A closed context has no reusable output to restore.
+    if (sessionMasterGraph) {
+      disposeMasterMeter(sessionMasterGraph.master);
     }
+    sessionMasterGraph?.dispose();
+    sessionMasterGraph = null;
   };
 
   try {
-    applyMasterMix(master, startupTracks, now, 'immediate');
-    graphs = buildTrackGraphs(context, master, {
+    sessionMasterGraph = buildSessionMasterGraph(
+      context,
+      engineMaster,
+      resolveMasterMix(startupTracks).gain,
+      now,
+    );
+    const runtimeOutput = sessionMasterGraph.output;
+    const runtimeMasterFader = sessionMasterGraph.master;
+    const runtimeMasterAutomation = sessionMasterGraph.automation;
+    graphs = buildTrackGraphs(context, runtimeOutput, {
       ...project,
       tracks: startupTracks,
       audioRouting: startupStore.project.audioRouting,
-    }, now, 'live', routingPlan);
+    }, now, 'live', routingPlan, undefined, runtimeMasterFader);
     let sharedDrumNoise: AudioBuffer | undefined;
     for (const track of startupTracks) {
       const graph = graphs.get(track.id);
@@ -1607,7 +1762,7 @@ async function createRuntimeSessionImpl(
             window.startBeat,
             window.endBeat,
             context,
-            master,
+            runtimeOutput,
           );
         }
       },
@@ -1762,7 +1917,7 @@ async function createRuntimeSessionImpl(
       );
       cancelNaturalDrainTimer = beginRuntimeNaturalDrain({
         scheduler,
-        output: master,
+        output: runtimeOutput,
         now: () => engine.now(),
         projectEndTime,
         tailSeconds: tail.tailSeconds,
@@ -1776,7 +1931,10 @@ async function createRuntimeSessionImpl(
     const runtimeSession: RuntimeSession = {
       requestId,
       scheduler,
-      master,
+      output: runtimeOutput,
+      master: runtimeMasterFader,
+      engineMaster,
+      masterAutomation: runtimeMasterAutomation,
       graphs,
       synths,
       drums,
@@ -1849,6 +2007,10 @@ async function createRuntimeSessionImpl(
     }
     const automationGraphBridge = {
       beginOverride: (target: AutomationTarget, value: number): void => {
+        if (isEffectiveMasterVolumeTarget(project, target)) {
+          runtimeMasterAutomation.beginAutomationOverride(value, engine.now());
+          return;
+        }
         const graph = graphs.get(target.trackId);
         if (!graph) throw new CancelledPlaybackRequest();
         graph.beginAutomationOverride(
@@ -1859,6 +2021,10 @@ async function createRuntimeSessionImpl(
         );
       },
       updateOverride: (target: AutomationTarget, value: number): void => {
+        if (isEffectiveMasterVolumeTarget(project, target)) {
+          runtimeMasterAutomation.updateAutomationOverride(value, engine.now());
+          return;
+        }
         const graph = graphs.get(target.trackId);
         if (!graph) throw new CancelledPlaybackRequest();
         graph.updateAutomationOverride(
@@ -1872,18 +2038,26 @@ async function createRuntimeSessionImpl(
         target: AutomationTarget,
         releaseBeat: number,
       ): void => {
-        const graph = graphs.get(target.trackId);
-        if (!graph) throw new CancelledPlaybackRequest();
         const returnBeat = tempo.secondsToBeat(
           tempo.beatToSeconds(releaseBeat) + AUTOMATION_TOUCH_RETURN_SECONDS,
         );
-        graph.releaseAutomationOverride(
-          target.type,
-          frozenAutomationValueAt(project, target, returnBeat),
-          engine.now(),
-          AUTOMATION_TOUCH_RETURN_SECONDS,
-          startupRoutingMix.audibleChannelIds.has(target.trackId),
-        );
+        if (isEffectiveMasterVolumeTarget(project, target)) {
+          runtimeMasterAutomation.releaseAutomationOverride(
+            frozenAutomationValueAt(project, target, returnBeat),
+            engine.now(),
+            AUTOMATION_TOUCH_RETURN_SECONDS,
+          );
+        } else {
+          const graph = graphs.get(target.trackId);
+          if (!graph) throw new CancelledPlaybackRequest();
+          graph.releaseAutomationOverride(
+            target.type,
+            frozenAutomationValueAt(project, target, returnBeat),
+            engine.now(),
+            AUTOMATION_TOUCH_RETURN_SECONDS,
+            startupRoutingMix.audibleChannelIds.has(target.trackId),
+          );
+        }
         scheduleAutomationTargetForWindow(
           runtimeSession,
           target,
@@ -1897,15 +2071,23 @@ async function createRuntimeSessionImpl(
         );
       },
       resumeOverride: (target: AutomationTarget, resumeBeat: number): void => {
-        const graph = graphs.get(target.trackId);
-        if (!graph) return;
-        graph.releaseAutomationOverride(
-          target.type,
-          frozenAutomationValueAt(project, target, resumeBeat),
-          engine.now(),
-          0.010,
-          startupRoutingMix.audibleChannelIds.has(target.trackId),
-        );
+        if (isEffectiveMasterVolumeTarget(project, target)) {
+          runtimeMasterAutomation.releaseAutomationOverride(
+            frozenAutomationValueAt(project, target, resumeBeat),
+            engine.now(),
+            0.010,
+          );
+        } else {
+          const graph = graphs.get(target.trackId);
+          if (!graph) return;
+          graph.releaseAutomationOverride(
+            target.type,
+            frozenAutomationValueAt(project, target, resumeBeat),
+            engine.now(),
+            0.010,
+            startupRoutingMix.audibleChannelIds.has(target.trackId),
+          );
+        }
         scheduleAutomationTargetForWindow(
           runtimeSession,
           target,
@@ -2051,11 +2233,15 @@ function scheduleAutomationTargetForWindow(
   const track = session.projectSnapshot.tracks.find(
     (candidate) => candidate.id === target.trackId,
   );
+  const isMasterTarget = isEffectiveMasterVolumeTarget(
+    session.projectSnapshot,
+    target,
+  );
   const graph = session.graphs.get(target.trackId);
   if (
     !lane
     || !track
-    || !graph
+    || (!isMasterTarget && !graph)
     || !isAutomationReadEnabled(session.projectSnapshot.automationReadState, lane)
   ) {
     return;
@@ -2075,18 +2261,27 @@ function scheduleAutomationTargetForWindow(
     false,
     session.tempoChangeBeats,
   )) {
-    graph.scheduleAutomation(
-      target.type,
-      command.value,
-      beatToTime(
-        command.beat,
-        session.transportTempo,
-        session.anchorBeat,
-        session.anchorTime,
-      ),
-      command.interpolation,
-      audible,
+    const when = beatToTime(
+      command.beat,
+      session.transportTempo,
+      session.anchorBeat,
+      session.anchorTime,
     );
+    if (isMasterTarget) {
+      session.masterAutomation.scheduleAutomation(
+        command.value,
+        when,
+        command.interpolation,
+      );
+    } else {
+      graph!.scheduleAutomation(
+        target.type,
+        command.value,
+        when,
+        command.interpolation,
+        audible,
+      );
+    }
   }
 }
 
@@ -2109,8 +2304,12 @@ function scheduleAutomationForWindow(
   for (const lane of session.projectSnapshot.automationLanes) {
     if (!isAutomationReadEnabled(session.projectSnapshot.automationReadState, lane)) continue;
     const track = tracks.get(lane.target.trackId);
+    const isMasterTarget = isEffectiveMasterVolumeTarget(
+      session.projectSnapshot,
+      lane.target,
+    );
     const graph = session.graphs.get(lane.target.trackId);
-    if (!track || !graph) continue;
+    if (!track || (!isMasterTarget && !graph)) continue;
     const commands = automationCommandsInWindow(
       lane,
       automationBaseValue(track, lane.target),
@@ -2121,18 +2320,27 @@ function scheduleAutomationForWindow(
       session.tempoChangeBeats,
     );
     for (const command of commands) {
-      graph.scheduleAutomation(
-        lane.target.type,
-        command.value,
-        beatToTime(
-          command.beat,
-          session.transportTempo,
-          session.anchorBeat,
-          session.anchorTime,
-        ),
-        command.interpolation,
-        audible.has(track.id),
+      const when = beatToTime(
+        command.beat,
+        session.transportTempo,
+        session.anchorBeat,
+        session.anchorTime,
       );
+      if (isMasterTarget) {
+        session.masterAutomation.scheduleAutomation(
+          command.value,
+          when,
+          command.interpolation,
+        );
+      } else {
+        graph!.scheduleAutomation(
+          lane.target.type,
+          command.value,
+          when,
+          command.interpolation,
+          audible.has(track.id),
+        );
+      }
     }
   }
 }

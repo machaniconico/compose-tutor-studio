@@ -23,6 +23,11 @@ import {
   MIN_EVENT_DURATION_BEATS,
 } from './limits';
 import { validateAudioRouting } from './audio-routing';
+import {
+  automationTargetTypesForTrack,
+  effectiveMasterTrackId,
+  isSupportedAutomationTarget,
+} from './automation-targets';
 
 export {
   MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
@@ -627,8 +632,11 @@ export function validateProject(project: Project): ValidationResult {
     markId(lane.id, `${lanePath}.id`);
     if (!trackIds.has(lane.target.trackId)) {
       push(`${lanePath}.target.trackId`, `automation target references missing track "${lane.target.trackId}"`);
-    } else if (tracksById.get(lane.target.trackId)?.type === 'master') {
-      push(`${lanePath}.target.trackId`, 'automation cannot target a Master track');
+    } else if (!isSupportedAutomationTarget(project, lane.target)) {
+      push(
+        `${lanePath}.target.trackId`,
+        'automation target is not supported for this track',
+      );
     }
     const targetKey = `${lane.target.type}\u0000${lane.target.trackId}`;
     if (automationTargets.has(targetKey)) {
@@ -706,12 +714,15 @@ export function validateProject(project: Project): ValidationResult {
         const track = tracksById.get(trackId);
         if (!track) {
           push(path, `automation Read state references missing track "${trackId}"`);
-        } else if (track.type === 'master') {
-          push(path, 'automation Read state cannot reference a Master track');
+        } else if (automationTargetTypesForTrack(project, track.id).length === 0) {
+          push(path, 'automation Read state cannot reference this track');
         }
       });
+      const effectiveMasterId = effectiveMasterTrackId(project);
       const canonicalDisabledReadIds = project.tracks
-        .filter((track) => track.type !== 'master' && disabledReadIds.has(track.id))
+        .filter((track) =>
+          (track.type !== 'master' || track.id === effectiveMasterId)
+          && disabledReadIds.has(track.id))
         .map((track) => track.id);
       if (
         canonicalDisabledReadIds.length === disabledTrackIds.length

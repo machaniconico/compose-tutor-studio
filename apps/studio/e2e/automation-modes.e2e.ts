@@ -142,6 +142,111 @@ test('records one Touch gesture as one undoable pass and persists Read, Bypass, 
   await expect.poll(() => automationPointIds(page)).toEqual(recordedIds);
 });
 
+test('edits and persists effective Master automation while runtime mode safely returns to Read', async ({
+  page,
+}) => {
+  await openAutomation(page);
+  const trackList = page.getByRole('navigation', { name: 'トラック一覧' });
+  await trackList
+    .getByRole('button', { name: 'Master トラックを選択', exact: true })
+    .click();
+
+  const panel = page.getByRole('tabpanel', { name: 'オートメーション' });
+  await expect(
+    panel.getByRole('heading', { name: 'Masterのオートメーション' }),
+  ).toBeVisible();
+  const target = panel.getByRole('group', { name: 'オートメーション対象' });
+  await expect(
+    target.getByRole('button', { name: 'Master出力音量', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(target.getByRole('button', { name: 'パン', exact: true }))
+    .toHaveCount(0);
+
+  const masterRead = panel.getByRole('button', { name: 'Master Read: オン' });
+  await expect(masterRead).toHaveAttribute('aria-pressed', 'true');
+  const modes = panel.getByRole('radiogroup', { name: 'Master 記録モード' });
+  await expect(modes.getByRole('radio', { name: 'Read', exact: true }))
+    .toHaveAttribute('aria-checked', 'true');
+  await expect(modes.getByRole('radio', { name: 'Touch', exact: true }))
+    .toHaveCount(1);
+
+  await panel.getByRole('button', { name: '再生位置に点を追加' }).click();
+  const point = panel.locator('[data-automation-point-id]').first();
+  await expect(point).toHaveCount(1);
+  await point.click();
+  const inspector = panel.getByRole('group', { name: '選択中の点' });
+  const value = inspector.getByLabel('Master出力音量（%）', { exact: true });
+  await value.fill('42');
+  await value.press('Enter');
+  await expect(point).toHaveAttribute('aria-label', /値 42%/);
+  const persistedPointIds = await automationPointIds(page);
+
+  await modes.getByRole('radio', { name: 'Touch', exact: true }).click();
+  await expect(modes.getByRole('radio', { name: 'Touch', exact: true }))
+    .toHaveAttribute('aria-checked', 'true');
+  await expect(panel.getByText('待機中（Armed）')).toBeVisible();
+
+  const mixer = page.getByRole('region', { name: 'ミキサー', exact: true });
+  const trackListFader = trackList.getByLabel('Master 音量', { exact: true });
+  const mixerFader = mixer.getByLabel('Master 音量', { exact: true });
+  await expect(trackListFader).toBeVisible();
+  await expect(mixerFader).toBeVisible();
+  await mixerFader.fill('0.66');
+  await expect(mixerFader).toHaveValue('0.66');
+  await expect(trackListFader).toHaveValue('0.66');
+
+  await masterRead.click();
+  await expect(
+    panel.getByRole('button', { name: 'Master Read: オフ' }),
+  ).toHaveAttribute('aria-pressed', 'false');
+  await saveProject(page);
+
+  await page.reload();
+  await openAutomation(page);
+  const reopenedTrackList = page.getByRole('navigation', {
+    name: 'トラック一覧',
+  });
+  await reopenedTrackList
+    .getByRole('button', { name: 'Master トラックを選択', exact: true })
+    .click();
+  const reopened = page.getByRole('tabpanel', { name: 'オートメーション' });
+  await expect(
+    reopened.getByRole('button', { name: 'Master Read: オフ' }),
+  ).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => automationPointIds(page)).toEqual(persistedPointIds);
+  await expect(reopened.locator('[data-automation-point-id]').first())
+    .toHaveAttribute('aria-label', /値 42%/);
+  const reopenedModes = reopened.getByRole('radiogroup', {
+    name: 'Master 記録モード',
+  });
+  await expect(reopenedModes.getByRole('radio', { name: 'Read', exact: true }))
+    .toHaveAttribute('aria-checked', 'true');
+  await expect(reopened.locator('[data-automation-write-status="read"]'))
+    .toContainText('Read');
+
+  const reopenedMixer = page.getByRole('region', {
+    name: 'ミキサー',
+    exact: true,
+  });
+  const reopenedTrackListFader = reopenedTrackList.getByLabel(
+    'Master 音量',
+    { exact: true },
+  );
+  const reopenedMixerFader = reopenedMixer.getByLabel(
+    'Master 音量',
+    { exact: true },
+  );
+  await expect(reopenedTrackListFader).toHaveValue('0.66');
+  await expect(reopenedMixerFader).toHaveValue('0.66');
+  await reopened.getByRole('button', { name: 'Master Read: オフ' }).click();
+  await page.getByRole('button', { name: '再生', exact: true }).click();
+  await expect(page.getByRole('button', { name: '一時停止', exact: true }))
+    .toBeVisible();
+  await expect(reopenedTrackListFader).toHaveValue('0.42');
+  await expect(reopenedMixerFader).toHaveValue('0.42');
+  await page.getByRole('button', { name: '一時停止', exact: true }).click();
+});
+
 test('keeps 44px focusable controls and internal timeline scroll at 320px', async ({
   page,
 }) => {

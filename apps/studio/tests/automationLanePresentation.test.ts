@@ -8,17 +8,51 @@ import {
   automationCurveSegmentsToSvgPaths,
   automationDisplayValueToModel,
   automationPointAriaLabel,
+  automationTargetPresentation,
   automationValueFromClientY,
   automationValueToDisplay,
   automationValueToY,
+  automationWriteConfirmationDescription,
   buildAutomationCurveSegments,
   clampAutomationValue,
   formatAutomationValue,
+  resolveAutomationTargetType,
   selectAutomationPointsForViewport,
   snapAutomationBeat,
 } from '../src/features/automation/automationLanePresentation';
 
 describe('automation lane presentation', () => {
+  it('names effective Master volume distinctly and describes volume-only Write', () => {
+    expect(resolveAutomationTargetType(
+      'track-pan',
+      ['track-volume'],
+    )).toBe('track-volume');
+    expect(
+      automationTargetPresentation('track-volume', true),
+    ).toMatchObject({
+      label: 'Master出力音量',
+      shortLabel: 'Master出力音量',
+      displayLabel: 'Master出力音量（%）',
+    });
+    expect(
+      automationPointAriaLabel(
+        { id: 'master-point', beat: 2, value: 0.75, interpolation: 'linear' },
+        0,
+        'track-volume',
+        true,
+      ),
+    ).toContain('Master出力音量 1点目');
+    expect(automationWriteConfirmationDescription(true)).toContain(
+      'Master出力音量のオートメーションだけ',
+    );
+    expect(automationWriteConfirmationDescription(true)).not.toContain(
+      '音量とパン',
+    );
+    expect(automationWriteConfirmationDescription(false)).toContain(
+      '音量とパン',
+    );
+  });
+
   it('snaps and clamps point positions without assuming a 4/4 bar', () => {
     expect(snapAutomationBeat(1.13, 0.25, 8)).toBe(1.25);
     expect(snapAutomationBeat(-4, 0.25, 8)).toBe(0);

@@ -51,12 +51,97 @@ describe('Mixer mute/solo accessibility', () => {
       expect(html).toContain(`aria-label="${track.name} ミュート"`);
       expect(html).toContain(`aria-label="${track.name} ソロ"`);
     }
-    expect(html.match(/トラックID /g) ?? []).toHaveLength(soundTracks.length);
+    expect(html.match(/トラックID /g) ?? []).toHaveLength(soundTracks.length + 1);
     expect(html).not.toContain('aria-label="Master パン"');
-    expect(html).not.toContain('mixer-automation-Master');
+    const masterDescriptionId = html.match(
+      /aria-label="Master 音量"[^>]*aria-describedby="([^"]+)"/,
+    )?.[1];
+    expect(masterDescriptionId).toBeDefined();
+    expect(html).toContain(`id="${masterDescriptionId}"`);
+    expect(html).toContain('Master出力音量。');
+    expect(html).toContain(
+      '再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。',
+    );
     expect(html).not.toContain('aria-label="Master ミュート"');
     expect(html).not.toContain('aria-label="Master ソロ"');
     expect(html).toContain('aria-label="マスター レベル RMS -∞ dB / Peak -∞ dB"');
+  });
+
+  it('moves the visible Master fader with enabled Read automation', () => {
+    const state = useStore.getState();
+    const master = state.project.tracks.find((track) => track.type === 'master');
+    if (!master) throw new Error('Master fixture missing');
+    const project = {
+      ...state.project,
+      tracks: state.project.tracks.map((track) =>
+        track.id === master.id ? { ...track, volume: 0.8 } : track),
+      automationLanes: [{
+        id: 'mixer-master-read-lane',
+        bypassed: false,
+        target: { type: 'track-volume' as const, trackId: master.id },
+        points: [{
+          id: 'mixer-master-read-point',
+          beat: 0,
+          value: 0.35,
+          interpolation: 'hold' as const,
+        }],
+      }],
+      automationReadState: { globalEnabled: true, disabledTrackIds: [] },
+    };
+    useStore.setState({
+      project,
+      transport: {
+        ...state.transport,
+        phase: 'playing',
+        isPlaying: true,
+        positionBeat: 2,
+      },
+    });
+    Object.assign(useStore.getInitialState(), useStore.getState());
+
+    const readHtml = renderToStaticMarkup(<MixerStrip />);
+    expect(readHtml).toMatch(
+      /<input[^>]*aria-label="Master 音量"[^>]*value="0\.35"/,
+    );
+    expect(readHtml).toContain('>-9.1 dB</span>');
+
+    const automationRecording = useStore.getState().automationRecording;
+    useStore.setState({
+      automationRecording: {
+        ...automationRecording,
+        trackModes: {
+          ...automationRecording.trackModes,
+          [master.id]: 'write',
+        },
+      },
+    });
+    Object.assign(useStore.getInitialState(), useStore.getState());
+    const writeHtml = renderToStaticMarkup(<MixerStrip />);
+    expect(writeHtml).toMatch(
+      /<input[^>]*aria-label="Master 音量"[^>]*value="0\.8"/,
+    );
+
+    useStore.setState({
+      project: {
+        ...project,
+        automationReadState: {
+          globalEnabled: true,
+          disabledTrackIds: [master.id],
+        },
+      },
+      automationRecording: {
+        ...automationRecording,
+        trackModes: {
+          ...automationRecording.trackModes,
+          [master.id]: 'read',
+        },
+      },
+    });
+    Object.assign(useStore.getInitialState(), useStore.getState());
+    const disabledHtml = renderToStaticMarkup(<MixerStrip />);
+    expect(disabledHtml).toMatch(
+      /<input[^>]*aria-label="Master 音量"[^>]*value="0\.8"/,
+    );
   });
 
   it('computes at least 44px focusable volume and pan sliders', () => {

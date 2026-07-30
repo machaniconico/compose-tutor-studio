@@ -230,7 +230,7 @@ components:
     Project:
       type: object
       description: >-
-        Current schema-v7 aggregate. lengthBeats, tempoMap, and timeSignatureMap
+        Current schema-v8 aggregate. lengthBeats, tempoMap, and timeSignatureMap
         are the musical-time authority; bpm, timeSignature, and lengthBars are
         validated compatibility mirrors. audioRouting is one normalized,
         acyclic stereo graph shared by realtime playback and offline WAV
@@ -241,7 +241,9 @@ components:
         and drum-event occurrences (linked source payload multiplied by clip
         instances) must not exceed 200000. Runtime limits the MIDI, drum, and
         realized-chord audible projection to 20000 events for live playback.
-        Automation lanes, lane bypass, and Global/Track Read gates are persisted;
+        Automation lanes persist non-Master volume/pan plus output-volume
+        automation for only the first (effective) Master. Lane bypass and
+        Global/Track Read gates, including that effective Master, are persisted;
         Read/Touch/Latch/Write selection, Armed/Writing state, live gesture
         ownership, and automation-pass buffers are runtime-only and intentionally
         absent from this aggregate.
@@ -283,7 +285,7 @@ components:
           maxLength: 4096
         schemaVersion:
           type: integer
-          const: 7
+          const: 8
         title:
           type: string
           maxLength: 4096
@@ -356,6 +358,9 @@ components:
         automationLanes:
           type: array
           maxItems: 2048
+          description: >-
+            At most one lane per target. Non-Master Tracks support volume and
+            pan; only the first (effective) Master supports volume.
           items:
             $ref: '#/components/schemas/AutomationLane'
         automationReadState:
@@ -637,7 +642,7 @@ components:
           minLength: 1
           maxLength: 4096
           description: >-
-            Linked-clip source id retained by current schema v7. MIDI/drum only;
+            Linked-clip source id retained by current schema v8. MIDI/drum only;
             the source must be
             a direct same-track, same-type non-alias clip of identical length.
             Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and
@@ -945,7 +950,7 @@ components:
       description: >-
         Persisted Global and per-Track Read gates. Effective Read additionally
         requires the target lane not to be bypassed. Runtime
-        Read/Touch/Latch/Write mode selection is not part of Project schema v7.
+        Read/Touch/Latch/Write mode selection is not part of Project schema v8.
       required: [globalEnabled, disabledTrackIds]
       properties:
         globalEnabled:
@@ -953,10 +958,12 @@ components:
         disabledTrackIds:
           type: array
           uniqueItems: true
-          maxItems: 127
+          maxItems: 128
           description: >-
-            Existing non-Master Track IDs in canonical Project track order.
-            Duplication does not copy a disabled state.
+            Existing non-Master Track IDs and, when disabled, the first
+            (effective) Master ID in canonical order across all Project Tracks.
+            Later Master IDs are invalid. Duplication does not copy a disabled
+            state.
           items:
             type: string
             minLength: 1
@@ -972,7 +979,10 @@ components:
           type: string
           minLength: 1
           maxLength: 4096
-          description: Must reference a non-Master Track; only one lane is allowed per target.
+          description: >-
+            Must reference an existing non-Master Track, except track-volume may
+            reference only the first (effective) Master. Master pan and later
+            Master targets are invalid. Only one lane is allowed per target.
     AutomationPoint:
       type: object
       additionalProperties: false

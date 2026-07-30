@@ -165,8 +165,17 @@ describe('automation recording pass lifecycle', () => {
       project: structuredClone(project),
       punchOutBeat: 2,
     }), 'stale-project');
-    expectFailure(beginAutomationPass(project, {
-      trackId: project.tracks.find((track) => track.type === 'master')!.id,
+    const effectiveMaster = project.tracks.find((track) => track.type === 'master')!;
+    const compatibilityMaster = {
+      ...structuredClone(effectiveMaster),
+      id: 'recording-compatibility-master',
+    };
+    const compatibilityProject = {
+      ...project,
+      tracks: [...project.tracks, compatibilityMaster],
+    };
+    expectFailure(beginAutomationPass(compatibilityProject, {
+      trackId: compatibilityMaster.id,
       mode: 'write',
       startBeat: 0,
     }), 'master-protected');
@@ -330,6 +339,33 @@ describe('automation recording pass rebasing', () => {
       .toContainEqual(expect.objectContaining({ beat: 2, value: 1.4 }));
     expect(laneFor(punched.project, writeTrackId, 'track-pan').points)
       .toContainEqual(expect.objectContaining({ beat: 2, value: -0.35 }));
+  });
+
+  it('rebases only the effective Master Read volume scalar', () => {
+    const project = createEmptyProject({ clock, lengthBars: 4 });
+    const master = project.tracks.find((track) => track.type === 'master')!;
+    const pass = passSuccess(beginAutomationPass(project, {
+      trackId: master.id,
+      mode: 'read',
+      startBeat: 1,
+    }));
+    const nextProject = structuredClone(project);
+    nextProject.tracks.find((track) => track.id === master.id)!.volume = 0.75;
+    nextProject.updatedAt = '2026-07-30T00:00:01.000Z';
+
+    const rebased = rebaseSuccess(rebaseAutomationPass(pass, {
+      expectedProject: project,
+      nextProject,
+    }));
+    expect(rebased.changedTargets).toEqual([target(master.id, 'track-volume')]);
+
+    const panProject = structuredClone(nextProject);
+    panProject.tracks.find((track) => track.id === master.id)!.pan = 0.25;
+    panProject.updatedAt = '2026-07-30T00:00:02.000Z';
+    expectFailure(rebaseAutomationPass(rebased.pass, {
+      expectedProject: nextProject,
+      nextProject: panProject,
+    }), 'invalid-pass');
   });
 
   it('supports chained rebases and rejects every superseded source reference', () => {
@@ -593,6 +629,37 @@ describe('Touch, Latch, and Write replacement semantics', () => {
     expect(pan.bypassed).toBe(true);
     expect(volume.points.find((point) => point.beat === 6)?.value).toBe(1.4);
     expect(pan.points.find((point) => point.beat === 6)?.value).toBeCloseTo(0.375, 12);
+  });
+
+  it('records effective-Master Write as volume only', () => {
+    const project = createEmptyProject({ clock, lengthBars: 4 });
+    const master = project.tracks.find((track) => track.type === 'master')!;
+    master.volume = 0.8;
+    master.pan = 0.2;
+    const pass = passSuccess(beginAutomationPass(project, {
+      trackId: master.id,
+      mode: 'write',
+      startBeat: 2,
+    }));
+
+    expect(pass.captures.map((capture) => capture.target)).toEqual([
+      target(master.id, 'track-volume'),
+    ]);
+    expectFailure(touchAutomationPass(pass, {
+      target: target(master.id, 'track-pan'),
+      beat: 3,
+      value: 0.1,
+    }), 'invalid-target');
+
+    const result = finalSuccess(punchOutAutomationPass(pass, {
+      project,
+      punchOutBeat: 6,
+      idFactory: idFactory(),
+    }));
+    expect(laneFor(result.project, master.id, 'track-volume').points)
+      .toContainEqual(expect.objectContaining({ beat: 2, value: 0.8 }));
+    expect(result.project.automationLanes.some((lane) =>
+      lane.target.trackId === master.id && lane.target.type === 'track-pan')).toBe(false);
   });
 
   it('Write holds the frozen scalar until first contact without predicting its value backward', () => {

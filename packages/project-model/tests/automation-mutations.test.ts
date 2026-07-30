@@ -303,16 +303,37 @@ describe('automation mutations', () => {
     expect(pan.project.automationLanes).toHaveLength(2);
   });
 
-  it('rejects missing and Master targets plus invalid runtime target unions', () => {
+  it('allows effective-Master volume but rejects pan, later Masters, and invalid targets', () => {
     const { project, trackId, masterTrackId } = fixture();
 
     expectFailure(addAutomationPoint(
       project,
       input('missing-track'),
     ), 'track-not-found');
-    expectFailure(addAutomationPoint(
+    const masterVolume = expectSuccess(addAutomationPoint(
       project,
       input(masterTrackId),
+      { laneId: 'master-volume-lane', pointId: 'master-volume-point' },
+    ));
+    expect(masterVolume.project.automationLanes[0]?.target).toEqual({
+      type: 'track-volume',
+      trackId: masterTrackId,
+    });
+    expectFailure(addAutomationPoint(
+      masterVolume.project,
+      input(masterTrackId, {
+        target: { type: 'track-pan', trackId: masterTrackId },
+        value: 0,
+      }),
+    ), 'master-protected');
+    const effectiveMaster = project.tracks.find((track) => track.id === masterTrackId)!;
+    const compatibilityMaster = {
+      ...structuredClone(effectiveMaster),
+      id: 'automation-compatibility-master',
+    };
+    expectFailure(addAutomationPoint(
+      { ...project, tracks: [...project.tracks, compatibilityMaster] },
+      input(compatibilityMaster.id),
     ), 'master-protected');
     expectFailure(addAutomationPoint(
       project,

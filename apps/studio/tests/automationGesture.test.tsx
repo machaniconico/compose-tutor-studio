@@ -1,6 +1,10 @@
+import { createEmptyProject } from '@cts/project-model';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  automationDisplayValue,
   createAutomationGestureAdapter,
+  resolveAutomationGestureDisplayValue,
+  shouldFollowAutomationRead,
   type AutomationGestureAdapterOptions,
 } from '../src/features/automation/useAutomationGesture';
 
@@ -29,6 +33,55 @@ function fixture(capturing = true) {
 }
 
 describe('shared automation gesture adapter', () => {
+  it('resolves the enabled Master Read curve and every Read gate', () => {
+    const project = createEmptyProject();
+    const master = project.tracks.find((track) => track.type === 'master');
+    if (!master) throw new Error('Master fixture missing');
+    master.volume = 0.8;
+    project.automationLanes = [{
+      id: 'master-display-lane',
+      bypassed: false,
+      target: { type: 'track-volume', trackId: master.id },
+      points: [
+        { id: 'display-0', beat: 0, value: 0.5, interpolation: 'linear' },
+        { id: 'display-1', beat: 4, value: 1.5, interpolation: 'hold' },
+      ],
+    }];
+    const target = { type: 'track-volume', trackId: master.id } as const;
+
+    expect(automationDisplayValue(project, target, 'playing', 2, true)).toBe(1);
+    expect(automationDisplayValue(project, target, 'stopped', 2, true)).toBe(0.8);
+    expect(automationDisplayValue(project, target, 'playing', 2, false)).toBe(0.8);
+
+    project.automationReadState = { globalEnabled: false, disabledTrackIds: [] };
+    expect(automationDisplayValue(project, target, 'playing', 2, true)).toBe(0.8);
+    project.automationReadState = {
+      globalEnabled: true,
+      disabledTrackIds: [master.id],
+    };
+    expect(automationDisplayValue(project, target, 'playing', 2, true)).toBe(0.8);
+    project.automationReadState = { globalEnabled: true, disabledTrackIds: [] };
+    project.automationLanes[0] = {
+      ...project.automationLanes[0]!,
+      bypassed: true,
+    };
+    expect(automationDisplayValue(project, target, 'playing', 2, true)).toBe(0.8);
+  });
+
+  it('keeps a live manual gesture preview ahead of a moving Read curve', () => {
+    expect(resolveAutomationGestureDisplayValue(1.25, 0.8, 0.4, true)).toBe(1.25);
+    expect(resolveAutomationGestureDisplayValue(null, 0.8, 0.4, true)).toBe(0.4);
+    expect(resolveAutomationGestureDisplayValue(null, 0.8, 0.4, false)).toBe(0.8);
+  });
+
+  it('shows the scalar while Write owns output and lets Touch/Latch read before touch', () => {
+    expect(shouldFollowAutomationRead(true, 'playing', 'write')).toBe(false);
+    expect(shouldFollowAutomationRead(true, 'playing', 'touch')).toBe(true);
+    expect(shouldFollowAutomationRead(true, 'playing', 'latch')).toBe(true);
+    expect(shouldFollowAutomationRead(true, 'playing', 'read')).toBe(true);
+    expect(shouldFollowAutomationRead(true, 'stopped', 'write')).toBe(true);
+  });
+
   it.each([
     ['pointerup', (end: ReturnType<typeof fixture>['adapter']) => end.pointerUp(7)],
     ['pointercancel', (end: ReturnType<typeof fixture>['adapter']) => end.pointerCancel(7)],

@@ -233,7 +233,7 @@ export type AutomationLane = {
 export type AutomationReadState = {
   /** Global automation Read gate. */
   globalEnabled: boolean;
-  /** Canonical project-order list of non-Master tracks whose Read gate is off. */
+  /** Canonical project-order list of supported Tracks whose Read gate is off. */
   disabledTrackIds: string[];
 };
 

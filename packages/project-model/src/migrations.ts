@@ -273,6 +273,16 @@ function migrateV6ToV7(
   };
 }
 
+/** Schema-v8 permits effective-Master volume automation without rewriting v7 data. */
+function migrateV7ToV8(
+  project: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    ...project,
+    schemaVersion: 8,
+  };
+}
+
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 1, to: 2, migrate: migrateV1ToV2 },
   { from: 2, to: 3, migrate: migrateV2ToV3 },
@@ -280,6 +290,7 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 4, to: 5, migrate: migrateV4ToV5 },
   { from: 5, to: 6, migrate: migrateV5ToV6 },
   { from: 6, to: 7, migrate: migrateV6ToV7 },
+  { from: 7, to: 8, migrate: migrateV7ToV8 },
 ]);
 
 export type ProjectMigrationErrorCode =
@@ -333,6 +344,70 @@ function assertMigrationRegistry(): void {
   }
 }
 
+/**
+ * Master automation was not part of any legacy schema. Reject it before a
+ * schema-only v7 -> v8 migration could make the same payload appear valid.
+ */
+function assertNoLegacyMasterAutomation(
+  project: Readonly<Record<string, unknown>>,
+  schemaVersion: number,
+): void {
+  if (schemaVersion < 3 || schemaVersion > 7) return;
+  const masterIds = new Set<string>();
+  if (Array.isArray(project.tracks)) {
+    for (const track of project.tracks) {
+      if (
+        typeof track === 'object'
+        && track !== null
+        && !Array.isArray(track)
+      ) {
+        const record = track as Readonly<Record<string, unknown>>;
+        if (record.type === 'master' && typeof record.id === 'string') {
+          masterIds.add(record.id);
+        }
+      }
+    }
+  }
+  if (masterIds.size === 0) return;
+
+  if (Array.isArray(project.automationLanes)) {
+    for (const lane of project.automationLanes) {
+      if (typeof lane !== 'object' || lane === null || Array.isArray(lane)) continue;
+      const target = (lane as Readonly<Record<string, unknown>>).target;
+      if (typeof target !== 'object' || target === null || Array.isArray(target)) continue;
+      if (masterIds.has((target as Readonly<Record<string, unknown>>).trackId as string)) {
+        throw new ProjectMigrationError(
+          'migration-failed',
+          `schemaVersion ${schemaVersion} automation cannot target a Master track`,
+        );
+      }
+    }
+  }
+
+  if (schemaVersion === 7) {
+    const readState = project.automationReadState;
+    if (
+      typeof readState === 'object'
+      && readState !== null
+      && !Array.isArray(readState)
+    ) {
+      const disabledTrackIds =
+        (readState as Readonly<Record<string, unknown>>).disabledTrackIds;
+      if (
+        Array.isArray(disabledTrackIds)
+        && disabledTrackIds.some(
+          (trackId) => typeof trackId === 'string' && masterIds.has(trackId),
+        )
+      ) {
+        throw new ProjectMigrationError(
+          'migration-failed',
+          'schemaVersion 7 automation Read state cannot reference a Master track',
+        );
+      }
+    }
+  }
+}
+
 /** Apply every consecutive migration without mutating the caller's input. */
 export function migrateProject(raw: Readonly<Record<string, unknown>>): Record<string, unknown> {
   assertMigrationRegistry();
@@ -352,6 +427,8 @@ export function migrateProject(raw: Readonly<Record<string, unknown>>): Record<s
       `Project schemaVersion ${version} is newer than supported version ${CURRENT_SCHEMA_VERSION}`,
     );
   }
+
+  assertNoLegacyMasterAutomation(current, version);
 
   while (version < CURRENT_SCHEMA_VERSION) {
     const migration = MIGRATIONS.find((candidate) => candidate.from === version);
