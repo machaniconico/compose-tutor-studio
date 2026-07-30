@@ -619,6 +619,8 @@ export function PlaybackLifecycleControl({
             ? '音声素材の保存領域へ現在アクセスできません。端末の空き容量やアクセス権を確認してください。編集内容はそのままです。'
             : transport.audioIssue === 'audio-decode-failed'
               ? '保存済みの音声素材を読み取れませんでした。素材が対応形式か、破損していないか確認してください。編集内容はそのままです。'
+              : transport.audioIssue === 'audio-warp-failed'
+                ? 'Elastic Audioの編集を音にできませんでした。タイミング点やピッチ補正範囲を確認してください。元の音声素材と編集内容はそのままです。'
               : transport.audioIssue === 'audio-resource-limit'
                 ? '再生時の音声処理またはメモリ上限を超えています。エフェクト、バス、または音声素材の数や長さを減らしてください。編集内容はそのままです。'
       : transport.audioIssue === 'start-failed'

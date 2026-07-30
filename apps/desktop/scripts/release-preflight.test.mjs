@@ -945,6 +945,27 @@ test('rejects hidden renderer and Rust network APIs from production source', asy
   );
 });
 
+test('pins the only local Elastic Audio Worker bootstrap exactly', async () => {
+  const rootDir = await createReleaseSource();
+  const workerPath = path.join(
+    rootDir,
+    'apps/studio/src/audio/audioWarpThread.ts',
+  );
+  await mkdir(path.dirname(workerPath), { recursive: true });
+  await copyFile(
+    new URL('../../studio/src/audio/audioWarpThread.ts', import.meta.url),
+    workerPath,
+  );
+  await validateNoHiddenNetworkCalls({ rootDir });
+
+  const reviewed = await readFile(workerPath, 'utf8');
+  await writeFile(workerPath, `${reviewed}\nexport const unreviewed = true;\n`);
+  await assert.rejects(
+    validateNoHiddenNetworkCalls({ rootDir }),
+    /reviewed local Elastic Audio Worker bootstrap does not match/,
+  );
+});
+
 test('rejects network primitives injected into final renderer assets', async () => {
   const distDir = await mkdtemp(path.join(os.tmpdir(), 'cts-renderer-assets-'));
   await mkdir(path.join(distDir, 'assets'), { recursive: true });

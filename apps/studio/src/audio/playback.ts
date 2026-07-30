@@ -40,8 +40,16 @@ import {
   preflightProjectAudioAssets,
   projectHasReferencedReadyAudioAssets,
   reserveProjectAudioAssetResourceBudget,
-  type AudioAssetBufferLease,
 } from './audioAssetResolver';
+import {
+  acquireAudioClipPlaybackBuffers,
+  estimateAudioWarpResourcePeakBytes,
+  getAudioClipBufferCache,
+  type AudioClipPlaybackBufferLease,
+} from './audioClipBuffers';
+import { AudioWarpDspError } from './audioWarpDsp';
+import { AudioWarpPlanError } from './audioWarpPlan';
+import { projectForAudioWarpAudition } from './audioWarpAudition';
 import {
   AudioClipPlanLimitError,
   createAudioClipPlaybackIndex,
@@ -131,7 +139,7 @@ type RuntimeSession = PlaybackSession & {
   synths: Map<string, SynthVoiceManager>;
   drums: Map<string, DrumVoiceManager>;
   audioVoices: Map<string, AudioClipVoiceManager>;
-  audioBuffers: AudioAssetBufferLease;
+  audioBuffers: AudioClipPlaybackBufferLease;
   readonly audioClipIndex: AudioClipPlaybackIndex;
   metronomeClicks: Set<ScheduledMetronomeClick>;
   metronomeBeatFrontier: number;
@@ -664,6 +672,16 @@ export function classifyPlaybackStartFailure(
   }
   if (error instanceof AudioRoutingGraphError && error.code === 'graph-node-limit') {
     return 'audio-resource-limit';
+  }
+  if (error instanceof AudioWarpDspError) {
+    return error.code === 'resource-limit'
+      ? 'audio-resource-limit'
+      : 'audio-warp-failed';
+  }
+  if (error instanceof AudioWarpPlanError) {
+    return error.code === 'resource-limit'
+      ? 'audio-resource-limit'
+      : 'audio-warp-failed';
   }
   return 'start-failed';
 }
@@ -1378,38 +1396,78 @@ export async function acquireRuntimeProjectAudioBuffers(
   project: Project,
   context: AudioContext,
   isCurrent: () => boolean,
-): Promise<AudioAssetBufferLease> {
+): Promise<AudioClipPlaybackBufferLease> {
   const audioAssetCache = getAudioAssetPlaybackCache();
+  const derivedCache = getAudioClipBufferCache();
   // Only active leases and in-flight decodes survive; reclaimable LRU entries
   // cannot create a false process-level reservation failure.
   audioAssetCache.clearUnused();
   if (!projectHasReferencedReadyAudioAssets(project)) {
-    return acquireProjectAudioBuffers({ assets: [], estimatedDecodedBytes: 0 }, context, {
+    const source = await acquireProjectAudioBuffers({ assets: [], estimatedDecodedBytes: 0 }, context, {
       cache: audioAssetCache,
     });
+    return acquireAudioClipPlaybackBuffers(
+      project,
+      { assets: [], estimatedDecodedBytes: 0 },
+      source,
+      context,
+    );
   }
 
+  const retainedDecodedBytes = audioAssetCache.retainedDecodedBytes;
+  let warpResources = estimateAudioWarpResourcePeakBytes(project, derivedCache);
   const estimate = assertProjectAudioAssetCombinedResourceBudget(
     project,
     context.sampleRate,
-    audioAssetCache.retainedDecodedBytes,
+    retainedDecodedBytes,
+    warpResources.estimatedPeakBytes,
   );
   const reservation = reserveProjectAudioAssetResourceBudget(
     project,
-    estimate.estimatedPeakBytes,
+    estimate.estimatedPeakBytes - warpResources.retainedDerivedBytes,
   );
   try {
     const preparedAudio = await preflightProjectAudioAssets(project, {
       cache: audioAssetCache,
       targetSampleRate: context.sampleRate,
     });
+    // Cache state can change while resolver I/O is pending. Recompute and
+    // atomically resize before decode/Worker allocation; retained cache PCM
+    // already owns its own shared-ledger reservation.
+    warpResources = estimateAudioWarpResourcePeakBytes(project, derivedCache);
+    const currentEstimate = assertProjectAudioAssetCombinedResourceBudget(
+      project,
+      context.sampleRate,
+      retainedDecodedBytes,
+      warpResources.estimatedPeakBytes,
+    );
+    reservation.resize(
+      currentEstimate.estimatedPeakBytes - warpResources.retainedDerivedBytes,
+    );
     if (!isCurrent()) throw new CancelledPlaybackRequest();
     if (String(context.state) !== 'running') {
       throw new Error(`AudioContext left the running state (${String(context.state)}).`);
     }
-    const audioBuffers = await acquireProjectAudioBuffers(preparedAudio, context, {
+    const sourceBuffers = await acquireProjectAudioBuffers(preparedAudio, context, {
       cache: audioAssetCache,
     });
+    if (!isCurrent()) {
+      sourceBuffers.release();
+      throw new CancelledPlaybackRequest();
+    }
+    const generation = useStore.getState().transport.playbackRequestId;
+    const audioBuffers = await acquireAudioClipPlaybackBuffers(
+      project,
+      preparedAudio,
+      sourceBuffers,
+      context,
+      {
+        cache: derivedCache,
+        resourceBudget: reservation,
+        generation,
+        currentGeneration: () => useStore.getState().transport.playbackRequestId,
+      },
+    );
     if (!isCurrent()) {
       audioBuffers.release();
       throw new CancelledPlaybackRequest();
@@ -1457,12 +1515,18 @@ async function createRuntimeSessionImpl(
   synchronizedIntent: SynchronizedStartIntent | null,
 ): Promise<RuntimeSession> {
   const initialStore = useStore.getState();
-  const project = initialStore.project;
+  const persistedProject = initialStore.project;
+  const project = synchronizedIntent
+    ? persistedProject
+    : projectForAudioWarpAudition(
+        persistedProject,
+        initialStore.audioWarpAuditionClipId,
+      );
   const transport = initialStore.transport;
   if (synchronizedIntent) {
     if (synchronizedIntent.signal.aborted) throw synchronizedError('cancelled');
     if (
-      project !== synchronizedIntent.projectSnapshot
+      persistedProject !== synchronizedIntent.projectSnapshot
       || initialStore.audioRecordingOperationId !== synchronizedIntent.operationId
     ) {
       throw synchronizedError('stale-operation');
@@ -1592,7 +1656,7 @@ async function createRuntimeSessionImpl(
         isCurrent,
       );
       if (
-        startupStore.project !== project
+        startupStore.project !== persistedProject
         || startupStore.transport.positionBeat !== synchronizedIntent.startBeat
       ) {
         throw synchronizedError('stale-operation');
@@ -2142,7 +2206,7 @@ function scheduleAudioForWindow(
   });
   for (const plan of plans) {
     const voice = session.audioVoices.get(plan.trackId);
-    const buffer = session.audioBuffers.buffersByAssetId.get(plan.assetId);
+    const buffer = session.audioBuffers.bufferForPlan(plan);
     if (!voice) {
       throw new AudioAssetPlaybackError(
         'asset-unavailable',

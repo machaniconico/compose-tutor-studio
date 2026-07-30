@@ -15,6 +15,7 @@ import {
   type RetryPolicy,
 } from '@cts/project-persistence';
 import {
+  audioWarpsEqual,
   clipContentOwnerId,
   adoptRecordedAudioPunch,
   automationTargetTypesForTrack,
@@ -118,6 +119,7 @@ export type AudioIssue =
   | 'audio-asset-changed'
   | 'audio-asset-unavailable'
   | 'audio-decode-failed'
+  | 'audio-warp-failed'
   | 'audio-resource-limit'
   | 'interrupted'
   | null;
@@ -307,6 +309,8 @@ export type StoreState = {
   savedProjects: readonly ProjectSummary[];
   /** Runtime-only evidence; Project metadata remains intact for relink/recovery. */
   audioAssetIssues: Readonly<Record<string, AudioAssetRuntimeIssue>>;
+  /** Runtime-only A/B bypass. The selected clip's persisted edit remains untouched. */
+  audioWarpAuditionClipId: string | null;
   /** Runtime-only Track automation modes and one-pass capture visibility. */
   automationRecording: AutomationRecordingRuntimeState;
   /** One synchronous publication marker consumed by the audio bridge. */
@@ -396,6 +400,11 @@ export type StoreState = {
   setZoomX: (zoomX: number) => void;
   toggleTutorialPanel: () => void;
   setInspectorContent: (content: string | null) => void;
+  /**
+   * Select one edited Audio Clip whose next live playback uses the original
+   * audio. This never enters Project history or persistence.
+   */
+  setAudioWarpAuditionClipId: (clipId: string | null) => boolean;
 
   // transport
   //
@@ -608,6 +617,13 @@ function clipTopologyEqual(
       leftGroove.probability === rightGroove.probability &&
       leftGroove.humanizeVelocity === rightGroove.humanizeVelocity &&
       leftGroove.seed === rightGroove.seed);
+  const warpEqual =
+    left.audioWarp === right.audioWarp
+    || (
+      left.audioWarp !== undefined
+      && right.audioWarp !== undefined
+      && audioWarpsEqual(left.audioWarp, right.audioWarp)
+    );
 
   return (
     left.id === right.id &&
@@ -624,6 +640,7 @@ function clipTopologyEqual(
     left.fadeInFrames === right.fadeInFrames &&
     left.fadeOutFrames === right.fadeOutFrames &&
     left.gainDb === right.gainDb &&
+    warpEqual &&
     grooveEqual
   );
 }
@@ -856,6 +873,18 @@ function makeEditor(project: Project): EditorState {
     chordToneHighlight: true,
     zoomX: 1,
   };
+}
+
+function hasAuditionableAudioWarp(project: Project, clipId: string | null): boolean {
+  if (clipId === null) return false;
+  return project.tracks.some((track) =>
+    track.clips.some((clip) =>
+      clip.id === clipId
+      && clip.type === 'audio'
+      && clip.audioWarp?.pitchEnabled === true
+      && clip.audioWarp.pitchRegions.length > 0,
+    ),
+  );
 }
 
 /** Drop UI selections that no longer exist in a restored or edited project. */
@@ -2203,6 +2232,7 @@ export function createStudioStore(
       project,
       editor: makeEditor(project),
       armedAudioTrackId: null,
+      audioWarpAuditionClipId: null,
       // Invalidate any audio startup that belongs to the previous project.
       // Never recycle request IDs: a stale async completion must not match a
       // later play attempt after a project switch.
@@ -2441,6 +2471,12 @@ export function createStudioStore(
       future: [],
       editor: reconcileEditorSelection(state.editor, stamped),
       armedAudioTrackId: reconcileArmedAudioTrackId(state.armedAudioTrackId, stamped),
+      audioWarpAuditionClipId: hasAuditionableAudioWarp(
+        stamped,
+        state.audioWarpAuditionClipId,
+      )
+        ? state.audioWarpAuditionClipId
+        : null,
       transport: automationAuthorization || automationReadScalarTarget
         ? state.transport
         : transportAfterProjectChange(state.transport, topologyChanged),
@@ -2528,6 +2564,7 @@ export function createStudioStore(
     persistenceNotice: null,
     savedProjects: [],
     audioAssetIssues: {},
+    audioWarpAuditionClipId: null,
     automationRecording: automationCoordinator.snapshot(),
     automationRecordingCommitRequestId: null,
     automationReadScalarCommit: null,
@@ -3082,6 +3119,45 @@ export function createStudioStore(
     setZoomX: (zoomX) => set((s) => ({ editor: { ...s.editor, zoomX } })),
     toggleTutorialPanel: () => set((s) => ({ tutorialPanelOpen: !s.tutorialPanelOpen })),
     setInspectorContent: (content) => set({ inspector: { content } }),
+    setAudioWarpAuditionClipId: (clipId) => {
+      const before = get();
+      if (
+        before.projectOperationBusy
+        || before.audioRecordingOperationId !== null
+        || (clipId !== null && !hasAuditionableAudioWarp(before.project, clipId))
+        || before.audioWarpAuditionClipId === clipId
+      ) {
+        return false;
+      }
+      if (
+        before.transport.phase !== 'stopped'
+        && !finalizeAutomationPass('seek')
+      ) {
+        return false;
+      }
+      const state = get();
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+        || (clipId !== null && !hasAuditionableAudioWarp(state.project, clipId))
+      ) {
+        return false;
+      }
+      const restartPlayback = state.transport.phase !== 'stopped';
+      set({
+        audioWarpAuditionClipId: clipId,
+        transport: restartPlayback
+          ? {
+              ...state.transport,
+              phase: 'starting',
+              isPlaying: false,
+              playbackRequestId: state.transport.playbackRequestId + 1,
+              audioIssue: null,
+            }
+          : state.transport,
+      });
+      return true;
+    },
 
     // --- transport ---
     play: () => {
@@ -3670,6 +3746,12 @@ export function createStudioStore(
         future: [project, ...future].slice(0, HISTORY_CAP),
         editor: reconcileEditorSelection(state.editor, restored),
         armedAudioTrackId: reconcileArmedAudioTrackId(state.armedAudioTrackId, restored),
+        audioWarpAuditionClipId: hasAuditionableAudioWarp(
+          restored,
+          state.audioWarpAuditionClipId,
+        )
+          ? state.audioWarpAuditionClipId
+          : null,
         transport: transportAfterProjectChange(state.transport, topologyChanged),
       }));
       if (restored.key !== project.key || restored.scale !== project.scale) {
@@ -3693,6 +3775,12 @@ export function createStudioStore(
         future: future.slice(1),
         editor: reconcileEditorSelection(state.editor, restored),
         armedAudioTrackId: reconcileArmedAudioTrackId(state.armedAudioTrackId, restored),
+        audioWarpAuditionClipId: hasAuditionableAudioWarp(
+          restored,
+          state.audioWarpAuditionClipId,
+        )
+          ? state.audioWarpAuditionClipId
+          : null,
         transport: transportAfterProjectChange(state.transport, topologyChanged),
       }));
       if (restored.key !== project.key || restored.scale !== project.scale) {

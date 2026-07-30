@@ -4,6 +4,10 @@ import type {
   ReadyAudioAsset,
 } from '@cts/project-model';
 import { createProjectMusicalTime } from './musicalTime';
+import {
+  compileAudioWarpRenderRequestIndex,
+  type AudioWarpRenderRequest,
+} from './audioWarpPlan';
 import type { BeatTimeMapping, LoopRegion } from './scheduler';
 
 /** A single lookahead/offline pass may never allocate an unbounded source list. */
@@ -33,6 +37,21 @@ export type AudioClipGainPoint = Readonly<{
   value: number;
 }>;
 
+export type AudioClipPlaybackBufferKey =
+  | Readonly<{
+      kind: 'source';
+      assetId: string;
+      checksumSha256: string;
+    }>
+  | Readonly<{
+      kind: 'derived';
+      assetId: string;
+      checksumSha256: string;
+      cacheKey: string;
+      sampleRate: number;
+      frameCount: number;
+    }>;
+
 /**
  * One independently-owned AudioBufferSource occurrence.
  *
@@ -46,6 +65,7 @@ export type AudioClipPlaybackPlan = Readonly<{
   clipId: string;
   assetId: string;
   checksumSha256: string;
+  playbackBufferKey: AudioClipPlaybackBufferKey;
   startBeat: number;
   endBeat: number;
   sourceOffsetSeconds: number;
@@ -80,6 +100,7 @@ export type AudioClipRegionIndexEntry = Readonly<{
   /** Structured source identity; never parse or concatenate persisted ids. */
   sourceIdentity: readonly string[];
   asset: ReadyAudioAsset;
+  warpRequest: AudioWarpRenderRequest | null;
   clipStartSeconds: number;
   audibleEndSeconds: number;
   sourceDurationSeconds: number;
@@ -108,6 +129,7 @@ export type AudioClipPlaybackIndex = Readonly<{
   regionCount: number;
   sortedRegions: readonly AudioClipRegionIndexEntry[];
   prefixMaxEndSeconds: readonly number[];
+  warpRequestsByClipId: ReadonlyMap<string, AudioWarpRenderRequest>;
 }>;
 
 type TransportSlice = Readonly<{
@@ -138,7 +160,8 @@ export function createAudioClipPlaybackIndex(
     MAX_AUDIO_CLIP_REGIONS,
     positiveSafeLimit(options.maxRegions, MAX_AUDIO_CLIP_REGIONS),
   );
-  const sortedRegions = collectAudioRegions(project, tempo, maxRegions)
+  const warpRequestsByClipId = compileAudioWarpRenderRequestIndex(project).byClipId;
+  const sortedRegions = collectAudioRegions(project, tempo, maxRegions, warpRequestsByClipId)
     .sort((left, right) => (
       left.clipStartSeconds - right.clipStartSeconds ||
       left.trackId.localeCompare(right.trackId) ||
@@ -156,6 +179,7 @@ export function createAudioClipPlaybackIndex(
     regionCount: sortedRegions.length,
     sortedRegions: Object.freeze(sortedRegions),
     prefixMaxEndSeconds: Object.freeze(prefixMaxEndSeconds),
+    warpRequestsByClipId,
   });
 }
 
@@ -275,6 +299,8 @@ function collectAudioRegions(
   project: Project,
   tempo: BeatTimeMapping,
   maxRegions: number = Number.MAX_SAFE_INTEGER,
+  warpRequestsByClipId: ReadonlyMap<string, AudioWarpRenderRequest> =
+    compileAudioWarpRenderRequestIndex(project).byClipId,
 ): AudioClipRegionIndexEntry[] {
   const readyAssets = new Map<string, ReadyAudioAsset>();
   for (const asset of project.audioAssets) {
@@ -296,22 +322,33 @@ function collectAudioRegions(
       );
       const timelineDurationSeconds = clipEndSeconds - clipStartSeconds;
       const sourceDurationSeconds = clip.sourceFrameCount / asset.sampleRate;
+      const warpRequest = warpRequestsByClipId.get(clip.id);
+      const playbackDurationSeconds = warpRequest
+        ? warpRequest.outputFrameCount / warpRequest.targetSampleRate
+        : sourceDurationSeconds;
       if (
         !Number.isFinite(clipStartSeconds) ||
         !Number.isFinite(timelineDurationSeconds) ||
-        !Number.isFinite(sourceDurationSeconds) ||
+        !Number.isFinite(playbackDurationSeconds) ||
         timelineDurationSeconds <= 0 ||
-        sourceDurationSeconds <= 0
+        playbackDurationSeconds <= 0
       ) {
         continue;
       }
 
       const audibleDurationSeconds = clip.loop
         ? timelineDurationSeconds
-        : Math.min(timelineDurationSeconds, sourceDurationSeconds);
+        : Math.min(timelineDurationSeconds, playbackDurationSeconds);
       const normalizedFades = normalizeFades(
-        clip.fadeInFrames / asset.sampleRate,
-        clip.fadeOutFrames / asset.sampleRate,
+        warpRequest
+          ? sourceFrameOffsetToOutputSeconds(warpRequest, clip.fadeInFrames)
+          : clip.fadeInFrames / asset.sampleRate,
+        warpRequest
+          ? playbackDurationSeconds - sourceFrameOffsetToOutputSeconds(
+              warpRequest,
+              clip.sourceFrameCount - clip.fadeOutFrames,
+            )
+          : clip.fadeOutFrames / asset.sampleRate,
         audibleDurationSeconds,
       );
       if (regions.length >= maxRegions) {
@@ -322,10 +359,11 @@ function collectAudioRegions(
         clip,
         sourceIdentity: Object.freeze(['clip', track.id, clip.id]),
         asset,
+        warpRequest: warpRequest ?? null,
         clipStartSeconds,
         audibleEndSeconds: clipStartSeconds + audibleDurationSeconds,
-        sourceDurationSeconds,
-        sourceStartSeconds: clip.sourceStartFrame / asset.sampleRate,
+        sourceDurationSeconds: playbackDurationSeconds,
+        sourceStartSeconds: warpRequest ? 0 : clip.sourceStartFrame / asset.sampleRate,
         fadeInSeconds: normalizedFades.fadeInSeconds,
         fadeOutSeconds: normalizedFades.fadeOutSeconds,
         outerFadeOffsetSeconds: 0,
@@ -462,6 +500,7 @@ function collectAudioRegions(
           take.id,
         ]),
         asset,
+        warpRequest: null,
         clipStartSeconds: regionStartSeconds,
         audibleEndSeconds: regionStartSeconds + audibleDurationSeconds,
         sourceDurationSeconds,
@@ -758,6 +797,7 @@ function planRegionInSlice(
     clipId: region.clip.id,
     assetId: region.asset.id,
     checksumSha256: region.asset.checksumSha256,
+    playbackBufferKey: playbackBufferKey(region),
     startBeat,
     endBeat,
     sourceOffsetSeconds: region.sourceStartSeconds + sourcePhaseSeconds,
@@ -771,6 +811,48 @@ function planRegionInSlice(
   if (plans.length > maxPlans) {
     throw new AudioClipPlanLimitError(maxPlans, plans.length);
   }
+}
+
+function playbackBufferKey(region: AudioClipRegionIndexEntry): AudioClipPlaybackBufferKey {
+  const request = region.warpRequest;
+  return request
+    ? Object.freeze({
+        kind: 'derived',
+        assetId: request.assetId,
+        checksumSha256: request.checksumSha256,
+        cacheKey: request.cacheKey,
+        sampleRate: request.targetSampleRate,
+        frameCount: request.outputFrameCount,
+      })
+    : Object.freeze({
+        kind: 'source',
+        assetId: region.asset.id,
+        checksumSha256: region.asset.checksumSha256,
+      });
+}
+
+function sourceFrameOffsetToOutputSeconds(
+  request: AudioWarpRenderRequest,
+  sourceFrameOffset: number,
+): number {
+  const sourceIndex = sourceFrameOffset
+    * request.targetSampleRate
+    / request.sourceSampleRate;
+  const knots = request.knots;
+  if (sourceIndex <= 0) return 0;
+  if (sourceIndex >= request.sourceFrameCountAtTargetRate) {
+    return request.outputFrameCount / request.targetSampleRate;
+  }
+  for (let index = 1; index < knots.length; index += 1) {
+    const right = knots[index]!;
+    if (sourceIndex > right.sourceIndex) continue;
+    const left = knots[index - 1]!;
+    const ratio = (sourceIndex - left.sourceIndex)
+      / (right.sourceIndex - left.sourceIndex);
+    return (left.outputFrame + ratio * (right.outputFrame - left.outputFrame))
+      / request.targetSampleRate;
+  }
+  return request.outputFrameCount / request.targetSampleRate;
 }
 
 function gainPoints(

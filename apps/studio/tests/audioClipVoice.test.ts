@@ -49,6 +49,8 @@ class FakeBufferSource extends FakeNode {
   readonly starts: Array<{ when: number; offset: number; duration: number }> = [];
   readonly stops: number[] = [];
   throwOnStart = false;
+  readonly playbackRate = { value: 1 };
+  readonly detune = { value: 0 };
 
   start(when: number, offset: number, duration: number): void {
     if (this.throwOnStart) throw new Error('source start failed');
@@ -93,6 +95,11 @@ function plan(overrides: Partial<AudioClipPlaybackPlan> = {}): AudioClipPlayback
     clipId: 'clip-1',
     assetId: 'asset-1',
     checksumSha256: 'a'.repeat(64),
+    playbackBufferKey: {
+      kind: 'source',
+      assetId: 'asset-1',
+      checksumSha256: 'a'.repeat(64),
+    },
     startBeat: 2,
     endBeat: 6,
     sourceOffsetSeconds: 1.25,
@@ -129,6 +136,8 @@ describe('AudioClipVoiceManager', () => {
     expect(fake.sources[0]?.connections[0]).toBe(fake.gains[0]);
     expect(fake.gains[0]?.connections[0]).toBe(output);
     expect(fake.sources[0]?.starts).toEqual([{ when: 10, offset: 1.25, duration: 2 }]);
+    expect(fake.sources[0]?.playbackRate.value).toBe(1);
+    expect(fake.sources[0]?.detune.value).toBe(0);
     expect(fake.gains[0]?.gain.commands).toEqual([
       { kind: 'cancel', time: 10 },
       { kind: 'set', value: 0.25, time: 10 },

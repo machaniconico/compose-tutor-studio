@@ -3,6 +3,8 @@ import { ScheduleEventLimitError } from '@cts/project-model';
 import { AudioAssetPlaybackError } from '../src/audio/audioAssetResolver';
 import { AudioClipPlanLimitError } from '../src/audio/audioClipPlanner';
 import { WavRenderLimitError } from '../src/audio/wav';
+import { AudioWarpDspError } from '../src/audio/audioWarpDsp';
+import { AudioWarpPlanError } from '../src/audio/audioWarpPlan';
 import { wavExportFailureMessage } from '../src/features/export/ExportMenuContent';
 
 describe('wavExportFailureMessage', () => {
@@ -33,5 +35,15 @@ describe('wavExportFailureMessage', () => {
   it('sanitizes unrelated failures', () => {
     expect(wavExportFailureMessage(new Error('/private/source/path')))
       .toBe('WAVの書き出しに失敗しました。');
+  });
+
+  it.each([
+    new AudioWarpPlanError('invalid-edit', 'clip-1', 'private detail'),
+    new AudioWarpDspError('invalid-pcm', 'private detail'),
+  ])('explains Elastic Audio failures without exposing internals', (error) => {
+    const message = wavExportFailureMessage(error);
+    expect(message).toContain('Elastic Audio');
+    expect(message).toContain('元の音声素材');
+    expect(message).not.toContain('private detail');
   });
 });

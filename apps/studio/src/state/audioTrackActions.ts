@@ -1,20 +1,33 @@
 import {
   appendAudioTrackClip,
+  addAudioClipTimingPoint,
   adoptRecordedAudioPunch,
   createRecordedAudioTakeFolder,
   createAudioTrackClip,
   deleteAudioClip,
   duplicateAudioClip,
   moveAudioClip,
+  moveAudioClipTimingPoint,
+  mergeAudioClipPitchRegions,
+  removeAudioClipTimingPoint,
+  replaceAudioClipPitchRegions,
+  resetAudioClipPitchRegions,
+  resetAudioClipTimingPoints,
+  retargetAudioClipPitchRegion,
+  setAudioClipWarp,
   setAudioClipFades,
   setAudioClipGain,
   setAudioClipLoop,
   splitAudioClip,
+  splitAudioClipPitchRegion,
   inspectAudioPunchTarget,
   trimAudioClipLeft,
   trimAudioClipRight,
   type AudioClipMutationErrorCode,
   type AudioClipMutationResult,
+  type AudioPitchRegion,
+  type AudioWarp,
+  type AudioWarpMarker,
   type Project,
   type ReadyAudioAsset,
   type SplitAudioClipResult,
@@ -2895,6 +2908,87 @@ export function setStudioAudioClipLoop(
   return runAudioMutation((project) => setAudioClipLoop(project, clipId, loop));
 }
 
+export function setStudioAudioClipWarp(
+  clipId: string,
+  audioWarp: AudioWarp | undefined,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) => setAudioClipWarp(project, clipId, audioWarp));
+}
+
+export function addStudioAudioClipTimingPoint(
+  clipId: string,
+  marker: AudioWarpMarker,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) => addAudioClipTimingPoint(project, clipId, marker));
+}
+
+export function moveStudioAudioClipTimingPoint(
+  clipId: string,
+  index: number,
+  marker: AudioWarpMarker,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) =>
+    moveAudioClipTimingPoint(project, clipId, index, marker));
+}
+
+export function removeStudioAudioClipTimingPoint(
+  clipId: string,
+  index: number,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) => removeAudioClipTimingPoint(project, clipId, index));
+}
+
+export function resetStudioAudioClipTimingPoints(
+  clipId: string,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) => resetAudioClipTimingPoints(project, clipId));
+}
+
+export function replaceStudioAudioClipPitchRegions(
+  clipId: string,
+  regions: readonly AudioPitchRegion[],
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) => replaceAudioClipPitchRegions(project, clipId, regions));
+}
+
+export function splitStudioAudioClipPitchRegion(
+  clipId: string,
+  index: number,
+  sourceFrame: number,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) =>
+    splitAudioClipPitchRegion(project, clipId, index, sourceFrame));
+}
+
+export function mergeStudioAudioClipPitchRegions(
+  clipId: string,
+  index: number,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) => mergeAudioClipPitchRegions(project, clipId, index));
+}
+
+export function retargetStudioAudioClipPitchRegion(
+  clipId: string,
+  index: number,
+  targetPitchCents: number,
+  correctionAmount?: number,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) =>
+    retargetAudioClipPitchRegion(
+      project,
+      clipId,
+      index,
+      targetPitchCents,
+      correctionAmount,
+    ));
+}
+
+export function resetStudioAudioClipPitchRegions(
+  clipId: string,
+): StudioAudioClipCommandResult {
+  return runAudioMutation((project) => resetAudioClipPitchRegions(project, clipId));
+}
+
 export function duplicateStudioAudioClip(
   clipId: string,
   startBeat: number,
@@ -2999,6 +3093,10 @@ export function studioAudioActionErrorMessage(code: StudioAudioActionErrorCode):
       return 'ループ中は左端を変更できません。先にループをオフにしてください。';
     case 'looped-split-unsupported':
       return 'ループ中は分割できません。先にループをオフにしてください。';
+    case 'edited-loop-unsupported':
+      return '音声のタイミングまたは音程を補正中はループにできません。先に「音声を整える」で補正をリセットしてください。';
+    case 'invalid-audio-warp':
+      return '音声補正の位置または範囲を安全に反映できません。タイミング点と音程区間を確認してください。';
     case 'duplicate-id':
     case 'id-factory-failed':
       return '安全な識別子を作れませんでした。もう一度お試しください。';

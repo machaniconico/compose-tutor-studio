@@ -3,8 +3,8 @@ import {
   AudioResourceReservationError,
   MAX_HEAVY_AUDIO_RESOURCE_BYTES,
   checkedHeavyAudioResourceTotal,
-  reserveHeavyAudioResources,
-  type HeavyAudioResourceReservation,
+  reserveHeavyAudioResourceBudget,
+  type HeavyAudioResourceBudget,
 } from './audioResourceReservation';
 
 /** Bound both attacker-controlled metadata and browser decode allocations. */
@@ -489,6 +489,7 @@ export function assertProjectAudioAssetCombinedResourceBudget(
   project: Project,
   targetSampleRate: number,
   retainedDecodedBytes = 0,
+  derivedAndWorkerBytes = 0,
 ): AudioAssetCombinedResourceEstimate {
   const assets = referencedReadyAudioAssets(project);
   if (assets.length === 0) {
@@ -515,12 +516,14 @@ export function assertProjectAudioAssetCombinedResourceBudget(
     estimate.largestRawAssetBytes,
     estimate.largestRawAssetBytes,
     retainedDecodedBytes,
+    derivedAndWorkerBytes,
   ], assetId);
   const decodePeakBytes = checkedAudioResourceTotal([
     estimate.rawBytes,
     estimate.largestRawAssetBytes,
     estimate.decodedBytes,
     retainedDecodedBytes,
+    derivedAndWorkerBytes,
   ], assetId);
   const estimatedPeakBytes = Math.max(resolvePeakBytes, decodePeakBytes);
   if (estimatedPeakBytes > MAX_AUDIO_ASSET_COMBINED_ESTIMATED_BYTES) {
@@ -537,10 +540,10 @@ export function assertProjectAudioAssetCombinedResourceBudget(
 export function reserveProjectAudioAssetResourceBudget(
   project: Project,
   estimatedPeakBytes: number,
-): HeavyAudioResourceReservation {
+): HeavyAudioResourceBudget {
   const assetId = referencedReadyAudioAssets(project)[0]?.id ?? null;
   try {
-    return reserveHeavyAudioResources(estimatedPeakBytes);
+    return reserveHeavyAudioResourceBudget(estimatedPeakBytes);
   } catch (error) {
     if (!(error instanceof AudioResourceReservationError)) throw error;
     throw new AudioAssetPlaybackError(

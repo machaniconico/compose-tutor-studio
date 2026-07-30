@@ -4,6 +4,7 @@ import {
   compileMusicalTime,
   createRecordedAudioTakeFolder,
   inspectAudioPunchTarget,
+  type AudioClip,
   type Project,
   type ReadyAudioAsset,
 } from '@cts/project-model';
@@ -2376,5 +2377,145 @@ describe('Studio Audio Clip commands', () => {
     useStore.getState().undo();
     expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
       .some((clip) => clip.id === copied.clipId)).toBe(true);
+  });
+
+  it('commits one Elastic Audio edit per accepted action, preserves no-ops, and undo/redo is exact', async () => {
+    const { result: imported } = await importFixture();
+    const clipId = imported.clipId;
+    const clip = useStore.getState().project.tracks
+      .flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId) as AudioClip | undefined;
+    if (!clip || clip.type !== 'audio') throw new Error('audio clip missing');
+    const warp = {
+      algorithm: 'wsola-v1' as const,
+      timingEnabled: true,
+      pitchEnabled: true,
+      markers: [
+        { sourceFrame: clip.sourceStartFrame, targetBeatOffset: 0 },
+        { sourceFrame: clip.sourceStartFrame + 48_000, targetBeatOffset: 1.5 },
+        {
+          sourceFrame: clip.sourceStartFrame + clip.sourceFrameCount,
+          targetBeatOffset: clip.lengthBeats,
+        },
+      ],
+      pitchRegions: [{
+        sourceStartFrame: clip.sourceStartFrame,
+        sourceFrameCount: 48_000,
+        sourcePitchCents: 6_900,
+        targetPitchCents: 7_000,
+        correctionAmount: 0.5,
+        transitionFrames: 0,
+      }],
+    };
+    const historyBefore = useStore.getState().past.length;
+    const revisionBefore = useStore.getState().saveState.revision;
+    useStore.getState().play();
+
+    const committed = actions.setStudioAudioClipWarp(clipId, warp);
+
+    expect(committed).toMatchObject({
+      ok: true,
+      changed: true,
+      playbackStopped: true,
+    });
+    expect(useStore.getState().past).toHaveLength(historyBefore + 1);
+    expect(useStore.getState().saveState.revision).toBe(revisionBefore + 1);
+    expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)).toMatchObject({ audioWarp: warp });
+
+    const afterCommitWarp = useStore.getState().project.tracks
+      .flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)?.audioWarp;
+    const noOpHistory = useStore.getState().past.length;
+    const noOpRevision = useStore.getState().saveState.revision;
+    expect(actions.setStudioAudioClipWarp(clipId, warp)).toMatchObject({
+      ok: true,
+      changed: false,
+      playbackStopped: false,
+    });
+    expect(useStore.getState().past).toHaveLength(noOpHistory);
+    expect(useStore.getState().saveState.revision).toBe(noOpRevision);
+
+    useStore.getState().undo();
+    expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)).not.toHaveProperty('audioWarp');
+    useStore.getState().redo();
+    expect(useStore.getState().project.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)?.audioWarp).toEqual(afterCommitWarp);
+  });
+
+  it('rejects an invalid warp without stopping playback or adding history', async () => {
+    const { result: imported } = await importFixture();
+    const clipId = imported.clipId;
+    const clip = useStore.getState().project.tracks
+      .flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId) as AudioClip | undefined;
+    if (!clip || clip.type !== 'audio') throw new Error('audio clip missing');
+    const historyBefore = useStore.getState().past.length;
+    const revisionBefore = useStore.getState().saveState.revision;
+    useStore.getState().play();
+
+    const rejected = actions.setStudioAudioClipWarp(clipId, {
+      algorithm: 'wsola-v1',
+      timingEnabled: true,
+      pitchEnabled: true,
+      markers: [
+        { sourceFrame: clip.sourceStartFrame, targetBeatOffset: 0 },
+        {
+          sourceFrame: clip.sourceStartFrame + clip.sourceFrameCount,
+          targetBeatOffset: clip.lengthBeats * 10,
+        },
+      ],
+      pitchRegions: [],
+    });
+
+    expect(rejected).toEqual({ ok: false, code: 'project-not-adoptable' });
+    expect(useStore.getState().transport.phase).not.toBe('stopped');
+    expect(useStore.getState().past).toHaveLength(historyBefore);
+    expect(useStore.getState().saveState.revision).toBe(revisionBefore);
+  });
+
+  it('keeps duplicated Elastic Audio edits independent', async () => {
+    const { result: imported } = await importFixture();
+    const original = useStore.getState().project.tracks
+      .flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === imported.clipId) as AudioClip | undefined;
+    if (!original) throw new Error('audio clip missing');
+    const warp = {
+      algorithm: 'wsola-v1' as const,
+      timingEnabled: true,
+      pitchEnabled: true,
+      markers: [
+        { sourceFrame: original.sourceStartFrame, targetBeatOffset: 0 },
+        {
+          sourceFrame: original.sourceStartFrame + original.sourceFrameCount,
+          targetBeatOffset: original.lengthBeats,
+        },
+      ],
+      pitchRegions: [{
+        sourceStartFrame: original.sourceStartFrame,
+        sourceFrameCount: original.sourceFrameCount,
+        sourcePitchCents: 6_900,
+        targetPitchCents: 7_000,
+        correctionAmount: 0.5,
+        transitionFrames: 0,
+      }],
+    };
+    expect(actions.setStudioAudioClipWarp(original.id, warp)).toMatchObject({
+      ok: true,
+      changed: true,
+    });
+    const duplicated = actions.duplicateStudioAudioClip(original.id, 4);
+    if (!duplicated.ok) throw new Error(duplicated.code);
+    expect(actions.setStudioAudioClipWarp(duplicated.clipId, {
+      ...warp,
+      pitchRegions: [{ ...warp.pitchRegions[0]!, targetPitchCents: 6_800 }],
+    })).toMatchObject({ ok: true, changed: true });
+
+    const clips = useStore.getState().project.tracks.flatMap((track) => track.clips);
+    expect(clips.find((clip) => clip.id === original.id)?.audioWarp?.pitchRegions[0]
+      ?.targetPitchCents).toBe(7_000);
+    expect(clips.find((clip) => clip.id === duplicated.clipId)?.audioWarp?.pitchRegions[0]
+      ?.targetPitchCents).toBe(6_800);
   });
 });

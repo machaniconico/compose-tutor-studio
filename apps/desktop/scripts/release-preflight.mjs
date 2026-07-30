@@ -481,6 +481,8 @@ const forbiddenPnpmConfigPaths = Object.freeze([
 ]);
 const productionViteConfigSha256 =
   '459066c044ee244af72e720aaca9cbb59d7c90b469e84fee8ac784e9348c841b';
+const productionLocalAudioWarpThreadSha256 =
+  'ec3118ff8f45fcbad112f027468aa7a3cf0fa20da5bcf5bff3be32a0e8c1e80f';
 const productionBuildScriptSha256 =
   'fa2a85733d26d47475bce20bea09227d2d3e1691ac0acc8770f4c977afd0e3be';
 const productionPnpmWorkspaceSha256 =
@@ -922,6 +924,18 @@ export async function validateNoHiddenNetworkCalls({ rootDir = defaultRepoRoot }
     'apps/studio/index.html',
   );
   for (const { filePath, sourceRoot } of typescriptFiles) {
+    const repositoryRelativePath = path
+      .relative(rootDir, filePath)
+      .split(path.sep)
+      .join('/');
+    if (repositoryRelativePath === 'apps/studio/src/audio/audioWarpThread.ts') {
+      await requirePinnedTextFile(
+        filePath,
+        productionLocalAudioWarpThreadSha256,
+        'reviewed local Elastic Audio Worker bootstrap',
+      );
+      continue;
+    }
     const source = await readFile(filePath, 'utf8');
     const sourceFile = ts.createSourceFile(
       filePath,
