@@ -53,6 +53,7 @@ export type AudioTakeCompMutationErrorCode =
   | 'clip-not-found'
   | 'invalid-clip-selection'
   | 'ineligible-clip'
+  | 'edited-clip-unsupported'
   | 'invalid-crossfade'
   | 'invalid-range'
   | 'boundary-not-found'
@@ -273,6 +274,12 @@ function locateReadyAudioClip(
     const clip = candidate as AudioClip;
     if (clip.loop) {
       return failure('ineligible-clip', 'Looped Audio Clips cannot become immutable takes.');
+    }
+    if (clip.audioWarp !== undefined) {
+      return failure(
+        'edited-clip-unsupported',
+        'Reset Elastic Audio edits before adding this Audio Clip to a take folder.',
+      );
     }
     const asset = project.audioAssets.find((item) => item.id === clip.audioAssetId);
     if (asset?.availability !== 'ready') {

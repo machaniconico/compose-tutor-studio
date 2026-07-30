@@ -7,6 +7,22 @@ import { nowIso, systemClock } from './clock';
 import { makeId } from './ids';
 import { MAX_CLIPS_PER_TRACK, MIN_EVENT_DURATION_BEATS } from './limits';
 import {
+  addAudioWarpTimingPoint,
+  audioWarpsEqual,
+  beatToSourceFrame,
+  cropAudioWarp,
+  mergeAudioPitchRegions,
+  moveAudioWarpTimingPoint,
+  partitionAudioWarp,
+  removeAudioWarpTimingPoint,
+  replaceAudioPitchRegions,
+  resetAudioPitchRegions,
+  resetAudioWarpTimingPoints,
+  retargetAudioPitchRegion,
+  splitAudioPitchRegion,
+  type AudioWarpEditResult,
+} from './audio-warp';
+import {
   MAX_PROJECT_STRING_LENGTH,
   encodeProjectJson,
   type ProjectCodecIssue,
@@ -20,6 +36,9 @@ import {
 } from './time';
 import type {
   AudioClip,
+  AudioPitchRegion,
+  AudioWarp,
+  AudioWarpMarker,
   Clip,
   Project,
   ReadyAudioAsset,
@@ -58,6 +77,8 @@ export type AudioClipMutationErrorCode =
   | 'project-length-limit'
   | 'looped-left-trim-unsupported'
   | 'looped-split-unsupported'
+  | 'edited-loop-unsupported'
+  | 'invalid-audio-warp'
   | 'unexpected';
 
 export type AudioClipMutationError = Readonly<{
@@ -159,6 +180,34 @@ type InitialSourceRangeResult =
 
 const defaultIdFactory: AudioClipIdFactory = (kind) => makeId(kind);
 const BEAT_ROUNDING_FACTOR = 1_000_000_000_000;
+
+function cloneAudioWarp(clip: AudioClip): AudioClip['audioWarp'] {
+  return clip.audioWarp === undefined
+    ? undefined
+    : {
+        ...clip.audioWarp,
+        markers: clip.audioWarp.markers.map((marker) => ({ ...marker })),
+        pitchRegions: clip.audioWarp.pitchRegions.map((region) => ({ ...region })),
+      };
+}
+
+function cropWarpToClip(
+  clip: AudioClip,
+  sourceStartFrame: number,
+  sourceEndFrame: number,
+  lengthBeats: number,
+): AudioClip['audioWarp'] {
+  if (clip.audioWarp === undefined) return undefined;
+  const cropped = cropAudioWarp(clip.audioWarp, sourceStartFrame, sourceEndFrame);
+  return {
+    ...cropped,
+    markers: cropped.markers.map((marker, index) =>
+      index === cropped.markers.length - 1
+        ? { ...marker, targetBeatOffset: lengthBeats }
+        : marker,
+    ),
+  };
+}
 
 function failure(
   code: AudioClipMutationErrorCode,
@@ -826,12 +875,22 @@ export function trimAudioClipLeft(
       return failure('invalid-position', 'The left trim must leave a positive Audio Clip window.');
     }
     if (startBeat === context.clip.startBeat) return success(project, context, false);
-    const frameDelta = frameDeltaBetweenBeats(
-      project,
-      context.clip.startBeat,
-      startBeat,
-      context.asset.sampleRate,
-    );
+    const timingWarp = context.clip.audioWarp?.timingEnabled === true
+      ? context.clip.audioWarp
+      : undefined;
+    const frameDelta = timingWarp === undefined
+      ? frameDeltaBetweenBeats(
+          project,
+          context.clip.startBeat,
+          startBeat,
+          context.asset.sampleRate,
+        )
+      : Math.round(
+          beatToSourceFrame(
+            timingWarp,
+            startBeat - context.clip.startBeat,
+          ) - context.clip.sourceStartFrame,
+        );
     if (frameDelta === null || frameDelta === 0) {
       return failure('invalid-source-range', 'The left trim cannot be represented in source frames.');
     }
@@ -868,6 +927,16 @@ export function trimAudioClipLeft(
       sourceStartFrame,
       sourceFrameCount,
       ...fades,
+      ...(context.clip.audioWarp !== undefined
+        ? {
+            audioWarp: cropWarpToClip(
+              context.clip,
+              sourceStartFrame,
+              sourceStartFrame + sourceFrameCount,
+              oldEndBeat - startBeat,
+            ),
+          }
+        : {}),
     };
     return success(
       replaceClip(project, context.track.id, clipId, trimmed, clock),
@@ -912,17 +981,31 @@ export function trimAudioClipRight(
         oldEndBeat,
         context.asset.sampleRate,
       );
-      const windowFrameCount = frameDeltaBetweenBeats(
-        project,
-        context.clip.startBeat,
-        endBeat,
-        context.asset.sampleRate,
-      );
+      if (context.clip.audioWarp !== undefined && endBeat > oldEndBeat) {
+        return failure(
+          'invalid-source-range',
+          'An edited Audio Clip cannot reveal source beyond its canonical timing endpoints.',
+        );
+      }
+      const timingWarp = context.clip.audioWarp?.timingEnabled === true
+        ? context.clip.audioWarp
+        : undefined;
+      const windowFrameCount = timingWarp === undefined
+        ? frameDeltaBetweenBeats(
+            project,
+            context.clip.startBeat,
+            endBeat,
+            context.asset.sampleRate,
+          )
+        : Math.round(beatToSourceFrame(
+            timingWarp,
+            endBeat - context.clip.startBeat,
+          ) - context.clip.sourceStartFrame);
       if (
         oldWindowFrameCount === null
         || windowFrameCount === null
         || windowFrameCount <= 0
-        || windowFrameCount === oldWindowFrameCount
+        || windowFrameCount === context.clip.sourceFrameCount
       ) {
         return failure('invalid-source-range', 'The right trim cannot be represented in source frames.');
       }
@@ -966,6 +1049,16 @@ export function trimAudioClipRight(
       lengthBeats: endBeat - context.clip.startBeat,
       sourceFrameCount,
       ...fades,
+      ...(context.clip.audioWarp !== undefined
+        ? {
+            audioWarp: cropWarpToClip(
+              context.clip,
+              context.clip.sourceStartFrame,
+              context.clip.sourceStartFrame + sourceFrameCount,
+              endBeat - context.clip.startBeat,
+            ),
+          }
+        : {}),
     };
     return success(
       replaceClip(extension.project, context.track.id, clipId, trimmed, clock),
@@ -1051,6 +1144,12 @@ export function setAudioClipLoop(
     const context = findAudioContext(project, clipId);
     if (!('clip' in context)) return context;
     if (loop === context.clip.loop) return success(project, context, false);
+    if (loop && context.clip.audioWarp !== undefined) {
+      return failure(
+        'edited-loop-unsupported',
+        'Reset Elastic Audio edits before enabling loop playback for this Audio Clip.',
+      );
+    }
     const changed = { ...context.clip, loop };
     return success(
       replaceClip(project, context.track.id, clipId, changed, clock),
@@ -1058,6 +1157,160 @@ export function setAudioClipLoop(
       true,
     );
   });
+}
+
+function updateAudioClipWarp(
+  project: Project,
+  clipId: string,
+  edit: (warp: AudioWarp) => AudioWarpEditResult,
+  clock: Clock,
+): AudioClipMutationResult {
+  return runMutation(project, () => {
+    const context = findAudioContext(project, clipId);
+    if (!('clip' in context)) return context;
+    if (context.clip.audioWarp === undefined) {
+      return failure('invalid-audio-warp', 'This Audio Clip does not have Elastic Audio edits.');
+    }
+    const result = edit(context.clip.audioWarp);
+    if (!result.ok) return failure('invalid-audio-warp', result.error.message);
+    if (!result.changed) return success(project, context, false);
+    const clip: AudioClip = { ...context.clip, audioWarp: result.audioWarp };
+    return success(
+      replaceClip(project, context.track.id, clipId, clip, clock),
+      { ...context, clip },
+      true,
+    );
+  });
+}
+
+/** Adopt or reset the complete canonical edit in one codec-validated mutation. */
+export function setAudioClipWarp(
+  project: Project,
+  clipId: string,
+  audioWarp: AudioWarp | undefined,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return runMutation(project, () => {
+    const context = findAudioContext(project, clipId);
+    if (!('clip' in context)) return context;
+    if (
+      (audioWarp === undefined && context.clip.audioWarp === undefined)
+      || (audioWarp !== undefined
+        && context.clip.audioWarp !== undefined
+        && audioWarpsEqual(audioWarp, context.clip.audioWarp))
+    ) {
+      return success(project, context, false);
+    }
+    if (audioWarp !== undefined && context.clip.loop) {
+      return failure('invalid-audio-warp', 'Elastic Audio edits require a non-looping Audio Clip.');
+    }
+    const { audioWarp: _oldWarp, ...withoutWarp } = context.clip;
+    const clip: AudioClip = audioWarp === undefined
+      ? withoutWarp
+      : {
+          ...withoutWarp,
+          audioWarp: {
+            ...audioWarp,
+            markers: audioWarp.markers.map((marker) => ({ ...marker })),
+            pitchRegions: audioWarp.pitchRegions.map((region) => ({ ...region })),
+          },
+        };
+    return success(
+      replaceClip(project, context.track.id, clipId, clip, clock),
+      { ...context, clip },
+      true,
+    );
+  });
+}
+
+export function addAudioClipTimingPoint(
+  project: Project,
+  clipId: string,
+  marker: AudioWarpMarker,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, (warp) =>
+    addAudioWarpTimingPoint(warp, marker), clock);
+}
+
+export function moveAudioClipTimingPoint(
+  project: Project,
+  clipId: string,
+  index: number,
+  marker: AudioWarpMarker,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, (warp) =>
+    moveAudioWarpTimingPoint(warp, index, marker), clock);
+}
+
+export function removeAudioClipTimingPoint(
+  project: Project,
+  clipId: string,
+  index: number,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, (warp) =>
+    removeAudioWarpTimingPoint(warp, index), clock);
+}
+
+export function resetAudioClipTimingPoints(
+  project: Project,
+  clipId: string,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, resetAudioWarpTimingPoints, clock);
+}
+
+export function replaceAudioClipPitchRegions(
+  project: Project,
+  clipId: string,
+  regions: readonly AudioPitchRegion[],
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, (warp) =>
+    replaceAudioPitchRegions(warp, regions), clock);
+}
+
+export function splitAudioClipPitchRegion(
+  project: Project,
+  clipId: string,
+  index: number,
+  splitSourceFrame: number,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, (warp) =>
+    splitAudioPitchRegion(warp, index, splitSourceFrame), clock);
+}
+
+export function mergeAudioClipPitchRegions(
+  project: Project,
+  clipId: string,
+  index: number,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, (warp) =>
+    mergeAudioPitchRegions(warp, index), clock);
+}
+
+export function retargetAudioClipPitchRegion(
+  project: Project,
+  clipId: string,
+  index: number,
+  targetPitchCents: number,
+  correctionAmount?: number,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, (warp) =>
+    retargetAudioPitchRegion(warp, index, targetPitchCents, correctionAmount), clock);
+}
+
+export function resetAudioClipPitchRegions(
+  project: Project,
+  clipId: string,
+  clock: Clock = systemClock,
+): AudioClipMutationResult {
+  return updateAudioClipWarp(project, clipId, resetAudioPitchRegions, clock);
 }
 
 /** Split a non-looping clip; only the two original outer edges retain fades. */
@@ -1087,12 +1340,20 @@ export function splitAudioClip(
     ) {
       return failure('invalid-position', 'The split must leave two positive Audio Clip windows.');
     }
-    const splitFrames = frameDeltaBetweenBeats(
-      project,
-      context.clip.startBeat,
-      options.splitBeat,
-      context.asset.sampleRate,
-    );
+    const timingWarp = context.clip.audioWarp?.timingEnabled === true
+      ? context.clip.audioWarp
+      : undefined;
+    const splitFrames = timingWarp === undefined
+      ? frameDeltaBetweenBeats(
+          project,
+          context.clip.startBeat,
+          options.splitBeat,
+          context.asset.sampleRate,
+        )
+      : Math.round(beatToSourceFrame(
+          timingWarp,
+          options.splitBeat - context.clip.startBeat,
+        ) - context.clip.sourceStartFrame);
     if (
       splitFrames === null
       || splitFrames <= 0
@@ -1141,22 +1402,54 @@ export function splitAudioClip(
     if (leftFadeLimit === null || rightFadeLimit === null) {
       return failure('invalid-fades', 'The split Audio Clip fade windows are not representable.');
     }
+    const partitionedWarp = context.clip.audioWarp === undefined
+      ? undefined
+      : partitionAudioWarp(
+          context.clip.audioWarp,
+          context.clip.sourceStartFrame + splitFrames,
+        );
+    const leftLengthBeats = options.splitBeat - context.clip.startBeat;
+    const rightLengthBeats = endBeat - options.splitBeat;
     const left: AudioClip = {
       ...context.clip,
-      lengthBeats: options.splitBeat - context.clip.startBeat,
+      lengthBeats: leftLengthBeats,
       sourceFrameCount: leftFrameCount,
       fadeInFrames: Math.min(context.clip.fadeInFrames, leftFadeLimit),
       fadeOutFrames: 0,
+      ...(partitionedWarp !== undefined
+        ? {
+            audioWarp: {
+              ...partitionedWarp.left,
+              markers: partitionedWarp.left.markers.map((marker, index) =>
+                index === partitionedWarp.left.markers.length - 1
+                  ? { ...marker, targetBeatOffset: leftLengthBeats }
+                  : marker,
+              ),
+            },
+          }
+        : {}),
     };
     const right: AudioClip = {
       ...context.clip,
       id: rightClipId,
       startBeat: options.splitBeat,
-      lengthBeats: endBeat - options.splitBeat,
+      lengthBeats: rightLengthBeats,
       sourceStartFrame: context.clip.sourceStartFrame + splitFrames,
       sourceFrameCount: rightFrameCount,
       fadeInFrames: 0,
       fadeOutFrames: Math.min(context.clip.fadeOutFrames, rightFadeLimit),
+      ...(partitionedWarp !== undefined
+        ? {
+            audioWarp: {
+              ...partitionedWarp.right,
+              markers: partitionedWarp.right.markers.map((marker, index) =>
+                index === partitionedWarp.right.markers.length - 1
+                  ? { ...marker, targetBeatOffset: rightLengthBeats }
+                  : marker,
+              ),
+            },
+          }
+        : {}),
     };
     const candidate: Project = {
       ...project,
@@ -1223,6 +1516,7 @@ export function duplicateAudioClip(
       ...context.clip,
       id: duplicateId,
       startBeat: options.startBeat,
+      ...(context.clip.audioWarp !== undefined ? { audioWarp: cloneAudioWarp(context.clip) } : {}),
     };
     const candidate: Project = {
       ...extension.project,

@@ -43,7 +43,7 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 8;
+const PROJECT_SCHEMA_VERSION: u64 = 9;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
@@ -721,7 +721,7 @@ struct ClipDto {
     start_beat: f64,
     length_beats: f64,
     #[serde(rename = "loop")]
-    _loop: bool,
+    looped: bool,
     alias_of: Option<String>,
     notes: Option<Vec<NoteDto>>,
     drum_events: Option<Vec<DrumEventDto>>,
@@ -733,6 +733,37 @@ struct ClipDto {
     fade_in_frames: Option<u64>,
     fade_out_frames: Option<u64>,
     gain_db: Option<f64>,
+    audio_warp: Option<AudioWarpDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioWarpDto {
+    algorithm: String,
+    #[serde(rename = "timingEnabled")]
+    _timing_enabled: bool,
+    #[serde(rename = "pitchEnabled")]
+    _pitch_enabled: bool,
+    markers: Vec<AudioWarpMarkerDto>,
+    pitch_regions: Vec<AudioPitchRegionDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioWarpMarkerDto {
+    source_frame: u64,
+    target_beat_offset: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AudioPitchRegionDto {
+    source_start_frame: u64,
+    source_frame_count: u64,
+    source_pitch_cents: f64,
+    target_pitch_cents: f64,
+    correction_amount: f64,
+    transition_frames: u64,
 }
 
 #[derive(Deserialize)]
@@ -3436,6 +3467,7 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
             5 => migrate_project_value_v5_to_v6(project)?,
             6 => migrate_project_value_v6_to_v7(project)?,
             7 => migrate_project_value_v7_to_v8(project)?,
+            8 => migrate_project_value_v8_to_v9(project)?,
             _ => return None,
         };
         version += 1;
@@ -3802,6 +3834,19 @@ fn migrate_project_value_v7_to_v8(mut project: Value) -> Option<Value> {
     project
         .as_object_mut()?
         .insert("schemaVersion".to_owned(), Value::from(8));
+    Some(project)
+}
+
+/** v9 adds optional Audio Warp metadata without changing valid legacy-v8 data. */
+fn migrate_project_value_v8_to_v9(mut project: Value) -> Option<Value> {
+    if project.get("schemaVersion").and_then(Value::as_u64) != Some(8)
+        || validate_project(&project).is_err()
+    {
+        return None;
+    }
+    project
+        .as_object_mut()?
+        .insert("schemaVersion".to_owned(), Value::from(9));
     Some(project)
 }
 
@@ -7385,6 +7430,7 @@ fn validate_project_versioned_presence(
     let has_v5_fields = schema_version >= 5;
     let has_v6_lane_fields = schema_version >= 6;
     let has_v7_read_state = schema_version >= 7;
+    let has_v9_audio_warp = schema_version >= 9;
     if V3_PROJECT_FIELDS
         .iter()
         .any(|key| project.contains_key(*key) != has_v3_fields)
@@ -7430,6 +7476,9 @@ fn validate_project_versioned_presence(
                 .any(|key| clip.contains_key(*key) != is_v3_audio)
                 || (is_v3_audio && !clip.contains_key("audioAssetId"))
             {
+                return Err(GenerationIssue::Corrupt);
+            }
+            if !has_v9_audio_warp && clip.contains_key("audioWarp") {
                 return Err(GenerationIssue::Corrupt);
             }
         }
@@ -8271,6 +8320,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                 || clip.fade_in_frames.is_some() && clip.kind != "audio"
                 || clip.fade_out_frames.is_some() && clip.kind != "audio"
                 || clip.gain_db.is_some() && clip.kind != "audio"
+                || clip.audio_warp.is_some() && clip.kind != "audio"
             {
                 return Err(GenerationIssue::Corrupt);
             }
@@ -8297,6 +8347,7 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                         || clip.fade_in_frames.is_some()
                         || clip.fade_out_frames.is_some()
                         || clip.gain_db.is_some()
+                        || clip.audio_warp.is_some()
                     {
                         return Err(GenerationIssue::Corrupt);
                     }
@@ -8327,7 +8378,13 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                     return Err(GenerationIssue::Corrupt);
                 }
                 match asset {
-                    AudioAssetDto::Ready { frame_count, .. } => {
+                    AudioAssetDto::Ready {
+                        frame_count,
+                        sample_rate,
+                        channel_count,
+                        media_type,
+                        ..
+                    } => {
                         if track.kind != "audio"
                             || source_count == 0
                             || source_start
@@ -8339,9 +8396,136 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                         {
                             return Err(GenerationIssue::Corrupt);
                         }
+                        if let Some(warp) = clip.audio_warp.as_ref() {
+                            const MAX_MARKERS: usize = 128;
+                            const MAX_PITCH_REGIONS: usize = 128;
+                            const MIN_SEGMENT_SECONDS: f64 = 0.04;
+                            if project.schema_version < 9
+                                || clip.looped
+                                || warp.algorithm != "wsola-v1"
+                                || warp.markers.len() < 2
+                                || warp.markers.len() > MAX_MARKERS
+                                || warp.pitch_regions.len() > MAX_PITCH_REGIONS
+                                || media_type != "audio/wav"
+                                || *sample_rate != 48_000
+                                || !matches!(*channel_count, 1 | 2)
+                                || source_count as f64 / *sample_rate as f64 > 60.0
+                            {
+                                return Err(GenerationIssue::Corrupt);
+                            }
+                            let last_marker =
+                                warp.markers.last().ok_or(GenerationIssue::Corrupt)?;
+                            if warp.markers[0].source_frame != source_start
+                                || warp.markers[0].target_beat_offset != 0.0
+                                || last_marker.source_frame
+                                    != source_start
+                                        .checked_add(source_count)
+                                        .ok_or(GenerationIssue::Corrupt)?
+                                || last_marker.target_beat_offset != clip.length_beats
+                            {
+                                return Err(GenerationIssue::Corrupt);
+                            }
+                            let tempo_map = project
+                                .tempo_map
+                                .as_deref()
+                                .ok_or(GenerationIssue::Corrupt)?;
+                            let mut tempo_index = 0usize;
+                            for pair in warp.markers.windows(2) {
+                                let left = &pair[0];
+                                let right = &pair[1];
+                                if left.source_frame > JS_MAX_SAFE_INTEGER
+                                    || right.source_frame > JS_MAX_SAFE_INTEGER
+                                    || !left.target_beat_offset.is_finite()
+                                    || !right.target_beat_offset.is_finite()
+                                    || right.source_frame <= left.source_frame
+                                    || right.target_beat_offset <= left.target_beat_offset
+                                {
+                                    return Err(GenerationIssue::Corrupt);
+                                }
+                                let absolute_start_beat = clip.start_beat + left.target_beat_offset;
+                                let absolute_end_beat = clip.start_beat + right.target_beat_offset;
+                                while tempo_index + 1 < tempo_map.len()
+                                    && tempo_map[tempo_index + 1].beat <= absolute_start_beat
+                                {
+                                    tempo_index += 1;
+                                }
+                                let mut segment_start_beat = absolute_start_beat;
+                                let mut segment_start_frame = left.source_frame as f64;
+                                while segment_start_beat < absolute_end_beat {
+                                    let tempo = tempo_map
+                                        .get(tempo_index)
+                                        .ok_or(GenerationIssue::Corrupt)?;
+                                    let next_tempo_beat = tempo_map
+                                        .get(tempo_index + 1)
+                                        .map_or(f64::INFINITY, |event| event.beat);
+                                    let segment_end_beat = absolute_end_beat.min(next_tempo_beat);
+                                    if segment_end_beat <= segment_start_beat {
+                                        return Err(GenerationIssue::Corrupt);
+                                    }
+                                    let marker_fraction = (segment_end_beat - absolute_start_beat)
+                                        / (absolute_end_beat - absolute_start_beat);
+                                    let segment_end_frame = left.source_frame as f64
+                                        + marker_fraction
+                                            * (right.source_frame - left.source_frame) as f64;
+                                    let source_seconds = (segment_end_frame - segment_start_frame)
+                                        / *sample_rate as f64;
+                                    let target_seconds =
+                                        (segment_end_beat - segment_start_beat) * 60.0 / tempo.bpm;
+                                    let stretch = target_seconds / source_seconds;
+                                    if !source_seconds.is_finite()
+                                        || source_seconds < MIN_SEGMENT_SECONDS
+                                        || !target_seconds.is_finite()
+                                        || target_seconds < MIN_SEGMENT_SECONDS
+                                        || !(0.5..=2.0).contains(&stretch)
+                                    {
+                                        return Err(GenerationIssue::Corrupt);
+                                    }
+                                    segment_start_beat = segment_end_beat;
+                                    segment_start_frame = segment_end_frame;
+                                    if segment_end_beat == next_tempo_beat {
+                                        tempo_index += 1;
+                                    }
+                                }
+                            }
+                            let mut previous_region_end = source_start;
+                            for region in &warp.pitch_regions {
+                                let region_end = region
+                                    .source_start_frame
+                                    .checked_add(region.source_frame_count)
+                                    .ok_or(GenerationIssue::Corrupt)?;
+                                let effective_shift = (region.target_pitch_cents
+                                    - region.source_pitch_cents)
+                                    * region.correction_amount;
+                                if region.source_start_frame > JS_MAX_SAFE_INTEGER
+                                    || region.source_frame_count == 0
+                                    || region.source_frame_count > JS_MAX_SAFE_INTEGER
+                                    || region.source_start_frame < source_start
+                                    || region.source_start_frame < previous_region_end
+                                    || region_end > source_start + source_count
+                                    || !region.source_pitch_cents.is_finite()
+                                    || !(0.0..=12_700.0).contains(&region.source_pitch_cents)
+                                    || !region.target_pitch_cents.is_finite()
+                                    || !(0.0..=12_700.0).contains(&region.target_pitch_cents)
+                                    || !region.correction_amount.is_finite()
+                                    || !(0.0..=1.0).contains(&region.correction_amount)
+                                    || !effective_shift.is_finite()
+                                    || effective_shift.abs() > 300.0
+                                    || region.transition_frames > JS_MAX_SAFE_INTEGER
+                                    || region.transition_frames > region.source_frame_count / 2
+                                {
+                                    return Err(GenerationIssue::Corrupt);
+                                }
+                                previous_region_end = region_end;
+                            }
+                        }
                     }
                     AudioAssetDto::Unresolved { .. } => {
-                        if source_start != 0 || source_count != 0 || fade_in != 0 || fade_out != 0 {
+                        if source_start != 0
+                            || source_count != 0
+                            || fade_in != 0
+                            || fade_out != 0
+                            || clip.audio_warp.is_some()
+                        {
                             return Err(GenerationIssue::Corrupt);
                         }
                     }
@@ -8575,6 +8759,7 @@ fn project_has_explicit_null_optionals(value: &Value) -> bool {
                             "fadeInFrames",
                             "fadeOutFrames",
                             "gainDb",
+                            "audioWarp",
                         ],
                     ) {
                         return true;

@@ -3,11 +3,14 @@ import { migrateProject, ProjectMigrationError } from './migrations';
 import type {
   AudioAsset,
   AudioCompSegment,
+  AudioPitchRegion,
   AudioRouteDestination,
   AudioRouting,
   AudioSend,
   AudioTake,
   AudioTakeFolder,
+  AudioWarp,
+  AudioWarpMarker,
   AutomationLane,
   AutomationPoint,
   AutomationReadState,
@@ -120,6 +123,7 @@ const UNRESOLVED_AUDIO_REASONS = ['legacy-reference', 'missing-reference'] as co
 const AUTOMATION_TARGET_TYPES = ['track-volume', 'track-pan'] as const;
 const AUTOMATION_INTERPOLATIONS = ['hold', 'linear'] as const;
 const AUDIO_SEND_POSITIONS = ['pre-fader', 'post-fader'] as const;
+const AUDIO_WARP_ALGORITHMS = ['wsola-v1'] as const;
 const ISO_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 class StructureDecoder {
@@ -370,6 +374,104 @@ function decodeDrumGroove(
   };
 }
 
+function decodeAudioWarpMarker(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioWarpMarker {
+  const record = decoder.record(value, path, ['sourceFrame', 'targetBeatOffset']) ?? {};
+  return {
+    sourceFrame: decoder.safeInteger(
+      decoder.required(record, 'sourceFrame', `${path}.sourceFrame`),
+      `${path}.sourceFrame`,
+    ),
+    targetBeatOffset: decoder.number(
+      decoder.required(record, 'targetBeatOffset', `${path}.targetBeatOffset`),
+      `${path}.targetBeatOffset`,
+    ),
+  };
+}
+
+function decodeAudioPitchRegion(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioPitchRegion {
+  const record = decoder.record(value, path, [
+    'sourceStartFrame',
+    'sourceFrameCount',
+    'sourcePitchCents',
+    'targetPitchCents',
+    'correctionAmount',
+    'transitionFrames',
+  ]) ?? {};
+  return {
+    sourceStartFrame: decoder.safeInteger(
+      decoder.required(record, 'sourceStartFrame', `${path}.sourceStartFrame`),
+      `${path}.sourceStartFrame`,
+    ),
+    sourceFrameCount: decoder.safeInteger(
+      decoder.required(record, 'sourceFrameCount', `${path}.sourceFrameCount`),
+      `${path}.sourceFrameCount`,
+    ),
+    sourcePitchCents: decoder.number(
+      decoder.required(record, 'sourcePitchCents', `${path}.sourcePitchCents`),
+      `${path}.sourcePitchCents`,
+    ),
+    targetPitchCents: decoder.number(
+      decoder.required(record, 'targetPitchCents', `${path}.targetPitchCents`),
+      `${path}.targetPitchCents`,
+    ),
+    correctionAmount: decoder.number(
+      decoder.required(record, 'correctionAmount', `${path}.correctionAmount`),
+      `${path}.correctionAmount`,
+    ),
+    transitionFrames: decoder.safeInteger(
+      decoder.required(record, 'transitionFrames', `${path}.transitionFrames`),
+      `${path}.transitionFrames`,
+    ),
+  };
+}
+
+function decodeAudioWarp(
+  decoder: StructureDecoder,
+  value: unknown,
+  path: string,
+): AudioWarp {
+  const record = decoder.record(value, path, [
+    'algorithm',
+    'timingEnabled',
+    'pitchEnabled',
+    'markers',
+    'pitchRegions',
+  ]) ?? {};
+  return {
+    algorithm: decoder.member(
+      decoder.required(record, 'algorithm', `${path}.algorithm`),
+      AUDIO_WARP_ALGORITHMS,
+      `${path}.algorithm`,
+    ),
+    timingEnabled: decoder.boolean(
+      decoder.required(record, 'timingEnabled', `${path}.timingEnabled`),
+      `${path}.timingEnabled`,
+    ),
+    pitchEnabled: decoder.boolean(
+      decoder.required(record, 'pitchEnabled', `${path}.pitchEnabled`),
+      `${path}.pitchEnabled`,
+    ),
+    markers: decoder.array(
+      decoder.required(record, 'markers', `${path}.markers`),
+      `${path}.markers`,
+      (item, itemPath) => decodeAudioWarpMarker(decoder, item, itemPath),
+    ),
+    pitchRegions: decoder.array(
+      decoder.required(record, 'pitchRegions', `${path}.pitchRegions`),
+      `${path}.pitchRegions`,
+      (item, itemPath) => decodeAudioPitchRegion(decoder, item, itemPath),
+    ),
+  };
+}
+
 function decodeClip(
   decoder: StructureDecoder,
   value: unknown,
@@ -392,6 +494,7 @@ function decodeClip(
     ...(schemaVersion >= 3
       ? ['sourceStartFrame', 'sourceFrameCount', 'fadeInFrames', 'fadeOutFrames', 'gainDb']
       : []),
+    ...(schemaVersion >= 9 ? ['audioWarp'] : []),
   ]) ?? {};
   const type = decoder.member(
     decoder.required(record, 'type', `${path}.type`),
@@ -437,6 +540,9 @@ function decodeClip(
     : Object.prototype.hasOwnProperty.call(record, 'gainDb')
       ? decoder.number(record.gainDb, `${path}.gainDb`)
       : undefined;
+  const audioWarp = schemaVersion >= 9 && Object.prototype.hasOwnProperty.call(record, 'audioWarp')
+    ? decodeAudioWarp(decoder, record.audioWarp, `${path}.audioWarp`)
+    : undefined;
   return {
     id: decoder.string(decoder.required(record, 'id', `${path}.id`), `${path}.id`),
     trackId: decoder.string(decoder.required(record, 'trackId', `${path}.trackId`), `${path}.trackId`),
@@ -458,6 +564,7 @@ function decodeClip(
     ...(fadeInFrames !== undefined ? { fadeInFrames } : {}),
     ...(fadeOutFrames !== undefined ? { fadeOutFrames } : {}),
     ...(gainDb !== undefined ? { gainDb } : {}),
+    ...(audioWarp !== undefined ? { audioWarp } : {}),
   };
 }
 
@@ -887,7 +994,7 @@ function inspectLegacyAutomationLane(
   decoder: StructureDecoder,
   value: unknown,
   path: string,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
 ): AutomationTarget {
   const record = decoder.record(
     value,
@@ -1190,7 +1297,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
 /** Reject fields that were not part of the declared legacy transport shape. */
 function inspectLegacyProjectStructure(
   input: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
 ): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
@@ -1295,7 +1402,7 @@ function inspectLegacyProjectStructure(
     tracks.filter((track) => track.type === 'master').map((track) => track.id),
   );
   automationTargets.forEach((target, index) => {
-    if (masterTrackIds.has(target.trackId)) {
+    if (schemaVersion <= 7 && masterTrackIds.has(target.trackId)) {
       decoder.issue(
         `automationLanes[${index}].target.trackId`,
         'invalid-reference',
@@ -1304,7 +1411,7 @@ function inspectLegacyProjectStructure(
     }
   });
   automationReadState?.disabledTrackIds.forEach((trackId, index) => {
-    if (masterTrackIds.has(trackId)) {
+    if (schemaVersion <= 7 && masterTrackIds.has(trackId)) {
       decoder.issue(
         `automationReadState.disabledTrackIds[${index}]`,
         'invalid-reference',
@@ -1396,7 +1503,7 @@ export function decodeProject(input: unknown): ProjectDecodeResult {
   if (version.version < CURRENT_SCHEMA_VERSION) {
     const legacyIssues = inspectLegacyProjectStructure(
       input,
-      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
     );
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };
