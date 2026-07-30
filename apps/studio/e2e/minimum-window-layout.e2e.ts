@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { createAudioWarpPitchFixture } from './fixtures/audio-warp-fixture';
 
 type LayoutSnapshot = {
   viewportWidth: number;
@@ -126,4 +127,58 @@ test('keeps the primary editor usable at the Tauri minimum window size', async (
   expect(compactExpanded.mixerHeight).toBeLessThanOrEqual(160);
   expect(compactExpanded.shellBottom).toBeLessThanOrEqual(compactExpanded.viewportHeight);
   expect(pageErrors).toEqual([]);
+});
+
+test('keeps Elastic Audio controls stacked with only its timeline scrolling horizontally', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1_024, height: 640 });
+  await page.goto('/');
+  await dismissWelcome(page);
+  await page.getByRole('button', { name: '＋ 追加', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'トラックを追加' });
+  await dialog.getByRole('radio', { name: /オーディオトラック/ }).check();
+  await dialog.getByLabel('名前', { exact: true }).fill('Layout Voice');
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'layout-voice.wav',
+    mimeType: 'audio/wav',
+    buffer: createAudioWarpPitchFixture(),
+  });
+  await expect(page.getByRole('button', {
+    name: 'Layout Voice トラックを選択',
+    exact: true,
+  })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#project-save-status')).toContainText('保存済み', {
+    timeout: 20_000,
+  });
+  const editor = page.getByRole('region', { name: '選択オーディオクリップの編集' });
+  await editor.locator('.audio-warp-editor summary').click();
+
+  for (const viewport of [
+    { width: 1_024, height: 640 },
+    { width: 320, height: 800 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const layout = await page.evaluate(() => {
+      const timeline = document.querySelector<HTMLElement>(
+        '.audio-warp-editor__timeline-scroll',
+      );
+      const body = document.querySelector<HTMLElement>('.audio-warp-editor__body');
+      if (!timeline || !body) throw new Error('Elastic Audio layout missing');
+      return {
+        viewportWidth: document.documentElement.clientWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        bodyWidth: body.getBoundingClientRect().width,
+        timelineClientWidth: timeline.clientWidth,
+        timelineScrollWidth: timeline.scrollWidth,
+        timelineHeight: timeline.getBoundingClientRect().height,
+        timelineOverflow: getComputedStyle(timeline).overflowX,
+      };
+    });
+    expect(layout.documentWidth - layout.viewportWidth).toBeLessThanOrEqual(1);
+    expect(layout.bodyWidth).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.timelineHeight).toBeGreaterThanOrEqual(180);
+    expect(layout.timelineScrollWidth).toBeGreaterThanOrEqual(layout.timelineClientWidth);
+    expect(layout.timelineOverflow).toBe('auto');
+  }
 });

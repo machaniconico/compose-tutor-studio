@@ -13,7 +13,7 @@
 │               │                                  │ /Theory   │
 ├───────────────┼──────────────────────────────────┤ Panel     │
 │ Browser       │ Editor: Piano Roll / Drum / Clip  │           │
-│               │         / Automation              │           │
+│               │   / Automation / Audio補正        │           │
 └───────────────┴──────────────────────────────────┴───────────┘
 ```
 
@@ -238,6 +238,19 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 320px幅ではtablistやdocumentを横overflowさせず、takeのmusical timelineだけを内部scrollする。lane、form、境界、削除はnative control、明確なfocus ring、44px相当のpointer targetを持つ。pointer精度をkeyboard利用の前提にしない
 - UIにbounded Auto Punch以外のQuick Punch、MIDI comping、名前付き複数comp、flattenを示すcontrolや予約labelを出さない
 
+### 2.13 Audio Clipのタイミング / 単音pitch補正
+
+- 対応Audio Clipを選ぶとAudio Clip Editor内に「音声を整える」disclosureを表示する。要約には「元の音声を変更せず、タイミングと一音ずつの音程を補正します」と書き、専門用語だけで目的を説明しない
+- disclosure内は「タイミング」「単音ピッチ」の2つのARIA tab / tabpanelで構成する。左右矢印、Home / Endでtabを移動でき、panelは選択が切り替わってもbusy理由とfocus復帰に必要な状態を失わない
+- タイミングlaneはpointをnative buttonとして公開し、選択状態を`aria-pressed`とoutlineで示す。Home / End、PageUp / PageDownでpoint選択、左右で0.01拍、Alt+左右で0.001拍の移動、Deleteで削除できる。始点 / 終点は動かせない理由をinline alertで伝える
+- 単音pitchは明示的な「音程を解析」から始め、進捗とcancelを`aria-live`で通知する。解析後は実データから作ったbounded waveform、pitch trace、半音guide、選択位置cursorを同じ時間軸へ表示し、regionをnative button、pitch / 補正量をlabel付きcontrolとして操作できる
+- 解析候補を外しただけの時は「まだプロジェクトは変更していません」と通知する。補正の確定、split / merge、削除 / resetはProject変更の有無を区別し、採用時だけUndo 1回と保存を発生させる
+- 「ピッチ補正前」「補正後」の2 buttonは現在状態を`aria-pressed`で示す。A/Bは選択Clipのpitch correctionだけをlive再生中の一時snapshotから外し、タイミング補正と再生位置を保つ。「書き出しや保存内容は変わらない」と常時説明し、ProjectのBypass controlに見せない
+- 録音、保存、Project切替などのbusy中はtab、解析、point / region、数値入力、A/Bをnative `disabled`にし、panel本体を`aria-disabled`にする。開始済み解析とpointer previewはcancelし、busy解除後も同じProject / Clip / activationなら直前のcontrolへfocusを戻す。対象が変わった時は古いfocusや解析結果を移さない
+- ready素材がない、素材がmissing / changed / unavailable、loop Clipではdisclosureを開けず、理由と可能な対処を同じEditorに表示する。linked Clip / take folderにはこのAudio Clip用disclosureを出さず、60秒超や非canonical素材は解析または確定前に説明付きで拒否する
+- 320px幅ではdocumentとtablistを横overflowさせず、音声timelineだけを内部横scrollする。pointer対象は44px相当、focus ringは背景と十分に区別し、波形・pitch線・色だけを操作の正本にしない
+- formant / vibrato、polyphonic pitch、take folder / loop-cycle、phase-coherent multitrack、audio quantize / groove、Smart Tempoを示す予約controlは置かない
+
 ## 3. ナビゲーション
 
 | ショートカット | 状態 | 動作 |
@@ -298,6 +311,10 @@ Chord Track のコンテキスト内操作:
 | テイク編集の対象不足 / 不一致 | 同じAudio Track・同じ開始位置・同じ長さの非loop Clipが2件以上必要であることを説明し、既存Clipや履歴を変更しない |
 | テイク素材が見つからない / 変更された | folderと該当takeを保持し、範囲採用・境界移動・take追加を無効にする。別素材へ黙って差し替えず、元の端末 / profileでの再読込を案内する |
 | テイク編集中の競合 | 録音または保存operation中はgroup / take追加 / comp確定 / 削除を無効にし、処理完了後に再試行できることを表示する。pointer previewはProject変更前に破棄する |
+| 音声補正の対象外 | ready・非loopの直接Audio Clipが必要であることを説明する。linked Clip、take folder、loop、60秒超、非canonical素材、missing / changed / unavailableでは編集を開かず、元素材やProjectを変更しない |
+| 音声補正の編集値が不正 | タイミング点の前後40 ms、0.5〜2倍、128点、pitch region 128件、実効±300 centのどの条件に合わないかを日本語で示し、候補だけを拒否する |
+| 音声補正の解析 / Worker失敗 | cancel、stale Project / Clip、Worker protocol、非有限PCM、memory上限を区別し、古い解析・派生PCMを表示 / 再生 / WAVへ採用しない。再試行できる場合は同じpanelへ導線を残す |
+| 音声補正中の競合 | 録音・保存・Project切替中は実controlを`disabled`にし、解析とpointer previewを中止する。Projectが同じまま解除された時だけ直前のfocusを回復し、Project / history / revisionは変更しない |
 | Project JSONへ音声がない | `.ctsproj.json`は音声binaryを同梱しないことをimport前に説明し、対応objectがlocal repositoryにない場合は現在のProjectを置換しない |
 | カラオケ音源が非対応 | WAV / MP3 / M4A / AAC、128 MiB以下、5分以下、stereoという条件と、端末codecでdecodeできなかった可能性を分けて案内する |
 | カラオケ音源がmono / near-mono | stereo中央定位の差分を利用する処理であることを説明し、左右に広がりのあるstereo音源を案内する |
@@ -339,3 +356,10 @@ Chord Track のコンテキスト内操作:
 - Exportには選択Track名と対応type（楽器・ドラム・Audio）を表示する。未選択・Master・Busは具体的理由付きで無効化する
 - 保存済みmute/soloをbounce viewだけで無視すること、下流Bus/send/effects/automationを含むこと、個別WAVの加算では元mixを再現しないことを明示する
 - filenameはProject名とTrack名を別々にsanitizeし、制御文字と不正Unicodeを除いて`Project - Track.wav`とする
+
+### 7.3 Audio Clipの音声補正
+
+- tab、timing point、pitch region、解析、A/B、確定 / resetはnative button / inputで操作でき、SVGの波形・pitch traceは装飾として扱う
+- point / regionはroving tab stopを1件にし、削除・分割・結合・busy解除後は同じ対象、次、前、解析buttonの順で予測可能にfocusを戻す
+- errorは`role="alert"`、成功や「まだProject未変更」はpolite status、解析進捗はlive regionで伝え、色・波形・音だけに依存しない
+- 320px幅と1024×640の両方でdocument横overflowを作らず、時間軸だけを横scroll可能にし、操作対象は44px相当を維持する

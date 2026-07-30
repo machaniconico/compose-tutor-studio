@@ -62,6 +62,7 @@
 | US-015 | 作曲者として、同じ区間を複数回録った素材から良い部分をつないで仕上げたい | Must | 同一Audio Track・同一時間窓の既存Clipを非破壊take folderへまとめ、複数範囲を別takeへ切り替え、境界調整・未使用take削除・Undo/Redo・保存/再読込・live/WAVで同じcompを使える |
 | US-016 | 作曲者として、音量やパンの変化を一時的に外して元のTrack設定と聴き比べたい | Must | non-Masterのvolume / panとeffective Masterの出力volumeをRead / Bypassで切り替え、Bypass中もpointを保持・編集できる。live再生とWAVはBypass時にTrack scalarを使い、Undo / Redo・保存 / 再読込後も同じ状態になる |
 | US-017 | 作曲者として、再生しながらミキサー操作をオートメーションへ記録したい | Must | non-Master Trackの音量 / パンとeffective Masterの出力音量についてRead / Touch / Latch / Writeを選び、Touchは操作中だけ、Latchは最初の操作からパンチアウトまで、Writeは再生開始から対応targetを記録できる。Master Writeは音量だけを扱う。1 passをProject変更・Undo・保存revision各1回で確定し、Writeは警告確認後だけ有効化して確定後Touchへ戻る。modeと記録中状態はruntime-only、確定curveだけを保存する |
+| US-018 | 作曲者として、録音済みの単音Audio Clipのタイミングと音程を元素材を壊さず整えたい | Must | 対応するready・非loop Audio Clipでタイミングpointと単音pitch regionを編集し、Undo / Redo・保存 / 再読込後も同じ結果になる。補正前 / 補正後を同じタイミングで試聴でき、live・全体WAV・選択Track WAVが同じ派生PCMを使う |
 
 ## 3. MVP機能範囲
 
@@ -83,6 +84,7 @@
 - Pattern/Clip: 1〜4小節単位の素材を組み合わせる
 - Track管理（部分実装）: instrument / drum / stereo Bus追加、音源fileからのAudio Track追加、non-master複製・並べ替え、一般non-master削除、内蔵synth 4音色の選択。schema v4の`Track.role`を学習上の正本にし、学習role Trackも名前を変更できる。学習roleの削除は保護し、一般TrackはChords / Bass / Melodyという名前でもroleを推測しない。Folder / Stackは後続とする
 - Audio Clip: app-ownedな48 kHz mono/stereo PCM 16-bit WAVへ正規化し、移動、trim、gain、fade、loop、split、独立複製、削除を非破壊に行う。loop中は位相fieldがまだないためleft trimとsplitを無効にする
+- Elastic Audio（初期スライス）: ready・非loopのAudio Clipに、source frameと曲上のbeatを対応付けるタイミングpoint、単音pitch region、補正量を非破壊metadataとして保存する。解析波形とpitch候補を確認して編集し、補正前 / 補正後を同じタイミングで試聴できる。formant / vibrato編集、polyphonic pitch、take folder / loop-cycle、複数Trackの位相をそろえたstretch、自動クオンタイズ / groove抽出は後続とする
 - Audio Take Comp: 同一Audio Track・同一時間窓の既存非loop Clipをschema v5のtake folderへまとめるほか、明示loop範囲を2〜128回だけ連続録音した各周をexact Audio Assetとして自動take folder化する。bounded Auto Punchでは空き範囲へexact Clipを置くか、範囲を覆う既存Clip / exact folderへ新takeを非破壊追加して全域採用する。生成全体を1 gesture = 1 Undoで保存する
 
 ### 3.3 Learning
@@ -104,6 +106,7 @@
 - app-owned Audio Assetのlive再生とoffline WAV取り込み。Project単体JSONには音声binaryを同梱せず、欠落・変更・storage不可を音声素材ごとに表示する
 - 0.5〜60秒の単一マイク入力録音。録音待機なしでは新規Audio Track、録音待機中の既存Audio Trackでは同Trackへ追加する。loop OFF / punch OFFは1 Clip、loop ONは2〜128固定pass、punch ONは録音待機中の既存Audio Trackへ明示`[in, out)`だけを録るbounded Auto Punchとする。Punchはloopと排他で、pre-rollから伴奏、future render frameのinでcapture、out＋正latency tailでcapture完了、post-roll自然完了の両方を確認してから採用する。60秒上限は正のlatency tailを含み、途中停止・cancel・unmount・失敗では全体を破棄する。録音待機、入力device、loop / punch locator、roll / pass指定はruntime-onlyでProjectへ保存しない
 - WAV/MP3/M4A/AACのステレオ音源を使う、ローカル完結の中央定位ボーカル軽減
+- 対応Audio Clipの非破壊タイミング補正と単音pitch correction。live再生、全体WAV、選択Track WAVは同じversioned WSOLA派生PCMを使い、補正前 / 補正後のA/BはProjectを変更しない
 - stereo Bus、各non-Masterのmain output、pre/post-fader send / return。循環は候補Project採用前に拒否し、live再生とoffline WAVで同じrouting graphを使う
 - non-Master Trackのvolume / panとeffective Masterのoutput volume Automation lane。pointのhold / linear curve編集、parameter-lane Read / Bypass、TrackまたはMaster / Global Readを保存・Undoできる。いずれかのRead gateが無効ならpointを破棄せず、live再生とoffline WAVの両方で対象Track scalarを使う
 - 対応Track別のRead / Touch / Latch / Write。再生pass中はミキサー / Track Listの音量・パン操作を一時bufferへ記録し、停止、自然終了、seek、loop右端などのパンチアウトでcurveを1回だけ確定する。effective Masterは音量だけを記録する。mode、Armed / Writing、pointer / keyboard gesture所有権はruntime-onlyで、Project切替・再読込時はReadへ戻す
@@ -127,6 +130,7 @@
 | クラウド同期 | 個人情報・音源データ扱いが増える | ローカル完結後 |
 | VCA / side-chain / hardware I/O routing | stereo Busとpre/post-fader sendまでは利用可能だが、制御グループ、side-chain入力、外部入出力は対象外 | 基本routingとautomation UIが安定してから独立Batchで追加 |
 | Quick Punch / 長時間streaming / 複数入力 / MIDI・named comp | 単一入力の伴奏同期録音、物理loopback実測校正、既存Clipの手動take folder化、明示loopの固定pass cycle capture、pre/post-roll付きbounded Auto Punchと非破壊take採用までは持つ。disk streaming、既存再生を継続したまま任意時点でin/outするQuick Punch、自動input monitoring、複数入力、MIDI comp、複数の名前付きcomp / flattenは持たない | boundedなlocal captureを3OS実機で検証した後、長時間streaming、Quick Punch、複数I/Oを独立gateで追加する |
+| 高度なAudio time / pitch編集 | 60秒以内のready・非loop Clipに対するmanual timing pointと単音pitch correctionまでは利用可能。formant保持 / 編集、vibrato編集、polyphonic pitch、take folder / loop-cycleへのwarp、phase-coherent multitrack、audio quantize / groove抽出、audio follow / Smart Tempoは持たない | 初期スライスの音質・live/WAV parity・3OS性能を固定した後、用途ごとに独立した品質gateで追加する |
 | 高度なAutomation target / mode | non-Master Trackのvolume / panとeffective Masterのoutput volumeに対するRead / Touch / Latch / Write、Global / TrackまたはMaster / lane Read gateまでは利用可能。Master pan、later Master、insert / send / tempo、MIDI CC / LFO、Trim / Relative / Cross-Over / Fill、parameter group単位のSuspend、複数loopへ連続記録するpass管理は持たない | 現行passのfailure atomicityと実機操作を固定した後、target追加と高度modeを別々のgateで追加 |
 
 ## 5. 非機能要件
@@ -138,6 +142,7 @@
 | 安定性 | 自動保存 | 編集後30秒以内。デスクトップ版は編集受付後1秒未満を目標にクラッシュ保護ACKを表示し、ACK済み内容をOS強制終了後に復元 |
 | 安定性 | 音声開始/中断 | 開始完了前は再生中と表示せず、失敗・出力中断後も編集を保持して再試行できる |
 | 安定性 | Audio Asset | 1 object 128 MiB以下、canonical 48 kHz / 1〜2 channel PCM16 WAV、SHA-256と実byte lengthを保存・読込・再生前に照合する。decode済みcacheは256 MiB以下 |
+| 安定性 | Elastic Audio | 1 Clipの編集対象は60秒以下、派生PCMとcacheは128 MiB以下。Worker処理と他の重い音声処理を共有384 MiB台帳で事前予約し、cancel / Project切替 / stale結果ではProjectや出力を変更しない |
 | 互換性 | OS | Windows/macOS 優先 |
 | アクセシビリティ | キーボード操作 | 主要操作はショートカット対応。単一文字キーは対応コントロールへのフォーカス中だけ有効にする |
 | プライバシー | ローカル保存 | デフォルトではプロジェクトを外部送信しない |
@@ -154,6 +159,7 @@
 - 利用許諾のあるステレオ音源から、ローカル処理でカラオケ用WAVを作成できる
 - instrument / drum / Audio / Bus Trackの管理と音色・routing変更が、Master保護、schema v4学習roleの改名時維持・削除保護、128 Track上限、Undo/Redo、自動保存、再読込、再生で一貫する
 - Audio Trackへ取り込んだ音声を非破壊編集でき、live再生とWAVが同じsource range / gain / fade / loopを使う。欠落・変更されたbinaryは別素材へ黙って置換せず、Project metadataを保持して説明する
+- 対応するready・非loop Audio Clipでタイミングpointと単音pitch regionを非破壊編集できる。Undo / Redo・保存 / 再読込でmetadataを保持し、live・全体WAV・選択Track WAVが同じ派生PCMを使う。A/B試聴はタイミングを維持したままpitch correctionだけをruntimeで外し、Project / history / save revisionを変えない
 - システム既定または選択した単一マイクから、新規または録音待機中の既存Audio Trackへ録音できる。録音待機と入力deviceはProject保存・履歴を汚さず、採用したAsset / ClipだけをUndo 1回で戻せる
 - 明示loop範囲を2〜128回の固定passで完走すると、各周exact Asset、最初のtake全体を使うcomp、take folderが1回のUndoで作られる。途中停止・cancel・unmount・失敗では部分takeを採用しない
 - 既存Audio Clipを非破壊take folderへまとめ、2つ以上の範囲を別takeへ切り替え、境界・未使用takeを編集できる。Undo/Redo、保存・再読込、live/WAVが同じgapless compを使う

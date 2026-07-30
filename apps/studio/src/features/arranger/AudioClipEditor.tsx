@@ -29,6 +29,7 @@ import {
   studioCompingErrorMessage,
 } from '../../state/compingActions';
 import { audioAssetPresentationStatus } from '../audioTrack/audioAssetPresentation';
+import { AudioWarpPitchEditor } from './AudioWarpPitchEditor';
 
 type AudioClipEditorProps = Readonly<{
   clip: AudioClip;
@@ -43,6 +44,56 @@ type EditorStatus = Readonly<{
   kind: 'status' | 'error';
   message: string;
 }>;
+
+export function audioWarpEditorDisabledReason(input: Readonly<{
+  projectOperationBusy: boolean;
+  recordingActive: boolean;
+  loop: boolean;
+  issue: AudioAssetRuntimeIssue | null;
+  readyAssetAvailable: boolean;
+}>): string | null {
+  if (input.projectOperationBusy) {
+    return 'プロジェクトを切り替え中のため、音声を整えられません。';
+  }
+  if (input.recordingActive) {
+    return '録音中または録音素材の保存中のため、音声を整えられません。';
+  }
+  if (input.loop) {
+    return 'ループ中のクリップは音声を整えられません。先にループをオフにしてください。';
+  }
+  if (input.issue === 'changed') {
+    return '音声素材が変更または破損しているため、音声を整えられません。';
+  }
+  if (input.issue === 'unavailable') {
+    return '端末内の音声素材を利用できないため、音声を整えられません。';
+  }
+  if (input.issue === 'missing' || !input.readyAssetAvailable) {
+    return '音声素材が見つからないため、音声を整えられません。';
+  }
+  return null;
+}
+
+export function audioWarpEditorBusyReason(
+  savePhase: 'idle' | 'pending' | 'saved' | 'error',
+): string | null {
+  return savePhase === 'pending'
+    ? 'プロジェクトを保存中のため、完了後に音声を整えてください。'
+    : null;
+}
+
+export function audioWarpEditorTransientReason(input: Readonly<{
+  projectOperationBusy: boolean;
+  recordingActive: boolean;
+  savePhase: 'idle' | 'pending' | 'saved' | 'error';
+}>): string | null {
+  if (input.projectOperationBusy) {
+    return 'プロジェクトを切り替え中のため、音声を整えられません。';
+  }
+  if (input.recordingActive) {
+    return '録音中または録音素材の保存中のため、音声を整えられません。';
+  }
+  return audioWarpEditorBusyReason(input.savePhase);
+}
 
 function beatAsBarNumber(musicalTime: MusicalTimeIndex, beat: number): number {
   const position = beatToBarPosition(musicalTime, beat);
@@ -212,6 +263,7 @@ export function AudioClipEditor({
   const projectOperationBusy = useStore((state) => state.projectOperationBusy);
   const audioRecordingOperationId = useStore((state) => state.audioRecordingOperationId);
   const savePhase = useStore((state) => state.saveState.phase);
+  const activationId = useStore((state) => state.saveState.activationId);
   const audioAssetIssues = useStore((state) => state.audioAssetIssues);
   const selectedTakeFolderId = useStore((state) => state.editor.selectedTakeFolderId);
   const persisted = readyAsset(asset);
@@ -264,6 +316,18 @@ export function AudioClipEditor({
         : !editable || matchingAssetProblem
           ? '音声素材を確認できないため、テイクを変更できません。'
           : null;
+  const warpDisabledReason = audioWarpEditorDisabledReason({
+    projectOperationBusy: false,
+    recordingActive: false,
+    loop: clip.loop,
+    issue,
+    readyAssetAvailable: persisted !== null,
+  });
+  const warpBusyReason = audioWarpEditorTransientReason({
+    projectOperationBusy,
+    recordingActive: audioRecordingOperationId !== null,
+    savePhase,
+  });
   const groupDisabledReason = compingDisabledReason
     ?? (
       matchingFolder
@@ -407,6 +471,15 @@ export function AudioClipEditor({
       <p id={helpId} className="arranger__timing-hint">
         配置開始は素材を変えずに移動します。左右トリムは元ファイルを変更せず、使う範囲だけを調整します。現在の素材範囲は{sourceSeconds.toFixed(2)}秒です。
       </p>
+
+      <AudioWarpPitchEditor
+        project={project}
+        clip={clip}
+        asset={persisted}
+        disabledReason={warpDisabledReason}
+        busyReason={warpBusyReason}
+        activationId={activationId}
+      />
 
       <div className="audio-clip-editor__comping">
         <div>
