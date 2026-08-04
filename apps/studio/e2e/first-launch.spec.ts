@@ -367,6 +367,15 @@ test('support dialog exposes local diagnostics from the workspace', async ({ pag
           userAgent: 'playwright-user-agent',
         },
         {
+          id: 'diag_e2e_project_load',
+          kind: 'project-load',
+          message: 'Saved project load failed. id=e2eProject',
+          stack: null,
+          componentStack: null,
+          occurredAt: '2026-06-23T00:02:45.000Z',
+          userAgent: 'playwright-user-agent',
+        },
+        {
           id: 'diag_e2e_audio',
           kind: 'audio-playback',
           message: 'AudioContext resume failed',
@@ -411,13 +420,15 @@ test('support dialog exposes local diagnostics from the workspace', async ({ pag
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('バージョン', { exact: true })).toBeVisible();
   await expect(dialog.getByText('診断ログ', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('7 件', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('8 件', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'バックアップから復元した記録' })).toBeVisible();
   await expect(dialog.getByText(/1\s*件の保存データを直前の正常なバックアップから読み込みました。/)).toBeVisible();
   await expect(dialog.getByRole('heading', { name: '保存に失敗した記録' })).toBeVisible();
   await expect(dialog.getByText(/1\s*件の保存失敗が記録されています。/)).toBeVisible();
   await expect(dialog.getByRole('heading', { name: '読み込み/書き出しに失敗した記録' })).toBeVisible();
   await expect(dialog.getByText(/2\s*件の読み込み\/書き出し失敗が記録されています。/)).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: '保存済みプロジェクトを開けなかった記録' })).toBeVisible();
+  await expect(dialog.getByText(/1\s*件の保存済みプロジェクト読み込み失敗が記録されています。/)).toBeVisible();
   await expect(dialog.getByRole('heading', { name: '音声の開始に失敗した記録' })).toBeVisible();
   await expect(dialog.getByText(/1\s*件の音声開始失敗が記録されています。/)).toBeVisible();
   await expect(dialog.getByRole('heading', { name: '作成/起動に失敗した記録' })).toBeVisible();
@@ -427,7 +438,7 @@ test('support dialog exposes local diagnostics from the workspace', async ({ pag
   await expect(dialog.getByText('保存', { exact: true })).toBeVisible();
   await expect(dialog.getByText('WAV書き出し', { exact: true })).toBeVisible();
   await expect(dialog.getByText('MIDI読み込み', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('音声', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('保存済み読み込み', { exact: true })).toBeVisible();
   await expect(dialog).not.toContainText('C:\\Users\\tester');
 
   await dialog.getByRole('button', { name: '診断情報をコピー' }).click();
@@ -443,6 +454,7 @@ test('support dialog exposes local diagnostics from the workspace', async ({ pag
   expect(copiedReport).toContain('id: diag_e2e_save');
   expect(copiedReport).toContain('id: diag_e2e_export');
   expect(copiedReport).toContain('id: diag_e2e_midi_import');
+  expect(copiedReport).toContain('id: diag_e2e_project_load');
   expect(copiedReport).toContain('id: diag_e2e_audio');
   expect(copiedReport).toContain('id: diag_e2e_template');
   expect(copiedReport).toContain('id: diag_e2e_backup_recovery');
@@ -450,6 +462,7 @@ test('support dialog exposes local diagnostics from the workspace', async ({ pag
   expect(copiedReport).toContain('storage-recovery');
   expect(copiedReport).toContain('export-wav');
   expect(copiedReport).toContain('import-midi');
+  expect(copiedReport).toContain('project-load');
   expect(copiedReport).toContain('audio-playback');
   expect(copiedReport).toContain('template-load');
   expect(copiedReport).toContain('[local-path]');
@@ -512,7 +525,11 @@ test('support dialog shows a manual diagnostic report when clipboard copy fails'
 
 test('unrecoverable saved projects are surfaced and removable from support', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('cts.project.e2eBroken', '{ this is not valid project json');
+    localStorage.setItem(
+      `cts.project.C:\\Users\\tester\\e2eBroken.ctsproj.json
+      ${'x'.repeat(180)}`,
+      '{ this is not valid project json',
+    );
   });
 
   await page.goto('/');
@@ -531,7 +548,8 @@ test('unrecoverable saved projects are surfaced and removable from support', asy
   const dialog = page.getByRole('dialog', { name: 'サポート' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading', { name: '復元できない保存データ' })).toBeVisible();
-  await expect(dialog.getByText('cts.project.e2eBroken', { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/cts\.project\.\[local-path\].*\.\.\./)).toBeVisible();
+  await expect(dialog).not.toContainText('C:\\Users\\tester');
   await expect(dialog.getByText('JSONが壊れています')).toBeVisible();
 
   page.once('dialog', async (confirmDialog) => {
@@ -540,9 +558,14 @@ test('unrecoverable saved projects are surfaced and removable from support', asy
   });
   await dialog.getByRole('button', { name: '復元できない保存データを削除' }).click();
   await expect(dialog.getByText('復元できない保存データを削除しました。')).toBeVisible();
-  await expect(dialog.getByText('cts.project.e2eBroken', { exact: true })).toBeHidden();
+  await expect(dialog.getByRole('heading', { name: '復元できない保存データ' })).toBeHidden();
 
-  const remaining = await page.evaluate(() => localStorage.getItem('cts.project.e2eBroken'));
+  const remaining = await page.evaluate(() =>
+    localStorage.getItem(
+      `cts.project.C:\\Users\\tester\\e2eBroken.ctsproj.json
+      ${'x'.repeat(180)}`,
+    ),
+  );
   expect(remaining).toBeNull();
 });
 

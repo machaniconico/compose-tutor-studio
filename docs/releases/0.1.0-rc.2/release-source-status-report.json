@@ -1,0 +1,290 @@
+{
+  "generatedAt": "2026-07-06T21:43:04.696Z",
+  "commit": "0c179c2848a52500b985e1ff435f5169d4fe798a",
+  "shortCommit": "0c179c2",
+  "branch": "wave5/desktop",
+  "isDirty": true,
+  "total": 12,
+  "summaries": [
+    {
+      "category": "Product source",
+      "total": 6,
+      "modified": 6,
+      "untracked": 0,
+      "other": 0,
+      "recommendedAction": "Review as a product change and commit with the matching feature or fix."
+    },
+    {
+      "category": "Release evidence",
+      "total": 1,
+      "modified": 0,
+      "untracked": 1,
+      "other": 0,
+      "recommendedAction": "Regenerate after the final clean build, then archive candidate-specific evidence."
+    },
+    {
+      "category": "Tests and QA",
+      "total": 5,
+      "modified": 5,
+      "untracked": 0,
+      "other": 0,
+      "recommendedAction": "Review as validation coverage for the candidate."
+    }
+  ],
+  "reviewPlan": [
+    {
+      "id": "product-runtime",
+      "title": "Product and desktop runtime",
+      "categories": [
+        "Product source"
+      ],
+      "total": 6,
+      "modified": 6,
+      "untracked": 0,
+      "other": 0,
+      "recommendedAction": "Review user-visible behavior, desktop runtime configuration, shared package metadata, and workspace metadata as one app change set.",
+      "completionCriteria": [
+        "User-visible behavior, desktop runtime configuration, shared package metadata, and workspace metadata have been reviewed together.",
+        "Changed behavior is covered by passing tests, E2E coverage, or a documented QA note.",
+        "No accidental dependency, installer, or workspace metadata drift remains in the bundle."
+      ],
+      "categoryBreakdown": [
+        {
+          "category": "Product source",
+          "total": 6,
+          "modified": 6,
+          "untracked": 0,
+          "other": 0,
+          "recommendedAction": "Review as a product change and commit with the matching feature or fix."
+        }
+      ],
+      "entryPreview": [
+        {
+          "raw": " M apps/studio/src/features/export/projectFileImport.ts",
+          "path": "apps/studio/src/features/export/projectFileImport.ts",
+          "state": "modified",
+          "category": "Product source"
+        },
+        {
+          "raw": " M apps/studio/src/features/projectMenu/ProjectMenu.tsx",
+          "path": "apps/studio/src/features/projectMenu/ProjectMenu.tsx",
+          "state": "modified",
+          "category": "Product source"
+        },
+        {
+          "raw": " M apps/studio/src/features/projectMenu/projectFailureMessages.ts",
+          "path": "apps/studio/src/features/projectMenu/projectFailureMessages.ts",
+          "state": "modified",
+          "category": "Product source"
+        },
+        {
+          "raw": " M apps/studio/src/features/support/SupportMenu.tsx",
+          "path": "apps/studio/src/features/support/SupportMenu.tsx",
+          "state": "modified",
+          "category": "Product source"
+        },
+        {
+          "raw": " M apps/studio/src/platform/diagnostics.ts",
+          "path": "apps/studio/src/platform/diagnostics.ts",
+          "state": "modified",
+          "category": "Product source"
+        }
+      ],
+      "remainingEntries": 1
+    },
+    {
+      "id": "validation",
+      "title": "Validation coverage",
+      "categories": [
+        "Tests and QA"
+      ],
+      "total": 5,
+      "modified": 5,
+      "untracked": 0,
+      "other": 0,
+      "recommendedAction": "Review unit, integration, and E2E coverage against the product/runtime changes before trusting the candidate.",
+      "completionCriteria": [
+        "Tests fail for the intended regression or directly exercise the changed behavior.",
+        "E2E and smoke coverage are rerun after the final source cleanup.",
+        "Validation-only files are either committed with their related behavior or intentionally separated for review."
+      ],
+      "categoryBreakdown": [
+        {
+          "category": "Tests and QA",
+          "total": 5,
+          "modified": 5,
+          "untracked": 0,
+          "other": 0,
+          "recommendedAction": "Review as validation coverage for the candidate."
+        }
+      ],
+      "entryPreview": [
+        {
+          "raw": "M apps/studio/e2e/first-launch.spec.ts",
+          "path": "apps/studio/e2e/first-launch.spec.ts",
+          "state": "modified",
+          "category": "Tests and QA"
+        },
+        {
+          "raw": " M apps/studio/tests/diagnostics.test.ts",
+          "path": "apps/studio/tests/diagnostics.test.ts",
+          "state": "modified",
+          "category": "Tests and QA"
+        },
+        {
+          "raw": " M apps/studio/tests/persistence.test.ts",
+          "path": "apps/studio/tests/persistence.test.ts",
+          "state": "modified",
+          "category": "Tests and QA"
+        },
+        {
+          "raw": " M apps/studio/tests/projectFailureMessages.test.ts",
+          "path": "apps/studio/tests/projectFailureMessages.test.ts",
+          "state": "modified",
+          "category": "Tests and QA"
+        },
+        {
+          "raw": " M apps/studio/tests/supportMenu.test.ts",
+          "path": "apps/studio/tests/supportMenu.test.ts",
+          "state": "modified",
+          "category": "Tests and QA"
+        }
+      ],
+      "remainingEntries": 0
+    },
+    {
+      "id": "release-readiness",
+      "title": "Release readiness",
+      "categories": [
+        "Release evidence"
+      ],
+      "total": 1,
+      "modified": 0,
+      "untracked": 1,
+      "other": 0,
+      "recommendedAction": "Review CI, release policy, generated evidence, archive contents, and distribution docs after product changes are settled.",
+      "completionCriteria": [
+        "Generated release evidence is recreated after the final clean build.",
+        "CI, release scripts, and distribution docs match the current publish flow.",
+        "`pnpm release:verify:publish` passes after the clean manifest is regenerated."
+      ],
+      "categoryBreakdown": [
+        {
+          "category": "Release evidence",
+          "total": 1,
+          "modified": 0,
+          "untracked": 1,
+          "other": 0,
+          "recommendedAction": "Regenerate after the final clean build, then archive candidate-specific evidence."
+        }
+      ],
+      "entryPreview": [
+        {
+          "raw": "?? docs/releases/0.1.0-rc.2/",
+          "path": "docs/releases/0.1.0-rc.2/",
+          "state": "untracked",
+          "category": "Release evidence"
+        }
+      ],
+      "remainingEntries": 0
+    }
+  ],
+  "entries": [
+    {
+      "code": "M ",
+      "path": "apps/studio/e2e/first-launch.spec.ts",
+      "state": "modified",
+      "raw": "M apps/studio/e2e/first-launch.spec.ts",
+      "category": "Tests and QA",
+      "recommendedAction": "Review as validation coverage for the candidate."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/src/features/export/projectFileImport.ts",
+      "state": "modified",
+      "raw": " M apps/studio/src/features/export/projectFileImport.ts",
+      "category": "Product source",
+      "recommendedAction": "Review as a product change and commit with the matching feature or fix."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/src/features/projectMenu/ProjectMenu.tsx",
+      "state": "modified",
+      "raw": " M apps/studio/src/features/projectMenu/ProjectMenu.tsx",
+      "category": "Product source",
+      "recommendedAction": "Review as a product change and commit with the matching feature or fix."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/src/features/projectMenu/projectFailureMessages.ts",
+      "state": "modified",
+      "raw": " M apps/studio/src/features/projectMenu/projectFailureMessages.ts",
+      "category": "Product source",
+      "recommendedAction": "Review as a product change and commit with the matching feature or fix."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/src/features/support/SupportMenu.tsx",
+      "state": "modified",
+      "raw": " M apps/studio/src/features/support/SupportMenu.tsx",
+      "category": "Product source",
+      "recommendedAction": "Review as a product change and commit with the matching feature or fix."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/src/platform/diagnostics.ts",
+      "state": "modified",
+      "raw": " M apps/studio/src/platform/diagnostics.ts",
+      "category": "Product source",
+      "recommendedAction": "Review as a product change and commit with the matching feature or fix."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/src/state/persistence.ts",
+      "state": "modified",
+      "raw": " M apps/studio/src/state/persistence.ts",
+      "category": "Product source",
+      "recommendedAction": "Review as a product change and commit with the matching feature or fix."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/tests/diagnostics.test.ts",
+      "state": "modified",
+      "raw": " M apps/studio/tests/diagnostics.test.ts",
+      "category": "Tests and QA",
+      "recommendedAction": "Review as validation coverage for the candidate."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/tests/persistence.test.ts",
+      "state": "modified",
+      "raw": " M apps/studio/tests/persistence.test.ts",
+      "category": "Tests and QA",
+      "recommendedAction": "Review as validation coverage for the candidate."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/tests/projectFailureMessages.test.ts",
+      "state": "modified",
+      "raw": " M apps/studio/tests/projectFailureMessages.test.ts",
+      "category": "Tests and QA",
+      "recommendedAction": "Review as validation coverage for the candidate."
+    },
+    {
+      "code": " M",
+      "path": "apps/studio/tests/supportMenu.test.ts",
+      "state": "modified",
+      "raw": " M apps/studio/tests/supportMenu.test.ts",
+      "category": "Tests and QA",
+      "recommendedAction": "Review as validation coverage for the candidate."
+    },
+    {
+      "code": "??",
+      "path": "docs/releases/0.1.0-rc.2/",
+      "state": "untracked",
+      "raw": "?? docs/releases/0.1.0-rc.2/",
+      "category": "Release evidence",
+      "recommendedAction": "Regenerate after the final clean build, then archive candidate-specific evidence."
+    }
+  ]
+}

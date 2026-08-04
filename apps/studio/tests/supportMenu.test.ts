@@ -4,7 +4,9 @@ import {
   diagnosticKindLabel,
   formatSupportDiagnosticTime,
   isBackupRecoveryDiagnostic,
+  summarizeProjectRecoveryIssue,
   summarizeRecentDiagnostics,
+  summarizeSupportDiagnosticCounts,
 } from '../src/features/support/SupportMenu';
 
 function diagnostic(overrides: Partial<DiagnosticEntry>): DiagnosticEntry {
@@ -24,6 +26,7 @@ describe('support menu diagnostics summary', () => {
   it('labels recent diagnostic kinds with beginner-readable support categories', () => {
     expect(diagnosticKindLabel('storage-save')).toBe('保存');
     expect(diagnosticKindLabel('audio-playback')).toBe('音声');
+    expect(diagnosticKindLabel('project-load')).toBe('保存済み読み込み');
     expect(diagnosticKindLabel('import-midi')).toBe('MIDI読み込み');
     expect(diagnosticKindLabel('export-wav')).toBe('WAV書き出し');
   });
@@ -74,5 +77,42 @@ describe('support menu diagnostics summary', () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it('summarizes unrecoverable saved project keys without leaking local paths', () => {
+    const summary = summarizeProjectRecoveryIssue({
+      key: `cts.project.C:\\Users\\tester\\song.ctsproj.json
+      ${'x'.repeat(180)}`,
+      reason: 'invalid-json',
+      detail: 'Unexpected token',
+    });
+
+    expect(summary.key).toContain('cts.project.[local-path]');
+    expect(summary.key).not.toContain('C:\\Users\\tester');
+    expect(summary.key).not.toContain('\n');
+    expect(summary.key.endsWith('...')).toBe(true);
+    expect(summary.reason).toBe('JSONが壊れています');
+  });
+
+  it('counts saved-project load failures separately from file transfer and app flow failures', () => {
+    const counts = summarizeSupportDiagnosticCounts([
+      diagnostic({ kind: 'project-load', message: 'Saved project load failed. id=demo' }),
+      diagnostic({ kind: 'project-import', message: 'Project file import failed' }),
+      diagnostic({ kind: 'template-load', message: 'Template failed' }),
+      diagnostic({ kind: 'audio-playback', message: 'AudioContext failed' }),
+      diagnostic({ kind: 'storage-save', message: 'QuotaExceededError' }),
+      diagnostic({
+        kind: 'storage-recovery',
+        message:
+          'Saved project recovered from backup. key=cts.project.demo; reason=invalid-json; detail=broken',
+      }),
+    ]);
+
+    expect(counts.savedProjectLoadFailureCount).toBe(1);
+    expect(counts.fileTransferFailureCount).toBe(1);
+    expect(counts.appFlowFailureCount).toBe(1);
+    expect(counts.audioFailureCount).toBe(1);
+    expect(counts.saveFailureCount).toBe(1);
+    expect(counts.backupRecoveryCount).toBe(1);
   });
 });

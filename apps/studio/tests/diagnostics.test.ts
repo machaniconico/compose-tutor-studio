@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearDiagnostics,
+  DIAGNOSTIC_KINDS,
   DIAGNOSTIC_LOG_KEY,
+  formatDiagnosticValue,
   formatDiagnosticReport,
   installGlobalDiagnostics,
   loadDiagnostics,
@@ -54,6 +56,56 @@ describe('diagnostics', () => {
     expect(loadDiagnostics(storage)).toEqual([]);
   });
 
+  it('loads every declared diagnostic kind from persisted logs', () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      DIAGNOSTIC_LOG_KEY,
+      JSON.stringify(
+        DIAGNOSTIC_KINDS.map((kind, index) => ({
+          id: `diag_kind_${index}`,
+          kind,
+          message: `message for ${kind}`,
+          stack: null,
+          componentStack: null,
+          occurredAt: '2026-07-01T00:00:00.000Z',
+          userAgent: 'test-agent',
+        })),
+      ),
+    );
+
+    expect(loadDiagnostics(storage).map((entry) => entry.kind)).toEqual([...DIAGNOSTIC_KINDS]);
+  });
+
+  it('normalizes persisted diagnostic text before returning entries', () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      DIAGNOSTIC_LOG_KEY,
+      JSON.stringify([
+        {
+          id: `diag legacy ${'x'.repeat(200)}`,
+          kind: 'window-error',
+          message: `Failed at C:\\Users\\name\\My Songs\\song.ctsproj.json ${'m'.repeat(7000)}`,
+          stack: 'Error\n    at C:\\workspace\\Compose Tutor Studio\\src\\App.tsx:1:1',
+          componentStack: 'at C:\\secret\\Component.tsx',
+          occurredAt: `2026-07-01T00:00:00.000Z ${'t'.repeat(200)}`,
+          userAgent: `agent C:\\Users\\name\\agent.txt ${'u'.repeat(300)}`,
+        },
+      ]),
+    );
+
+    const [entry] = loadDiagnostics(storage);
+
+    expect(entry?.id.endsWith('...')).toBe(true);
+    expect(entry?.message).toContain('[local-path]');
+    expect(entry?.message).not.toContain('My Songs');
+    expect(entry?.message.length).toBeLessThanOrEqual(6000);
+    expect(entry?.stack).toContain('[local-path]');
+    expect(entry?.componentStack).toContain('[local-path]');
+    expect(entry?.occurredAt.endsWith('...')).toBe(true);
+    expect(entry?.userAgent).not.toContain('C:\\Users\\name');
+    expect(entry?.userAgent?.endsWith('...')).toBe(true);
+  });
+
   it('redacts local paths from messages and stacks', () => {
     const storage = new MemoryStorage();
     const error = new Error('Failed at D:\\Users\\name\\song.ctsproj.json');
@@ -66,6 +118,18 @@ describe('diagnostics', () => {
     expect(entry?.message).not.toContain('Users');
     expect(entry?.stack).toContain('[local-path]');
     expect(entry?.componentStack).toContain('[local-path]');
+  });
+
+  it('formats inline diagnostic values without leaking paths or multiline text', () => {
+    const value = formatDiagnosticValue(`  C:\\Users\\name\\song.ctsproj.json
+      ${'x'.repeat(120)}`, 40);
+
+    expect(value).toContain('[local-path]');
+    expect(value).not.toContain('C:\\Users\\name');
+    expect(value).not.toContain('\n');
+    expect(value.endsWith('...')).toBe(true);
+    expect(value.length).toBeLessThanOrEqual(43);
+    expect(formatDiagnosticValue('   ')).toBe('(empty)');
   });
 
   it('redacts UNC, long Windows, and POSIX local paths', () => {
@@ -91,6 +155,24 @@ describe('diagnostics', () => {
     expect(sanitized).not.toContain('/home/name');
     expect(sanitized).not.toContain('/tmp/cts-export');
     expect(sanitized).not.toContain('~/Music');
+  });
+
+  it('redacts local paths that contain spaces without removing nearby prose', () => {
+    const message = [
+      'win=C:\\Users\\name\\My Songs\\draft song.ctsproj.json after path',
+      'unc=\\\\server\\Shared Music\\draft song.wav after path',
+      'file=file:///C:/Users/name/My Songs/App.tsx:12:4 after path',
+      'posix=/Users/name/My Songs/draft song.mid after path',
+    ].join(' ');
+
+    const sanitized = sanitizeDiagnosticText(message);
+
+    expect(sanitized).toContain('[local-path]');
+    expect(sanitized).toContain('after path');
+    expect(sanitized).not.toContain('My Songs');
+    expect(sanitized).not.toContain('draft song');
+    expect(sanitized).not.toContain('C:\\Users');
+    expect(sanitized).not.toContain('/Users/name');
   });
 
   it('formats a copyable support report', () => {
@@ -129,7 +211,7 @@ describe('diagnostics', () => {
     expect(report).toContain('summary by kind: none');
   });
 
-  it('records export failures for support without leaking local paths', () => {
+  it('records operational failures for support without leaking local paths', () => {
     const storage = new MemoryStorage();
     const error = new Error('Write failed at C:\\Users\\name\\song.wav');
 
@@ -139,6 +221,7 @@ describe('diagnostics', () => {
     recordDiagnostic('import-midi', 'MIDI import failed', {}, storage, null);
     recordDiagnostic('audio-playback', 'AudioContext resume failed', {}, storage, null);
     recordDiagnostic('template-load', 'Template failed', {}, storage, null);
+    recordDiagnostic('project-load', 'Saved project load failed', {}, storage, null);
 
     const report = formatDiagnosticReport(loadDiagnostics(storage));
     expect(report).toContain('export-wav');
@@ -150,6 +233,8 @@ describe('diagnostics', () => {
     expect(report).toContain('AudioContext resume failed');
     expect(report).toContain('template-load');
     expect(report).toContain('Template failed');
+    expect(report).toContain('project-load');
+    expect(report).toContain('Saved project load failed');
     expect(report).toContain('[local-path]');
     expect(report).not.toContain('C:\\Users\\name');
   });

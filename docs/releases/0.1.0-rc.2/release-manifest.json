@@ -1,0 +1,50 @@
+{
+  "productName": "Compose Tutor Studio",
+  "packageName": "@cts/studio",
+  "version": "0.1.0",
+  "platform": "windows-x64",
+  "generatedAt": "2026-07-06T21:43:04.051Z",
+  "sourceControl": {
+    "commit": "0c179c2848a52500b985e1ff435f5169d4fe798a",
+    "shortCommit": "0c179c2",
+    "branch": "wave5/desktop",
+    "isDirty": true,
+    "status": [
+      "M apps/studio/e2e/first-launch.spec.ts",
+      " M apps/studio/src/features/export/projectFileImport.ts",
+      " M apps/studio/src/features/projectMenu/ProjectMenu.tsx",
+      " M apps/studio/src/features/projectMenu/projectFailureMessages.ts",
+      " M apps/studio/src/features/support/SupportMenu.tsx",
+      " M apps/studio/src/platform/diagnostics.ts",
+      " M apps/studio/src/state/persistence.ts",
+      " M apps/studio/tests/diagnostics.test.ts",
+      " M apps/studio/tests/persistence.test.ts",
+      " M apps/studio/tests/projectFailureMessages.test.ts",
+      " M apps/studio/tests/supportMenu.test.ts",
+      "?? docs/releases/0.1.0-rc.2/"
+    ]
+  },
+  "artifacts": [
+    {
+      "kind": "portable-exe",
+      "fileName": "cts-studio.exe",
+      "path": "apps/studio/src-tauri/target/release/cts-studio.exe",
+      "sizeBytes": 14737920,
+      "sha256": "379b7e502e27bafbf03d71f7c9f2abe989867234b3c17e1094893175c3bffeb1"
+    },
+    {
+      "kind": "msi-installer",
+      "fileName": "Compose Tutor Studio_0.1.0_x64_en-US.msi",
+      "path": "apps/studio/src-tauri/target/release/bundle/msi/Compose Tutor Studio_0.1.0_x64_en-US.msi",
+      "sizeBytes": 3317760,
+      "sha256": "7eec0b9df45b811c862c11c651240511e14e0f585278e0dad433b8dd968cb8fa"
+    },
+    {
+      "kind": "nsis-installer",
+      "fileName": "Compose Tutor Studio_0.1.0_x64-setup.exe",
+      "path": "apps/studio/src-tauri/target/release/bundle/nsis/Compose Tutor Studio_0.1.0_x64-setup.exe",
+      "sizeBytes": 2216731,
+      "sha256": "ca0b9c4d9ccc4584b0434985feb1c97666f0c7027a1181aa28c694be50d998a5"
+    }
+  ]
+}

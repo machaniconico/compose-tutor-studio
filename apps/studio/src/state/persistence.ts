@@ -5,13 +5,15 @@
 // so tests can inject a stub.
 
 import { deserializeProject, validateProject, type Project } from '@cts/project-model';
-import { loadDiagnostics, recordDiagnostic } from '../platform/diagnostics';
+import { formatDiagnosticValue, loadDiagnostics, recordDiagnostic } from '../platform/diagnostics';
 
 const KEY_PREFIX = 'cts.project.';
 const BACKUP_KEY_PREFIX = 'cts.projectBackup.';
 const MAX_RECOVERY_DETAIL_LENGTH = 600;
 const DEFAULT_PROJECT_SUMMARY_TITLE = '無題のプロジェクト';
 const MAX_PROJECT_SUMMARY_TITLE_LENGTH = 80;
+const MAX_DIAGNOSTIC_KEY_LENGTH = 120;
+const MAX_DIAGNOSTIC_DETAIL_LENGTH = 600;
 
 export type ProjectSummary = {
   id: string;
@@ -82,10 +84,9 @@ function recordProjectSaveFailure(
   const detail = error instanceof Error ? error.message : String(error);
   recordDiagnostic(
     'storage-save',
-    `Project save failed. key=${key}; payloadBytes=${payloadLength}; detail=${detail.slice(
-      0,
-      MAX_RECOVERY_DETAIL_LENGTH,
-    )}`,
+    `Project save failed. key=${diagnosticStorageKey(
+      key,
+    )}; payloadBytes=${payloadLength}; detail=${diagnosticDetail(detail)}`,
     {},
     storage,
     null,
@@ -214,7 +215,9 @@ function makeRecoveryIssue(
 }
 
 function recordProjectRecoveryIssue(issue: ProjectRecoveryIssue, storage: Storage): void {
-  const message = `Saved project was skipped. key=${issue.key}; reason=${issue.reason}; detail=${issue.detail}`;
+  const message = `Saved project was skipped. key=${diagnosticStorageKey(issue.key)}; reason=${
+    issue.reason
+  }; detail=${diagnosticDetail(issue.detail)}`;
   const alreadyRecorded = loadDiagnostics(storage).some(
     (entry) => entry.kind === 'storage-recovery' && entry.message === message,
   );
@@ -229,7 +232,9 @@ function recordProjectRecoveryIssue(issue: ProjectRecoveryIssue, storage: Storag
 }
 
 function recordProjectBackupRecovery(key: string, issue: ProjectRecoveryIssue, storage: Storage): void {
-  const message = `Saved project recovered from backup. key=${key}; reason=${issue.reason}; detail=${issue.detail}`;
+  const message = `Saved project recovered from backup. key=${diagnosticStorageKey(
+    key,
+  )}; reason=${issue.reason}; detail=${diagnosticDetail(issue.detail)}`;
   const alreadyRecorded = loadDiagnostics(storage).some(
     (entry) => entry.kind === 'storage-recovery' && entry.message === message,
   );
@@ -241,6 +246,14 @@ function recordProjectBackupRecovery(key: string, issue: ProjectRecoveryIssue, s
     storage,
     null,
   );
+}
+
+function diagnosticStorageKey(key: string): string {
+  return formatDiagnosticValue(key, MAX_DIAGNOSTIC_KEY_LENGTH);
+}
+
+function diagnosticDetail(detail: string): string {
+  return formatDiagnosticValue(detail, MAX_DIAGNOSTIC_DETAIL_LENGTH);
 }
 
 export function normalizeProjectSummaryTitle(title: string): string {

@@ -1,0 +1,3 @@
+379b7e502e27bafbf03d71f7c9f2abe989867234b3c17e1094893175c3bffeb1  apps/studio/src-tauri/target/release/cts-studio.exe
+7eec0b9df45b811c862c11c651240511e14e0f585278e0dad433b8dd968cb8fa  apps/studio/src-tauri/target/release/bundle/msi/Compose Tutor Studio_0.1.0_x64_en-US.msi
+ca0b9c4d9ccc4584b0434985feb1c97666f0c7027a1181aa28c694be50d998a5  apps/studio/src-tauri/target/release/bundle/nsis/Compose Tutor Studio_0.1.0_x64-setup.exe

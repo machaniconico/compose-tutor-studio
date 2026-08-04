@@ -1,0 +1,135 @@
+{
+  "productName": "Compose Tutor Studio",
+  "version": "0.1.0",
+  "platform": "windows-x64",
+  "generatedAt": "2026-07-06T21:43:07.298Z",
+  "manifestPath": "apps/studio/src-tauri/target/release/release/release-manifest.json",
+  "result": "Pass",
+  "metadata": {
+    "PortableExe": {
+      "Path": "D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\cts-studio.exe",
+      "Exists": true,
+      "FileDescription": "Compose Tutor Studio",
+      "ProductName": "Compose Tutor Studio",
+      "ProductVersion": "0.1.0",
+      "FileVersion": "0.1.0",
+      "CompanyName": "cts"
+    },
+    "NsisInstaller": {
+      "Path": "D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\nsis\\Compose Tutor Studio_0.1.0_x64-setup.exe",
+      "Exists": true,
+      "FileDescription": "Compose Tutor Studio",
+      "ProductName": "Compose Tutor Studio",
+      "ProductVersion": "0.1.0",
+      "FileVersion": "0.1.0",
+      "CompanyName": ""
+    },
+    "MsiInstaller": {
+      "Path": "D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\msi\\Compose Tutor Studio_0.1.0_x64_en-US.msi",
+      "Exists": true,
+      "ProductName": "Compose Tutor Studio",
+      "ProductVersion": "0.1.0",
+      "ProductCode": "{BF9E0880-497A-458D-BD30-FB2ACE997C42}",
+      "UpgradeCode": "{A776024F-6B69-5D06-8534-15426C9C632A}",
+      "Manufacturer": "cts"
+    }
+  },
+  "checks": [
+    {
+      "label": "portable exe file name",
+      "actual": "cts-studio.exe",
+      "expected": "/^cts-studio\\.exe$/",
+      "result": "Pass"
+    },
+    {
+      "label": "MSI installer file name includes product, version, architecture, and locale",
+      "actual": "Compose Tutor Studio_0.1.0_x64_en-US.msi",
+      "expected": "/^Compose Tutor Studio_0\\.1\\.0_x64_en-US\\.msi$/",
+      "result": "Pass"
+    },
+    {
+      "label": "NSIS installer file name includes product, version, architecture, and setup suffix",
+      "actual": "Compose Tutor Studio_0.1.0_x64-setup.exe",
+      "expected": "/^Compose Tutor Studio_0\\.1\\.0_x64-setup\\.exe$/",
+      "result": "Pass"
+    },
+    {
+      "label": "portable exe ProductName",
+      "actual": "Compose Tutor Studio",
+      "expected": "Compose Tutor Studio",
+      "result": "Pass"
+    },
+    {
+      "label": "portable exe FileDescription",
+      "actual": "Compose Tutor Studio",
+      "expected": "Compose Tutor Studio",
+      "result": "Pass"
+    },
+    {
+      "label": "portable exe ProductVersion",
+      "actual": "0.1.0",
+      "expected": "0.1.0",
+      "result": "Pass"
+    },
+    {
+      "label": "portable exe FileVersion",
+      "actual": "0.1.0",
+      "expected": "0.1.0",
+      "result": "Pass"
+    },
+    {
+      "label": "NSIS installer ProductName",
+      "actual": "Compose Tutor Studio",
+      "expected": "Compose Tutor Studio",
+      "result": "Pass"
+    },
+    {
+      "label": "NSIS installer FileDescription",
+      "actual": "Compose Tutor Studio",
+      "expected": "Compose Tutor Studio",
+      "result": "Pass"
+    },
+    {
+      "label": "NSIS installer ProductVersion",
+      "actual": "0.1.0",
+      "expected": "0.1.0",
+      "result": "Pass"
+    },
+    {
+      "label": "NSIS installer FileVersion",
+      "actual": "0.1.0",
+      "expected": "0.1.0",
+      "result": "Pass"
+    },
+    {
+      "label": "MSI ProductName",
+      "actual": "Compose Tutor Studio",
+      "expected": "Compose Tutor Studio",
+      "result": "Pass"
+    },
+    {
+      "label": "MSI ProductVersion",
+      "actual": "0.1.0",
+      "expected": "0.1.0",
+      "result": "Pass"
+    },
+    {
+      "label": "MSI ProductCode",
+      "actual": "{BF9E0880-497A-458D-BD30-FB2ACE997C42}",
+      "expected": "Windows Installer product code GUID",
+      "result": "Pass"
+    },
+    {
+      "label": "MSI UpgradeCode",
+      "actual": "a776024f-6b69-5d06-8534-15426c9c632a",
+      "expected": "a776024f-6b69-5d06-8534-15426c9c632a",
+      "result": "Pass"
+    },
+    {
+      "label": "MSI Manufacturer",
+      "actual": "cts",
+      "expected": "non-empty",
+      "result": "Pass"
+    }
+  ]
+}

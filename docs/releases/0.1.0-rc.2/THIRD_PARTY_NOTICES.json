@@ -1,0 +1,2461 @@
+{
+  "generatedAt": "2026-07-06T21:43:11.797Z",
+  "sources": {
+    "npmPackage": "apps/studio/package.json",
+    "cargoLock": "apps/studio/src-tauri/Cargo.lock"
+  },
+  "summary": {
+    "npmCount": 7,
+    "cargoCount": 256,
+    "licenses": [
+      {
+        "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+        "count": 1
+      },
+      {
+        "license": "0BSD OR MIT OR Apache-2.0",
+        "count": 1
+      },
+      {
+        "license": "Apache-2.0",
+        "count": 1
+      },
+      {
+        "license": "Apache-2.0 / MIT",
+        "count": 1
+      },
+      {
+        "license": "Apache-2.0 AND MIT",
+        "count": 1
+      },
+      {
+        "license": "Apache-2.0 OR MIT",
+        "count": 31
+      },
+      {
+        "license": "BSD-3-Clause",
+        "count": 2
+      },
+      {
+        "license": "BSD-3-Clause AND MIT",
+        "count": 1
+      },
+      {
+        "license": "BSD-3-Clause/MIT",
+        "count": 1
+      },
+      {
+        "license": "CC0-1.0 OR MIT-0 OR Apache-2.0",
+        "count": 1
+      },
+      {
+        "license": "MIT",
+        "count": 49
+      },
+      {
+        "license": "MIT OR Apache-2.0",
+        "count": 128
+      },
+      {
+        "license": "MIT OR Apache-2.0 OR Zlib",
+        "count": 2
+      },
+      {
+        "license": "MIT OR Zlib OR Apache-2.0",
+        "count": 1
+      },
+      {
+        "license": "MIT/Apache-2.0",
+        "count": 11
+      },
+      {
+        "license": "MPL-2.0",
+        "count": 5
+      },
+      {
+        "license": "Unicode-3.0",
+        "count": 18
+      },
+      {
+        "license": "Unlicense OR MIT",
+        "count": 4
+      },
+      {
+        "license": "Unlicense/MIT",
+        "count": 2
+      },
+      {
+        "license": "Zlib",
+        "count": 1
+      },
+      {
+        "license": "Zlib OR Apache-2.0 OR MIT",
+        "count": 1
+      }
+    ]
+  },
+  "npm": [
+    {
+      "name": "@tauri-apps/api",
+      "version": "2.11.0",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://github.com/tauri-apps/tauri#readme",
+      "repository": "git+https://github.com/tauri-apps/tauri.git",
+      "path": "apps/studio/node_modules/@tauri-apps/api/package.json"
+    },
+    {
+      "name": "@tauri-apps/plugin-dialog",
+      "version": "2.7.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/plugins-workspace",
+      "path": "apps/studio/node_modules/@tauri-apps/plugin-dialog/package.json"
+    },
+    {
+      "name": "@tauri-apps/plugin-fs",
+      "version": "2.5.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/plugins-workspace",
+      "path": "apps/studio/node_modules/@tauri-apps/plugin-fs/package.json"
+    },
+    {
+      "name": "react",
+      "version": "19.2.7",
+      "license": "MIT",
+      "homepage": "https://react.dev/",
+      "repository": "https://github.com/facebook/react.git",
+      "path": "apps/studio/node_modules/react/package.json"
+    },
+    {
+      "name": "react-dom",
+      "version": "19.2.7",
+      "license": "MIT",
+      "homepage": "https://react.dev/",
+      "repository": "https://github.com/facebook/react.git",
+      "path": "apps/studio/node_modules/react-dom/package.json"
+    },
+    {
+      "name": "scheduler",
+      "version": "0.27.0",
+      "license": "MIT",
+      "homepage": "https://react.dev/",
+      "repository": "https://github.com/facebook/react.git",
+      "path": "node_modules/.pnpm/react-dom@19.2.7_react@19.2.7/node_modules/scheduler/package.json"
+    },
+    {
+      "name": "zustand",
+      "version": "5.0.14",
+      "license": "MIT",
+      "homepage": "https://github.com/pmndrs/zustand",
+      "repository": "git+https://github.com/pmndrs/zustand.git",
+      "path": "apps/studio/node_modules/zustand/package.json"
+    }
+  ],
+  "cargo": [
+    {
+      "name": "adler2",
+      "version": "2.0.1",
+      "license": "0BSD OR MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/oyvindln/adler2",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/adler2-2.0.1/Cargo.toml"
+    },
+    {
+      "name": "aho-corasick",
+      "version": "1.1.4",
+      "license": "Unlicense OR MIT",
+      "homepage": "https://github.com/BurntSushi/aho-corasick",
+      "repository": "https://github.com/BurntSushi/aho-corasick",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aho-corasick-1.1.4/Cargo.toml"
+    },
+    {
+      "name": "alloc-no-stdlib",
+      "version": "2.0.4",
+      "license": "BSD-3-Clause",
+      "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib",
+      "repository": "https://github.com/dropbox/rust-alloc-no-stdlib",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloc-no-stdlib-2.0.4/Cargo.toml"
+    },
+    {
+      "name": "alloc-stdlib",
+      "version": "0.2.2",
+      "license": "BSD-3-Clause",
+      "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib",
+      "repository": "https://github.com/dropbox/rust-alloc-no-stdlib",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/alloc-stdlib-0.2.2/Cargo.toml"
+    },
+    {
+      "name": "anyhow",
+      "version": "1.0.102",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/anyhow",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anyhow-1.0.102/Cargo.toml"
+    },
+    {
+      "name": "autocfg",
+      "version": "1.5.1",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/cuviper/autocfg",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/autocfg-1.5.1/Cargo.toml"
+    },
+    {
+      "name": "base64",
+      "version": "0.22.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/marshallpierce/rust-base64",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/base64-0.22.1/Cargo.toml"
+    },
+    {
+      "name": "bit-set",
+      "version": "0.8.0",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://github.com/contain-rs/bit-set",
+      "repository": "https://github.com/contain-rs/bit-set",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-set-0.8.0/Cargo.toml"
+    },
+    {
+      "name": "bit-vec",
+      "version": "0.8.0",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://github.com/contain-rs/bit-vec",
+      "repository": "https://github.com/contain-rs/bit-vec",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bit-vec-0.8.0/Cargo.toml"
+    },
+    {
+      "name": "bitflags",
+      "version": "1.3.2",
+      "license": "MIT/Apache-2.0",
+      "homepage": "https://github.com/bitflags/bitflags",
+      "repository": "https://github.com/bitflags/bitflags",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-1.3.2/Cargo.toml"
+    },
+    {
+      "name": "bitflags",
+      "version": "2.13.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/bitflags/bitflags",
+      "repository": "https://github.com/bitflags/bitflags",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitflags-2.13.0/Cargo.toml"
+    },
+    {
+      "name": "block-buffer",
+      "version": "0.10.4",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/RustCrypto/utils",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block-buffer-0.10.4/Cargo.toml"
+    },
+    {
+      "name": "brotli",
+      "version": "8.0.3",
+      "license": "BSD-3-Clause AND MIT",
+      "homepage": "https://github.com/dropbox/rust-brotli",
+      "repository": "https://github.com/dropbox/rust-brotli",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/brotli-8.0.3/Cargo.toml"
+    },
+    {
+      "name": "brotli-decompressor",
+      "version": "5.0.1",
+      "license": "BSD-3-Clause/MIT",
+      "homepage": "https://github.com/dropbox/rust-brotli-decompressor",
+      "repository": "https://github.com/dropbox/rust-brotli-decompressor",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/brotli-decompressor-5.0.1/Cargo.toml"
+    },
+    {
+      "name": "bs58",
+      "version": "0.5.1",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/Nullus157/bs58-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bs58-0.5.1/Cargo.toml"
+    },
+    {
+      "name": "byteorder",
+      "version": "1.5.0",
+      "license": "Unlicense OR MIT",
+      "homepage": "https://github.com/BurntSushi/byteorder",
+      "repository": "https://github.com/BurntSushi/byteorder",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/byteorder-1.5.0/Cargo.toml"
+    },
+    {
+      "name": "bytes",
+      "version": "1.11.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/tokio-rs/bytes",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytes-1.11.1/Cargo.toml"
+    },
+    {
+      "name": "camino",
+      "version": "1.2.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/camino-rs/camino",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/camino-1.2.2/Cargo.toml"
+    },
+    {
+      "name": "cargo_metadata",
+      "version": "0.19.2",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/oli-obk/cargo_metadata",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_metadata-0.19.2/Cargo.toml"
+    },
+    {
+      "name": "cargo_toml",
+      "version": "0.22.3",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://lib.rs/cargo_toml",
+      "repository": "https://gitlab.com/lib.rs/cargo_toml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo_toml-0.22.3/Cargo.toml"
+    },
+    {
+      "name": "cargo-platform",
+      "version": "0.1.9",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-lang/cargo",
+      "repository": "https://github.com/rust-lang/cargo",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cargo-platform-0.1.9/Cargo.toml"
+    },
+    {
+      "name": "cc",
+      "version": "1.2.64",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-lang/cc-rs",
+      "repository": "https://github.com/rust-lang/cc-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cc-1.2.64/Cargo.toml"
+    },
+    {
+      "name": "cfb",
+      "version": "0.7.3",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/mdsteele/rust-cfb",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cfb-0.7.3/Cargo.toml"
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-lang/cfg-if",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cfg-if-1.0.4/Cargo.toml"
+    },
+    {
+      "name": "chrono",
+      "version": "0.4.45",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/chronotope/chrono",
+      "repository": "https://github.com/chronotope/chrono",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/chrono-0.4.45/Cargo.toml"
+    },
+    {
+      "name": "cookie",
+      "version": "0.18.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/SergioBenitez/cookie-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cookie-0.18.1/Cargo.toml"
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.2.17",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/RustCrypto/utils",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.2.17/Cargo.toml"
+    },
+    {
+      "name": "crc32fast",
+      "version": "1.5.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/srijs/rust-crc32fast",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crc32fast-1.5.0/Cargo.toml"
+    },
+    {
+      "name": "crossbeam-channel",
+      "version": "0.5.15",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-channel",
+      "repository": "https://github.com/crossbeam-rs/crossbeam",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crossbeam-channel-0.5.15/Cargo.toml"
+    },
+    {
+      "name": "crossbeam-utils",
+      "version": "0.8.21",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-utils",
+      "repository": "https://github.com/crossbeam-rs/crossbeam",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crossbeam-utils-0.8.21/Cargo.toml"
+    },
+    {
+      "name": "crypto-common",
+      "version": "0.1.7",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/RustCrypto/traits",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crypto-common-0.1.7/Cargo.toml"
+    },
+    {
+      "name": "cssparser",
+      "version": "0.36.0",
+      "license": "MPL-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/rust-cssparser",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cssparser-0.36.0/Cargo.toml"
+    },
+    {
+      "name": "cssparser-macros",
+      "version": "0.6.1",
+      "license": "MPL-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/rust-cssparser",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cssparser-macros-0.6.1/Cargo.toml"
+    },
+    {
+      "name": "ctor",
+      "version": "0.8.0",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/mmastrac/rust-ctor",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ctor-0.8.0/Cargo.toml"
+    },
+    {
+      "name": "ctor-proc-macro",
+      "version": "0.0.7",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/mmastrac/rust-ctor",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ctor-proc-macro-0.0.7/Cargo.toml"
+    },
+    {
+      "name": "darling",
+      "version": "0.23.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/TedDriggs/darling",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/darling-0.23.0/Cargo.toml"
+    },
+    {
+      "name": "darling_core",
+      "version": "0.23.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/TedDriggs/darling",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/darling_core-0.23.0/Cargo.toml"
+    },
+    {
+      "name": "darling_macro",
+      "version": "0.23.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/TedDriggs/darling",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/darling_macro-0.23.0/Cargo.toml"
+    },
+    {
+      "name": "deranged",
+      "version": "0.5.8",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/jhpratt/deranged",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/deranged-0.5.8/Cargo.toml"
+    },
+    {
+      "name": "derive_more",
+      "version": "2.1.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/JelteF/derive_more",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/derive_more-2.1.1/Cargo.toml"
+    },
+    {
+      "name": "derive_more-impl",
+      "version": "2.1.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/JelteF/derive_more",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/derive_more-impl-2.1.1/Cargo.toml"
+    },
+    {
+      "name": "digest",
+      "version": "0.10.7",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/RustCrypto/traits",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/digest-0.10.7/Cargo.toml"
+    },
+    {
+      "name": "dirs",
+      "version": "6.0.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/soc/dirs-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dirs-6.0.0/Cargo.toml"
+    },
+    {
+      "name": "dirs-sys",
+      "version": "0.5.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dirs-dev/dirs-sys-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dirs-sys-0.5.0/Cargo.toml"
+    },
+    {
+      "name": "displaydoc",
+      "version": "0.2.6",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/yaahc/displaydoc",
+      "repository": "https://github.com/yaahc/displaydoc",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/displaydoc-0.2.6/Cargo.toml"
+    },
+    {
+      "name": "dom_query",
+      "version": "0.27.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/niklak/dom_query",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dom_query-0.27.0/Cargo.toml"
+    },
+    {
+      "name": "dpi",
+      "version": "0.1.2",
+      "license": "Apache-2.0 AND MIT",
+      "homepage": "",
+      "repository": "https://github.com/rust-windowing/winit",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dpi-0.1.2/Cargo.toml"
+    },
+    {
+      "name": "dtoa",
+      "version": "1.0.11",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/dtoa",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dtoa-1.0.11/Cargo.toml"
+    },
+    {
+      "name": "dtoa-short",
+      "version": "0.3.5",
+      "license": "MPL-2.0",
+      "homepage": "",
+      "repository": "https://github.com/upsuper/dtoa-short",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dtoa-short-0.3.5/Cargo.toml"
+    },
+    {
+      "name": "dtor",
+      "version": "0.3.0",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/mmastrac/rust-ctor",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dtor-0.3.0/Cargo.toml"
+    },
+    {
+      "name": "dtor-proc-macro",
+      "version": "0.0.6",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/mmastrac/rust-ctor",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dtor-proc-macro-0.0.6/Cargo.toml"
+    },
+    {
+      "name": "dunce",
+      "version": "1.0.5",
+      "license": "CC0-1.0 OR MIT-0 OR Apache-2.0",
+      "homepage": "https://lib.rs/crates/dunce",
+      "repository": "https://gitlab.com/kornelski/dunce",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dunce-1.0.5/Cargo.toml"
+    },
+    {
+      "name": "dyn-clone",
+      "version": "1.0.20",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/dyn-clone",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dyn-clone-1.0.20/Cargo.toml"
+    },
+    {
+      "name": "embed-resource",
+      "version": "3.0.9",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/nabijaczleweli/rust-embed-resource",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/embed-resource-3.0.9/Cargo.toml"
+    },
+    {
+      "name": "equivalent",
+      "version": "1.0.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/indexmap-rs/equivalent",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/equivalent-1.0.2/Cargo.toml"
+    },
+    {
+      "name": "erased-serde",
+      "version": "0.4.10",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/erased-serde",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/erased-serde-0.4.10/Cargo.toml"
+    },
+    {
+      "name": "fastrand",
+      "version": "2.4.1",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/smol-rs/fastrand",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fastrand-2.4.1/Cargo.toml"
+    },
+    {
+      "name": "fdeflate",
+      "version": "0.3.7",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/image-rs/fdeflate",
+      "repository": "https://github.com/image-rs/fdeflate",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/Cargo.toml"
+    },
+    {
+      "name": "find-msvc-tools",
+      "version": "0.1.9",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-lang/cc-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/find-msvc-tools-0.1.9/Cargo.toml"
+    },
+    {
+      "name": "flate2",
+      "version": "1.1.9",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-lang/flate2-rs",
+      "repository": "https://github.com/rust-lang/flate2-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/flate2-1.1.9/Cargo.toml"
+    },
+    {
+      "name": "fnv",
+      "version": "1.0.7",
+      "license": "Apache-2.0 / MIT",
+      "homepage": "",
+      "repository": "https://github.com/servo/rust-fnv",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fnv-1.0.7/Cargo.toml"
+    },
+    {
+      "name": "foldhash",
+      "version": "0.2.0",
+      "license": "Zlib",
+      "homepage": "",
+      "repository": "https://github.com/orlp/foldhash",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/foldhash-0.2.0/Cargo.toml"
+    },
+    {
+      "name": "form_urlencoded",
+      "version": "1.2.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/rust-url",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/form_urlencoded-1.2.2/Cargo.toml"
+    },
+    {
+      "name": "generic-array",
+      "version": "0.14.7",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/fizyk20/generic-array.git",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/generic-array-0.14.7/Cargo.toml"
+    },
+    {
+      "name": "getrandom",
+      "version": "0.3.4",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-random/getrandom",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.3.4/Cargo.toml"
+    },
+    {
+      "name": "getrandom",
+      "version": "0.4.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-random/getrandom",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.4.2/Cargo.toml"
+    },
+    {
+      "name": "glob",
+      "version": "0.3.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-lang/glob",
+      "repository": "https://github.com/rust-lang/glob",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/glob-0.3.3/Cargo.toml"
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.12.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-lang/hashbrown",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hashbrown-0.12.3/Cargo.toml"
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.17.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-lang/hashbrown",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hashbrown-0.17.1/Cargo.toml"
+    },
+    {
+      "name": "heck",
+      "version": "0.5.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/withoutboats/heck",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/heck-0.5.0/Cargo.toml"
+    },
+    {
+      "name": "hex",
+      "version": "0.4.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/KokaKiwi/rust-hex",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hex-0.4.3/Cargo.toml"
+    },
+    {
+      "name": "html5ever",
+      "version": "0.38.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/html5ever",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/html5ever-0.38.0/Cargo.toml"
+    },
+    {
+      "name": "http",
+      "version": "1.4.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/hyperium/http",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/http-1.4.2/Cargo.toml"
+    },
+    {
+      "name": "ico",
+      "version": "0.5.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/mdsteele/rust-ico",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.5.0/Cargo.toml"
+    },
+    {
+      "name": "icu_collections",
+      "version": "2.2.0",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_collections-2.2.0/Cargo.toml"
+    },
+    {
+      "name": "icu_locale_core",
+      "version": "2.2.0",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_locale_core-2.2.0/Cargo.toml"
+    },
+    {
+      "name": "icu_normalizer",
+      "version": "2.2.0",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_normalizer-2.2.0/Cargo.toml"
+    },
+    {
+      "name": "icu_normalizer_data",
+      "version": "2.2.0",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_normalizer_data-2.2.0/Cargo.toml"
+    },
+    {
+      "name": "icu_properties",
+      "version": "2.2.0",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_properties-2.2.0/Cargo.toml"
+    },
+    {
+      "name": "icu_properties_data",
+      "version": "2.2.0",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_properties_data-2.2.0/Cargo.toml"
+    },
+    {
+      "name": "icu_provider",
+      "version": "2.2.0",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_provider-2.2.0/Cargo.toml"
+    },
+    {
+      "name": "ident_case",
+      "version": "1.0.1",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/TedDriggs/ident_case",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ident_case-1.0.1/Cargo.toml"
+    },
+    {
+      "name": "idna",
+      "version": "1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/rust-url/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/Cargo.toml"
+    },
+    {
+      "name": "idna_adapter",
+      "version": "1.2.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://docs.rs/crate/idna_adapter/latest",
+      "repository": "https://github.com/hsivonen/idna_adapter",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna_adapter-1.2.2/Cargo.toml"
+    },
+    {
+      "name": "indexmap",
+      "version": "1.9.3",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/bluss/indexmap",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/indexmap-1.9.3/Cargo.toml"
+    },
+    {
+      "name": "indexmap",
+      "version": "2.14.0",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/indexmap-rs/indexmap",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/indexmap-2.14.0/Cargo.toml"
+    },
+    {
+      "name": "infer",
+      "version": "0.19.0",
+      "license": "MIT",
+      "homepage": "https://github.com/bojand/infer",
+      "repository": "https://github.com/bojand/infer",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/infer-0.19.0/Cargo.toml"
+    },
+    {
+      "name": "itoa",
+      "version": "1.0.18",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/itoa",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.18/Cargo.toml"
+    },
+    {
+      "name": "json-patch",
+      "version": "3.0.1",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/idubrov/json-patch",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/json-patch-3.0.1/Cargo.toml"
+    },
+    {
+      "name": "jsonptr",
+      "version": "0.6.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/chanced/jsonptr",
+      "repository": "https://github.com/chanced/jsonptr",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/jsonptr-0.6.3/Cargo.toml"
+    },
+    {
+      "name": "keyboard-types",
+      "version": "0.7.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/pyfisch/keyboard-types",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyboard-types-0.7.0/Cargo.toml"
+    },
+    {
+      "name": "libc",
+      "version": "0.2.186",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-lang/libc",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.186/Cargo.toml"
+    },
+    {
+      "name": "litemap",
+      "version": "0.8.2",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/litemap-0.8.2/Cargo.toml"
+    },
+    {
+      "name": "lock_api",
+      "version": "0.4.14",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/Amanieu/parking_lot",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lock_api-0.4.14/Cargo.toml"
+    },
+    {
+      "name": "log",
+      "version": "0.4.32",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-lang/log",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.32/Cargo.toml"
+    },
+    {
+      "name": "markup5ever",
+      "version": "0.38.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/html5ever",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.38.0/Cargo.toml"
+    },
+    {
+      "name": "memchr",
+      "version": "2.8.2",
+      "license": "Unlicense OR MIT",
+      "homepage": "https://github.com/BurntSushi/memchr",
+      "repository": "https://github.com/BurntSushi/memchr",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/memchr-2.8.2/Cargo.toml"
+    },
+    {
+      "name": "mime",
+      "version": "0.3.17",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/hyperium/mime",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime-0.3.17/Cargo.toml"
+    },
+    {
+      "name": "miniz_oxide",
+      "version": "0.8.9",
+      "license": "MIT OR Zlib OR Apache-2.0",
+      "homepage": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide",
+      "repository": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/miniz_oxide-0.8.9/Cargo.toml"
+    },
+    {
+      "name": "mio",
+      "version": "1.2.1",
+      "license": "MIT",
+      "homepage": "https://github.com/tokio-rs/mio",
+      "repository": "https://github.com/tokio-rs/mio",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mio-1.2.1/Cargo.toml"
+    },
+    {
+      "name": "muda",
+      "version": "0.19.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/muda",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/muda-0.19.2/Cargo.toml"
+    },
+    {
+      "name": "new_debug_unreachable",
+      "version": "1.0.6",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/mbrubeck/rust-debug-unreachable",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/new_debug_unreachable-1.0.6/Cargo.toml"
+    },
+    {
+      "name": "num-conv",
+      "version": "0.2.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/jhpratt/num-conv",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/num-conv-0.2.2/Cargo.toml"
+    },
+    {
+      "name": "num-traits",
+      "version": "0.2.19",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-num/num-traits",
+      "repository": "https://github.com/rust-num/num-traits",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/num-traits-0.2.19/Cargo.toml"
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/matklad/once_cell",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/once_cell-1.21.4/Cargo.toml"
+    },
+    {
+      "name": "option-ext",
+      "version": "0.2.0",
+      "license": "MPL-2.0",
+      "homepage": "https://github.com/soc/option-ext",
+      "repository": "https://github.com/soc/option-ext.git",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/option-ext-0.2.0/Cargo.toml"
+    },
+    {
+      "name": "parking_lot",
+      "version": "0.12.5",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/Amanieu/parking_lot",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/parking_lot-0.12.5/Cargo.toml"
+    },
+    {
+      "name": "parking_lot_core",
+      "version": "0.9.12",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/Amanieu/parking_lot",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/parking_lot_core-0.9.12/Cargo.toml"
+    },
+    {
+      "name": "percent-encoding",
+      "version": "2.3.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/rust-url/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/percent-encoding-2.3.2/Cargo.toml"
+    },
+    {
+      "name": "phf",
+      "version": "0.13.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf-0.13.1/Cargo.toml"
+    },
+    {
+      "name": "phf_codegen",
+      "version": "0.13.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf_codegen-0.13.1/Cargo.toml"
+    },
+    {
+      "name": "phf_generator",
+      "version": "0.13.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf_generator-0.13.1/Cargo.toml"
+    },
+    {
+      "name": "phf_macros",
+      "version": "0.13.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf_macros-0.13.1/Cargo.toml"
+    },
+    {
+      "name": "phf_shared",
+      "version": "0.13.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/phf_shared-0.13.1/Cargo.toml"
+    },
+    {
+      "name": "pin-project-lite",
+      "version": "0.2.17",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/taiki-e/pin-project-lite",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pin-project-lite-0.2.17/Cargo.toml"
+    },
+    {
+      "name": "plist",
+      "version": "1.9.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/ebarnard/rust-plist/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/plist-1.9.0/Cargo.toml"
+    },
+    {
+      "name": "png",
+      "version": "0.17.16",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/image-rs/image-png",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/png-0.17.16/Cargo.toml"
+    },
+    {
+      "name": "potential_utf",
+      "version": "0.1.5",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/potential_utf-0.1.5/Cargo.toml"
+    },
+    {
+      "name": "powerfmt",
+      "version": "0.2.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/jhpratt/powerfmt",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/powerfmt-0.2.0/Cargo.toml"
+    },
+    {
+      "name": "precomputed-hash",
+      "version": "0.1.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/emilio/precomputed-hash",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/precomputed-hash-0.1.1/Cargo.toml"
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.106",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/proc-macro2",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proc-macro2-1.0.106/Cargo.toml"
+    },
+    {
+      "name": "quick-xml",
+      "version": "0.39.4",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/tafia/quick-xml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quick-xml-0.39.4/Cargo.toml"
+    },
+    {
+      "name": "quote",
+      "version": "1.0.45",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/quote",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.45/Cargo.toml"
+    },
+    {
+      "name": "raw-window-handle",
+      "version": "0.6.2",
+      "license": "MIT OR Apache-2.0 OR Zlib",
+      "homepage": "",
+      "repository": "https://github.com/rust-windowing/raw-window-handle",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-window-handle-0.6.2/Cargo.toml"
+    },
+    {
+      "name": "ref-cast",
+      "version": "1.0.25",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/ref-cast",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.25/Cargo.toml"
+    },
+    {
+      "name": "ref-cast-impl",
+      "version": "1.0.25",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/ref-cast",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-impl-1.0.25/Cargo.toml"
+    },
+    {
+      "name": "regex",
+      "version": "1.12.4",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-lang/regex",
+      "repository": "https://github.com/rust-lang/regex",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/regex-1.12.4/Cargo.toml"
+    },
+    {
+      "name": "regex-automata",
+      "version": "0.4.14",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-lang/regex/tree/master/regex-automata",
+      "repository": "https://github.com/rust-lang/regex",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/regex-automata-0.4.14/Cargo.toml"
+    },
+    {
+      "name": "regex-syntax",
+      "version": "0.8.11",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-lang/regex/tree/master/regex-syntax",
+      "repository": "https://github.com/rust-lang/regex",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/regex-syntax-0.8.11/Cargo.toml"
+    },
+    {
+      "name": "rfd",
+      "version": "0.16.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/PolyMeilex/rfd",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rfd-0.16.0/Cargo.toml"
+    },
+    {
+      "name": "rustc_version",
+      "version": "0.4.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/djc/rustc-version-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustc_version-0.4.1/Cargo.toml"
+    },
+    {
+      "name": "rustc-hash",
+      "version": "2.1.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/rust-lang/rustc-hash",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustc-hash-2.1.2/Cargo.toml"
+    },
+    {
+      "name": "same-file",
+      "version": "1.0.6",
+      "license": "Unlicense/MIT",
+      "homepage": "https://github.com/BurntSushi/same-file",
+      "repository": "https://github.com/BurntSushi/same-file",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/same-file-1.0.6/Cargo.toml"
+    },
+    {
+      "name": "schemars",
+      "version": "0.8.22",
+      "license": "MIT",
+      "homepage": "https://graham.cool/schemars/",
+      "repository": "https://github.com/GREsau/schemars",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/schemars-0.8.22/Cargo.toml"
+    },
+    {
+      "name": "schemars",
+      "version": "0.9.0",
+      "license": "MIT",
+      "homepage": "https://graham.cool/schemars/",
+      "repository": "https://github.com/GREsau/schemars",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/schemars-0.9.0/Cargo.toml"
+    },
+    {
+      "name": "schemars",
+      "version": "1.2.1",
+      "license": "MIT",
+      "homepage": "https://graham.cool/schemars/",
+      "repository": "https://github.com/GREsau/schemars",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/schemars-1.2.1/Cargo.toml"
+    },
+    {
+      "name": "schemars_derive",
+      "version": "0.8.22",
+      "license": "MIT",
+      "homepage": "https://graham.cool/schemars/",
+      "repository": "https://github.com/GREsau/schemars",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/schemars_derive-0.8.22/Cargo.toml"
+    },
+    {
+      "name": "scopeguard",
+      "version": "1.2.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/bluss/scopeguard",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/scopeguard-1.2.0/Cargo.toml"
+    },
+    {
+      "name": "selectors",
+      "version": "0.36.1",
+      "license": "MPL-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/stylo",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.36.1/Cargo.toml"
+    },
+    {
+      "name": "semver",
+      "version": "1.0.28",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/semver",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.28/Cargo.toml"
+    },
+    {
+      "name": "serde",
+      "version": "1.0.228",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://serde.rs",
+      "repository": "https://github.com/serde-rs/serde",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/Cargo.toml"
+    },
+    {
+      "name": "serde_core",
+      "version": "1.0.228",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://serde.rs",
+      "repository": "https://github.com/serde-rs/serde",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/Cargo.toml"
+    },
+    {
+      "name": "serde_derive",
+      "version": "1.0.228",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://serde.rs",
+      "repository": "https://github.com/serde-rs/serde",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_derive-1.0.228/Cargo.toml"
+    },
+    {
+      "name": "serde_derive_internals",
+      "version": "0.29.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://serde.rs",
+      "repository": "https://github.com/serde-rs/serde",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_derive_internals-0.29.1/Cargo.toml"
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.150",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/serde-rs/json",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.150/Cargo.toml"
+    },
+    {
+      "name": "serde_repr",
+      "version": "0.1.20",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/serde-repr",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_repr-0.1.20/Cargo.toml"
+    },
+    {
+      "name": "serde_spanned",
+      "version": "1.1.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/toml-rs/toml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_spanned-1.1.1/Cargo.toml"
+    },
+    {
+      "name": "serde_with",
+      "version": "3.21.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/jonasbb/serde_with/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_with-3.21.0/Cargo.toml"
+    },
+    {
+      "name": "serde_with_macros",
+      "version": "3.21.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/jonasbb/serde_with/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_with_macros-3.21.0/Cargo.toml"
+    },
+    {
+      "name": "serde-untagged",
+      "version": "0.1.9",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/serde-untagged",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-untagged-0.1.9/Cargo.toml"
+    },
+    {
+      "name": "serialize-to-javascript",
+      "version": "0.1.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/chippers/serialize-to-javascript",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serialize-to-javascript-0.1.2/Cargo.toml"
+    },
+    {
+      "name": "serialize-to-javascript-impl",
+      "version": "0.1.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/chippers/serialize-to-javascript",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serialize-to-javascript-impl-0.1.2/Cargo.toml"
+    },
+    {
+      "name": "servo_arc",
+      "version": "0.4.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/stylo",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/servo_arc-0.4.3/Cargo.toml"
+    },
+    {
+      "name": "sha2",
+      "version": "0.10.9",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/RustCrypto/hashes",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.10.9/Cargo.toml"
+    },
+    {
+      "name": "shlex",
+      "version": "2.0.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/comex/rust-shlex",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/shlex-2.0.1/Cargo.toml"
+    },
+    {
+      "name": "simd-adler32",
+      "version": "0.3.9",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/mcountryman/simd-adler32",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/simd-adler32-0.3.9/Cargo.toml"
+    },
+    {
+      "name": "siphasher",
+      "version": "1.0.3",
+      "license": "MIT/Apache-2.0",
+      "homepage": "https://docs.rs/siphasher",
+      "repository": "https://github.com/jedisct1/rust-siphash",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/siphasher-1.0.3/Cargo.toml"
+    },
+    {
+      "name": "smallvec",
+      "version": "1.15.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/rust-smallvec",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/smallvec-1.15.2/Cargo.toml"
+    },
+    {
+      "name": "socket2",
+      "version": "0.6.4",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/rust-lang/socket2",
+      "repository": "https://github.com/rust-lang/socket2",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/socket2-0.6.4/Cargo.toml"
+    },
+    {
+      "name": "softbuffer",
+      "version": "0.4.8",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/rust-windowing/softbuffer",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/softbuffer-0.4.8/Cargo.toml"
+    },
+    {
+      "name": "stable_deref_trait",
+      "version": "1.2.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/storyyeller/stable_deref_trait",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stable_deref_trait-1.2.1/Cargo.toml"
+    },
+    {
+      "name": "string_cache",
+      "version": "0.9.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/string-cache",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/string_cache-0.9.0/Cargo.toml"
+    },
+    {
+      "name": "string_cache_codegen",
+      "version": "0.6.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/string-cache",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/string_cache_codegen-0.6.1/Cargo.toml"
+    },
+    {
+      "name": "strsim",
+      "version": "0.11.1",
+      "license": "MIT",
+      "homepage": "https://github.com/rapidfuzz/strsim-rs",
+      "repository": "https://github.com/rapidfuzz/strsim-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/strsim-0.11.1/Cargo.toml"
+    },
+    {
+      "name": "syn",
+      "version": "2.0.117",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/syn",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/syn-2.0.117/Cargo.toml"
+    },
+    {
+      "name": "synstructure",
+      "version": "0.13.2",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/mystor/synstructure",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/synstructure-0.13.2/Cargo.toml"
+    },
+    {
+      "name": "tao",
+      "version": "0.35.3",
+      "license": "Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/tao",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tao-0.35.3/Cargo.toml"
+    },
+    {
+      "name": "tauri",
+      "version": "2.11.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://tauri.app/",
+      "repository": "https://github.com/tauri-apps/tauri",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-2.11.2/Cargo.toml"
+    },
+    {
+      "name": "tauri-build",
+      "version": "2.6.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://tauri.app/",
+      "repository": "https://github.com/tauri-apps/tauri",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-build-2.6.2/Cargo.toml"
+    },
+    {
+      "name": "tauri-codegen",
+      "version": "2.6.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://tauri.app/",
+      "repository": "https://github.com/tauri-apps/tauri",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-codegen-2.6.2/Cargo.toml"
+    },
+    {
+      "name": "tauri-macros",
+      "version": "2.6.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://tauri.app/",
+      "repository": "https://github.com/tauri-apps/tauri",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-macros-2.6.2/Cargo.toml"
+    },
+    {
+      "name": "tauri-plugin",
+      "version": "2.6.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://tauri.app/",
+      "repository": "https://github.com/tauri-apps/tauri",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-2.6.2/Cargo.toml"
+    },
+    {
+      "name": "tauri-plugin-dialog",
+      "version": "2.7.1",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/plugins-workspace",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.1/Cargo.toml"
+    },
+    {
+      "name": "tauri-plugin-fs",
+      "version": "2.5.1",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/plugins-workspace",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.1/Cargo.toml"
+    },
+    {
+      "name": "tauri-runtime",
+      "version": "2.11.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://tauri.app/",
+      "repository": "https://github.com/tauri-apps/tauri",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-runtime-2.11.2/Cargo.toml"
+    },
+    {
+      "name": "tauri-runtime-wry",
+      "version": "2.11.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://tauri.app/",
+      "repository": "https://github.com/tauri-apps/tauri",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-runtime-wry-2.11.2/Cargo.toml"
+    },
+    {
+      "name": "tauri-utils",
+      "version": "2.9.2",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://tauri.app/",
+      "repository": "https://github.com/tauri-apps/tauri",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-utils-2.9.2/Cargo.toml"
+    },
+    {
+      "name": "tauri-winres",
+      "version": "0.3.6",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/winres",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-winres-0.3.6/Cargo.toml"
+    },
+    {
+      "name": "tendril",
+      "version": "0.5.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/html5ever",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tendril-0.5.0/Cargo.toml"
+    },
+    {
+      "name": "thiserror",
+      "version": "1.0.69",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/thiserror",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-1.0.69/Cargo.toml"
+    },
+    {
+      "name": "thiserror",
+      "version": "2.0.18",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/thiserror",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/Cargo.toml"
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "1.0.69",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/thiserror",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-impl-1.0.69/Cargo.toml"
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "2.0.18",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/thiserror",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-impl-2.0.18/Cargo.toml"
+    },
+    {
+      "name": "time",
+      "version": "0.3.47",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://time-rs.github.io",
+      "repository": "https://github.com/time-rs/time",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-0.3.47/Cargo.toml"
+    },
+    {
+      "name": "time-core",
+      "version": "0.1.8",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/time-rs/time",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.8/Cargo.toml"
+    },
+    {
+      "name": "time-macros",
+      "version": "0.2.27",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/time-rs/time",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-macros-0.2.27/Cargo.toml"
+    },
+    {
+      "name": "tinystr",
+      "version": "0.8.3",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.3/Cargo.toml"
+    },
+    {
+      "name": "tinyvec",
+      "version": "1.11.0",
+      "license": "Zlib OR Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/Lokathor/tinyvec",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinyvec-1.11.0/Cargo.toml"
+    },
+    {
+      "name": "tinyvec_macros",
+      "version": "0.1.1",
+      "license": "MIT OR Apache-2.0 OR Zlib",
+      "homepage": "",
+      "repository": "https://github.com/Soveu/tinyvec_macros",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinyvec_macros-0.1.1/Cargo.toml"
+    },
+    {
+      "name": "tokio",
+      "version": "1.52.3",
+      "license": "MIT",
+      "homepage": "https://tokio.rs",
+      "repository": "https://github.com/tokio-rs/tokio",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/Cargo.toml"
+    },
+    {
+      "name": "toml",
+      "version": "0.9.12+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/toml-rs/toml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml-0.9.12+spec-1.1.0/Cargo.toml"
+    },
+    {
+      "name": "toml",
+      "version": "1.1.2+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/toml-rs/toml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml-1.1.2+spec-1.1.0/Cargo.toml"
+    },
+    {
+      "name": "toml_datetime",
+      "version": "0.7.5+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/toml-rs/toml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-0.7.5+spec-1.1.0/Cargo.toml"
+    },
+    {
+      "name": "toml_datetime",
+      "version": "1.1.1+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/toml-rs/toml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_datetime-1.1.1+spec-1.1.0/Cargo.toml"
+    },
+    {
+      "name": "toml_parser",
+      "version": "1.1.2+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/toml-rs/toml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_parser-1.1.2+spec-1.1.0/Cargo.toml"
+    },
+    {
+      "name": "toml_writer",
+      "version": "1.1.1+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/toml-rs/toml",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/toml_writer-1.1.1+spec-1.1.0/Cargo.toml"
+    },
+    {
+      "name": "tracing",
+      "version": "0.1.44",
+      "license": "MIT",
+      "homepage": "https://tokio.rs",
+      "repository": "https://github.com/tokio-rs/tracing",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/Cargo.toml"
+    },
+    {
+      "name": "tracing-core",
+      "version": "0.1.36",
+      "license": "MIT",
+      "homepage": "https://tokio.rs",
+      "repository": "https://github.com/tokio-rs/tracing",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-core-0.1.36/Cargo.toml"
+    },
+    {
+      "name": "tray-icon",
+      "version": "0.23.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/tauri-apps/tray-icon",
+      "repository": "https://github.com/tauri-apps/tray-icon",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tray-icon-0.23.1/Cargo.toml"
+    },
+    {
+      "name": "typeid",
+      "version": "1.0.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/typeid",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typeid-1.0.3/Cargo.toml"
+    },
+    {
+      "name": "typenum",
+      "version": "1.20.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/paholg/typenum",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typenum-1.20.1/Cargo.toml"
+    },
+    {
+      "name": "unic-char-property",
+      "version": "0.9.0",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unic-char-property-0.9.0/Cargo.toml"
+    },
+    {
+      "name": "unic-char-range",
+      "version": "0.9.0",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unic-char-range-0.9.0/Cargo.toml"
+    },
+    {
+      "name": "unic-common",
+      "version": "0.9.0",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unic-common-0.9.0/Cargo.toml"
+    },
+    {
+      "name": "unic-ucd-ident",
+      "version": "0.9.0",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unic-ucd-ident-0.9.0/Cargo.toml"
+    },
+    {
+      "name": "unic-ucd-version",
+      "version": "0.9.0",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unic-ucd-version-0.9.0/Cargo.toml"
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/unicode-ident",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-ident-1.0.24/Cargo.toml"
+    },
+    {
+      "name": "unicode-segmentation",
+      "version": "1.13.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/unicode-rs/unicode-segmentation",
+      "repository": "https://github.com/unicode-rs/unicode-segmentation",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-segmentation-1.13.3/Cargo.toml"
+    },
+    {
+      "name": "url",
+      "version": "2.5.8",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/rust-url",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/Cargo.toml"
+    },
+    {
+      "name": "urlpattern",
+      "version": "0.3.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/denoland/rust-urlpattern",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/urlpattern-0.3.0/Cargo.toml"
+    },
+    {
+      "name": "utf-8",
+      "version": "0.7.6",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/SimonSapin/rust-utf8",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/utf-8-0.7.6/Cargo.toml"
+    },
+    {
+      "name": "utf8_iter",
+      "version": "1.0.4",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://docs.rs/utf8_iter/",
+      "repository": "https://github.com/hsivonen/utf8_iter",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/utf8_iter-1.0.4/Cargo.toml"
+    },
+    {
+      "name": "uuid",
+      "version": "1.23.3",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://github.com/uuid-rs/uuid",
+      "repository": "https://github.com/uuid-rs/uuid",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/uuid-1.23.3/Cargo.toml"
+    },
+    {
+      "name": "version_check",
+      "version": "0.9.5",
+      "license": "MIT/Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/SergioBenitez/version_check",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/version_check-0.9.5/Cargo.toml"
+    },
+    {
+      "name": "vswhom",
+      "version": "0.1.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/nabijaczleweli/vswhom.rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vswhom-0.1.0/Cargo.toml"
+    },
+    {
+      "name": "vswhom-sys",
+      "version": "0.1.3",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/nabijaczleweli/vswhom-sys.rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vswhom-sys-0.1.3/Cargo.toml"
+    },
+    {
+      "name": "walkdir",
+      "version": "2.5.0",
+      "license": "Unlicense/MIT",
+      "homepage": "https://github.com/BurntSushi/walkdir",
+      "repository": "https://github.com/BurntSushi/walkdir",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/walkdir-2.5.0/Cargo.toml"
+    },
+    {
+      "name": "web_atoms",
+      "version": "0.2.4",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/servo/html5ever",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/web_atoms-0.2.4/Cargo.toml"
+    },
+    {
+      "name": "webview2-com",
+      "version": "0.38.2",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/wravery/webview2-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/webview2-com-0.38.2/Cargo.toml"
+    },
+    {
+      "name": "webview2-com-macros",
+      "version": "0.8.1",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/wravery/webview2-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/webview2-com-macros-0.8.1/Cargo.toml"
+    },
+    {
+      "name": "webview2-com-sys",
+      "version": "0.38.2",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/wravery/webview2-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/webview2-com-sys-0.38.2/Cargo.toml"
+    },
+    {
+      "name": "winapi-util",
+      "version": "0.1.11",
+      "license": "Unlicense OR MIT",
+      "homepage": "https://github.com/BurntSushi/winapi-util",
+      "repository": "https://github.com/BurntSushi/winapi-util",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winapi-util-0.1.11/Cargo.toml"
+    },
+    {
+      "name": "window-vibrancy",
+      "version": "0.6.0",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/tauri-plugin-vibrancy",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/window-vibrancy-0.6.0/Cargo.toml"
+    },
+    {
+      "name": "windows",
+      "version": "0.61.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-0.61.3/Cargo.toml"
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "version": "0.52.6",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows_x86_64_msvc-0.52.6/Cargo.toml"
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "version": "0.53.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows_x86_64_msvc-0.53.1/Cargo.toml"
+    },
+    {
+      "name": "windows-collections",
+      "version": "0.2.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-collections-0.2.0/Cargo.toml"
+    },
+    {
+      "name": "windows-core",
+      "version": "0.61.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-core-0.61.2/Cargo.toml"
+    },
+    {
+      "name": "windows-future",
+      "version": "0.2.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-future-0.2.1/Cargo.toml"
+    },
+    {
+      "name": "windows-implement",
+      "version": "0.60.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-implement-0.60.2/Cargo.toml"
+    },
+    {
+      "name": "windows-interface",
+      "version": "0.59.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-interface-0.59.3/Cargo.toml"
+    },
+    {
+      "name": "windows-link",
+      "version": "0.1.3",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-link-0.1.3/Cargo.toml"
+    },
+    {
+      "name": "windows-link",
+      "version": "0.2.1",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-link-0.2.1/Cargo.toml"
+    },
+    {
+      "name": "windows-numerics",
+      "version": "0.2.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-numerics-0.2.0/Cargo.toml"
+    },
+    {
+      "name": "windows-result",
+      "version": "0.3.4",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-result-0.3.4/Cargo.toml"
+    },
+    {
+      "name": "windows-strings",
+      "version": "0.4.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-strings-0.4.2/Cargo.toml"
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.59.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-sys-0.59.0/Cargo.toml"
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.60.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-sys-0.60.2/Cargo.toml"
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.61.2",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-sys-0.61.2/Cargo.toml"
+    },
+    {
+      "name": "windows-targets",
+      "version": "0.52.6",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-targets-0.52.6/Cargo.toml"
+    },
+    {
+      "name": "windows-targets",
+      "version": "0.53.5",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-targets-0.53.5/Cargo.toml"
+    },
+    {
+      "name": "windows-threading",
+      "version": "0.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.1.0/Cargo.toml"
+    },
+    {
+      "name": "windows-version",
+      "version": "0.1.7",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-version-0.1.7/Cargo.toml"
+    },
+    {
+      "name": "winnow",
+      "version": "0.7.15",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/winnow-rs/winnow",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winnow-0.7.15/Cargo.toml"
+    },
+    {
+      "name": "winnow",
+      "version": "1.0.3",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/winnow-rs/winnow",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winnow-1.0.3/Cargo.toml"
+    },
+    {
+      "name": "winreg",
+      "version": "0.55.0",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/gentoo90/winreg-rs",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winreg-0.55.0/Cargo.toml"
+    },
+    {
+      "name": "writeable",
+      "version": "0.6.3",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/writeable-0.6.3/Cargo.toml"
+    },
+    {
+      "name": "wry",
+      "version": "0.55.1",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "",
+      "repository": "https://github.com/tauri-apps/wry",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wry-0.55.1/Cargo.toml"
+    },
+    {
+      "name": "yoke",
+      "version": "0.8.3",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yoke-0.8.3/Cargo.toml"
+    },
+    {
+      "name": "yoke-derive",
+      "version": "0.8.2",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yoke-derive-0.8.2/Cargo.toml"
+    },
+    {
+      "name": "zerofrom",
+      "version": "0.1.8",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zerofrom-0.1.8/Cargo.toml"
+    },
+    {
+      "name": "zerofrom-derive",
+      "version": "0.1.7",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zerofrom-derive-0.1.7/Cargo.toml"
+    },
+    {
+      "name": "zerotrie",
+      "version": "0.2.4",
+      "license": "Unicode-3.0",
+      "homepage": "https://icu4x.unicode.org",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zerotrie-0.2.4/Cargo.toml"
+    },
+    {
+      "name": "zerovec",
+      "version": "0.11.6",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zerovec-0.11.6/Cargo.toml"
+    },
+    {
+      "name": "zerovec-derive",
+      "version": "0.11.3",
+      "license": "Unicode-3.0",
+      "homepage": "",
+      "repository": "https://github.com/unicode-org/icu4x",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zerovec-derive-0.11.3/Cargo.toml"
+    },
+    {
+      "name": "zmij",
+      "version": "1.0.21",
+      "license": "MIT",
+      "homepage": "",
+      "repository": "https://github.com/dtolnay/zmij",
+      "checksum": "",
+      "path": "C:/Users/macha/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.21/Cargo.toml"
+    }
+  ]
+}

@@ -19,6 +19,8 @@ import { canUseNativeFileDialogs, openBinaryFileFromDialog } from '../../platfor
 import { fileTransferFailureMessage } from '../export/exportFailureMessages';
 import { requestSupportMenuOpen } from '../support/supportEvents';
 import {
+  savedProjectLoadDiagnosticMessage,
+  savedProjectLoadFailureMessage,
   templateLoadDiagnosticMessage,
   templateLoadFailureMessage,
 } from './projectFailureMessages';
@@ -284,7 +286,8 @@ function SavedProjectList({ onDone }: { onDone: () => void }) {
       onDone();
       pushToast('プロジェクトを読み込みました。', 'success');
     } else {
-      pushToast('プロジェクトの読み込みに失敗しました。', 'error');
+      recordDiagnostic('project-load', savedProjectLoadDiagnosticMessage(id));
+      pushToast(savedProjectLoadFailureMessage(), 'error');
     }
   };
 

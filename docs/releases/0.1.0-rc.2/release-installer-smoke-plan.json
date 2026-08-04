@@ -1,0 +1,85 @@
+{
+  "productName": "Compose Tutor Studio",
+  "version": "0.1.0",
+  "platform": "windows-x64",
+  "generatedAt": "2026-07-06T21:43:07.877Z",
+  "result": "Pass",
+  "planOnly": true,
+  "manifestPath": "apps/studio/src-tauri/target/release/release/release-manifest.json",
+  "installerMetadataReportPath": "apps/studio/src-tauri/target/release/release/release-installer-metadata-report.json",
+  "msiProductCode": "{BF9E0880-497A-458D-BD30-FB2ACE997C42}",
+  "artifacts": {
+    "portable": {
+      "kind": "portable-exe",
+      "fileName": "cts-studio.exe",
+      "path": "apps/studio/src-tauri/target/release/cts-studio.exe",
+      "sizeBytes": 14737920,
+      "sha256": "379b7e502e27bafbf03d71f7c9f2abe989867234b3c17e1094893175c3bffeb1"
+    },
+    "msi": {
+      "kind": "msi-installer",
+      "fileName": "Compose Tutor Studio_0.1.0_x64_en-US.msi",
+      "path": "apps/studio/src-tauri/target/release/bundle/msi/Compose Tutor Studio_0.1.0_x64_en-US.msi",
+      "sizeBytes": 3317760,
+      "sha256": "7eec0b9df45b811c862c11c651240511e14e0f585278e0dad433b8dd968cb8fa"
+    },
+    "nsis": {
+      "kind": "nsis-installer",
+      "fileName": "Compose Tutor Studio_0.1.0_x64-setup.exe",
+      "path": "apps/studio/src-tauri/target/release/bundle/nsis/Compose Tutor Studio_0.1.0_x64-setup.exe",
+      "sizeBytes": 2216731,
+      "sha256": "ca0b9c4d9ccc4584b0434985feb1c97666f0c7027a1181aa28c694be50d998a5"
+    }
+  },
+  "steps": [
+    {
+      "id": "PRE-001",
+      "purpose": "Confirm the candidate artifacts and installer metadata match the release manifest before touching the machine.",
+      "shell": "PowerShell",
+      "command": "pnpm release:verify; pnpm release:installers:verify",
+      "expected": "Both commands pass for the same candidate build."
+    },
+    {
+      "id": "REL-MAN-001-NSIS-INSTALL",
+      "purpose": "Install the NSIS candidate in a clean Windows VM or disposable test account.",
+      "shell": "PowerShell",
+      "command": "Start-Process -FilePath 'D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\nsis\\Compose Tutor Studio_0.1.0_x64-setup.exe' -Wait -PassThru",
+      "expected": "Installer completes without error and the app can be found from Start or the install directory."
+    },
+    {
+      "id": "REL-MAN-001-NSIS-SILENT-OPTIONAL",
+      "purpose": "Optional unattended NSIS install check for repeatable QA environments.",
+      "shell": "PowerShell",
+      "command": "Start-Process -FilePath 'D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\nsis\\Compose Tutor Studio_0.1.0_x64-setup.exe' -ArgumentList '/S' -Wait -PassThru",
+      "expected": "Process exits successfully. If this differs from the interactive install, record the difference in the QA log."
+    },
+    {
+      "id": "REL-MAN-001-NSIS-LAUNCH-PROBE",
+      "purpose": "Probe the default per-user Tauri NSIS install location and launch if present.",
+      "shell": "PowerShell",
+      "command": "$exe = Join-Path $env:LOCALAPPDATA 'Programs\\Compose Tutor Studio\\Compose Tutor Studio.exe'; if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe } else { Write-Host \"Expected exe not found: $exe\" }",
+      "expected": "Compose Tutor Studio opens. If installed elsewhere, launch from Start and note the actual path."
+    },
+    {
+      "id": "REL-MAN-001-NSIS-UNINSTALL",
+      "purpose": "Uninstall the NSIS candidate after launch checks.",
+      "shell": "PowerShell",
+      "command": "$uninstaller = Join-Path $env:LOCALAPPDATA 'Programs\\Compose Tutor Studio\\uninstall.exe'; if (Test-Path -LiteralPath $uninstaller) { Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru } else { Write-Host 'Use Windows Settings > Installed apps to uninstall.' }",
+      "expected": "The app is removed and no stale Start/menu shortcut remains for this candidate."
+    },
+    {
+      "id": "REL-MAN-002-MSI-INSTALL",
+      "purpose": "Install the MSI candidate in a clean Windows VM or disposable test account.",
+      "shell": "PowerShell",
+      "command": "Start-Process msiexec.exe -ArgumentList '/i', 'D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\msi\\Compose Tutor Studio_0.1.0_x64_en-US.msi', '/qn', '/norestart', 'ALLUSERS=2', 'MSIINSTALLPERUSER=1', '/L*v', 'D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\release\\msi-install-smoke.log' -Wait -PassThru",
+      "expected": "msiexec exits successfully and the app can be launched from the installed location or Start."
+    },
+    {
+      "id": "REL-MAN-002-MSI-UNINSTALL",
+      "purpose": "Uninstall the MSI candidate by ProductCode after launch checks.",
+      "shell": "PowerShell",
+      "command": "Start-Process msiexec.exe -ArgumentList '/x', '{BF9E0880-497A-458D-BD30-FB2ACE997C42}', '/qn', '/norestart', '/L*v', 'D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\release\\msi-uninstall-smoke.log' -Wait -PassThru",
+      "expected": "msiexec exits successfully and the app is removed from Windows installed apps."
+    }
+  ]
+}

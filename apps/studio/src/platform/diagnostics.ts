@@ -4,19 +4,23 @@
 // bounded, path-redacted log in localStorage so a user can copy it when asking
 // for help after a crash.
 
-export type DiagnosticKind =
-  | 'render-error'
-  | 'window-error'
-  | 'unhandled-rejection'
-  | 'storage-recovery'
-  | 'storage-save'
-  | 'audio-playback'
-  | 'template-load'
-  | 'import-midi'
-  | 'project-import'
-  | 'project-export'
-  | 'export-midi'
-  | 'export-wav';
+export const DIAGNOSTIC_KINDS = [
+  'render-error',
+  'window-error',
+  'unhandled-rejection',
+  'storage-recovery',
+  'storage-save',
+  'audio-playback',
+  'template-load',
+  'project-load',
+  'import-midi',
+  'project-import',
+  'project-export',
+  'export-midi',
+  'export-wav',
+] as const;
+
+export type DiagnosticKind = (typeof DIAGNOSTIC_KINDS)[number];
 
 export type DiagnosticEntry = {
   id: string;
@@ -33,6 +37,46 @@ export type DiagnosticTarget = Pick<Window, 'addEventListener' | 'removeEventLis
 export const DIAGNOSTIC_LOG_KEY = 'cts.diagnostics.v1';
 const MAX_DIAGNOSTICS = 20;
 const MAX_TEXT_LENGTH = 6000;
+const DIAGNOSTIC_KIND_SET = new Set<string>(DIAGNOSTIC_KINDS);
+const KNOWN_LOCAL_FILE_SUFFIX =
+  String.raw`(?:ctsproj\.json|json|mid|midi|wav|tsx?|jsx?|mjs|cjs|rs|css|html|ico|png)(?::\d+(?::\d+)?)?`;
+const KNOWN_LOCAL_FILE_PATH_PATTERNS: Array<[RegExp, string]> = [
+  [
+    new RegExp(String.raw`file:///[A-Za-z]:/[^\r\n)"']+?\.${KNOWN_LOCAL_FILE_SUFFIX}`, 'g'),
+    'file:///[local-path]',
+  ],
+  [
+    new RegExp(String.raw`\\\\\?\\[A-Za-z]:\\[^\r\n)"']+?\.${KNOWN_LOCAL_FILE_SUFFIX}`, 'g'),
+    '[local-path]',
+  ],
+  [
+    new RegExp(String.raw`[A-Za-z]:\\[^\r\n)"']+?\.${KNOWN_LOCAL_FILE_SUFFIX}`, 'g'),
+    '[local-path]',
+  ],
+  [
+    new RegExp(String.raw`[A-Za-z]:/[^\r\n)"']+?\.${KNOWN_LOCAL_FILE_SUFFIX}`, 'g'),
+    '[local-path]',
+  ],
+  [
+    new RegExp(String.raw`\\\\[^\\\r\n)"']+\\[^\r\n)"']+?\.${KNOWN_LOCAL_FILE_SUFFIX}`, 'g'),
+    '[local-path]',
+  ],
+  [
+    new RegExp(
+      String.raw`(?:/Users|/home|/tmp|/var/folders)/[^\r\n)"']+?\.${KNOWN_LOCAL_FILE_SUFFIX}`,
+      'g',
+    ),
+    '[local-path]',
+  ],
+  [
+    new RegExp(String.raw`~/[^\r\n)"']+?\.${KNOWN_LOCAL_FILE_SUFFIX}`, 'g'),
+    '[local-path]',
+  ],
+  [
+    new RegExp(String.raw`file:///[^\r\n)"']+?\.${KNOWN_LOCAL_FILE_SUFFIX}`, 'g'),
+    'file:///[local-path]',
+  ],
+];
 
 export function appVersion(): string {
   return typeof __CTS_APP_VERSION__ === 'string' ? __CTS_APP_VERSION__ : 'development';
@@ -57,7 +101,7 @@ function makeId(): string {
 }
 
 export function sanitizeDiagnosticText(value: string): string {
-  return value
+  return redactKnownLocalFilePaths(value)
     .replace(/file:\/\/\/[A-Za-z]:\/[^\s)"']+/g, 'file:///[local-path]')
     .replace(/\\\\\?\\[A-Za-z]:\\[^\s)"']+/g, '[local-path]')
     .replace(/[A-Za-z]:\\[^\s)"']+/g, '[local-path]')
@@ -67,6 +111,20 @@ export function sanitizeDiagnosticText(value: string): string {
     .replace(/~\/[^\s)"']+/g, '[local-path]')
     .replace(/file:\/\/\/[^\s)"']+/g, 'file:///[local-path]')
     .slice(0, MAX_TEXT_LENGTH);
+}
+
+function redactKnownLocalFilePaths(value: string): string {
+  return KNOWN_LOCAL_FILE_PATH_PATTERNS.reduce(
+    (text, [pattern, replacement]) => text.replace(pattern, replacement),
+    value,
+  );
+}
+
+export function formatDiagnosticValue(value: string, maxLength = 120): string {
+  const compact = sanitizeDiagnosticText(value).replace(/\s+/g, ' ').trim();
+  if (compact.length === 0) return '(empty)';
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength)}...`;
 }
 
 function normalizeError(error: unknown): { message: string; stack: string | null } {
@@ -91,35 +149,36 @@ function parseDiagnostics(raw: string | null): DiagnosticEntry[] {
   try {
     const value: unknown = JSON.parse(raw);
     if (!Array.isArray(value)) return [];
-    return value.filter(isDiagnosticEntry).slice(0, MAX_DIAGNOSTICS);
+    return value
+      .map(normalizeDiagnosticEntry)
+      .filter((entry): entry is DiagnosticEntry => entry !== null)
+      .slice(0, MAX_DIAGNOSTICS);
   } catch {
     return [];
   }
 }
 
-function isDiagnosticEntry(value: unknown): value is DiagnosticEntry {
-  if (typeof value !== 'object' || value === null) return false;
+function normalizeDiagnosticEntry(value: unknown): DiagnosticEntry | null {
+  if (typeof value !== 'object' || value === null) return null;
   const v = value as Record<string, unknown>;
-  return (
-    typeof v.id === 'string' &&
-    (v.kind === 'render-error' ||
-      v.kind === 'window-error' ||
-      v.kind === 'unhandled-rejection' ||
-      v.kind === 'storage-recovery' ||
-      v.kind === 'storage-save' ||
-      v.kind === 'audio-playback' ||
-      v.kind === 'template-load' ||
-      v.kind === 'import-midi' ||
-      v.kind === 'project-import' ||
-      v.kind === 'project-export' ||
-      v.kind === 'export-midi' ||
-      v.kind === 'export-wav') &&
-    typeof v.message === 'string' &&
-    (typeof v.stack === 'string' || v.stack === null) &&
-    (typeof v.componentStack === 'string' || v.componentStack === null) &&
-    typeof v.occurredAt === 'string' &&
-    (typeof v.userAgent === 'string' || v.userAgent === null)
-  );
+  const { id, kind, message, stack, componentStack, occurredAt, userAgent } = v;
+  if (typeof id !== 'string') return null;
+  if (typeof kind !== 'string' || !DIAGNOSTIC_KIND_SET.has(kind)) return null;
+  if (typeof message !== 'string') return null;
+  if (typeof stack !== 'string' && stack !== null) return null;
+  if (typeof componentStack !== 'string' && componentStack !== null) return null;
+  if (typeof occurredAt !== 'string') return null;
+  if (typeof userAgent !== 'string' && userAgent !== null) return null;
+
+  return {
+    id: formatDiagnosticValue(id, 120),
+    kind: kind as DiagnosticKind,
+    message: sanitizeDiagnosticText(message),
+    stack: stack === null ? null : sanitizeDiagnosticText(stack),
+    componentStack: componentStack === null ? null : sanitizeDiagnosticText(componentStack),
+    occurredAt: formatDiagnosticValue(occurredAt, 120),
+    userAgent: userAgent === null ? null : formatDiagnosticValue(userAgent, 240),
+  };
 }
 
 export function loadDiagnostics(storage: Storage | null = getStorage()): DiagnosticEntry[] {

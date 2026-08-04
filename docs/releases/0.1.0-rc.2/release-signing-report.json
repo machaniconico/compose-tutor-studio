@@ -1,0 +1,60 @@
+{
+  "productName": "Compose Tutor Studio",
+  "version": "0.1.0",
+  "platform": "windows-x64",
+  "generatedAt": "2026-07-06T21:43:10.384Z",
+  "manifestPath": "apps/studio/src-tauri/target/release/release/release-manifest.json",
+  "requireSigned": false,
+  "signingState": "unsigned-limited",
+  "guidance": "Artifacts are unsigned. Limit distribution and show SmartScreen/SHA-256 guidance to users.",
+  "artifacts": [
+    {
+      "kind": "portable-exe",
+      "fileName": "cts-studio.exe",
+      "path": "apps/studio/src-tauri/target/release/cts-studio.exe",
+      "sha256": "379b7e502e27bafbf03d71f7c9f2abe989867234b3c17e1094893175c3bffeb1",
+      "signature": {
+        "status": "NotSigned",
+        "checkedPath": "D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\cts-studio.exe",
+        "fileExists": true,
+        "statusMessage": "File is not digitally signed.",
+        "signerSubject": "",
+        "signerIssuer": "",
+        "signerThumbprint": "",
+        "timeStamperSubject": ""
+      }
+    },
+    {
+      "kind": "msi-installer",
+      "fileName": "Compose Tutor Studio_0.1.0_x64_en-US.msi",
+      "path": "apps/studio/src-tauri/target/release/bundle/msi/Compose Tutor Studio_0.1.0_x64_en-US.msi",
+      "sha256": "7eec0b9df45b811c862c11c651240511e14e0f585278e0dad433b8dd968cb8fa",
+      "signature": {
+        "status": "NotSigned",
+        "checkedPath": "D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\msi\\Compose Tutor Studio_0.1.0_x64_en-US.msi",
+        "fileExists": true,
+        "statusMessage": "File is not digitally signed.",
+        "signerSubject": "",
+        "signerIssuer": "",
+        "signerThumbprint": "",
+        "timeStamperSubject": ""
+      }
+    },
+    {
+      "kind": "nsis-installer",
+      "fileName": "Compose Tutor Studio_0.1.0_x64-setup.exe",
+      "path": "apps/studio/src-tauri/target/release/bundle/nsis/Compose Tutor Studio_0.1.0_x64-setup.exe",
+      "sha256": "ca0b9c4d9ccc4584b0434985feb1c97666f0c7027a1181aa28c694be50d998a5",
+      "signature": {
+        "status": "NotSigned",
+        "checkedPath": "D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\nsis\\Compose Tutor Studio_0.1.0_x64-setup.exe",
+        "fileExists": true,
+        "statusMessage": "File is not digitally signed.",
+        "signerSubject": "",
+        "signerIssuer": "",
+        "signerThumbprint": "",
+        "timeStamperSubject": ""
+      }
+    }
+  ]
+}

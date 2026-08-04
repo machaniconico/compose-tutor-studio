@@ -26,7 +26,8 @@ class FailingStorage extends MemoryStorage {
 class ProjectWriteFailingStorage extends MemoryStorage {
   override setItem(key: string, value: string): void {
     if (key.startsWith('cts.project.')) {
-      throw new Error('QuotaExceededError');
+      throw new Error(`QuotaExceededError at C:\\Users\\name\\song.ctsproj.json
+        ${'x'.repeat(900)}`);
     }
     super.setItem(key, value);
   }
@@ -185,6 +186,22 @@ describe('persistence', () => {
     expect(loadDiagnostics(storage)).toHaveLength(1);
   });
 
+  it('keeps skipped saved-project diagnostic keys redacted and single-line', () => {
+    const storage = new MemoryStorage();
+    const unsafeId = `C:\\Users\\name\\song.ctsproj.json
+      ${'x'.repeat(180)}`;
+    storage.setItem(projectKey(unsafeId), '{ broken project json');
+
+    expect(listProjectRecoveryIssues(storage)).toHaveLength(1);
+
+    const message = loadDiagnostics(storage)[0]?.message ?? '';
+    expect(message).toContain('Saved project was skipped');
+    expect(message).toContain('key=cts.project.[local-path]');
+    expect(message).not.toContain('C:\\Users\\name');
+    expect(message).not.toContain('\n');
+    expect(message.length).toBeLessThan(400);
+  });
+
   it('deletes only unrecoverable saved project entries', () => {
     const storage = new MemoryStorage();
     const valid = createDefaultProject('残す曲');
@@ -237,6 +254,9 @@ describe('persistence', () => {
     expect(diagnostics[0]?.message).toContain(projectKey(project.id));
     expect(diagnostics[0]?.message).toContain('payloadBytes=');
     expect(diagnostics[0]?.message).toContain('QuotaExceededError');
+    expect(diagnostics[0]?.message).toContain('[local-path]');
+    expect(diagnostics[0]?.message).not.toContain('C:\\Users\\name');
+    expect(diagnostics[0]?.message).not.toContain('\n');
     expect(diagnostics[0]?.message).not.toContain('保存失敗');
   });
 

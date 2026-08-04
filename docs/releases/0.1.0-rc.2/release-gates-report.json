@@ -1,0 +1,238 @@
+{
+  "generatedAt": "2026-07-06T21:43:14.235Z",
+  "commit": "0c179c2",
+  "result": "Pass",
+  "commandSource": "default",
+  "commands": [
+    {
+      "command": "pnpm check",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:41:51.379Z",
+      "finishedAt": "2026-07-06T21:41:59.732Z",
+      "durationMs": 8353,
+      "stdoutTail": "est:  ✓ tests/gridMath.test.ts (16 tests) 5ms\napps/studio test:  ✓ tests/exportHistory.test.ts (5 tests) 7ms\napps/studio test:  ✓ tests/releaseNotesVerifier.test.mjs (4 tests) 193ms\napps/studio test:  ✓ tests/releaseQaLogVerifier.test.mjs (4 tests) 197ms\napps/studio test:  ✓ tests/errorBoundary.test.ts (1 test) 5ms\napps/studio test:  ✓ tests/fileDialogs.test.ts (6 tests) 7ms\napps/studio test:  ✓ tests/sourceStatusReportVerifier.test.mjs (15 tests) 77ms\napps/studio test:  ✓ tests/projectFileImport.test.ts (6 tests) 6ms\napps/studio test:  ✓ tests/persistence.test.ts (16 tests) 20ms\napps/studio test:  ✓ tests/mockCoach.test.ts (18 tests) 9ms\napps/studio test:  ✓ tests/difficultyText.test.ts (52 tests) 8ms\napps/studio test:  ✓ tests/exportHelpers.test.ts (13 tests) 92ms\napps/studio test:  ✓ tests/scheduler.test.ts (20 tests) 6ms\napps/studio test:  ✓ tests/store.test.ts (34 tests) 111ms\napps/studio test:  ✓ tests/firstSongSmoke.test.ts (1 test) 93ms\napps/studio test:  ✓ tests/editorActions.test.ts (15 tests) 467ms\napps/studio test:  ✓ tests/metering.test.ts (6 tests) 3ms\napps/studio test:  ✓ tests/events.test.ts (8 tests) 5ms\napps/studio test:  ✓ tests/metronome.test.ts (5 tests) 3ms\napps/studio test:  ✓ tests/projectFailureMessages.test.ts (6 tests) 4ms\napps/studio test:  ✓ tests/wav.test.ts (9 tests) 4ms\napps/studio test:  ✓ tests/supportEvents.test.ts (2 tests) 2ms\napps/studio test:  ✓ tests/releaseArchiveVerifier.test.mjs (3 tests) 2ms\napps/studio test:  ✓ tests/supportMenu.test.ts (6 tests) 6ms\napps/studio test:  ✓ tests/tutorialBridge.test.ts (6 tests) 48ms\napps/studio test:  ✓ tests/playbackFailure.test.ts (3 tests) 2ms\napps/studio test:  ✓ tests/transportShortcuts.test.ts (7 tests) 5ms\napps/studio test:  Test Files  33 passed (33)\napps/studio test:       Tests  346 passed (346)\napps/studio test:    Start at  06:41:58\napps/studio test:    Duration  1.04s (transform 1.98s, setup 0ms, collect 5.95s, tests 1.46s, environment 5ms, prepare 3.88s)\napps/studio test: Done",
+      "stderrTail": "$ pnpm typecheck && pnpm test\n$ pnpm -r typecheck\n$ pnpm -r test"
+    },
+    {
+      "command": "pnpm check:privacy",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:41:59.732Z",
+      "finishedAt": "2026-07-06T21:42:00.405Z",
+      "durationMs": 673,
+      "stdoutTail": "Privacy/network policy check passed: no hidden network calls or network-capable permissions detected.",
+      "stderrTail": "$ pnpm --filter @cts/studio check:privacy\n$ node ./scripts/checkNoHiddenNetwork.mjs"
+    },
+    {
+      "command": "pnpm check:secrets",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:42:00.405Z",
+      "finishedAt": "2026-07-06T21:42:01.150Z",
+      "durationMs": 745,
+      "stdoutTail": "Release secret policy check passed: no private signing keys, certificates, or secret values detected.",
+      "stderrTail": "$ pnpm --filter @cts/studio check:secrets\n$ node ./scripts/checkReleaseSecrets.mjs"
+    },
+    {
+      "command": "pnpm check:assets",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:42:01.150Z",
+      "finishedAt": "2026-07-06T21:42:01.740Z",
+      "durationMs": 590,
+      "stdoutTail": "Source asset policy check passed: no unexpected image, audio, video, archive, or signing asset files detected.",
+      "stderrTail": "$ pnpm --filter @cts/studio check:assets\n$ node ./scripts/checkSourceAssetPolicy.mjs"
+    },
+    {
+      "command": "pnpm build",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:42:01.740Z",
+      "finishedAt": "2026-07-06T21:42:06.914Z",
+      "durationMs": 5174,
+      "stdoutTail": "Scope: 5 of 6 workspace projects\npackages/project-model build$ node ./node_modules/typescript/bin/tsc --noEmit\npackages/theory-engine build$ node ./node_modules/typescript/bin/tsc --noEmit\npackages/project-model build: Done\npackages/theory-engine build: Done\npackages/midi-io build$ node ./node_modules/typescript/bin/tsc --noEmit\npackages/tutorial-engine build$ node ./node_modules/typescript/bin/tsc --noEmit\npackages/midi-io build: Done\npackages/tutorial-engine build: Done\napps/studio build$ node ./node_modules/typescript/bin/tsc --noEmit && node ./node_modules/vite/bin/vite.js build\napps/studio build: vite v7.3.5 building client environment for production...\napps/studio build: transforming...\napps/studio build: ✓ 145 modules transformed.\napps/studio build: rendering chunks...\napps/studio build: computing gzip size...\napps/studio build: dist/index.html                   0.61 kB │ gzip:   0.39 kB\napps/studio build: dist/assets/index-C481NECp.css   38.08 kB │ gzip:   7.00 kB\napps/studio build: dist/assets/index-DMOaE2df.js   483.40 kB │ gzip: 149.22 kB\napps/studio build: ✓ built in 1.03s\napps/studio build: Done",
+      "stderrTail": "$ pnpm -r build"
+    },
+    {
+      "command": "pnpm check:size",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:42:06.914Z",
+      "finishedAt": "2026-07-06T21:42:07.519Z",
+      "durationMs": 605,
+      "stdoutTail": "PASS web JS raw total: 472.1 KiB / 600.0 KiB\nPASS web JS gzip total: 145.7 KiB / 180.0 KiB\nPASS web CSS raw total: 37.2 KiB / 90.0 KiB\nPASS web CSS gzip total: 6.8 KiB / 24.0 KiB",
+      "stderrTail": "$ pnpm --filter @cts/studio check:size\n$ node ./scripts/checkSize.mjs"
+    },
+    {
+      "command": "pnpm test:e2e",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:42:07.519Z",
+      "finishedAt": "2026-07-06T21:42:12.553Z",
+      "durationMs": 5034,
+      "stdoutTail": "Running 9 tests using 9 workers\n\n  ok 7 [chromium] › e2e\\first-launch.spec.ts:479:1 › support dialog shows a manual diagnostic report when clipboard copy fails (887ms)\n  ok 6 [chromium] › e2e\\first-launch.spec.ts:526:1 › unrecoverable saved projects are surfaced and removable from support (924ms)\n  ok 1 [chromium] › e2e\\first-launch.spec.ts:202:1 › invalid project import is rejected without replacing the current project (1.0s)\n  ok 3 [chromium] › e2e\\first-launch.spec.ts:259:1 › invalid MIDI import is rejected without changing the current project and records diagnostics (1.1s)\n  ok 9 [chromium] › e2e\\first-launch.spec.ts:317:1 › support dialog exposes local diagnostics from the workspace (973ms)\n  ok 4 [chromium] › e2e\\first-launch.spec.ts:156:1 › unsafe project titles are exported with safe filenames without changing the title (1.4s)\n  ok 5 [chromium] › e2e\\first-launch.spec.ts:63:1 › sample song can be heard, saved, and prepared for MIDI export (1.4s)\n  ok 2 [chromium] › e2e\\first-launch.spec.ts:101:1 › project can be saved, resumed after reload, exported, and imported (1.4s)\n  ok 8 [chromium] › e2e\\first-launch.spec.ts:572:1 › offline core workflow does not make external network requests (1.5s)\n\n  9 passed (4.0s)",
+      "stderrTail": "$ pnpm --filter @cts/studio test:e2e\n$ node ./node_modules/@playwright/test/cli.js test"
+    },
+    {
+      "command": "pnpm build:desktop",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:42:12.553Z",
+      "finishedAt": "2026-07-06T21:43:02.885Z",
+      "durationMs": 50332,
+      "stdoutTail": "vite v7.3.5 building client environment for production...\ntransforming...\n✓ 145 modules transformed.\nrendering chunks...\ncomputing gzip size...\ndist/index.html                   0.61 kB │ gzip:   0.39 kB\ndist/assets/index-C481NECp.css   38.08 kB │ gzip:   7.00 kB\ndist/assets/index-DMOaE2df.js   483.40 kB │ gzip: 149.22 kB\n✓ built in 1.04s",
+      "stderrTail": "$ pnpm --filter @cts/studio build:desktop\n$ node ./node_modules/@tauri-apps/cli/tauri.js build\n        Info Looking up installed tauri packages to check mismatched versions...\n     Running beforeBuildCommand `pnpm build`\n$ node ./node_modules/typescript/bin/tsc --noEmit && node ./node_modules/vite/bin/vite.js build\n   Compiling cts-studio v0.1.0 (D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri)\n    Finished `release` profile [optimized] target(s) in 38.17s\n       Built application at: D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\cts-studio.exe\n        Info Patching D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\cts-studio.exe with bundle type information: msi\n        Info Target: x64\n     Running candle for \"D:\\\\workspace\\\\compose-tutor-studio\\\\apps\\\\studio\\\\src-tauri\\\\target\\\\release\\\\wix\\\\x64\\\\main.wxs\"\n     Running light to produce D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\msi\\Compose Tutor Studio_0.1.0_x64_en-US.msi\n        Info Patching D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\cts-studio.exe with bundle type information: nsis\n        Info Target: x64\n     Running makensis to produce D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\nsis\\Compose Tutor Studio_0.1.0_x64-setup.exe\n    Finished 2 bundles at:\n        D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\msi\\Compose Tutor Studio_0.1.0_x64_en-US.msi\n        D:\\workspace\\compose-tutor-studio\\apps\\studio\\src-tauri\\target\\release\\bundle\\nsis\\Compose Tutor Studio_0.1.0_x64-setup.exe"
+    },
+    {
+      "command": "pnpm check:size:desktop",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:02.885Z",
+      "finishedAt": "2026-07-06T21:43:03.481Z",
+      "durationMs": 596,
+      "stdoutTail": "PASS web JS raw total: 472.1 KiB / 600.0 KiB\nPASS web JS gzip total: 145.7 KiB / 180.0 KiB\nPASS web CSS raw total: 37.2 KiB / 90.0 KiB\nPASS web CSS gzip total: 6.8 KiB / 24.0 KiB\nPASS desktop exe: 14.06 MiB / 30.00 MiB\nPASS MSI installer: 3.16 MiB / 20.00 MiB\nPASS NSIS installer: 2.11 MiB / 20.00 MiB",
+      "stderrTail": "$ pnpm --filter @cts/studio check:size:desktop\n$ node ./scripts/checkSize.mjs --desktop"
+    },
+    {
+      "command": "pnpm release:manifest",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:03.481Z",
+      "finishedAt": "2026-07-06T21:43:04.114Z",
+      "durationMs": 633,
+      "stdoutTail": "Created apps/studio/src-tauri/target/release/release/release-manifest.json\nCreated apps/studio/src-tauri/target/release/release/SHA256SUMS.txt",
+      "stderrTail": "$ pnpm --filter @cts/studio release:manifest\n$ node ./scripts/createReleaseManifest.mjs"
+    },
+    {
+      "command": "pnpm release:source-status",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:04.114Z",
+      "finishedAt": "2026-07-06T21:43:04.733Z",
+      "durationMs": 619,
+      "stdoutTail": "Created apps/studio/src-tauri/target/release/release/release-source-status-report.json\nCreated apps/studio/src-tauri/target/release/release/release-source-status-report.md\nSource worktree: dirty (12 entries)",
+      "stderrTail": "$ pnpm --filter @cts/studio release:source-status\n$ node ./scripts/createSourceStatusReport.mjs"
+    },
+    {
+      "command": "pnpm release:source-status:verify",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:04.733Z",
+      "finishedAt": "2026-07-06T21:43:05.323Z",
+      "durationMs": 590,
+      "stdoutTail": "Release source status verification passed: apps/studio/src-tauri/target/release/release/release-source-status-report.json",
+      "stderrTail": "$ pnpm --filter @cts/studio release:source-status:verify\n$ node ./scripts/verifySourceStatusReport.mjs"
+    },
+    {
+      "command": "pnpm release:verify",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:05.323Z",
+      "finishedAt": "2026-07-06T21:43:05.915Z",
+      "durationMs": 592,
+      "stdoutTail": "PASS portable-exe: apps/studio/src-tauri/target/release/cts-studio.exe\nPASS msi-installer: apps/studio/src-tauri/target/release/bundle/msi/Compose Tutor Studio_0.1.0_x64_en-US.msi\nPASS nsis-installer: apps/studio/src-tauri/target/release/bundle/nsis/Compose Tutor Studio_0.1.0_x64-setup.exe\nRelease artifact verification passed: 3 artifacts.",
+      "stderrTail": "$ pnpm --filter @cts/studio release:verify\n$ node ./scripts/verifyReleaseArtifacts.mjs"
+    },
+    {
+      "command": "pnpm release:installers:verify",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:05.915Z",
+      "finishedAt": "2026-07-06T21:43:07.330Z",
+      "durationMs": 1416,
+      "stdoutTail": "Created apps/studio/src-tauri/target/release/release/release-installer-metadata-report.json\nCreated apps/studio/src-tauri/target/release/release/release-installer-metadata-report.md\nPass portable exe file name\nPass MSI installer file name includes product, version, architecture, and locale\nPass NSIS installer file name includes product, version, architecture, and setup suffix\nPass portable exe ProductName\nPass portable exe FileDescription\nPass portable exe ProductVersion\nPass portable exe FileVersion\nPass NSIS installer ProductName\nPass NSIS installer FileDescription\nPass NSIS installer ProductVersion\nPass NSIS installer FileVersion\nPass MSI ProductName\nPass MSI ProductVersion\nPass MSI ProductCode\nPass MSI UpgradeCode\nPass MSI Manufacturer",
+      "stderrTail": "$ pnpm --filter @cts/studio release:installers:verify\n$ node ./scripts/verifyInstallerMetadata.mjs"
+    },
+    {
+      "command": "pnpm release:installers:smoke:plan",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:07.331Z",
+      "finishedAt": "2026-07-06T21:43:07.911Z",
+      "durationMs": 580,
+      "stdoutTail": "Created apps/studio/src-tauri/target/release/release/release-installer-smoke-plan.json\nCreated apps/studio/src-tauri/target/release/release/release-installer-smoke-plan.md",
+      "stderrTail": "$ pnpm --filter @cts/studio release:installers:smoke:plan\n$ node ./scripts/createInstallerSmokePlan.mjs"
+    },
+    {
+      "command": "pnpm release:installers:smoke:verify",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:07.911Z",
+      "finishedAt": "2026-07-06T21:43:08.508Z",
+      "durationMs": 597,
+      "stdoutTail": "Release installer smoke plan verification passed: apps/studio/src-tauri/target/release/release/release-installer-smoke-plan.json",
+      "stderrTail": "$ pnpm --filter @cts/studio release:installers:smoke:verify\n$ node ./scripts/verifyInstallerSmokePlan.mjs"
+    },
+    {
+      "command": "pnpm release:signing",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:08.508Z",
+      "finishedAt": "2026-07-06T21:43:10.417Z",
+      "durationMs": 1909,
+      "stdoutTail": "Created apps/studio/src-tauri/target/release/release/release-signing-report.json\nCreated apps/studio/src-tauri/target/release/release/release-signing-report.md",
+      "stderrTail": "$ pnpm --filter @cts/studio release:signing\n$ node ./scripts/createSigningReport.mjs"
+    },
+    {
+      "command": "pnpm release:signing:verify",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:10.417Z",
+      "finishedAt": "2026-07-06T21:43:11.007Z",
+      "durationMs": 590,
+      "stdoutTail": "Release signing report verification passed: apps/studio/src-tauri/target/release/release/release-signing-report.json",
+      "stderrTail": "$ pnpm --filter @cts/studio release:signing:verify\n$ node ./scripts/verifySigningReport.mjs"
+    },
+    {
+      "command": "pnpm release:notices",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:11.007Z",
+      "finishedAt": "2026-07-06T21:43:11.833Z",
+      "durationMs": 826,
+      "stdoutTail": "Created apps/studio/src-tauri/target/release/release/THIRD_PARTY_NOTICES.json\nCreated apps/studio/src-tauri/target/release/release/THIRD_PARTY_NOTICES.md",
+      "stderrTail": "$ pnpm --filter @cts/studio release:notices\n$ node ./scripts/createThirdPartyNotices.mjs"
+    },
+    {
+      "command": "pnpm release:notices:verify",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:11.833Z",
+      "finishedAt": "2026-07-06T21:43:12.425Z",
+      "durationMs": 592,
+      "stdoutTail": "Third-party notices verification passed: 7 npm package(s), 256 Rust crate(s).",
+      "stderrTail": "$ pnpm --filter @cts/studio release:notices:verify\n$ node ./scripts/verifyThirdPartyNotices.mjs"
+    },
+    {
+      "command": "pnpm release:notes",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:12.425Z",
+      "finishedAt": "2026-07-06T21:43:13.028Z",
+      "durationMs": 603,
+      "stdoutTail": "Created apps/studio/src-tauri/target/release/release/release-notes-draft.md",
+      "stderrTail": "$ pnpm --filter @cts/studio release:notes\n$ node ./scripts/createReleaseNotes.mjs"
+    },
+    {
+      "command": "pnpm release:notes:verify:draft",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:13.028Z",
+      "finishedAt": "2026-07-06T21:43:13.632Z",
+      "durationMs": 604,
+      "stdoutTail": "Release notes verification passed (draft structure): apps/studio/src-tauri/target/release/release/release-notes-draft.md",
+      "stderrTail": "$ pnpm --filter @cts/studio release:notes:verify:draft\n$ node ./scripts/verifyReleaseNotes.mjs --allow-draft"
+    },
+    {
+      "command": "pnpm check:release",
+      "result": "Pass",
+      "exitCode": 0,
+      "startedAt": "2026-07-06T21:43:13.632Z",
+      "finishedAt": "2026-07-06T21:43:14.235Z",
+      "durationMs": 603,
+      "stdoutTail": " distribution notes include pnpm release:verify\nPASS distribution notes include pnpm release:verify:publish\nPASS distribution notes include コード署名\nPASS distribution notes include SmartScreen\nPASS distribution notes include 未署名ビルド\nPASS distribution notes include updater\nPASS distribution notes include 診断ログ\nPASS distribution notes include WebView2\nPASS distribution notes include アンインストール\nPASS distribution notes include リリース担当者チェック\nPASS signing plan includes Windows code signing\nPASS signing plan includes Tauri updater\nPASS signing plan includes SmartScreen\nPASS signing plan includes TAURI_SIGNING_PRIVATE_KEY\nPASS signing plan includes TAURI_SIGNING_PRIVATE_KEY_PASSWORD\nPASS signing plan includes TAURI_WINDOWS_SIGNTOOL_PATH\nPASS signing plan includes upgradeCode\nPASS signing plan includes Phase 0\nPASS signing plan includes Phase 1\nPASS signing plan includes Phase 2\nPASS signing plan includes Phase 3\nPASS signing plan includes private key\nPASS signing plan includes rollback\nPASS signing plan includes SIGN-001\nPASS signing plan includes SIGN-002\nPASS signing plan includes SIGN-003\nPASS signing plan includes SIGN-004\nPASS signing plan includes SIGN-005\nPASS signing plan includes SECRETS-001\nPASS signing plan includes UPD-001\nPASS signing plan includes UPD-002\nPASS signing plan includes UPD-003\nPASS signing plan includes UPD-004\nPASS signing plan records fixed upgradeCode\nPASS privacy policy includes pnpm check:privacy\nPASS privacy policy includes fetch\nPASS privacy policy includes WebSocket\nPASS privacy policy includes @tauri-apps/plugin-http\nPASS privacy policy includes HTTP\nPASS privacy policy includes updater\nPASS privacy policy includes telemetry\nPASS privacy policy includes AI Coach\nPASS privacy policy includes opt-in\nPASS privacy policy includes docs/13_distribution_release_notes.md\nPASS privacy policy includes docs/12_release_qa_log.md\nPASS privacy policy includes pnpm check:secrets\nPASS privacy policy includes pnpm check:assets\nRelease readiness passed: 400 checks.",
+      "stderrTail": "$ pnpm --filter @cts/studio check:release\n$ node ./scripts/checkReleaseReadiness.mjs"
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import {
   clearDiagnostics,
   type DiagnosticEntry,
   formatDiagnosticReport,
+  formatDiagnosticValue,
   loadDiagnostics,
   sanitizeDiagnosticText,
   type DiagnosticKind,
@@ -46,6 +47,20 @@ type RecentDiagnosticSummary = {
   message: string;
 };
 
+export type ProjectRecoveryIssueSummary = {
+  key: string;
+  reason: string;
+};
+
+export type SupportDiagnosticCounts = {
+  saveFailureCount: number;
+  fileTransferFailureCount: number;
+  audioFailureCount: number;
+  savedProjectLoadFailureCount: number;
+  appFlowFailureCount: number;
+  backupRecoveryCount: number;
+};
+
 const RECENT_DIAGNOSTIC_LIMIT = 5;
 const RECENT_DIAGNOSTIC_MESSAGE_LIMIT = 120;
 
@@ -66,19 +81,48 @@ function recoveryReasonText(reason: ProjectRecoveryIssue['reason']): string {
   return '新しい形式のため未対応です';
 }
 
+export function summarizeProjectRecoveryIssue(
+  issue: ProjectRecoveryIssue,
+): ProjectRecoveryIssueSummary {
+  return {
+    key: formatDiagnosticValue(issue.key, 120),
+    reason: recoveryReasonText(issue.reason),
+  };
+}
+
 export function diagnosticKindLabel(kind: DiagnosticKind): string {
-  if (kind === 'render-error') return '画面表示';
-  if (kind === 'window-error') return 'アプリエラー';
-  if (kind === 'unhandled-rejection') return '処理中断';
-  if (kind === 'storage-recovery') return '保存復元';
-  if (kind === 'storage-save') return '保存';
-  if (kind === 'audio-playback') return '音声';
-  if (kind === 'template-load') return '作成/起動';
-  if (kind === 'import-midi') return 'MIDI読み込み';
-  if (kind === 'project-import') return 'プロジェクト読み込み';
-  if (kind === 'project-export') return 'プロジェクト書き出し';
-  if (kind === 'export-midi') return 'MIDI書き出し';
-  return 'WAV書き出し';
+  switch (kind) {
+    case 'render-error':
+      return '画面表示';
+    case 'window-error':
+      return 'アプリエラー';
+    case 'unhandled-rejection':
+      return '処理中断';
+    case 'storage-recovery':
+      return '保存復元';
+    case 'storage-save':
+      return '保存';
+    case 'audio-playback':
+      return '音声';
+    case 'template-load':
+      return '作成/起動';
+    case 'project-load':
+      return '保存済み読み込み';
+    case 'import-midi':
+      return 'MIDI読み込み';
+    case 'project-import':
+      return 'プロジェクト読み込み';
+    case 'project-export':
+      return 'プロジェクト書き出し';
+    case 'export-midi':
+      return 'MIDI書き出し';
+    case 'export-wav':
+      return 'WAV書き出し';
+    default: {
+      const unhandled: never = kind;
+      return unhandled;
+    }
+  }
 }
 
 export function formatSupportDiagnosticTime(occurredAt: string): string {
@@ -108,6 +152,21 @@ export function isBackupRecoveryDiagnostic(entry: DiagnosticEntry): boolean {
   return entry.kind === 'storage-recovery' && entry.message.includes(BACKUP_RECOVERY_MARKER);
 }
 
+export function summarizeSupportDiagnosticCounts(entries: DiagnosticEntry[]): SupportDiagnosticCounts {
+  return {
+    saveFailureCount: entries.filter((entry) => entry.kind === 'storage-save').length,
+    fileTransferFailureCount: entries.filter((entry) =>
+      FILE_TRANSFER_DIAGNOSTIC_KINDS.has(entry.kind),
+    ).length,
+    audioFailureCount: entries.filter((entry) => entry.kind === 'audio-playback').length,
+    savedProjectLoadFailureCount: entries.filter((entry) => entry.kind === 'project-load').length,
+    appFlowFailureCount: entries.filter((entry) =>
+      APP_FLOW_DIAGNOSTIC_KINDS.has(entry.kind),
+    ).length,
+    backupRecoveryCount: entries.filter(isBackupRecoveryDiagnostic).length,
+  };
+}
+
 export function SupportMenu() {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<SupportStatus>('idle');
@@ -116,15 +175,14 @@ export function SupportMenu() {
   const recoveryIssues = open ? listProjectRecoveryIssues() : [];
   const diagnostics = open ? loadDiagnostics() : [];
   const recentDiagnostics = summarizeRecentDiagnostics(diagnostics);
-  const saveFailureCount = diagnostics.filter((entry) => entry.kind === 'storage-save').length;
-  const fileTransferFailureCount = diagnostics.filter((entry) =>
-    FILE_TRANSFER_DIAGNOSTIC_KINDS.has(entry.kind),
-  ).length;
-  const audioFailureCount = diagnostics.filter((entry) => entry.kind === 'audio-playback').length;
-  const appFlowFailureCount = diagnostics.filter((entry) =>
-    APP_FLOW_DIAGNOSTIC_KINDS.has(entry.kind),
-  ).length;
-  const backupRecoveryCount = diagnostics.filter(isBackupRecoveryDiagnostic).length;
+  const {
+    saveFailureCount,
+    fileTransferFailureCount,
+    audioFailureCount,
+    savedProjectLoadFailureCount,
+    appFlowFailureCount,
+    backupRecoveryCount,
+  } = summarizeSupportDiagnosticCounts(diagnostics);
   const message = statusText(status);
 
   const openDialog = (): void => {
@@ -215,12 +273,15 @@ export function SupportMenu() {
                   以下の保存データは自動で読み込まず、元データは端末内に残しています。診断情報をコピーして相談するか、不要なら削除できます。
                 </p>
                 <ul>
-                  {recoveryIssues.map((issue) => (
-                    <li key={`${issue.key}:${issue.reason}`}>
-                      <span>{issue.key}</span>
-                      <small>{recoveryReasonText(issue.reason)}</small>
-                    </li>
-                  ))}
+                  {recoveryIssues.map((issue) => {
+                    const summary = summarizeProjectRecoveryIssue(issue);
+                    return (
+                      <li key={`${issue.key}:${issue.reason}`}>
+                        <span>{summary.key}</span>
+                        <small>{summary.reason}</small>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <button type="button" onClick={clearRecoveryData} data-version={version}>
                   復元できない保存データを削除
@@ -276,6 +337,19 @@ export function SupportMenu() {
                 <p>
                   {audioFailureCount}
                   件の音声開始失敗が記録されています。診断情報をコピーして相談すると、出力デバイスや音声許可の問題を確認しやすくなります。
+                </p>
+              </section>
+            ) : null}
+
+            {savedProjectLoadFailureCount > 0 ? (
+              <section
+                className="support-menu__recovery support-menu__recovery--warning"
+                aria-labelledby="support-saved-project-load-failure-title"
+              >
+                <h3 id="support-saved-project-load-failure-title">保存済みプロジェクトを開けなかった記録</h3>
+                <p>
+                  {savedProjectLoadFailureCount}
+                  件の保存済みプロジェクト読み込み失敗が記録されています。診断情報をコピーして相談すると、保存データの状態を確認しやすくなります。
                 </p>
               </section>
             ) : null}

@@ -3,6 +3,7 @@ import {
   validateProject,
   type Project,
 } from '@cts/project-model';
+import { formatDiagnosticValue } from '../../platform/diagnostics';
 
 export type ProjectFileImportFailureReason =
   | 'invalid-json'
@@ -69,8 +70,8 @@ function importFailure(
     ok: false,
     reason,
     userMessage: userMessageForReason(reason),
-    diagnosticMessage: `Project file import rejected. reason=${reason}; detail=${detail.slice(
-      0,
+    diagnosticMessage: `Project file import rejected. reason=${reason}; detail=${formatDiagnosticValue(
+      detail,
       MAX_DIAGNOSTIC_DETAIL_LENGTH,
     )}`,
   };
