@@ -4,6 +4,7 @@
  */
 
 import type { Project, NoteEvent, DrumLane, Track, Clip } from '@cts/project-model';
+import { beatsPerBar } from '@cts/project-model';
 import {
   PPQ,
   writeVarLen,
@@ -135,13 +136,13 @@ function notePatternLength(notes: NoteEvent[]): number {
 }
 
 /** Convert a drum clip's events into absolute-tick MIDI messages on channel 9. */
-function clipDrumsToMessages(clip: Clip, ppq: number): MidiMessage[] {
+function clipDrumsToMessages(clip: Clip, ppq: number, bpb: number): MidiMessage[] {
   const events = clip.drumEvents ?? [];
   if (events.length === 0) return [];
 
   const stepsPerBar = clip.stepsPerBar ?? 16;
-  // A bar of 4 quarter-note beats is divided into stepsPerBar steps.
-  const beatsPerStep = 4 / stepsPerBar;
+  // A bar of `bpb` quarter-note beats is divided into stepsPerBar steps.
+  const beatsPerStep = bpb / stepsPerBar;
 
   const msgs: MidiMessage[] = [];
   for (const evt of events) {
@@ -157,7 +158,12 @@ function clipDrumsToMessages(clip: Clip, ppq: number): MidiMessage[] {
 }
 
 /** Build one MTrk for an instrument/drum track, including CC7/CC10 at start. */
-function buildInstrumentTrack(track: Track, channel: number, ppq: number): Uint8Array {
+function buildInstrumentTrack(
+  track: Track,
+  channel: number,
+  ppq: number,
+  bpb: number,
+): Uint8Array {
   const msgs: MidiMessage[] = [
     { tick: 0, bytes: trackNameMeta(track.name) },
     { tick: 0, bytes: [0xb0 | channel, 7, volumeToCc(track.volume)] },
@@ -166,7 +172,7 @@ function buildInstrumentTrack(track: Track, channel: number, ppq: number): Uint8
 
   for (const clip of track.clips) {
     if (clip.type === 'drum') {
-      msgs.push(...clipDrumsToMessages(clip, ppq));
+      msgs.push(...clipDrumsToMessages(clip, ppq, bpb));
     } else {
       msgs.push(...clipNotesToMessages(clip, channel, ppq));
     }
@@ -210,10 +216,11 @@ export function projectToMidi(project: Project, options?: { ppq?: number }): Uin
     return nextChannel++;
   };
 
+  const bpb = beatsPerBar(project.timeSignature);
   for (const track of project.tracks) {
     if (track.type !== 'instrument' && track.type !== 'drum') continue;
     const channel = track.type === 'drum' ? DRUM_CHANNEL : allocChannel();
-    trackChunks.push(buildInstrumentTrack(track, channel, ppq));
+    trackChunks.push(buildInstrumentTrack(track, channel, ppq, bpb));
   }
 
   const allTracks = [tempoTrack, ...trackChunks];

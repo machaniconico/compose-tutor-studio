@@ -2,12 +2,16 @@ import type { EffectConfig, Track } from '@cts/project-model';
 import { useCallback, useMemo, useState } from 'react';
 import {
   DEFAULT_EFFECT_PARAMS,
+  delayTimeSeconds,
+  MAX_DELAY_SECONDS,
   effectParam,
   findEffect,
   upsertEffect,
+  type DelayDivision,
   type SupportedEffectType,
 } from '../../audio/effects';
-import { useStore } from '../../state/store';
+import { effectParamExplanation } from '../inspector/difficultyText';
+import { sliderUndoProps, useStore } from '../../state/store';
 import { LevelMeter, type LevelMeterReading } from './LevelMeter';
 import './meter.css';
 
@@ -165,11 +169,14 @@ function ChannelStrip(props: {
         <input
           className="mix-ch__volume"
           type="range"
+          {...sliderUndoProps}
           min={0}
           max={2}
           step={0.01}
           value={track.volume}
           aria-label={`${track.name} 音量`}
+          title="ダブルクリックで初期値(0 dB)に戻ります"
+          onDoubleClick={() => setTrackVolume(track.id, 1)}
           onChange={(e) => setTrackVolume(track.id, Number(e.target.value))}
         />
         <span className="mix-ch__db">{gainToDbLabel(track.volume)}</span>
@@ -179,6 +186,7 @@ function ChannelStrip(props: {
         <div className="mix-ch__pan">
           <input
             type="range"
+            {...sliderUndoProps}
             min={-1}
             max={1}
             step={0.01}
@@ -256,6 +264,12 @@ function EffectControls(props: {
   const filter = findEffect(track.effects, 'filter');
   const delay = findEffect(track.effects, 'delay');
   const reverb = findEffect(track.effects, 'reverb');
+  const eq = findEffect(track.effects, 'eq');
+  const compressor = findEffect(track.effects, 'compressor');
+  const difficulty = useStore((s) => s.editor.difficulty);
+  const bpm = useStore((s) => s.project.bpm);
+  const eqOn = eq?.enabled ?? false;
+  const compressorOn = compressor?.enabled ?? false;
   const filterOn = filter?.enabled ?? false;
   const delayOn = delay?.enabled ?? false;
   const reverbOn = reverb?.enabled ?? false;
@@ -281,9 +295,91 @@ function EffectControls(props: {
     DEFAULT_EFFECT_PARAMS.reverb.mix ?? 0.25,
   );
 
+  const eqRows = [
+    ['lowGainDb', '低音'],
+    ['midGainDb', '中音'],
+    ['highGainDb', '高音'],
+  ] as const;
+  const compressorRows = [
+    ['thresholdDb', 'スレッショルド', -60, 0, 1, ' dB'],
+    ['ratio', 'レシオ', 1, 20, 0.5, ' :1'],
+    ['attackSeconds', 'アタック', 0, 0.2, 0.005, ' s'],
+    ['releaseSeconds', 'リリース', 0.01, 1, 0.01, ' s'],
+  ] as const;
+
   return (
     <details className="mix-ch__effects">
       <summary>FX</summary>
+      <div className="mix-ch__effect">
+        <label>
+          <input
+            type="checkbox"
+            checked={eqOn}
+            aria-label={`${track.name} イコライザー`}
+            onChange={(event) => setEffectEnabled('eq', event.target.checked)}
+          />
+          イコライザー(音色の調整)
+        </label>
+        {eqRows.map(([key, label]) => {
+          const value = effectLabel(eq, key, DEFAULT_EFFECT_PARAMS.eq[key] ?? 0);
+          return (
+            <div key={key} title={effectParamExplanation(key, difficulty)}>
+              <input
+                type="range"
+                {...sliderUndoProps}
+                min={-12}
+                max={12}
+                step={0.5}
+                value={value}
+                disabled={!eqOn}
+                aria-label={`${track.name} イコライザー ${label}`}
+                onChange={(event) => setEffectParam('eq', key, Number(event.target.value))}
+              />
+              <span>
+                {label} {value > 0 ? '+' : ''}
+                {value.toFixed(1)} dB
+              </span>
+              <small className="mix-ch__hint">{effectParamExplanation(key, difficulty)}</small>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mix-ch__effect">
+        <label>
+          <input
+            type="checkbox"
+            checked={compressorOn}
+            aria-label={`${track.name} コンプレッサー`}
+            onChange={(event) => setEffectEnabled('compressor', event.target.checked)}
+          />
+          コンプレッサー(音量のばらつきをそろえる)
+        </label>
+        {compressorRows.map(([key, label, min, max, step, unit]) => {
+          const value = effectLabel(compressor, key, DEFAULT_EFFECT_PARAMS.compressor[key] ?? 0);
+          return (
+            <div key={key} title={effectParamExplanation(key, difficulty)}>
+              <input
+                type="range"
+                {...sliderUndoProps}
+                min={min}
+                max={max}
+                step={step}
+                value={value}
+                disabled={!compressorOn}
+                aria-label={`${track.name} コンプレッサー ${label}`}
+                onChange={(event) => setEffectParam('compressor', key, Number(event.target.value))}
+              />
+              <span>
+                {label} {value}
+                {unit}
+              </span>
+              <small className="mix-ch__hint">{effectParamExplanation(key, difficulty)}</small>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="mix-ch__effect">
         <label>
           <input
@@ -296,6 +392,7 @@ function EffectControls(props: {
         </label>
         <input
           type="range"
+          {...sliderUndoProps}
           min={200}
           max={12000}
           step={10}
@@ -319,8 +416,9 @@ function EffectControls(props: {
         </label>
         <input
           type="range"
+          {...sliderUndoProps}
           min={0.05}
-          max={1}
+          max={MAX_DELAY_SECONDS}
           step={0.01}
           value={delayTime}
           disabled={!delayOn}
@@ -328,8 +426,29 @@ function EffectControls(props: {
           onChange={(event) => setEffectParam('delay', 'timeSeconds', Number(event.target.value))}
         />
         <span>{delayTime.toFixed(2)} s</span>
+        <select
+          value=""
+          disabled={!delayOn}
+          aria-label={`${track.name} ディレイを曲のテンポに合わせる`}
+          onChange={(event) => {
+            const division = event.target.value as DelayDivision;
+            if (division) {
+              setEffectParam(
+                'delay',
+                'timeSeconds',
+                Math.min(MAX_DELAY_SECONDS, delayTimeSeconds(bpm, division)),
+              );
+            }
+          }}
+        >
+          <option value="">テンポに合わせる…</option>
+          <option value="1/4">4分音符</option>
+          <option value="1/8">8分音符</option>
+          <option value="1/8d">付点8分音符</option>
+        </select>
         <input
           type="range"
+          {...sliderUndoProps}
           min={0}
           max={0.8}
           step={0.01}
@@ -353,6 +472,7 @@ function EffectControls(props: {
         </label>
         <input
           type="range"
+          {...sliderUndoProps}
           min={0}
           max={0.8}
           step={0.01}

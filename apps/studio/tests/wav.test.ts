@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { encodeWav, floatToInt16 } from '../src/audio/wav';
+import { createEmptyProject, type Track } from '@cts/project-model';
+import {
+  encodeWav,
+  floatToInt16,
+  RENDER_TAIL_SECONDS,
+  renderLengthSeconds,
+} from '../src/audio/wav';
 
 /** Read a 4-char ASCII tag from an ArrayBuffer at an offset. */
 function ascii(buffer: ArrayBuffer, offset: number, length = 4): string {
@@ -79,5 +85,52 @@ describe('encodeWav (mono)', () => {
     expect(view.getUint32(24, true)).toBe(22050);
     expect(view.getUint16(32, true)).toBe(2); // block align = 1ch * 2 bytes
     expect(view.getUint32(40, true)).toBe(2 * 2); // 2 frames * 2 bytes
+  });
+});
+
+describe('renderLengthSeconds', () => {
+  const base = createEmptyProject({
+    bpm: 20,
+    lengthBars: 1,
+    timeSignature: [4, 4],
+    clock: () => new Date('2026-06-11T00:00:00.000Z'),
+  });
+  const delayTrack = (enabled: boolean, params: Record<string, number>): Track => ({
+    id: 'melody',
+    name: 'Melody',
+    type: 'instrument',
+    clips: [],
+    volume: 0.8,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: [{ id: 'fx-delay', type: 'delay', enabled, params }],
+  });
+
+  it('renders 8 bars of 3/4 as 24 beats', () => {
+    // 8 bars x 3 beats at 60 BPM = 24 s.
+    const waltz = { ...base, bpm: 60, lengthBars: 8, timeSignature: [3, 4] as [number, number], tracks: [] };
+    expect(renderLengthSeconds(waltz)).toBe(24 + RENDER_TAIL_SECONDS);
+  });
+
+  it('is the song plus the fixed tail when no delay is enabled', () => {
+    // 1 bar of 4/4 at 20 BPM = 12 s.
+    expect(renderLengthSeconds({ ...base, tracks: [] })).toBe(12 + RENDER_TAIL_SECONDS);
+    expect(
+      renderLengthSeconds({ ...base, tracks: [delayTrack(false, { timeSeconds: 1.5 })] }),
+    ).toBe(12 + RENDER_TAIL_SECONDS);
+  });
+
+  it('extends the tail by the longest enabled delay so the last repeat is kept', () => {
+    const project = {
+      ...base,
+      tracks: [delayTrack(true, { timeSeconds: 0.5 }), { ...delayTrack(true, { timeSeconds: 1.5 }), id: 'bass' }],
+    };
+    expect(renderLengthSeconds(project)).toBe(12 + 1.5 + RENDER_TAIL_SECONDS);
+  });
+
+  it('uses the clamped legacy delay time, not the raw saved value', () => {
+    const project = { ...base, tracks: [delayTrack(true, { delayTime: 4 })] };
+    expect(renderLengthSeconds(project)).toBe(12 + 1.5 + RENDER_TAIL_SECONDS);
   });
 });

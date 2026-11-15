@@ -1,13 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { ChordEvent } from '@cts/project-model';
+import { beatsPerBar } from '@cts/project-model';
 import {
   PROGRESSION_TEMPLATES,
   getDiatonicChords,
   suggestNextChords,
   type HarmonicFunction,
 } from '@cts/theory-engine';
-import { useStore } from '../../state/store';
+import { useStore, watchDragEnd } from '../../state/store';
 import { pxPerBeat, timelineWidth } from '../timeline';
+import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
 import {
   addChordWithAnalysis,
   applyProgressionTemplate,
@@ -29,6 +31,9 @@ function functionClass(fn: HarmonicFunction | undefined): string {
   }
 }
 
+/** Undo transaction owner: a stale pointer event only closes a chord drag's own step. */
+const CHORD_DRAG = Symbol('chordDrag');
+
 type ChordDrag = {
   chordId: string;
   kind: 'move' | 'resize';
@@ -49,6 +54,7 @@ export function ChordLane() {
   const selectedChordId = useStore((s) => s.editor.selectedChordId);
   const selectChord = useStore((s) => s.selectChord);
   const updateChord = useStore((s) => s.updateChord);
+  const beginTransaction = useStore((s) => s.beginTransaction);
   const setInspectorContent = useStore((s) => s.setInspectorContent);
 
   const [popoverChordId, setPopoverChordId] = useState<string | null>(null);
@@ -56,7 +62,7 @@ export function ChordLane() {
   const dragRef = useRef<ChordDrag | null>(null);
   const movedRef = useRef(false);
 
-  const bpb = project.timeSignature[0];
+  const bpb = beatsPerBar(project.timeSignature);
   const lengthBeats = project.lengthBars * bpb;
   const width = timelineWidth(lengthBeats, zoomX);
   const ppb = pxPerBeat(zoomX);
@@ -118,6 +124,8 @@ export function ChordLane() {
       e.stopPropagation();
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
       movedRef.current = false;
+      beginTransaction(CHORD_DRAG);
+      watchDragEnd(CHORD_DRAG, e.pointerId);
       dragRef.current = {
         chordId: chord.id,
         kind,
@@ -126,13 +134,18 @@ export function ChordLane() {
         originDuration: chord.durationBeats,
       };
     },
-    [],
+    [beginTransaction],
   );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
+      // Undo or a lost window focus closed the transaction: this drag is over.
+      if (!useStore.getState().ownsTransaction(CHORD_DRAG)) {
+        dragRef.current = null;
+        return;
+      }
       const dx = e.clientX - drag.startX;
       if (Math.abs(dx) > 3) movedRef.current = true;
       const barsDelta = Math.round(dx / (bpb * ppb));
@@ -149,7 +162,7 @@ export function ChordLane() {
     [bpb, ppb, lengthBeats, updateChord],
   );
 
-  const onPointerUp = useCallback(() => {
+  const onPointerEnd = useCallback(() => {
     dragRef.current = null;
   }, []);
 
@@ -165,50 +178,56 @@ export function ChordLane() {
         <TemplatePicker />
       </div>
 
-      <div
-        ref={gridRef}
-        className="chord-lane__grid"
-        style={{ width }}
-        onClick={onGridClick}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-      >
-        {/* bar guides */}
-        {Array.from({ length: project.lengthBars }, (_, bar) => (
-          <div key={`bar-${bar}`} className="chord-lane__bar" style={{ left: bar * bpb * ppb }} />
-        ))}
+      {/* The ruler and grid scroll together so every bar stays reachable when zoomed in. */}
+      <div className="chord-lane__scroll" data-testid="chord-lane-scroll">
+        <TimelineRuler />
+        <div
+          ref={gridRef}
+          className="chord-lane__grid"
+          style={{ width }}
+          onClick={onGridClick}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+        >
+          {/* bar guides */}
+          {Array.from({ length: project.lengthBars }, (_, bar) => (
+            <div key={`bar-${bar}`} className="chord-lane__bar" style={{ left: bar * bpb * ppb }} />
+          ))}
 
-        {project.chordTrack.map((chord) => {
-          const isSelected = chord.id === selectedChordId;
-          return (
-            <div
-              key={chord.id}
-              className={`chord-chip ${functionClass(chord.function)}${isSelected ? ' is-selected' : ''}`}
-              style={{ left: chord.startBeat * ppb, width: chord.durationBeats * ppb }}
-              onPointerDown={(e) => onChipPointerDown(e, chord, 'move')}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (movedRef.current) return;
-                selectChord(chord.id);
-                setInspectorContent(`chord:${chord.id}`);
-              }}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                selectChord(chord.id);
-                setPopoverChordId(chord.id);
-              }}
-              title={`${chord.symbol}${chord.degree ? `（${chord.degree}）` : ''}`}
-            >
-              <span className="chord-chip__symbol">{chord.symbol}</span>
-              {chord.degree ? <span className="chord-chip__degree">{chord.degree}</span> : null}
-              <span
-                className="chord-chip__resize"
-                onPointerDown={(e) => onChipPointerDown(e, chord, 'resize')}
-                aria-hidden="true"
-              />
-            </div>
-          );
-        })}
+          {project.chordTrack.map((chord) => {
+            const isSelected = chord.id === selectedChordId;
+            return (
+              <div
+                key={chord.id}
+                className={`chord-chip ${functionClass(chord.function)}${isSelected ? ' is-selected' : ''}`}
+                style={{ left: chord.startBeat * ppb, width: chord.durationBeats * ppb }}
+                onPointerDown={(e) => onChipPointerDown(e, chord, 'move')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (movedRef.current) return;
+                  selectChord(chord.id);
+                  setInspectorContent(`chord:${chord.id}`);
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  selectChord(chord.id);
+                  setPopoverChordId(chord.id);
+                }}
+                title={`${chord.symbol}${chord.degree ? `（${chord.degree}）` : ''}`}
+              >
+                <span className="chord-chip__symbol">{chord.symbol}</span>
+                {chord.degree ? <span className="chord-chip__degree">{chord.degree}</span> : null}
+                <span
+                  className="chord-chip__resize"
+                  onPointerDown={(e) => onChipPointerDown(e, chord, 'resize')}
+                  aria-hidden="true"
+                />
+              </div>
+            );
+          })}
+          <Playhead ppb={ppb} />
+        </div>
       </div>
 
       {popoverChord ? (

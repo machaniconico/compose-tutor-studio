@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { ParsedMidi } from '@cts/midi-io';
+import { checkProjectPredicate } from '@cts/tutorial-engine';
 import { installLocalStorage } from './localStorageStub';
 
 // The store reads localStorage at module-import time, so install the stub
@@ -162,6 +164,168 @@ describe('setNoteVelocity', () => {
   });
 });
 
+describe('role によるトラック解決 (改名後)', () => {
+  function renameByRole(role: 'bass' | 'melody', name: string): void {
+    useStore.setState((s) => ({
+      project: {
+        ...s.project,
+        tracks: s.project.tracks.map((t) => (t.role === role ? { ...t, name } : t)),
+      },
+    }));
+  }
+
+  it('Bass を「ベース」に改名しても generateBassIntoClip の対象クリップが見つかる', () => {
+    renameByRole('bass', 'ベース');
+    const project = useStore.getState().project;
+    expect(actions.findTrackByRole(project, 'bass')?.name).toBe('ベース');
+    const clip = actions.firstMidiClipOfTrack(project, 'Bass');
+    expect(clip).not.toBeNull();
+    const reasons = actions.generateBassIntoClip(clip!.id, 'rootOnly');
+    expect(reasons.length).toBeGreaterThan(0);
+    const saved = actions.findTrackByRole(useStore.getState().project, 'bass')?.clips[0];
+    expect(saved?.id).toBe(clip!.id);
+    expect(saved?.notes?.length).toBe(reasons.length);
+  });
+
+  it('Melody を「メロディ」に改名しても generateMelodyIntoClip の対象クリップが見つかる', () => {
+    renameByRole('melody', 'メロディ');
+    const project = useStore.getState().project;
+    const clip = actions.firstMidiClipOfTrack(project, 'Melody');
+    expect(clip).not.toBeNull();
+    const generated = actions.generateMelodyIntoClip(clip!.id, 1);
+    expect(generated.length).toBeGreaterThan(0);
+    const saved = actions.findTrackByRole(useStore.getState().project, 'melody')?.clips[0];
+    expect(saved?.id).toBe(clip!.id);
+    expect(saved?.notes?.length).toBe(generated.length);
+  });
+
+  it('role が無いプロジェクトは名前でフォールバックする', () => {
+    useStore.setState((s) => ({
+      project: {
+        ...s.project,
+        tracks: s.project.tracks.map((t) => ({ ...t, role: undefined })),
+      },
+    }));
+    const project = useStore.getState().project;
+    expect(actions.findTrackByRole(project, 'bass')).toBeNull();
+    expect(actions.firstMidiClipOfTrack(project, 'Bass')).not.toBeNull();
+  });
+
+  it('importMidiTracks は標準名のトラックに role を付けるが、既存の role は奪わない', () => {
+    const note = { pitch: 60, startBeat: 0, durationBeats: 1, velocity: 90, channel: 0 };
+    actions.importMidiTracks({
+      format: 1,
+      ppq: 480,
+      tracks: [
+        { index: 0, name: 'Bass', notes: [note] },
+        { index: 1, name: 'Piano', notes: [note] },
+      ],
+      tempos: [],
+      timeSignatures: [],
+      bpm: 120,
+      timeSignature: [4, 4],
+    });
+    const tracks = useStore.getState().project.tracks;
+    expect(tracks.filter((t) => t.role === 'bass')).toHaveLength(1);
+    expect(tracks.find((t) => t.name === 'Piano')?.role).toBeUndefined();
+  });
+
+  it('importMidiTracks は未使用の role を同じ読み込みの先頭トラックだけに付ける', () => {
+    useStore.setState((s) => ({
+      project: { ...s.project, tracks: s.project.tracks.filter((t) => t.role !== 'bass') },
+    }));
+    const note = { pitch: 60, startBeat: 0, durationBeats: 1, velocity: 90, channel: 0 };
+    actions.importMidiTracks({
+      format: 1,
+      ppq: 480,
+      tracks: [
+        { index: 0, name: 'Bass', notes: [note] },
+        { index: 1, name: 'bass', notes: [note] },
+      ],
+      tempos: [],
+      timeSignatures: [],
+      bpm: 120,
+      timeSignature: [4, 4],
+    });
+    const tracks = useStore.getState().project.tracks;
+    expect(tracks.find((t) => t.name === 'Bass')?.role).toBe('bass');
+    expect(tracks.find((t) => t.name === 'bass')?.role).toBeUndefined();
+  });
+});
+
+describe('importMidiTracks: 拍子の取り込み', () => {
+  const note = { pitch: 60, startBeat: 0, durationBeats: 1, velocity: 90, channel: 0 };
+  const parsedWaltz = (notes = [note]): ParsedMidi => ({
+    format: 1,
+    ppq: 480,
+    tracks: [{ index: 0, name: 'Piano', notes }],
+    tempos: [],
+    timeSignatures: [],
+    bpm: 120,
+    timeSignature: [3, 4] as [number, number],
+  });
+  const drumClip = () => useStore.getState().project.tracks.find((t) => t.type === 'drum')?.clips[0];
+
+  beforeEach(() => {
+    // 4/4, 8 bars: kick on beats 1 and 3 of bar 1 (steps 0, 8), snare on beat 2 (step 4),
+    // and a 4-bar section starting at bar 4 (beat 16).
+    const clipId = drumClip()?.id ?? '';
+    useStore.getState().toggleDrumStep(clipId, 'kick', 0);
+    useStore.getState().toggleDrumStep(clipId, 'kick', 8);
+    useStore.getState().toggleDrumStep(clipId, 'snare', 4);
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      sections: [{ id: 'sec-a', name: 'Aメロ', type: 'verse', startBar: 4, lengthBars: 4 }],
+    }));
+  });
+
+  it('3/4 の MIDI は共通の拍子変更を通る: ドラムは 12 ステップに再グリッド、セクションは拍位置で換算', () => {
+    const result = actions.importMidiTracks(parsedWaltz());
+    const project = useStore.getState().project;
+    expect(project.timeSignature).toEqual([3, 4]);
+    // 32 beats of 4/4 -> 11 bars of 3/4.
+    expect(project.lengthBars).toBe(11);
+    const clip = drumClip();
+    expect(clip?.stepsPerBar).toBe(12);
+    const steps = (lane: string) =>
+      (clip?.drumEvents ?? []).filter((e) => e.lane === lane).map((e) => e.stepIndex).sort((a, b) => a - b);
+    // Beat 2 of bar 1 is still step 8 (4 steps per beat); beat 1 (4/4 bar 1 beat 2) is step 4.
+    expect(steps('kick')).toEqual([0, 8]);
+    expect(steps('snare')).toEqual([4]);
+    // The section began at beat 16 and lasted 16 beats: bars 5..10 of 3/4 (16/3 is not whole).
+    expect(project.sections[0]).toMatchObject({ name: 'Aメロ', startBar: 5, lengthBars: 6 });
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings[0]).toContain('セクション');
+  });
+
+  it('同じ拍子のファイルは何も変換せず警告も出ない', () => {
+    const result = actions.importMidiTracks({ ...parsedWaltz(), timeSignature: [4, 4] });
+    const project = useStore.getState().project;
+    expect(project.timeSignature).toEqual([4, 4]);
+    expect(project.lengthBars).toBe(8);
+    expect(drumClip()?.stepsPerBar).toBe(16);
+    expect(project.sections[0]).toMatchObject({ startBar: 4, lengthBars: 4 });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('読み込んだノートが曲より長いときだけ共通の長さ変更で伸ばす', () => {
+    // Ends at beat 40 -> 14 bars of 3/4 (the meter change alone would give 11).
+    actions.importMidiTracks(parsedWaltz([{ ...note, startBeat: 39, durationBeats: 1 }]));
+    const project = useStore.getState().project;
+    expect(project.lengthBars).toBe(14);
+    // The drum clip ended with the song and keeps doing so.
+    expect(drumClip()?.lengthBeats).toBe(42);
+  });
+
+  it('読み込み全体が Undo 1 段で戻る', () => {
+    const before = useStore.getState().project;
+    actions.importMidiTracks(parsedWaltz());
+    expect(useStore.getState().project.timeSignature).toEqual([3, 4]);
+    useStore.getState().undo();
+    expect(useStore.getState().project).toEqual(before);
+  });
+});
+
 describe('generateBassIntoClip', () => {
   it('writes notes into the Bass clip with reasons', () => {
     const clipId = bassClipId();
@@ -221,6 +385,88 @@ describe('applyDrumPattern', () => {
     expect(events.length).toBeGreaterThan(0);
     expect(events.some((e) => e.lane === 'kick')).toBe(true);
     expect(events.some((e) => e.lane === 'snare')).toBe(true);
+  });
+
+  it('places 8-beat hits on 16th steps in 4/4 (kick 0/8, snare 4/12 per bar)', () => {
+    const drumClip = useStore.getState().project.tracks
+      .find((t) => t.type === 'drum')?.clips[0];
+    actions.applyDrumPattern(drumClip?.id ?? '', 'eightBeat');
+    const events = useStore.getState().project.tracks
+      .find((t) => t.type === 'drum')?.clips[0]?.drumEvents ?? [];
+    const firstBar = (lane: string) =>
+      events.filter((e) => e.lane === lane && e.stepIndex < 16).map((e) => e.stepIndex).sort((a, b) => a - b);
+    expect(firstBar('kick')).toEqual([0, 8]);
+    expect(firstBar('snare')).toEqual([4, 12]);
+    expect(firstBar('closedHat')).toEqual([0, 2, 4, 6, 8, 10, 12, 14]);
+  });
+
+  it('drops hits past the bar in 3/4 and keeps 4 steps per beat', () => {
+    useStore.getState().setTimeSignature([3, 4]);
+    const drumClip = useStore.getState().project.tracks
+      .find((t) => t.type === 'drum')?.clips[0];
+    expect(drumClip?.stepsPerBar).toBe(12);
+    actions.applyDrumPattern(drumClip?.id ?? '', 'eightBeat');
+    const events = useStore.getState().project.tracks
+      .find((t) => t.type === 'drum')?.clips[0]?.drumEvents ?? [];
+    const firstBar = (lane: string) =>
+      events.filter((e) => e.lane === lane && e.stepIndex < 12).map((e) => e.stepIndex).sort((a, b) => a - b);
+    // Beat 3 (snare's "4th beat") does not exist in 3/4.
+    expect(firstBar('kick')).toEqual([0, 8]);
+    expect(firstBar('snare')).toEqual([4]);
+    expect(firstBar('closedHat')).toEqual([0, 2, 4, 6, 8, 10]);
+    expect(events.every((e) => e.stepIndex % 1 === 0)).toBe(true);
+  });
+
+  it('fills a partial last bar only up to the clip end', () => {
+    // 33 beats of 4/4: 8 full bars plus one beat of a 9th bar.
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((t) =>
+        t.type === 'drum' ? { ...t, clips: t.clips.map((c) => ({ ...c, lengthBeats: 33 })) } : t,
+      ),
+    }));
+    const drumClip = useStore.getState().project.tracks
+      .find((t) => t.type === 'drum')?.clips[0];
+    actions.applyDrumPattern(drumClip?.id ?? '', 'eightBeat');
+    const events = useStore.getState().project.tracks
+      .find((t) => t.type === 'drum')?.clips[0]?.drumEvents ?? [];
+    const lastBar = (lane: string) =>
+      events.filter((e) => e.lane === lane && e.stepIndex >= 128).map((e) => e.stepIndex).sort((a, b) => a - b);
+    expect(lastBar('kick')).toEqual([128]);
+    expect(lastBar('closedHat')).toEqual([128, 130]);
+    expect(lastBar('snare')).toEqual([]);
+    // Nothing at or after beat 33 (step 132).
+    expect(events.every((e) => e.stepIndex < 132)).toBe(true);
+  });
+
+  it('3/4 に 16 ステップのクリップ(旧ファイル)でも、適用したパターンがレッスン判定を満たす', () => {
+    // Load a project whose drum grid was never regridded: 3/4 with 16 steps per bar.
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      timeSignature: [3, 4],
+      lengthBars: 8,
+      tracks: project.tracks.map((t) =>
+        t.type === 'drum'
+          ? { ...t, clips: t.clips.map((c) => ({ ...c, lengthBeats: 24, stepsPerBar: 16, drumEvents: [] })) }
+          : t,
+      ),
+    }));
+    const clipId = useStore.getState().project.tracks.find((t) => t.type === 'drum')?.clips[0]?.id ?? '';
+
+    actions.applyDrumPattern(clipId, 'fourOnFloor');
+    let project = useStore.getState().project;
+    const events = project.tracks.find((t) => t.type === 'drum')?.clips[0]?.drumEvents ?? [];
+    const firstBarKicks = events
+      .filter((e) => e.lane === 'kick' && e.stepIndex < 16)
+      .map((e) => e.stepIndex)
+      .sort((a, b) => a - b);
+    expect(firstBarKicks).toEqual([0, 5, 11]);
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project)).toBe(true);
+
+    actions.applyDrumPattern(clipId, 'eightBeat');
+    project = useStore.getState().project;
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'eightBeat' }, project)).toBe(true);
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'backbeat' }, project)).toBe(true);
   });
 });
 

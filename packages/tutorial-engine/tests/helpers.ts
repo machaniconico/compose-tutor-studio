@@ -116,19 +116,21 @@ export function makeSection(type: SectionType, startBar = 0): Section {
   };
 }
 
-export function makeMelodyTrack(notes: NoteEvent[]): Track {
+export function makeMelodyTrack(notes: NoteEvent[], overrides: Partial<Track> = {}): Track {
   return makeTrack({
     name: 'Melody',
     type: 'instrument',
     clips: [makeNoteClip(notes)],
+    ...overrides,
   });
 }
 
-export function makeBassTrack(notes: NoteEvent[]): Track {
+export function makeBassTrack(notes: NoteEvent[], overrides: Partial<Track> = {}): Track {
   return makeTrack({
     name: 'Bass',
     type: 'instrument',
     clips: [makeNoteClip(notes)],
+    ...overrides,
   });
 }
 

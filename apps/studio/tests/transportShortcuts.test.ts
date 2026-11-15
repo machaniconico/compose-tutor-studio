@@ -6,6 +6,7 @@ import {
   saveIndicatorText,
   type TransportShortcutEvent,
 } from '../src/features/transport/TransportBar';
+import { registerDialog } from '../src/features/common/dialogState';
 
 type FakeElement = EventTarget & {
   getAttribute: (name: string) => string | null;
@@ -79,6 +80,7 @@ function makeActions(isPlaying = false) {
     play: vi.fn(),
     redo: vi.fn(),
     saveToLocalStorage: vi.fn(),
+    showShortcutHelp: vi.fn(),
     stop: vi.fn(),
     undo: vi.fn(),
   };
@@ -117,7 +119,25 @@ describe('transport shortcut key matching', () => {
       expect(isEditableShortcutTarget(target)).toBe(true);
       expect(getTransportShortcut(shortcutEvent(' ', { target }))).toBeNull();
       expect(getTransportShortcut(shortcutEvent('z', { ctrlKey: true, target }))).toBeNull();
+      expect(getTransportShortcut(shortcutEvent('?', { shiftKey: true, target }))).toBeNull();
     }
+  });
+
+  it('ignores shortcuts while a dialog is open', () => {
+    const unregister = registerDialog();
+    try {
+      expect(getTransportShortcut(shortcutEvent(' '))).toBeNull();
+      expect(getTransportShortcut(shortcutEvent('s', { ctrlKey: true }))).toBeNull();
+      expect(getTransportShortcut(shortcutEvent('z', { ctrlKey: true }))).toBeNull();
+      expect(getTransportShortcut(shortcutEvent('?', { shiftKey: true }))).toBeNull();
+    } finally {
+      unregister();
+    }
+    expect(getTransportShortcut(shortcutEvent(' '))).toBe('togglePlayback');
+  });
+
+  it('maps ? to the shortcut help', () => {
+    expect(getTransportShortcut(shortcutEvent('?', { shiftKey: true }))).toBe('showShortcutHelp');
   });
 });
 

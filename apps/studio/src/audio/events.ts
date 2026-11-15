@@ -6,6 +6,7 @@
 // conversion lives here and is unit tested.
 
 import type { DrumLane, Project } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
 import type { ScheduledEvent } from './scheduler';
 
 /** Default steps per bar for a drum clip when not specified. */
@@ -61,7 +62,8 @@ export function drumStepToBeat(
  * The result is unsorted; the scheduler sorts by resolved time. Pure.
  */
 export function buildScheduleEvents(project: Project): ScheduledEvent[] {
-  const beatsPerBar = project.timeSignature[0] > 0 ? project.timeSignature[0] : 4;
+  const bpb = beatsPerBarOf(project.timeSignature);
+  const beatsPerBar = bpb > 0 ? bpb : 4;
   const events: ScheduledEvent[] = [];
 
   for (const track of project.tracks) {

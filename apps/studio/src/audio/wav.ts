@@ -6,8 +6,11 @@
 // clamping are unit testable.
 
 import type { Project } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
+import { delaySettings, enabledSupportedEffects } from './effects';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import { buildTrackGraphs } from './graph';
+import { createMasterChain } from './masterChain';
 import { beatToTime, projectLengthBeats, secondsPerBeat } from './scheduler';
 import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
@@ -18,6 +21,26 @@ export const RENDER_SAMPLE_RATE = 44100;
 export const RENDER_CHANNELS = 2;
 /** Silence tail appended after the last event, seconds. */
 export const RENDER_TAIL_SECONDS = 1;
+
+/**
+ * Total render length in seconds: the song plus a tail long enough for the
+ * first repeat of the longest enabled delay, so the export does not cut off
+ * echoes that live playback lets ring past the last bar.
+ */
+export function renderLengthSeconds(project: Project): number {
+  const bpb = beatsPerBarOf(project.timeSignature);
+  const beatsPerBar = bpb > 0 ? bpb : 4;
+  const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
+  const songSeconds = lengthBeats * secondsPerBeat(project.bpm);
+  let longestDelay = 0;
+  for (const track of project.tracks) {
+    for (const effect of enabledSupportedEffects(track.effects)) {
+      if (effect.type !== 'delay') continue;
+      longestDelay = Math.max(longestDelay, delaySettings(effect).timeSeconds);
+    }
+  }
+  return songSeconds + longestDelay + RENDER_TAIL_SECONDS;
+}
 
 /** Clamp a float sample to [-1, 1] and convert to a signed 16-bit int. */
 export function floatToInt16(sample: number): number {
@@ -108,25 +131,12 @@ function writeAscii(view: DataView, offset: number, text: string): void {
  * of an exported render (the song plays once, no click).
  */
 export async function renderProjectToWav(project: Project): Promise<Blob> {
-  const beatsPerBar = project.timeSignature[0] > 0 ? project.timeSignature[0] : 4;
-  const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
-  const songSeconds = lengthBeats * secondsPerBeat(project.bpm);
-  const totalSeconds = songSeconds + RENDER_TAIL_SECONDS;
-  const frames = Math.max(1, Math.ceil(totalSeconds * RENDER_SAMPLE_RATE));
+  const frames = Math.max(1, Math.ceil(renderLengthSeconds(project) * RENDER_SAMPLE_RATE));
 
   const ctx = new OfflineAudioContext(RENDER_CHANNELS, frames, RENDER_SAMPLE_RATE);
 
-  // Master bus + soft limiter (mirrors AudioEngine routing).
-  const master = ctx.createGain();
-  master.gain.value = 1;
-  const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -3;
-  limiter.knee.value = 6;
-  limiter.ratio.value = 12;
-  limiter.attack.value = 0.002;
-  limiter.release.value = 0.12;
-  master.connect(limiter);
-  limiter.connect(ctx.destination);
+  // Master bus + soft limiter (shared with AudioEngine).
+  const master = createMasterChain(ctx, project.tracks).input;
 
   // Per-track graphs + voice managers.
   const graphs = buildTrackGraphs(ctx, master, project.tracks, 0);

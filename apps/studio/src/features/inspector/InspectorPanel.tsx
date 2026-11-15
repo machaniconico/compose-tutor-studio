@@ -4,6 +4,7 @@ import { useStore, type RightPanelTab } from '../../state/store';
 import { appendChordAfterLast } from '../../state/editorActions';
 import { AssistantPanel } from '../assistant/AssistantPanel';
 import { TutorialPanel } from '../tutorial/TutorialPanel';
+import { Term } from '../common/Term';
 import { useInspection } from './useInspection';
 import type { NoteInspectionResult, ChordInspectionResult, KeyScaleOverview } from './useInspection';
 import {
@@ -92,19 +93,19 @@ function NoteInspector({ data, difficulty }: { data: NoteInspectionResult; diffi
 
       {data.scaleDegree ? (
         <div className="kv">
-          <span>キー内の度数</span>
+          <span>キー内の<Term id="degree">度数</Term></span>
           <span>{data.scaleDegree}度</span>
         </div>
       ) : null}
 
       <div className="kv">
-        <span>スケール</span>
+        <span><Term id="scale">スケール</Term></span>
         <span>{scalePresenceLabel(data.inScale, difficulty)}</span>
       </div>
 
       {data.currentChordSymbol ? (
         <div className="kv">
-          <span>現在のコード</span>
+          <span>現在の<Term id="chord">コード</Term></span>
           <span>{data.currentChordSymbol}</span>
         </div>
       ) : null}
@@ -164,7 +165,7 @@ function ChordInspector({ data, difficulty }: { data: ChordInspectionResult; dif
 
   return (
     <div className="panel-section">
-      <p className="panel-section__title">コード解析</p>
+      <p className="panel-section__title"><Term id="chord">コード</Term>解析</p>
       <div className="chord-headline">{data.symbol}</div>
 
       <div className="kv">
@@ -172,7 +173,7 @@ function ChordInspector({ data, difficulty }: { data: ChordInspectionResult; dif
         <span>{notes}</span>
       </div>
       <div className="kv">
-        <span>度数</span>
+        <span><Term id="degree">度数</Term></span>
         <span>{degreeLabel(data.degree, difficulty)}</span>
       </div>
       <div className="kv">
@@ -181,7 +182,7 @@ function ChordInspector({ data, difficulty }: { data: ChordInspectionResult; dif
       </div>
 
       <div className="kv">
-        <span>テンション</span>
+        <span><Term id="tension">テンション</Term></span>
         <span>{tensionLabel(data.tension, difficulty)}</span>
       </div>
 
@@ -195,7 +196,7 @@ function ChordInspector({ data, difficulty }: { data: ChordInspectionResult; dif
 
       {nextChords.length > 0 ? (
         <div className="inspector-next">
-          <p className="panel-section__title">次に進みやすいコード</p>
+          <p className="panel-section__title">次に進みやすい<Term id="chord">コード</Term></p>
           <div className="inspector-next__buttons">
             {nextChords.map((n, i) => (
               <button
@@ -246,14 +247,14 @@ function KeyScaleView({ data, difficulty }: { data: KeyScaleOverview; difficulty
 
   return (
     <div className="panel-section">
-      <p className="panel-section__title">キー / スケール概要</p>
+      <p className="panel-section__title"><Term id="key">キー</Term> / <Term id="scale">スケール</Term>概要</p>
 
       <div className="kv">
-        <span>キー</span>
+        <span><Term id="key">キー</Term></span>
         <span>{data.key}</span>
       </div>
       <div className="kv">
-        <span>スケール</span>
+        <span><Term id="scale">スケール</Term></span>
         <span>{data.scaleLabel}</span>
       </div>
       {data.scaleNotes.length > 0 ? (

@@ -18,9 +18,15 @@ import type {
   NoteEvent,
   Project,
   Track,
+  TrackRole,
 } from '@cts/project-model';
 import type { ParsedMidi } from '@cts/midi-io';
-import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
+import {
+  beatsPerBar as beatsPerBarOf,
+  drumBeatToStep,
+  setLengthBars as setProjectLengthBars,
+  setTimeSignature as setProjectTimeSignature,
+} from '@cts/project-model';
 import {
   analyzeChord,
   parseChord,
@@ -35,6 +41,7 @@ import {
   type HarmonicFunction,
 } from '@cts/theory-engine';
 import { getScalePitchClasses } from '@cts/theory-engine';
+import { roleForTrackName } from '@cts/tutorial-engine';
 import { useStore } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
@@ -104,9 +111,18 @@ export function findTrackByName(project: Project, name: string): Track | null {
   return project.tracks.find((t) => t.name.toLowerCase() === lower) ?? null;
 }
 
-/** The first MIDI clip of a named track, if any. */
+/** Find the first track with the given role (the stable identity; names are free text). */
+export function findTrackByRole(project: Project, role: TrackRole): Track | null {
+  return project.tracks.find((t) => t.role === role) ?? null;
+}
+
+/**
+ * The first MIDI clip of a track, if any. A conventional name ('Bass', 'Melody', ...)
+ * is resolved by role first, so renamed tracks are still found; other names match by name.
+ */
 export function firstMidiClipOfTrack(project: Project, name: string): Clip | null {
-  const track = findTrackByName(project, name);
+  const role = roleForTrackName(name);
+  const track = (role ? findTrackByRole(project, role) : null) ?? findTrackByName(project, name);
   if (!track) return null;
   return track.clips.find((c) => c.type === 'midi') ?? track.clips[0] ?? null;
 }
@@ -425,9 +441,17 @@ const MIDI_IMPORT_COLORS = ['#6f9bd8', '#5bb0a8', '#c75b86', '#d98a4b', '#8b75d7
 export type MidiImportResult = {
   importedTrackCount: number;
   importedNoteCount: number;
+  /** Beginner-facing notes (Japanese) from adopting the file's meter, if any. */
+  warnings: string[];
 };
 
-/** Add parsed SMF note tracks as new instrument tracks in the current project. */
+/**
+ * Add parsed SMF note tracks as new instrument tracks in the current project.
+ * The file's tempo and meter are adopted: the meter goes through the shared
+ * `setTimeSignature` so existing drum clips are regridded and sections are
+ * converted by beat, and the song only ever grows (through `setLengthBars`) to
+ * hold the imported notes. All of it is one undo step.
+ */
 export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
   const sourceTracks = parsed.tracks.filter((track) => track.notes.length > 0);
   if (sourceTracks.length === 0) {
@@ -436,12 +460,19 @@ export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
 
   let firstTrackId: string | null = null;
   let firstClipId: string | null = null;
+  let warnings: string[] = [];
   const importedNoteCount = sourceTracks.reduce((sum, track) => sum + track.notes.length, 0);
 
-  useStore.getState().applyProjectChange((project) => {
-    const nextTimeSignature = parsed.timeSignature;
-    const nextBeatsPerBar = Math.max(1, nextTimeSignature[0] * (4 / nextTimeSignature[1]));
-    const existingLengthBeats = project.lengthBars * projectBeatsPerBar(project);
+  useStore.getState().applyProjectChange((current) => {
+    const sameMeter =
+      current.timeSignature[0] === parsed.timeSignature[0] &&
+      current.timeSignature[1] === parsed.timeSignature[1];
+    const meterChange = sameMeter
+      ? { project: current, warnings: [] }
+      : setProjectTimeSignature(current, parsed.timeSignature);
+    warnings = meterChange.warnings;
+
+    const nextBeatsPerBar = Math.max(1, projectBeatsPerBar(meterChange.project));
     const importedEndBeat = sourceTracks.reduce((max, track) => {
       const trackEnd = track.notes.reduce(
         (noteMax, note) => Math.max(noteMax, note.startBeat + note.durationBeats),
@@ -449,9 +480,13 @@ export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
       );
       return Math.max(max, trackEnd);
     }, 0);
-    const projectLengthBeats = Math.max(existingLengthBeats, importedEndBeat, nextBeatsPerBar);
-    const lengthBars = Math.max(1, Math.ceil(projectLengthBeats / nextBeatsPerBar));
+    const importedBars = Math.max(1, Math.ceil(importedEndBeat / nextBeatsPerBar));
+    const project =
+      importedBars > meterChange.project.lengthBars
+        ? setProjectLengthBars(meterChange.project, importedBars)
+        : meterChange.project;
 
+    const takenRoles = new Set(project.tracks.map((t) => t.role));
     const importedTracks: Track[] = sourceTracks.map((track, index) => {
       const trackId = uid('track');
       const clipId = uid('clip');
@@ -478,10 +513,15 @@ export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
         loop: false,
         notes,
       };
+      const name = track.name?.trim() || `MIDI ${index + 1}`;
+      const nameRole = roleForTrackName(name);
+      const role = nameRole && !takenRoles.has(nameRole) ? nameRole : undefined;
+      if (role) takenRoles.add(role);
       return {
         id: trackId,
-        name: track.name?.trim() || `MIDI ${index + 1}`,
+        name,
         type: 'instrument',
+        ...(role ? { role } : {}),
         color: MIDI_IMPORT_COLORS[index % MIDI_IMPORT_COLORS.length],
         clips: [clip],
         volume: 1,
@@ -506,8 +546,6 @@ export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
     return {
       ...project,
       bpm: Math.round(parsed.bpm),
-      timeSignature: nextTimeSignature,
-      lengthBars,
       tracks,
     };
   });
@@ -521,6 +559,7 @@ export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
   return {
     importedTrackCount: sourceTracks.length,
     importedNoteCount,
+    warnings,
   };
 }
 
@@ -589,68 +628,76 @@ export type DrumPatternId =
 export type DrumPattern = {
   id: DrumPatternId;
   name: string;
-  /** lane -> step indices that are ON (within one bar of stepsPerBar steps). */
-  steps: Partial<Record<DrumLane, number[]>>;
+  /**
+   * lane -> beat offsets within one bar that are ON (0 = 1st beat, 0.5 = its
+   * off-beat). Written for a 4-beat bar; in a shorter bar (3/4) the hits past
+   * the bar end are dropped.
+   */
+  beats: Partial<Record<DrumLane, number[]>>;
 };
 
 /**
- * One-bar (16-step) drum pattern presets. Original beginner-friendly patterns;
+ * One-bar drum pattern presets. Original beginner-friendly patterns;
  * not copied from any product's factory content.
  */
 export const DRUM_PATTERNS: DrumPattern[] = [
   {
     id: 'fourOnFloor',
     name: 'Four on the floor',
-    steps: {
-      kick: [0, 4, 8, 12],
-      closedHat: [2, 6, 10, 14],
-      clap: [4, 12],
+    beats: {
+      kick: [0, 1, 2, 3],
+      closedHat: [0.5, 1.5, 2.5, 3.5],
+      clap: [1, 3],
     },
   },
   {
     id: 'eightBeat',
     name: '8ビート',
-    steps: {
-      kick: [0, 8],
-      snare: [4, 12],
-      closedHat: [0, 2, 4, 6, 8, 10, 12, 14],
+    beats: {
+      kick: [0, 2],
+      snare: [1, 3],
+      closedHat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
     },
   },
   {
     id: 'hiphop',
     name: 'ヒップホップ',
-    steps: {
-      kick: [0, 6, 10],
-      snare: [4, 12],
-      closedHat: [0, 2, 4, 6, 8, 10, 12, 14],
-      openHat: [14],
+    beats: {
+      kick: [0, 1.5, 2.5],
+      snare: [1, 3],
+      closedHat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
+      openHat: [3.5],
     },
   },
   {
     id: 'gameLoop',
     name: 'ゲームループ',
-    steps: {
-      kick: [0, 8],
-      snare: [4, 12],
-      closedHat: [0, 3, 6, 9, 12, 15],
-      perc: [2, 10],
+    beats: {
+      kick: [0, 2],
+      snare: [1, 3],
+      closedHat: [0, 0.75, 1.5, 2.25, 3, 3.75],
+      perc: [0.5, 2.5],
     },
   },
   {
     id: 'lofi',
     name: 'ローファイ',
-    steps: {
-      kick: [0, 10],
-      snare: [4, 12],
-      closedHat: [0, 4, 8, 12],
-      perc: [7],
+    beats: {
+      kick: [0, 2.5],
+      snare: [1, 3],
+      closedHat: [0, 1, 2, 3],
+      perc: [1.75],
     },
   },
 ];
 
 /**
  * Apply a drum pattern to a drum clip, replacing its events. The pattern's
- * one-bar step map is tiled across every bar the clip spans.
+ * one-bar beat map is converted to the clip's step grid with `drumBeatToStep`
+ * (the same rounding the lesson checker uses, so a grid that does not divide
+ * the bar evenly still satisfies the lesson) and tiled across every bar the
+ * clip spans; in a partial last bar only the hits before the clip end are
+ * written.
  */
 export function applyDrumPattern(clipId: string, patternId: DrumPatternId): void {
   const pattern = DRUM_PATTERNS.find((p) => p.id === patternId);
@@ -659,16 +706,17 @@ export function applyDrumPattern(clipId: string, patternId: DrumPatternId): void
     const bpb = projectBeatsPerBar(project);
     return mapClip(project, clipId, (clip) => {
       const stepsPerBar = clip.stepsPerBar ?? 16;
-      const bars = Math.max(1, Math.round(clip.lengthBeats / bpb));
+      const bars = Math.max(1, Math.ceil(clip.lengthBeats / bpb - 1e-9));
       const events: DrumEvent[] = [];
       for (let bar = 0; bar < bars; bar += 1) {
         const barOffset = bar * stepsPerBar;
-        for (const [lane, indices] of Object.entries(pattern.steps)) {
-          for (const idx of indices ?? []) {
+        for (const [lane, beats] of Object.entries(pattern.beats)) {
+          for (const beat of beats ?? []) {
+            if (beat >= bpb || bar * bpb + beat >= clip.lengthBeats) continue;
             events.push({
               id: uid('drum'),
               lane: lane as DrumLane,
-              stepIndex: barOffset + idx,
+              stepIndex: barOffset + drumBeatToStep(beat, stepsPerBar, bpb),
               velocity: 100,
             });
           }

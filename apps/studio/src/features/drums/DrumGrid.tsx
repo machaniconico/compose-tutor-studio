@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { useStore } from '../../state/store';
 import type { Clip, DrumEvent, DrumLane, Track } from '@cts/project-model';
+import { beatsPerBar } from '@cts/project-model';
+import { stepGridPxPerBeat } from '../timeline';
+import { Playhead } from '../transport/TimelineRuler';
 import { DRUM_PATTERNS, applyDrumPattern, setDrumStepVelocity } from '../../state/editorActions';
 
 /** Six lanes shown top-to-bottom, with Japanese labels. */
@@ -14,6 +17,11 @@ const LANES: { lane: DrumLane; label: string }[] = [
 ];
 
 /** Velocity cycle for repeated clicks: strong -> medium -> soft -> off. */
+/** Layout of one drum row in px (matches .drum-grid__row in styles.css). */
+const LANE_LABEL_PX = 64;
+const MIN_STEP_PX = 22;
+const STEP_GAP_PX = 3;
+
 const VELOCITY_CYCLE = [100, 70, 40, 0] as const;
 
 function nextVelocity(current: number | null): number {
@@ -52,6 +60,8 @@ export function DrumGrid() {
   const tracks = useStore((s) => s.project.tracks);
   const selectedClipId = useStore((s) => s.editor.selectedClipId);
   const timeSignature = useStore((s) => s.project.timeSignature);
+  const positionBeat = useStore((s) => s.transport.positionBeat);
+  const zoomX = useStore((s) => s.editor.zoomX);
 
   const [bar, setBar] = useState(0);
 
@@ -61,10 +71,18 @@ export function DrumGrid() {
   }
 
   const stepsPerBar = clip.stepsPerBar ?? 16;
-  const bpb = timeSignature[0];
-  const totalBars = Math.max(1, Math.round(clip.lengthBeats / bpb));
+  const bpb = beatsPerBar(timeSignature);
+  // A clip may end part-way through a bar (after a meter change): show that
+  // bar too, with the steps past the clip end switched off.
+  const totalBars = Math.max(1, Math.ceil(clip.lengthBeats / bpb - 1e-9));
   const activeBar = Math.min(bar, totalBars - 1);
   const barOffset = activeBar * stepsPerBar;
+  const beatsPerStep = bpb / stepsPerBar;
+  // The playhead starts at the first step cell, just right of the lane label.
+  const stepAreaPpb = stepGridPxPerBeat(zoomX, stepsPerBar, bpb, MIN_STEP_PX + STEP_GAP_PX);
+  const stepPx = (stepAreaPpb * bpb) / stepsPerBar - STEP_GAP_PX;
+  const labelOffsetBeats = (LANE_LABEL_PX + STEP_GAP_PX) / stepAreaPpb;
+  const barStartBeat = clip.startBeat + activeBar * bpb;
 
   const events = clip.drumEvents ?? [];
   const byKey = new Map<string, DrumEvent>();
@@ -109,7 +127,10 @@ export function DrumGrid() {
         ) : null}
       </div>
 
-      <div className="drum-grid" style={{ ['--steps' as string]: String(stepsPerBar) }}>
+      <div
+        className="drum-grid"
+        style={{ ['--steps' as string]: String(stepsPerBar), ['--step-px' as string]: `${stepPx}px` }}
+      >
         {LANES.map(({ lane, label }) => (
           <div className="drum-grid__row" key={lane}>
             <span className="drum-grid__lane-label">{label}</span>
@@ -118,14 +139,16 @@ export function DrumGrid() {
               const event = byKey.get(`${lane}:${stepIndex}`);
               const isOn = event !== undefined;
               const isBeatStart = stepInBar % 4 === 0;
+              const isOutside = stepIndex * beatsPerStep >= clip.lengthBeats - 1e-9;
               const shade = isOn ? velocityClass(event.velocity) : '';
               return (
                 <button
                   type="button"
                   key={stepInBar}
-                  className={`drum-cell${isOn ? ' is-on' : ''}${shade}${isBeatStart ? ' is-beat-start' : ''}`}
+                  className={`drum-cell${isOn ? ' is-on' : ''}${shade}${isBeatStart ? ' is-beat-start' : ''}${isOutside ? ' is-outside' : ''}`}
                   aria-pressed={isOn}
-                  aria-label={`${label} ステップ ${stepInBar + 1}${isOn ? ` 強さ ${event.velocity}` : ''}`}
+                  aria-label={`${label} ステップ ${stepInBar + 1}${isOn ? ` 強さ ${event.velocity}` : ''}${isOutside ? '(クリップの外)' : ''}`}
+                  disabled={isOutside}
                   onClick={() =>
                     setDrumStepVelocity(clip.id, lane, stepIndex, nextVelocity(event?.velocity ?? null))
                   }
@@ -134,6 +157,11 @@ export function DrumGrid() {
             })}
           </div>
         ))}
+        <Playhead
+          ppb={stepAreaPpb}
+          offsetBeats={barStartBeat - labelOffsetBeats}
+          hidden={positionBeat < barStartBeat || positionBeat >= barStartBeat + bpb}
+        />
       </div>
       <p className="drums__hint">セルを繰り返しクリックすると 強 → 中 → 弱 → オフ と切り替わります。</p>
     </div>

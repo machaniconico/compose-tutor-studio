@@ -696,6 +696,60 @@ describe('checkProjectPredicate: hasDrumPattern', () => {
     const analysis = analyzeDrumPattern(project, 'backbeat');
     expect(analysis.missing).toEqual([{ lane: 'snare', stepIndices: [4, 12] }]);
   });
+
+  it('3/4 (stepsPerBar 12): 拍の位置は beatsPerBar から求める', () => {
+    const drumTrack = makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('kick', 4)]);
+    drumTrack.clips[0]!.stepsPerBar = 12;
+    const project = makeProject({ timeSignature: [3, 4], tracks: [drumTrack] });
+    // 四つ打ち in 3/4 = kick on each of the 3 beats (steps 0, 4, 8).
+    const analysis = analyzeDrumPattern(project, 'fourOnFloor');
+    expect(analysis.satisfied).toBe(false);
+    expect(analysis.stepsPerBar).toBe(12);
+    expect(analysis.beatsPerBar).toBe(3);
+    expect(analysis.missing).toEqual([{ lane: 'kick', stepIndices: [8] }]);
+    // Backbeat in 3/4 only has beat 2 to land on (step 4).
+    const snare = makeDrumTrack([makeDrumEvent('snare', 4)]);
+    snare.clips[0]!.stepsPerBar = 12;
+    expect(
+      checkProjectPredicate(
+        { type: 'hasDrumPattern', patternType: 'backbeat' },
+        makeProject({ timeSignature: [3, 4], tracks: [snare] }),
+      ),
+    ).toBe(true);
+  });
+
+  it('3/4 に 16 ステップのクリップ(旧ファイル): 拍位置は整数ステップ 0,5,11 に丸めて達成できる', () => {
+    // 16 / 3 = 5.33 steps per beat: the requirement must round like the pattern
+    // presets do, otherwise no integer stepIndex could ever satisfy it.
+    const empty = makeDrumTrack([makeDrumEvent('kick', 0)]);
+    empty.clips[0]!.stepsPerBar = 16;
+    const analysis = analyzeDrumPattern(makeProject({ timeSignature: [3, 4], tracks: [empty] }), 'fourOnFloor');
+    expect(analysis.stepsPerBar).toBe(16);
+    expect(analysis.missing).toEqual([{ lane: 'kick', stepIndices: [5, 11] }]);
+    expect(analysis.missing.flatMap((m) => m.stepIndices).every(Number.isInteger)).toBe(true);
+
+    const kit = makeDrumTrack([
+      makeDrumEvent('kick', 0),
+      makeDrumEvent('kick', 5),
+      makeDrumEvent('kick', 11),
+      ...[0, 3, 5, 8, 11, 13].map((s) => makeDrumEvent('closedHat', s)),
+      makeDrumEvent('snare', 5),
+    ]);
+    kit.clips[0]!.stepsPerBar = 16;
+    const project = makeProject({ timeSignature: [3, 4], tracks: [kit] });
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project)).toBe(true);
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'eightBeat' }, project)).toBe(true);
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'backbeat' }, project)).toBe(true);
+  });
+
+  it('ドラムイベントが無い 3/4 プロジェクトは 12 ステップ基準で要件を返す', () => {
+    const analysis = analyzeDrumPattern(
+      makeProject({ timeSignature: [3, 4], tracks: [makeDrumTrack([])] }),
+      'fourOnFloor',
+    );
+    expect(analysis.stepsPerBar).toBe(12);
+    expect(analysis.missing).toEqual([{ lane: 'kick', stepIndices: [0, 4, 8] }]);
+  });
 });
 
 // ─── 委譲と純粋性 ────────────────────────────────────────────────────────────
@@ -723,5 +777,35 @@ describe('checkProjectPredicate: 既存predicateへの委譲と純粋性', () =>
     const second = checkProjectPredicate(predicate, project);
     expect(first).toBe(second);
     expect(JSON.stringify(project)).toBe(snapshot);
+  });
+});
+
+describe('collectTrackNotes 相当: role 一致のトラックを数える', () => {
+  it('名前が「ベース」でも role=bass ならルート判定がノートを数える', () => {
+    const project = makeProject({
+      lengthBars: 4,
+      chordTrack: FOUR_CHORDS,
+      tracks: [
+        makeBassTrack([makeNote(36, 0), makeNote(43, 4), makeNote(45, 8), makeNote(41, 12)], {
+          name: 'ベース',
+          role: 'bass',
+        }),
+      ],
+    });
+    const analysis = analyzeBassRootOnDownbeat(project, 'Bass');
+    expect(analysis.consideredBars).toBe(4);
+    expect(analysis.rootBars).toBe(4);
+    expect(
+      checkProjectPredicate({ type: 'hasBassRootOnDownbeat', trackName: 'Bass', minRatio: 0.75 }, project),
+    ).toBe(true);
+  });
+
+  it('role も名前も一致しなければノートは数えない', () => {
+    const project = makeProject({
+      lengthBars: 4,
+      chordTrack: FOUR_CHORDS,
+      tracks: [makeBassTrack([makeNote(36, 0)], { name: 'ベース' })],
+    });
+    expect(analyzeBassRootOnDownbeat(project, 'Bass').rootBars).toBe(0);
   });
 });

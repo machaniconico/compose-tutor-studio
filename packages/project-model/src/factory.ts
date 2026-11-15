@@ -3,7 +3,8 @@
 // No Math.random() or Date.now() here — ids come from makeId().
 
 import { makeId } from './ids';
-import { createMidiClip, createDrumClip } from './factories';
+import { CURRENT_SCHEMA_VERSION, createMidiClip, createDrumClip } from './factories';
+import { beatsPerBar, drumStepsPerBar } from './time';
 import type {
   ChordEvent,
   MusicalKey,
@@ -114,15 +115,16 @@ export function createDefaultProject(opts: CreateDefaultProjectOpts = {}): Proje
   const instrTrack = createInstrumentTrack('Piano');
   const drumTrack = createDrumTrack('Drums');
 
-  // Beats in one bar = numerator * (4 / denominator)
-  const lengthBeats = lengthBars * timeSignature[0] * (4 / timeSignature[1]);
+  const lengthBeats = lengthBars * beatsPerBar(timeSignature);
 
   instrTrack.clips.push(createMidiClip(instrTrack.id, 0, lengthBeats));
-  drumTrack.clips.push(createDrumClip(drumTrack.id, 0, lengthBeats));
+  drumTrack.clips.push(
+    createDrumClip(drumTrack.id, 0, lengthBeats, drumStepsPerBar(timeSignature)),
+  );
 
   return {
     id: makeId('project'),
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title,
     bpm,
     timeSignature,

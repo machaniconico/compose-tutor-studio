@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { checkGoalOnEvent, evaluateProjectPredicate } from '../src/goals.js';
+import { resolveTrack, resolveTrackByPredicateName, roleForTrackName } from '../src/trackResolve.js';
 import type { AppEvent } from '../src/types.js';
 import {
   makeDrumEvent,
+  makeBassTrack,
   makeDrumTrack,
   makeMelodyTrack,
   makeNote,
   makeProject,
   makeSection,
+  makeChord,
 } from './helpers.js';
 
 // ─── chordCountAtLeast ────────────────────────────────────────────────────────
@@ -196,6 +199,74 @@ describe('noteCountAtLeast', () => {
 
 // ─── hasSection ───────────────────────────────────────────────────────────────
 
+describe('role による役割解決 (trackName はフォールバック)', () => {
+  const renamedBass = () =>
+    makeBassTrack([makeNote(36), makeNote(38)], { name: 'ベース', role: 'bass', volume: 0.7 });
+
+  it('role=bass で名前が「ベース」でも trackName:Bass の noteCountAtLeast が通る', () => {
+    const project = makeProject({ tracks: [renamedBass()] });
+    expect(
+      evaluateProjectPredicate({ type: 'noteCountAtLeast', trackName: 'Bass', value: 2 }, project),
+    ).toBe(true);
+    expect(
+      evaluateProjectPredicate({ type: 'noteCountAtLeast', trackName: 'Bass', value: 3 }, project),
+    ).toBe(false);
+  });
+
+  it('role=bass で名前が「ベース」でも trackName:Bass の trackVolumeInRange が通る', () => {
+    const project = makeProject({ tracks: [renamedBass()] });
+    expect(
+      evaluateProjectPredicate(
+        { type: 'trackVolumeInRange', trackName: 'Bass', min: 0.6, max: 0.8 },
+        project,
+      ),
+    ).toBe(true);
+  });
+
+  it('role が無く名前も一致しなければ満たさない', () => {
+    const project = makeProject({
+      tracks: [makeBassTrack([makeNote(36)], { name: 'ベース' })],
+    });
+    expect(
+      evaluateProjectPredicate({ type: 'noteCountAtLeast', trackName: 'Bass', value: 1 }, project),
+    ).toBe(false);
+  });
+});
+
+describe('resolveTrack', () => {
+  it('role 一致を名前一致より優先し、どちらも無ければ null', () => {
+    const byName = makeBassTrack([], { id: 'by-name', name: 'Bass' });
+    const byRole = makeBassTrack([], { id: 'by-role', name: 'ベース', role: 'bass' });
+    const project = makeProject({ tracks: [byName, byRole] });
+    expect(resolveTrack(project, { role: 'bass', trackName: 'Bass' })?.id).toBe('by-role');
+    expect(resolveTrack(project, { trackName: 'Bass' })?.id).toBe('by-name');
+    expect(resolveTrack(project, { role: 'melody', trackName: 'Nope' })).toBeNull();
+    expect(resolveTrack(project, {})).toBeNull();
+  });
+
+  it('roleForTrackName は標準名を role に対応づける', () => {
+    expect(roleForTrackName('Bass')).toBe('bass');
+    expect(roleForTrackName('Chords')).toBe('chords');
+    expect(roleForTrackName('Melody')).toBe('melody');
+    expect(roleForTrackName('Drums')).toBe('drums');
+    expect(roleForTrackName('Piano')).toBeUndefined();
+  });
+
+  it('roleForTrackName は Object のプロトタイプ名を role と誤認しない', () => {
+    expect(roleForTrackName('constructor')).toBeUndefined();
+    expect(roleForTrackName('__proto__')).toBeUndefined();
+    expect(roleForTrackName('toString')).toBeUndefined();
+    expect(roleForTrackName('')).toBeUndefined();
+  });
+
+  it('プロトタイプ名の trackName でも名前一致だけで解決する', () => {
+    const named = makeBassTrack([], { id: 'proto', name: 'constructor' });
+    const project = makeProject({ tracks: [named] });
+    expect(resolveTrackByPredicateName(project, 'constructor')?.id).toBe('proto');
+    expect(resolveTrackByPredicateName(project, '__proto__')).toBeNull();
+  });
+});
+
 describe('hasSection', () => {
   it('returns true when chorus section exists', () => {
     const project = makeProject({ sections: [makeSection('chorus')] });
@@ -325,6 +396,102 @@ describe('checkGoalOnEvent — event kind', () => {
       payload: { bar: 0, chordSymbol: 'C' },
     };
     expect(checkGoalOnEvent(goal, rightEvent, project, 0).satisfied).toBe(true);
+  });
+
+  describe('EventMatch.trackName と role', () => {
+    const goal = {
+      kind: 'event' as const,
+      eventType: 'note.added' as const,
+      count: 1,
+      match: { trackName: 'Bass' },
+    };
+    const noteOn = (trackId: string, trackName: string): AppEvent => ({
+      type: 'note.added',
+      payload: { pitch: 36, startBeat: 0, durationBeats: 1, trackId, trackName, inScale: true },
+    });
+
+    it('role=bass で名前が「ベース」のトラックのイベントが通る', () => {
+      const bass = makeBassTrack([], { id: 'b', name: 'ベース', role: 'bass' });
+      const p = makeProject({ tracks: [bass] });
+      expect(checkGoalOnEvent(goal, noteOn('b', 'ベース'), p, 0).satisfied).toBe(true);
+    });
+
+    it('同じ role のトラックが複数あれば、判定対象の先頭トラックへのイベントだけが通る', () => {
+      const first = makeBassTrack([], { id: 'b1', name: 'ベース1', role: 'bass' });
+      const second = makeBassTrack([], { id: 'b2', name: 'ベース2', role: 'bass' });
+      const p = makeProject({ tracks: [first, second] });
+      expect(checkGoalOnEvent(goal, noteOn('b1', 'ベース1'), p, 0).satisfied).toBe(true);
+      expect(checkGoalOnEvent(goal, noteOn('b2', 'ベース2'), p, 0).satisfied).toBe(false);
+    });
+
+    it('イベント・ノート数・音楽的判定はすべて同じトラックを見る', () => {
+      const bassNotes = [makeNote(36, 0), makeNote(36, 1), makeNote(36, 2), makeNote(36, 3)];
+      const melody = makeMelodyTrack([], { id: 'm', name: 'メロディ', role: 'melody' });
+      const chords = [makeChord('C', 0)];
+      const noteCount = {
+        kind: 'project' as const,
+        predicate: { type: 'noteCountAtLeast' as const, trackName: 'Bass', value: 4 },
+      };
+      const bassRoot = {
+        type: 'hasBassRootOnDownbeat' as const,
+        trackName: 'Bass',
+        minRatio: 1,
+      };
+      const withinScale = {
+        type: 'hasNotesWithinScale' as const,
+        trackName: 'Bass',
+        minRatio: 1,
+      };
+
+      const onFirst = makeProject({
+        chordTrack: chords,
+        tracks: [
+          melody,
+          makeBassTrack(bassNotes, { id: 'b1', name: 'ベース1', role: 'bass' }),
+          makeBassTrack([], { id: 'b2', name: 'ベース2', role: 'bass' }),
+        ],
+      });
+      expect(checkGoalOnEvent(goal, noteOn('b1', 'ベース1'), onFirst, 0).satisfied).toBe(true);
+      expect(checkGoalOnEvent(noteCount, noteOn('b1', 'ベース1'), onFirst, 0).satisfied).toBe(true);
+      expect(evaluateProjectPredicate(bassRoot, onFirst)).toBe(true);
+      expect(evaluateProjectPredicate(withinScale, onFirst)).toBe(true);
+
+      const onSecond = makeProject({
+        chordTrack: chords,
+        tracks: [
+          melody,
+          makeBassTrack([], { id: 'b1', name: 'ベース1', role: 'bass' }),
+          makeBassTrack(bassNotes, { id: 'b2', name: 'ベース2', role: 'bass' }),
+        ],
+      });
+      expect(checkGoalOnEvent(goal, noteOn('b2', 'ベース2'), onSecond, 0).satisfied).toBe(false);
+      expect(checkGoalOnEvent(noteCount, noteOn('b2', 'ベース2'), onSecond, 0).satisfied).toBe(
+        false,
+      );
+      expect(evaluateProjectPredicate(bassRoot, onSecond)).toBe(false);
+      expect(evaluateProjectPredicate(withinScale, onSecond)).toBe(false);
+    });
+
+    it('別 role のトラックは、名前が Bass でも role=bass が別にあれば通らない', () => {
+      const realBass = makeBassTrack([], { id: 'b', name: 'ベース', role: 'bass' });
+      const misnamed = makeMelodyTrack([], { id: 'm', name: 'Bass', role: 'melody' });
+      const p = makeProject({ tracks: [realBass, misnamed] });
+      expect(checkGoalOnEvent(goal, noteOn('m', 'Bass'), p, 0).satisfied).toBe(false);
+    });
+
+    it('role の無い旧プロジェクトは名前一致で通り、別名なら通らない', () => {
+      const legacy = makeBassTrack([], { id: 'b', name: 'Bass' });
+      const other = makeMelodyTrack([], { id: 'm', name: 'ベース' });
+      const p = makeProject({ tracks: [legacy, other] });
+      expect(checkGoalOnEvent(goal, noteOn('b', 'Bass'), p, 0).satisfied).toBe(true);
+      expect(checkGoalOnEvent(goal, noteOn('m', 'ベース'), p, 0).satisfied).toBe(false);
+    });
+
+    it('プロジェクトに無い trackId はイベントの名前で判定する', () => {
+      const p = makeProject({ tracks: [] });
+      expect(checkGoalOnEvent(goal, noteOn('gone', 'Bass'), p, 0).satisfied).toBe(true);
+      expect(checkGoalOnEvent(goal, noteOn('gone', 'Piano'), p, 0).satisfied).toBe(false);
+    });
   });
 
   it('exercise goal never satisfied by events', () => {

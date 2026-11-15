@@ -1,7 +1,7 @@
 // Project validation. Enforces docs/06_data_model.md section 5 plus structural
 // integrity checks (unique ids, clip.trackId references an existing track).
 
-import type { Project } from './types';
+import type { Project, TrackRole } from './types';
 
 export type ValidationError = {
   /** Dot/bracket path to the offending value, e.g. `tracks[0].clips[1].startBeat`. */
@@ -18,6 +18,18 @@ export type ValidationResult = {
 };
 
 const VALID_DENOMINATORS = new Set([2, 4, 8, 16]);
+const VALID_TRACK_ROLES = new Set<TrackRole>(['chords', 'bass', 'melody', 'drums']);
+
+/** Allowed ranges for optional eq / compressor parameters. */
+const EFFECT_PARAM_RANGES: Partial<Record<string, Record<string, [number, number]>>> = {
+  eq: { lowGainDb: [-12, 12], midGainDb: [-12, 12], highGainDb: [-12, 12] },
+  compressor: {
+    thresholdDb: [-60, 0],
+    ratio: [1, 20],
+    attackSeconds: [0, 1],
+    releaseSeconds: [0.01, 1],
+  },
+};
 
 function inRange(value: number, min: number, max: number): boolean {
   return Number.isFinite(value) && value >= min && value <= max;
@@ -50,6 +62,19 @@ export function validateProject(project: Project): ValidationResult {
     push('lengthBars', `lengthBars must be a positive integer (got ${project.lengthBars})`);
   }
 
+  if (project.swing !== undefined && !inRange(project.swing, 0, 60)) {
+    push('swing', `swing must be between 0 and 60 (got ${project.swing})`);
+  }
+
+  const loopRange = project.loopRange;
+  if (loopRange !== undefined) {
+    const start = loopRange?.startBeat;
+    const end = loopRange?.endBeat;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+      push('loopRange', `loop range must satisfy 0 <= start < end (got ${start} to ${end})`);
+    }
+  }
+
   // --- Id uniqueness (collect all ids across the project) ---
   const seenIds = new Set<string>();
   const markId = (id: string, path: string): void => {
@@ -72,6 +97,22 @@ export function validateProject(project: Project): ValidationResult {
     if (!inRange(track.pan, -1, 1)) {
       push(`tracks[${ti}].pan`, `pan must be between -1 and 1 (got ${track.pan})`);
     }
+    (track.effects ?? []).forEach((effect, ei) => {
+      const ranges = EFFECT_PARAM_RANGES[effect.type];
+      if (!ranges) return;
+      for (const [key, [min, max]] of Object.entries(ranges)) {
+        const value = effect.params?.[key];
+        if (value !== undefined && !inRange(value, min, max)) {
+          push(
+            `tracks[${ti}].effects[${ei}].params.${key}`,
+            `${effect.type} ${key} must be between ${min} and ${max} (got ${value})`,
+          );
+        }
+      }
+    });
+    if (track.role !== undefined && !VALID_TRACK_ROLES.has(track.role)) {
+      push(`tracks[${ti}].role`, `role must be chords, bass, melody, or drums (got ${track.role})`);
+    }
   });
 
   // --- Clips + nested events ---
@@ -85,6 +126,15 @@ export function validateProject(project: Project): ValidationResult {
       }
       if (!(clip.lengthBeats > 0) || !Number.isFinite(clip.lengthBeats)) {
         push(`${clipPath}.lengthBeats`, `clip length must be > 0 (got ${clip.lengthBeats})`);
+      }
+      if (
+        clip.contentLengthBeats !== undefined &&
+        (!(clip.contentLengthBeats > 0) || !Number.isFinite(clip.contentLengthBeats))
+      ) {
+        push(
+          `${clipPath}.contentLengthBeats`,
+          `clip content length must be > 0 (got ${clip.contentLengthBeats})`,
+        );
       }
       if (clip.trackId !== track.id) {
         push(`${clipPath}.trackId`, `clip.trackId "${clip.trackId}" does not match containing track "${track.id}"`);

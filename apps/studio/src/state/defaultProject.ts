@@ -2,15 +2,17 @@
 //
 // A later pass swaps this for the @cts/project-model `createEmptyProject`
 // factory (being implemented in parallel). For now we build a fully-typed
-// Project locally so the UI has real state to render. Only TYPES are imported
-// from the package.
+// Project locally so the UI has real state to render. Only types and the schema
+// version are imported from the package.
 
 import type {
   ChordEvent,
   Clip,
   Project,
   Track,
+  TrackRole,
 } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION } from '@cts/project-model';
 import { PITCH_CLASS } from './music';
 import { nowIso, uid } from './ids';
 
@@ -127,12 +129,14 @@ function instrumentTrack(
   preset: string,
   color: string,
   lengthBeats: number,
+  role: TrackRole,
 ): Track {
   const id = uid('track');
   return {
     id,
     name,
     type: 'instrument',
+    role,
     color,
     clips: [emptyMidiClip(id, lengthBeats)],
     volume: 0.8,
@@ -151,6 +155,7 @@ function drumTrack(lengthBeats: number): Track {
     id,
     name: 'Drums',
     type: 'drum',
+    role: 'drums',
     color: '#d98a4b',
     clips: [emptyDrumClip(id, lengthBeats)],
     volume: 0.85,
@@ -170,7 +175,7 @@ function masterTrack(): Track {
     type: 'master',
     color: '#7c83ff',
     clips: [],
-    volume: 0.9,
+    volume: 1,
     pan: 0,
     mute: false,
     solo: false,
@@ -189,7 +194,7 @@ export function createDefaultProject(title = '最初の1曲'): Project {
   const now = nowIso();
   return {
     id: uid('project'),
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title,
     bpm: 120,
     timeSignature: [4, 4],
@@ -197,9 +202,9 @@ export function createDefaultProject(title = '最初の1曲'): Project {
     scale: 'major',
     lengthBars: DEFAULT_BARS,
     tracks: [
-      instrumentTrack('Chords', 'warmPad', '#5bb0a8', lengthBeats),
-      instrumentTrack('Bass', 'subBass', '#c75b86', lengthBeats),
-      instrumentTrack('Melody', 'leadSine', '#6f9bd8', lengthBeats),
+      instrumentTrack('Chords', 'warmPad', '#5bb0a8', lengthBeats, 'chords'),
+      instrumentTrack('Bass', 'subBass', '#c75b86', lengthBeats, 'bass'),
+      instrumentTrack('Melody', 'leadSine', '#6f9bd8', lengthBeats, 'melody'),
       drumTrack(lengthBeats),
       masterTrack(),
     ],

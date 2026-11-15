@@ -5,6 +5,7 @@ import type { Project } from '@cts/project-model';
 // checker → goals: 従来predicateの委譲）。両モジュールとも関数宣言のみで
 // トップレベル実行が無いため、ESM の循環importとして安全。
 import { checkProjectPredicate } from './checker.js';
+import { resolveTrackByPredicateName } from './trackResolve.js';
 import type {
   AppEvent,
   AppEventType,
@@ -76,15 +77,13 @@ export function evaluateProjectPredicate(
     }
 
     case 'noteCountAtLeast': {
-      for (const track of project.tracks) {
-        if (track.name !== predicate.trackName) continue;
-        let count = 0;
-        for (const clip of track.clips) {
-          count += clip.notes?.length ?? 0;
-        }
-        if (count >= predicate.value) return true;
+      const track = resolveTrackByPredicateName(project, predicate.trackName);
+      if (!track) return false;
+      let count = 0;
+      for (const clip of track.clips) {
+        count += clip.notes?.length ?? 0;
       }
-      return false;
+      return count >= predicate.value;
     }
 
     case 'hasSection': {
@@ -96,13 +95,9 @@ export function evaluateProjectPredicate(
     }
 
     case 'trackVolumeInRange': {
-      for (const track of project.tracks) {
-        if (track.name !== predicate.trackName) continue;
-        if (track.volume >= predicate.min && track.volume <= predicate.max) {
-          return true;
-        }
-      }
-      return false;
+      const track = resolveTrackByPredicateName(project, predicate.trackName);
+      if (!track) return false;
+      return track.volume >= predicate.min && track.volume <= predicate.max;
     }
 
     case 'exportCompleted': {
@@ -123,7 +118,24 @@ export function evaluateProjectPredicate(
 
 // ─── Event Matching ───────────────────────────────────────────────────────────
 
-function matchesEventMatch(event: AppEvent, match: EventMatch): boolean {
+/**
+ * Same identity rule as the project predicates: the event's track is looked up
+ * by id so a renamed track still counts, and it must be the track the project
+ * predicates resolve to, so a lesson's event and note-count steps agree when
+ * several tracks share a role. The payload name is only consulted when the track
+ * is not in the project.
+ */
+function eventTrackMatches(
+  payload: Record<string, unknown>,
+  trackName: string,
+  project: Project,
+): boolean {
+  const eventTrack = project.tracks.find((t) => t.id === payload['trackId']);
+  if (!eventTrack) return payload['trackName'] === trackName;
+  return resolveTrackByPredicateName(project, trackName)?.id === eventTrack.id;
+}
+
+function matchesEventMatch(event: AppEvent, match: EventMatch, project: Project): boolean {
   const p = event.payload as unknown as Record<string, unknown>;
 
   if (match.chordSymbol !== undefined) {
@@ -142,9 +154,8 @@ function matchesEventMatch(event: AppEvent, match: EventMatch): boolean {
     const lane = p['lane'] as string | undefined;
     if (lane !== match.lane) return false;
   }
-  if (match.trackName !== undefined) {
-    const trackName = p['trackName'] as string | undefined;
-    if (trackName !== match.trackName) return false;
+  if (match.trackName !== undefined && !eventTrackMatches(p, match.trackName, project)) {
+    return false;
   }
   if (match.format !== undefined) {
     const format = p['format'] as string | undefined;
@@ -165,11 +176,12 @@ export function evaluateEventGoal(
   requiredCount: number,
   event: AppEvent,
   currentCount: number,
+  project: Project,
 ): { matches: boolean; newCount: number } {
   if (event.type !== eventType) {
     return { matches: false, newCount: currentCount };
   }
-  if (match && !matchesEventMatch(event, match)) {
+  if (match && !matchesEventMatch(event, match, project)) {
     return { matches: false, newCount: currentCount };
   }
   const newCount = currentCount + 1;
@@ -209,6 +221,7 @@ export function checkGoalOnEvent(
     required,
     event,
     eventCount,
+    project,
   );
   return { satisfied: matches, newEventCount: newCount };
 }

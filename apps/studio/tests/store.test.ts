@@ -1,10 +1,43 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { validateProject } from '@cts/project-model';
 import { installLocalStorage, MemoryStorage } from './localStorageStub';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { createSampleProject, SAMPLE_PROJECT_TITLE } from '../src/state/sampleProject';
 import { isInScale, PITCH_CLASS } from '../src/state/music';
 import { projectKey } from '../src/state/persistence';
+
+// Audio is mocked so the bridge's start beat can be observed without Web Audio.
+const schedulerStarts = vi.hoisted(() => [] as number[]);
+vi.mock('../src/audio/engine', () => ({
+  getAudioEngine: () => ({
+    now: () => 0,
+    ensureContext: async () => ({ context: {}, master: {} }),
+  }),
+}));
+vi.mock('../src/audio/graph', () => ({
+  buildTrackGraphs: () => new Map(),
+  applyMixState: () => undefined,
+}));
+vi.mock('../src/audio/masterChain', () => ({ applyMasterVolume: () => undefined }));
+vi.mock('../src/audio/synth', () => ({ SynthVoiceManager: class {} }));
+vi.mock('../src/audio/drums', () => ({ DrumVoiceManager: class {} }));
+vi.mock('../src/audio/scheduler', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/audio/scheduler')>();
+  class FakeScheduler {
+    isRunning = false;
+    start(_events: unknown, _bpm: number, startBeat: number): void {
+      schedulerStarts.push(startBeat);
+      this.isRunning = true;
+    }
+    stop(): void {
+      this.isRunning = false;
+    }
+    currentBeat(): number {
+      return 0;
+    }
+  }
+  return { ...actual, Scheduler: FakeScheduler };
+});
 
 // The store reads localStorage at module-import time, so install the stub
 // BEFORE importing it. We import dynamically inside beforeAll for that reason.
@@ -125,6 +158,159 @@ describe('store metadata actions', () => {
     expect(useStore.getState().project.title).toBe('新タイトル');
 
     expect(useStore.getState().project.updatedAt >= before).toBe(true);
+  });
+});
+
+describe('song length (setLengthBars)', () => {
+  const noteStarts = () =>
+    useStore.getState().project.tracks[0]?.clips[0]?.notes?.map((n) => n.startBeat) ?? [];
+
+  it('shortens freely when nothing lies past the new end', () => {
+    expect(useStore.getState().setLengthBars(16)).toBeNull();
+    expect(useStore.getState().setLengthBars(8)).toBeNull();
+    expect(useStore.getState().project.lengthBars).toBe(8);
+    expect(useStore.getState().canUndo()).toBe(true);
+  });
+
+  it('warns about the preset chords in bars 5-8 before cutting to 4 bars', () => {
+    const warning = useStore.getState().setLengthBars(4);
+    expect(warning).toMatch(/コード 4 個/);
+    expect(useStore.getState().project.lengthBars).toBe(8);
+  });
+
+  it('warns in Japanese about notes past the new end, deletes after confirming, and undoes in one step', () => {
+    const clipId = useStore.getState().project.tracks[0]?.clips[0]?.id ?? '';
+    useStore.getState().addNote(clipId, { pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 });
+    useStore.getState().addNote(clipId, { pitch: 64, startBeat: 20, durationBeats: 1, velocity: 100 });
+    const pastBefore = useStore.getState().past.length;
+
+    const warning = useStore.getState().setLengthBars(4);
+    expect(warning).toMatch(/ノート 1 個/);
+    expect(warning).toMatch(/削除/);
+    // Not applied until confirmed.
+    expect(useStore.getState().project.lengthBars).toBe(8);
+    expect(noteStarts()).toEqual([0, 20]);
+    expect(useStore.getState().past.length).toBe(pastBefore);
+
+    expect(useStore.getState().setLengthBars(4, true)).toBeNull();
+    expect(useStore.getState().project.lengthBars).toBe(4);
+    expect(noteStarts()).toEqual([0]);
+    expect(useStore.getState().past.length).toBe(pastBefore + 1);
+
+    useStore.getState().undo();
+    expect(useStore.getState().project.lengthBars).toBe(8);
+    expect(noteStarts()).toEqual([0, 20]);
+  });
+
+  it('warns about a note that rings past the new end, cuts it after confirming, and undoes the cut', () => {
+    const clipId = useStore.getState().project.tracks[0]?.clips[0]?.id ?? '';
+    useStore.getState().addNote(clipId, { pitch: 60, startBeat: 15, durationBeats: 8, velocity: 100 });
+    // Only the preset chords in bars 5-8 and this note are affected (nothing starts past bar 4 on the note side).
+    const noteDuration = () =>
+      useStore.getState().project.tracks[0]?.clips[0]?.notes?.find((n) => n.startBeat === 15)?.durationBeats;
+    const pastBefore = useStore.getState().past.length;
+
+    const warning = useStore.getState().setLengthBars(4);
+    expect(warning).toMatch(/終わりをまたぐ ノート 1 個/);
+    expect(warning).toMatch(/切られます/);
+    // Cancel: nothing changes and no undo step is added.
+    expect(useStore.getState().project.lengthBars).toBe(8);
+    expect(noteDuration()).toBe(8);
+    expect(useStore.getState().past.length).toBe(pastBefore);
+
+    expect(useStore.getState().setLengthBars(4, true)).toBeNull();
+    expect(useStore.getState().project.lengthBars).toBe(4);
+    expect(noteDuration()).toBe(1);
+    expect(useStore.getState().project.tracks[0]?.clips[0]?.lengthBeats).toBe(16);
+    expect(useStore.getState().past.length).toBe(pastBefore + 1);
+
+    useStore.getState().undo();
+    expect(useStore.getState().project.lengthBars).toBe(8);
+    expect(noteDuration()).toBe(8);
+  });
+
+  it('lengthens without a warning and keeps the chords', () => {
+    const chords = useStore.getState().project.chordTrack.length;
+    expect(useStore.getState().setLengthBars(16)).toBeNull();
+    expect(useStore.getState().project.lengthBars).toBe(16);
+    expect(useStore.getState().project.chordTrack.length).toBe(chords);
+  });
+});
+
+describe('time signature (setTimeSignature)', () => {
+  it('switches 4/4 -> 3/4 keeping beats, rounding the length up, and undoes in one step', () => {
+    const chordStarts = useStore.getState().project.chordTrack.map((c) => c.startBeat);
+    const { confirm, warnings } = useStore.getState().setTimeSignature([3, 4]);
+    expect(confirm).toBeNull();
+    expect(Array.isArray(warnings)).toBe(true);
+    const project = useStore.getState().project;
+    expect(project.timeSignature).toEqual([3, 4]);
+    expect(project.lengthBars).toBe(11);
+    expect(project.chordTrack.map((c) => c.startBeat)).toEqual(chordStarts);
+    for (const track of project.tracks) {
+      if (track.type !== 'drum') continue;
+      for (const clip of track.clips) expect(clip.stepsPerBar).toBe(12);
+    }
+    useStore.getState().undo();
+    expect(useStore.getState().project.timeSignature).toEqual([4, 4]);
+    expect(useStore.getState().project.lengthBars).toBe(8);
+  });
+
+  it('asks before merging drum hits that collide on the coarser grid, applies after confirming, and undoes', () => {
+    // A 32-step kick grid: step 1 (off the 16th grid, soft) and step 2 (on the beat, loud) both become step 1 in 3/4.
+    const seeded = useStore.getState().project;
+    useStore.setState({
+      project: {
+        ...seeded,
+        tracks: seeded.tracks.map((t) =>
+          t.type === 'drum'
+            ? {
+                ...t,
+                clips: t.clips.map((c) => ({
+                  ...c,
+                  stepsPerBar: 32,
+                  drumEvents: [
+                    { id: 'kick-soft', lane: 'kick' as const, stepIndex: 1, velocity: 20 },
+                    { id: 'kick-loud', lane: 'kick' as const, stepIndex: 2, velocity: 127 },
+                  ],
+                })),
+              }
+            : t,
+        ),
+      },
+    });
+    const kicks = () =>
+      useStore
+        .getState()
+        .project.tracks.find((t) => t.type === 'drum')
+        ?.clips[0]?.drumEvents?.map((e) => [e.id, e.stepIndex, e.velocity]);
+    const pastBefore = useStore.getState().past.length;
+
+    const first = useStore.getState().setTimeSignature([3, 4]);
+    expect(first.confirm).toMatch(/ドラムの 1 個/);
+    expect(first.confirm).toMatch(/削除/);
+    expect(first.warnings).toEqual([]);
+    // Cancel: nothing changes and no undo step is added.
+    expect(useStore.getState().project.timeSignature).toEqual([4, 4]);
+    expect(kicks()).toEqual([
+      ['kick-soft', 1, 20],
+      ['kick-loud', 2, 127],
+    ]);
+    expect(useStore.getState().past.length).toBe(pastBefore);
+
+    const second = useStore.getState().setTimeSignature([3, 4], true);
+    expect(second.confirm).toBeNull();
+    expect(second.warnings.some((w) => w.includes('重なる'))).toBe(true);
+    expect(useStore.getState().project.timeSignature).toEqual([3, 4]);
+    expect(kicks()).toEqual([['kick-loud', 1, 127]]);
+    expect(useStore.getState().past.length).toBe(pastBefore + 1);
+
+    useStore.getState().undo();
+    expect(useStore.getState().project.timeSignature).toEqual([4, 4]);
+    expect(kicks()).toEqual([
+      ['kick-soft', 1, 20],
+      ['kick-loud', 2, 127],
+    ]);
   });
 });
 
@@ -488,5 +674,34 @@ describe('difficulty mode', () => {
   it('setDifficulty does not push undo history', () => {
     useStore.getState().setDifficulty('standard');
     expect(useStore.getState().canUndo()).toBe(false);
+  });
+});
+
+describe('seek', () => {
+  it('setPosition moves the playhead without adding undo history', () => {
+    const pastBefore = useStore.getState().past.length;
+    useStore.getState().setPosition(8);
+    expect(useStore.getState().transport.positionBeat).toBe(8);
+    expect(useStore.getState().past.length).toBe(pastBefore);
+    expect(useStore.getState().canUndo()).toBe(false);
+  });
+
+  it('play after setPosition(8) starts playback from beat 8, and restartAt re-seeks while playing', async () => {
+    const { initAudioBridge, restartAt } = await import('../src/audio/playback');
+    const teardown = initAudioBridge();
+    schedulerStarts.length = 0;
+    try {
+      useStore.getState().setPosition(8);
+      useStore.getState().play();
+      await vi.waitFor(() => expect(schedulerStarts).toEqual([8]));
+
+      restartAt(16);
+      await vi.waitFor(() => expect(schedulerStarts).toEqual([8, 16]));
+      expect(useStore.getState().transport.isPlaying).toBe(true);
+      expect(useStore.getState().canUndo()).toBe(false);
+    } finally {
+      useStore.getState().stop();
+      teardown();
+    }
   });
 });

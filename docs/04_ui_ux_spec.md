@@ -86,15 +86,18 @@
 | ショートカット | 動作 |
 |---|---|
 | Space | 再生/停止 |
-| R | 録音/入力開始。MVPでは未実装でも予約 |
-| B | Browser表示切替 |
-| L | Learn Panel表示切替 |
-| T | Theory Inspector表示切替 |
-| C | Chord Palette表示 |
-| S | Scale Snap切替 |
-| Q | 選択ノート量子化 |
+| Cmd/Ctrl+Z | 元に戻す |
+| Cmd/Ctrl+Shift+Z、Cmd/Ctrl+Y | やり直す |
 | Cmd/Ctrl+S | 保存 |
-| Cmd/Ctrl+E | Export |
+| ? | ショートカット一覧を開く |
+| Delete、Backspace | 選択ノート削除(ピアノロール) |
+| Q | 選択ノート量子化(ピアノロール) |
+| S | Scale Snap切替(ピアノロール) |
+| C | Chord Tone Highlight切替(ピアノロール) |
+
+実装済みの一覧の正本は `apps/studio/src/state/keymap.ts`、Undo の単位は `docs/02_feature_specification.md` §3.3 を参照。
+
+次のキーは予約のみで未実装: R(録音/入力開始)、B(Browser表示切替)、L(Learn Panel表示切替)、T(Theory Inspector表示切替)、Cmd/Ctrl+E(Export)。
 
 ## 4. 初回導線
 

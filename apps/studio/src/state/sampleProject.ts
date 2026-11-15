@@ -15,6 +15,7 @@ import type {
   Project,
   Track,
 } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION } from '@cts/project-model';
 import { PITCH_CLASS } from './music';
 import { nowIso, uid } from './ids';
 
@@ -319,7 +320,7 @@ function masterTrack(): Track {
     type: 'master',
     color: '#7c83ff',
     clips: [],
-    volume: 0.9,
+    volume: 1,
     pan: 0,
     mute: false,
     solo: false,
@@ -335,7 +336,7 @@ export function createSampleProject(): Project {
   const now = nowIso();
   return {
     id: uid('project'),
-    schemaVersion: 1,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     title: SAMPLE_PROJECT_TITLE,
     bpm: 120,
     timeSignature: [4, 4],

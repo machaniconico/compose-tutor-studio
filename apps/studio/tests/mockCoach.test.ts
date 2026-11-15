@@ -220,6 +220,27 @@ describe('MockCoach', () => {
     });
   });
 
+  describe('role によるトラック解決', () => {
+    it('role=melody で名前が「メロディ」のトラックのノートも解析対象になる', async () => {
+      const base = projectWithMelody();
+      const renamed: Project = {
+        ...base,
+        tracks: base.tracks.map((t) =>
+          t.name === 'Melody' ? { ...t, name: 'メロディ', role: 'melody' as const } : t,
+        ),
+      };
+      const suggestions = await coach.suggestImprovements(renamed);
+      expect(suggestions.some((s) => s.title === 'メロディを作ってみよう')).toBe(false);
+      // 名前が一致しない role 無しのトラックは空扱いのまま。
+      const noRole: Project = {
+        ...renamed,
+        tracks: renamed.tracks.map((t) => (t.name === 'メロディ' ? { ...t, role: undefined } : t)),
+      };
+      const empty = await coach.suggestImprovements(noRole);
+      expect(empty.some((s) => s.title === 'メロディを作ってみよう')).toBe(true);
+    });
+  });
+
   describe('CoachAdapter インターフェース準拠', () => {
     it('suggestImprovements は Promise を返す', () => {
       const result = coach.suggestImprovements(emptyProject());

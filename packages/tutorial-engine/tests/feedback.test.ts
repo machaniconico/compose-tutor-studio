@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { explainPredicate } from '../src/feedback.js';
+import type { ProjectPredicate } from '../src/types.js';
 import {
   makeBassTrack,
   makeChord,
@@ -710,5 +711,74 @@ describe('explainPredicate — hasDrumPattern', () => {
     expect(result.satisfied).toBe(false);
     expect(result.reason).toContain('スネア');
     expect(result.reason).toContain('4拍目');
+  });
+
+  it('3/4 (stepsPerBar 12): ステップ 4 を「2拍目」と表示する', () => {
+    const drumTrack = makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('kick', 8)]);
+    drumTrack.clips[0]!.stepsPerBar = 12;
+    const project = makeProject({ timeSignature: [3, 4], tracks: [drumTrack] });
+    const result = explainPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.reason).toContain('キック');
+    expect(result.reason).toContain('2拍目');
+    expect(result.reason).not.toContain('4拍目');
+  });
+});
+
+describe('explainPredicate — role 解決', () => {
+  const bass = (notes: number, volume = 1) =>
+    makeBassTrack(
+      Array.from({ length: notes }, (_, i) => makeNote(36 + i, i)),
+      { name: 'ベース', role: 'bass', volume },
+    );
+
+  it('role=bass で名前が「ベース」でもノート数を現在値で報告する', () => {
+    const project = makeProject({ tracks: [bass(3)] });
+    const result = explainPredicate({ type: 'noteCountAtLeast', trackName: 'Bass', value: 6 }, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.reason).toContain('3 個');
+  });
+
+  it('role=bass で名前が「ベース」でも音量を現在値で報告する', () => {
+    const project = makeProject({ tracks: [bass(0, 0.5)] });
+    const result = explainPredicate(
+      { type: 'trackVolumeInRange', trackName: 'Bass', min: 0.6, max: 1.0 },
+      project,
+    );
+    expect(result.satisfied).toBe(false);
+    expect(result.reason).toContain('50%');
+    expect(result.reason).not.toContain('見つかりません');
+  });
+
+  it('文言は解析した改名後のトラック名を使う', () => {
+    const project = makeProject({ tracks: [bass(3, 0.5)] });
+    const predicates: ProjectPredicate[] = [
+      { type: 'noteCountAtLeast', trackName: 'Bass', value: 6 },
+      { type: 'trackVolumeInRange', trackName: 'Bass', min: 0.6, max: 1.0 },
+    ];
+    for (const predicate of predicates) {
+      const result = explainPredicate(predicate, project);
+      expect(result.reason).toContain('「ベース」');
+      expect(result.nextAction).toContain('「ベース」');
+      expect(`${result.reason}${result.nextAction}`).not.toContain('Bass');
+    }
+  });
+
+  it('スケール判定の文言も改名後のトラック名を使う', () => {
+    const project = makeProject({ tracks: [bass(0)] });
+    const result = explainPredicate(
+      { type: 'hasNotesWithinScale', trackName: 'Bass', minRatio: 0.8 },
+      project,
+    );
+    expect(result.nextAction).toContain('「ベース」');
+    expect(`${result.reason}${result.nextAction}`).not.toContain('Bass');
+  });
+
+  it('トラックが見つからなければ目標側の名前で案内する', () => {
+    const result = explainPredicate(
+      { type: 'trackVolumeInRange', trackName: 'Bass', min: 0.6, max: 1.0 },
+      makeProject({ tracks: [] }),
+    );
+    expect(result.reason).toContain('「Bass」');
   });
 });

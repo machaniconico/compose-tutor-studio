@@ -45,6 +45,16 @@ describe('instantiateTemplate', () => {
     }
   });
 
+  it('sets a role on every instrument and drum track of every template', () => {
+    for (const id of ALL_IDS) {
+      const project = instantiateTemplate(id, clock);
+      const roles = project.tracks
+        .filter((t) => t.type === 'instrument' || t.type === 'drum')
+        .map((t) => t.role);
+      expect(roles, `template ${id}`).toEqual(['chords', 'bass', 'melody', 'drums']);
+    }
+  });
+
   it('carries the template tempo/key/length onto the project', () => {
     const project = instantiateTemplate('lofi-chill', clock);
     expect(project.bpm).toBe(82);

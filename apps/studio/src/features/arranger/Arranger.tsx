@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import type { Section } from '@cts/project-model';
-import { addSection, updateSection } from '@cts/project-model';
-import { useStore } from '../../state/store';
+import { addSection, beatsPerBar, updateSection } from '@cts/project-model';
+import { textUndoProps, useStore } from '../../state/store';
 import { publishAppEvent } from '../../state/appEvents';
 import { pxPerBeat } from '../timeline';
+import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
 
 /** Section types with Japanese labels and an accent class. */
 const SECTION_TYPES: { type: Section['type']; label: string }[] = [
@@ -31,7 +32,7 @@ export function Arranger() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const bpb = project.timeSignature[0];
+  const bpb = beatsPerBar(project.timeSignature);
   const ppb = pxPerBeat(zoomX);
   const barPx = bpb * ppb;
   const laneWidth = project.lengthBars * barPx;
@@ -77,6 +78,7 @@ export function Arranger() {
         </button>
       </div>
 
+      <TimelineRuler />
       <div className="arranger__timeline" style={{ width: laneWidth }}>
         {/* bar guides */}
         {Array.from({ length: project.lengthBars + 1 }, (_, bar) => (
@@ -98,6 +100,7 @@ export function Arranger() {
             <span className="arranger__section-type">{typeLabel(section.type)}</span>
           </button>
         ))}
+        <Playhead ppb={ppb} />
       </div>
 
       {editing ? (
@@ -131,6 +134,7 @@ function SectionEditor(props: {
         <label>
           <span>名前</span>
           <input
+            {...textUndoProps}
             value={section.name}
             onChange={(e) => onPatch({ name: e.target.value })}
             aria-label="セクション名"
@@ -155,6 +159,7 @@ function SectionEditor(props: {
         <label>
           <span>開始小節</span>
           <input
+            {...textUndoProps}
             type="number"
             min={0}
             max={maxBars - 1}
@@ -168,6 +173,7 @@ function SectionEditor(props: {
         <label>
           <span>長さ（小節）</span>
           <input
+            {...textUndoProps}
             type="number"
             min={1}
             max={maxBars}

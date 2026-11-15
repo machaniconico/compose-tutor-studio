@@ -4,11 +4,19 @@
 // foreign entries never crash the app. Works against any Storage-shaped object,
 // so tests can inject a stub.
 
-import { deserializeProject, validateProject, type Project } from '@cts/project-model';
+import {
+  CURRENT_SCHEMA_VERSION,
+  deserializeProject,
+  validateProject,
+  type Project,
+} from '@cts/project-model';
 import { formatDiagnosticValue, loadDiagnostics, recordDiagnostic } from '../platform/diagnostics';
 
 const KEY_PREFIX = 'cts.project.';
 const BACKUP_KEY_PREFIX = 'cts.projectBackup.';
+// Sits under KEY_PREFIX, so every project key scan must go through isProjectKey.
+const MIGRATION_BACKUP_KEY_PREFIX = 'cts.project.backup.v';
+const UTF8_BOM = '\uFEFF';
 const MAX_RECOVERY_DETAIL_LENGTH = 600;
 const DEFAULT_PROJECT_SUMMARY_TITLE = '無題のプロジェクト';
 const MAX_PROJECT_SUMMARY_TITLE_LENGTH = 80;
@@ -52,6 +60,15 @@ export function projectKey(id: string): string {
 /** Build the storage key for the previous known-good copy of a project. */
 export function projectBackupKey(id: string): string {
   return `${BACKUP_KEY_PREFIX}${id}`;
+}
+
+/** Build the storage key holding the raw JSON saved before a schema migration. */
+export function migrationBackupKey(schemaVersion: number): string {
+  return `${MIGRATION_BACKUP_KEY_PREFIX}${schemaVersion}`;
+}
+
+function isProjectKey(key: string): boolean {
+  return key.startsWith(KEY_PREFIX) && !key.startsWith(MIGRATION_BACKUP_KEY_PREFIX);
 }
 
 function projectIdFromKey(key: string): string | null {
@@ -174,6 +191,7 @@ function parseRecoverableProject(
   key: string,
   storage: Storage,
 ): { project: Project | null; issue: ProjectRecoveryIssue | null } {
+  backupBeforeMigration(raw, storage);
   const primary = parseProject(raw, key);
   if (!primary.issue) return primary;
 
@@ -182,12 +200,34 @@ function parseRecoverableProject(
   const backupRaw = storage.getItem(projectBackupKey(id));
   if (!backupRaw) return primary;
 
+  backupBeforeMigration(backupRaw, storage);
   const backup = parseProject(backupRaw, projectBackupKey(id));
   if (!backup.project) return primary;
 
   recordProjectBackupRecovery(key, primary.issue, storage);
   repairPrimaryProjectFromBackup(key, backupRaw, storage);
   return { project: backup.project, issue: null };
+}
+
+function backupBeforeMigration(raw: string, storage: Storage): void {
+  const version = storedSchemaVersion(raw);
+  if (version === null || version >= CURRENT_SCHEMA_VERSION) return;
+  try {
+    storage.setItem(migrationBackupKey(version), raw);
+  } catch {
+    // A full storage must not stop the project from loading.
+  }
+}
+
+function storedSchemaVersion(raw: string): number | null {
+  try {
+    const parsed: unknown = JSON.parse(raw.startsWith(UTF8_BOM) ? raw.slice(UTF8_BOM.length) : raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { schemaVersion } = parsed as { schemaVersion?: unknown };
+    return typeof schemaVersion === 'number' ? schemaVersion : null;
+  } catch {
+    return null;
+  }
 }
 
 function repairPrimaryProjectFromBackup(key: string, backupRaw: string, storage: Storage): void {
@@ -290,7 +330,7 @@ export function listSavedProjects(storage: Storage | null = getStorage()): Proje
   const summaries: ProjectSummary[] = [];
   for (let i = 0; i < storage.length; i += 1) {
     const key = storage.key(i);
-    if (!key || !key.startsWith(KEY_PREFIX)) continue;
+    if (!key || !isProjectKey(key)) continue;
     const raw = storage.getItem(key);
     if (!raw) continue;
     const result = parseRecoverableProject(raw, key, storage);
@@ -313,7 +353,7 @@ export function listProjectRecoveryIssues(storage: Storage | null = getStorage()
   const issues: ProjectRecoveryIssue[] = [];
   for (let i = 0; i < storage.length; i += 1) {
     const key = storage.key(i);
-    if (!key || !key.startsWith(KEY_PREFIX)) continue;
+    if (!key || !isProjectKey(key)) continue;
     const raw = storage.getItem(key);
     if (!raw) continue;
     const { project, issue } = parseRecoverableProject(raw, key, storage);
@@ -330,7 +370,7 @@ export function deleteProjectRecoveryIssue(
   key: string,
   storage: Storage | null = getStorage(),
 ): boolean {
-  if (!storage || !key.startsWith(KEY_PREFIX)) return false;
+  if (!storage || !isProjectKey(key)) return false;
   const raw = storage.getItem(key);
   if (!raw) return false;
   const { project, issue } = parseRecoverableProject(raw, key, storage);

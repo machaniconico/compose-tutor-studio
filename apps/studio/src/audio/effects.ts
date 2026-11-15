@@ -1,10 +1,34 @@
 import type { EffectConfig, EffectType } from '@cts/project-model';
 
-export type SupportedEffectType = Extract<EffectType, 'filter' | 'delay' | 'reverb'>;
+export type SupportedEffectType = Extract<
+  EffectType,
+  'eq' | 'compressor' | 'filter' | 'delay' | 'reverb'
+>;
 
-const SUPPORTED_EFFECTS: readonly SupportedEffectType[] = ['filter', 'delay', 'reverb'];
+/**
+ * Signal order once EQ or the compressor is on: eq -> compressor -> filter ->
+ * delay -> reverb. Without them, older projects keep their saved list order.
+ */
+const SUPPORTED_EFFECTS: readonly SupportedEffectType[] = [
+  'eq',
+  'compressor',
+  'filter',
+  'delay',
+  'reverb',
+];
 
 export const DEFAULT_EFFECT_PARAMS: Record<SupportedEffectType, Record<string, number>> = {
+  eq: {
+    lowGainDb: 0,
+    midGainDb: 0,
+    highGainDb: 0,
+  },
+  compressor: {
+    thresholdDb: -24,
+    ratio: 3,
+    attackSeconds: 0.01,
+    releaseSeconds: 0.2,
+  },
   filter: {
     cutoffHz: 1800,
     resonance: 0.7,
@@ -18,6 +42,40 @@ export const DEFAULT_EFFECT_PARAMS: Record<SupportedEffectType, Record<string, n
     mix: 0.25,
   },
 };
+
+export type EqEffectSettings = {
+  lowGainDb: number;
+  midGainDb: number;
+  highGainDb: number;
+};
+
+export type CompressorEffectSettings = {
+  thresholdDb: number;
+  ratio: number;
+  attackSeconds: number;
+  releaseSeconds: number;
+};
+
+export type DelayDivision = '1/4' | '1/8' | '1/8d';
+
+const DELAY_DIVISION_BEATS: Record<DelayDivision, number> = {
+  '1/4': 1,
+  '1/8': 0.5,
+  '1/8d': 0.75,
+};
+
+/**
+ * Upper clamp for a saved delay time. Kept at the pre-tempo-sync value so
+ * projects saved with an over-limit value (e.g. `delayTime: 4`) still resolve to
+ * exactly the same 1.5 s they played at before. Tempo-synced values that would
+ * exceed it (a quarter note below 40 BPM) are clamped by the mixer.
+ */
+export const MAX_DELAY_SECONDS = 1.5;
+
+/** Delay time in seconds that lines up with the tempo for a note division. */
+export function delayTimeSeconds(bpm: number, division: DelayDivision): number {
+  return (60 / bpm) * DELAY_DIVISION_BEATS[division];
+}
 
 export type FilterEffectSettings = {
   cutoffHz: number;
@@ -107,8 +165,16 @@ export function upsertEffect(
 export function enabledSupportedEffects(
   effects: readonly EffectConfig[] | undefined,
 ): EffectConfig[] {
-  return (effects ?? []).filter(
+  const enabled = (effects ?? []).filter(
     (effect) => effect.enabled && isSupportedEffectType(effect.type),
+  );
+  if (!enabled.some((effect) => effect.type === 'eq' || effect.type === 'compressor')) {
+    return enabled;
+  }
+  return enabled.sort(
+    (a, b) =>
+      SUPPORTED_EFFECTS.indexOf(a.type as SupportedEffectType) -
+      SUPPORTED_EFFECTS.indexOf(b.type as SupportedEffectType),
   );
 }
 
@@ -116,6 +182,23 @@ export function effectSignature(effects: readonly EffectConfig[] | undefined): s
   return enabledSupportedEffects(effects)
     .map((effect) => `${effect.id}:${effect.type}`)
     .join('|');
+}
+
+export function eqSettings(effect: EffectConfig): EqEffectSettings {
+  return {
+    lowGainDb: readNumber(effect, ['lowGainDb'], 0, -12, 12),
+    midGainDb: readNumber(effect, ['midGainDb'], 0, -12, 12),
+    highGainDb: readNumber(effect, ['highGainDb'], 0, -12, 12),
+  };
+}
+
+export function compressorSettings(effect: EffectConfig): CompressorEffectSettings {
+  return {
+    thresholdDb: readNumber(effect, ['thresholdDb'], -24, -60, 0),
+    ratio: readNumber(effect, ['ratio'], 3, 1, 20),
+    attackSeconds: readNumber(effect, ['attackSeconds'], 0.01, 0, 1),
+    releaseSeconds: readNumber(effect, ['releaseSeconds'], 0.2, 0.01, 1),
+  };
 }
 
 export function filterSettings(effect: EffectConfig): FilterEffectSettings {
@@ -127,7 +210,7 @@ export function filterSettings(effect: EffectConfig): FilterEffectSettings {
 
 export function delaySettings(effect: EffectConfig): DelayEffectSettings {
   return {
-    timeSeconds: readNumber(effect, ['timeSeconds', 'time', 'delayTime'], 0.25, 0, 1.5),
+    timeSeconds: readNumber(effect, ['timeSeconds', 'time', 'delayTime'], 0.25, 0, MAX_DELAY_SECONDS),
     feedback: readNumber(effect, ['feedback'], 0.28, 0, 0.85),
     mix: readNumber(effect, ['mix'], 0.32, 0, 1),
   };
@@ -211,9 +294,76 @@ function createEffectInstance(
   effect: EffectConfig,
   when: number,
 ): EffectInstance {
+  if (effect.type === 'eq') return createEqEffect(ctx, effect, when);
+  if (effect.type === 'compressor') return createCompressorEffect(ctx, effect, when);
   if (effect.type === 'filter') return createFilterEffect(ctx, effect, when);
   if (effect.type === 'delay') return createDelayEffect(ctx, effect, when);
   return createReverbEffect(ctx, effect, when);
+}
+
+function createEqEffect(
+  ctx: BaseAudioContext,
+  effect: EffectConfig,
+  when: number,
+): EffectInstance {
+  const low = ctx.createBiquadFilter();
+  const mid = ctx.createBiquadFilter();
+  const high = ctx.createBiquadFilter();
+  low.type = 'lowshelf';
+  low.frequency.value = 200;
+  mid.type = 'peaking';
+  mid.frequency.value = 1000;
+  mid.Q.value = 1;
+  high.type = 'highshelf';
+  high.frequency.value = 4000;
+  low.connect(mid);
+  mid.connect(high);
+
+  const instance: EffectInstance = {
+    type: 'eq',
+    input: low,
+    output: high,
+    apply(nextEffect, nextWhen) {
+      const settings = eqSettings(nextEffect);
+      setParam(low.gain, settings.lowGainDb, nextWhen);
+      setParam(mid.gain, settings.midGainDb, nextWhen);
+      setParam(high.gain, settings.highGainDb, nextWhen);
+    },
+    dispose() {
+      disconnect(low);
+      disconnect(mid);
+      disconnect(high);
+    },
+  };
+  instance.apply(effect, when);
+  return instance;
+}
+
+function createCompressorEffect(
+  ctx: BaseAudioContext,
+  effect: EffectConfig,
+  when: number,
+): EffectInstance {
+  const compressor = ctx.createDynamicsCompressor();
+  compressor.knee.value = 6;
+
+  const instance: EffectInstance = {
+    type: 'compressor',
+    input: compressor,
+    output: compressor,
+    apply(nextEffect, nextWhen) {
+      const settings = compressorSettings(nextEffect);
+      setParam(compressor.threshold, settings.thresholdDb, nextWhen);
+      setParam(compressor.ratio, settings.ratio, nextWhen);
+      setParam(compressor.attack, settings.attackSeconds, nextWhen);
+      setParam(compressor.release, settings.releaseSeconds, nextWhen);
+    },
+    dispose() {
+      disconnect(compressor);
+    },
+  };
+  instance.apply(effect, when);
+  return instance;
 }
 
 function createFilterEffect(
@@ -248,7 +398,7 @@ function createDelayEffect(
 ): EffectInstance {
   const input = ctx.createGain();
   const dry = ctx.createGain();
-  const delay = ctx.createDelay(1.5);
+  const delay = ctx.createDelay(MAX_DELAY_SECONDS);
   const feedback = ctx.createGain();
   const wet = ctx.createGain();
   const output = ctx.createGain();

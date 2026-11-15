@@ -121,6 +121,8 @@
 - `hasMelodyChordToneOnStrongBeat(track, chordTrack, ratio)`
 - `hasExported(format)`
 
+トラックを指す判定(`noteCountAtLeast`、`trackVolumeInRange`、`hasBassRootOnDownbeat` など)は、`trackName`('Bass' / 'Melody' / 'Chords' / 'Drums')を対応する `Track.role`(bass / melody / chords / drums)に読み替え、role が一致するトラックを優先して探す。見つからない時だけ名前の完全一致にフォールバックするため、学習者がトラック名を「ベース」などに変えても判定は変わらない(`resolveTrack`、`packages/tutorial-engine/src/trackResolve.ts`)。同じ role のトラックが複数ある時は、並びが先頭のトラックだけを判定対象にする。イベント目標の `match.trackName` も同じ規則で、イベントの `trackId` が判定対象のトラックと一致する時だけ通す(イベントに載る表示名とは比べない)。プロジェクトに無い `trackId` の時だけイベントの `trackName` と比べる。フィードバック文には改名後の表示名を使う。
+
 ### 4.3 フィードバック設計
 
 フィードバックは3段階で返す。
@@ -170,6 +172,15 @@
 | Beginner | 専門用語を避け、操作と結果を説明 |
 | Standard | 度数、コード機能、スケールを表示 |
 | Advanced | テンション、借用、代理、ボイスリーディングを表示 |
+
+## 6.1 用語集
+
+- `features/tutorial/glossary.ts` に 40 語以上の用語を持ち、各語は beginner / standard / advanced の 3 難易度の説明（独自文）を持つ。
+- `Term`（`features/common/Term.tsx`）で本文中の用語を包むと、ホバーとキーボードフォーカス（tabindex=0、aria-describedby）で現在の難易度の説明（role=tooltip）が出る。説明は body 直下に描画し、画面の右端で止め、下に入り切らないときは語の上に出す（右パネルの overflow で切れない）。Escape で閉じる（ホバーだけで開いた場合も、フォーカスがどこにあっても閉じる）。
+- `GlossaryPanel` はチュートリアルタブの「用語集をひらく」から開く。一覧と検索ができ、ひらがな・カタカナ・英字を正規化して部分一致する（「すうぃんぐ」と「swing」は同じ語）。
+- インスペクターの主要用語（キー、スケール、コード、度数、テンションなど）を `Term` で包んでいる。
+- レッスンの「やること」と「なぜ？」の本文は、用語集の語を自動で `Term` にする（文ごとに同じ語は最初の 1 回だけ。「キーボード」の「キー」のように別の単語の一部は対象外。スネアの音にも使う「パン」も自動では包まない）。
+- 用語集を開いている間もレッスンは裏で保たれ、もどると回答の途中経過が残っている。
 
 ## 7. 進捗保存
 

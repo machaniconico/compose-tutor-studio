@@ -281,8 +281,10 @@ export class Scheduler {
     this.scheduledBeat = startBeat;
     this.anchorTime = this.clock();
     this.running = true;
-    // Schedule the first window immediately, then on each tick.
+    // Schedule the first window immediately, then on each tick. Starting at the
+    // project end stops inside this first tick, so no timer is created then.
     this.tick();
+    if (!this.running) return;
     this.timer = setInterval(() => this.tick(), this.tickMs);
   }
 

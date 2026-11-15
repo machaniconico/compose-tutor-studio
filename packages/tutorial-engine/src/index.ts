@@ -109,3 +109,6 @@ export {
   COURSE0_LESSONS,
   getLessonById,
 } from './content/index.js';
+
+// ─── Track resolution (role first, name as fallback) ─────────────────────────
+export { resolveTrack, resolveTrackByPredicateName, roleForTrackName } from './trackResolve.js';

@@ -23,6 +23,16 @@ describe('project file import parsing', () => {
     }
   });
 
+  it('upgrades an older project file to the current schema', () => {
+    const project = { ...createDefaultProject('古いファイル'), schemaVersion: 1 };
+    const result = parseProjectFileImport(JSON.stringify(project));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.schemaVersion).toBe(2);
+    }
+  });
+
   it('rejects invalid JSON with a beginner-facing message', () => {
     const result = parseProjectFileImport('{not json');
 

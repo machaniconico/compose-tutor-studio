@@ -3,6 +3,8 @@
 // Holds the project, transport, editor UI state, panel state, and an
 // undo/redo history of project snapshots. Project mutations always bump
 // `updatedAt`, push history, and schedule a debounced localStorage save.
+// Inside a transaction (one drag, one slider gesture, one text edit) mutations
+// only update the current value; the commit adds a single undo step.
 
 import { create } from 'zustand';
 import type {
@@ -14,6 +16,11 @@ import type {
   Project,
   ScaleName,
   Track,
+} from '@cts/project-model';
+import {
+  contentBeyondBars,
+  setLengthBars as setProjectLengthBars,
+  setTimeSignature as setProjectTimeSignature,
 } from '@cts/project-model';
 import { getScalePitchClasses } from '@cts/theory-engine';
 import { createDefaultProject } from './defaultProject';
@@ -87,6 +94,8 @@ type StoreState = {
   // history
   past: Project[];
   future: Project[];
+  /** Project as it was when the open transaction began; null when none is open. */
+  transactionBase: Project | null;
 
   /** Generic escape hatch: apply an immutable project change (bumps updatedAt, pushes history, saves). */
   applyProjectChange: (fn: (p: Project) => Project) => void;
@@ -96,6 +105,24 @@ type StoreState = {
   setKey: (key: MusicalKey) => void;
   setScale: (scale: ScaleName) => void;
   setTitle: (title: string) => void;
+  /**
+   * Change the time signature, keeping every beat position (one undo step).
+   * When the coarser drum grid would merge two hits into one and `confirmed`
+   * is false, nothing changes and `confirm` holds a Japanese question instead.
+   * Once applied, `confirm` is null and `warnings` lists beginner-facing notes
+   * about content that had to be snapped or merged.
+   */
+  setTimeSignature: (
+    timeSignature: [number, number],
+    confirmed?: boolean,
+  ) => { confirm: string | null; warnings: string[] };
+  /**
+   * Change the song length in bars (one undo step). When shortening would
+   * delete notes, chords or drum hits past the new end, or cut notes or chords
+   * that run past it, and `confirmed` is false, nothing changes and a Japanese
+   * warning is returned instead. Returns null once the change is applied.
+   */
+  setLengthBars: (lengthBars: number, confirmed?: boolean) => string | null;
 
   // chord actions
   addChord: (symbol: string, startBeat: number, durationBeats: number) => void;
@@ -153,7 +180,24 @@ type StoreState = {
   toggleMetronome: () => void;
 
   // history actions
+  /**
+   * Start grouping project changes into one undo step. `owner` names the
+   * operation: a different owner commits the open transaction and starts its
+   * own. Without an owner this joins any open transaction.
+   */
+  beginTransaction: (owner?: unknown) => void;
+  /**
+   * Close the transaction, adding one undo step if the project really changed.
+   * With an `owner`, this only closes a transaction that owner opened.
+   */
+  commitTransaction: (owner?: unknown) => void;
+  /** Close the transaction and restore the project; `owner` as in commit. */
+  cancelTransaction: (owner?: unknown) => void;
+  /** True while a transaction opened by `owner` is still open. */
+  ownsTransaction: (owner: unknown) => boolean;
+  /** Abandons any open transaction first, so undo always lands on a whole step. */
   undo: () => void;
+  /** Abandons any open transaction first, like `undo`. */
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
@@ -274,6 +318,11 @@ function makeSavedState(savedAt: string): SaveState {
   return { status: 'saved', lastSavedAt: savedAt, errorMessage: null };
 }
 
+/** Whether two projects differ only in their `updatedAt` stamp. */
+function sameProjectContent(a: Project, b: Project): boolean {
+  return JSON.stringify({ ...a, updatedAt: '' }) === JSON.stringify({ ...b, updatedAt: '' });
+}
+
 /** Load the most recent saved project, or build a fresh default. */
 function initialProject(): Project {
   return loadMostRecentProject() ?? createDefaultProject();
@@ -332,11 +381,31 @@ export const useStore = create<StoreState>((set, get) => {
   const commitProject = (next: Project): void => {
     const current = get().project;
     const stamped: Project = { ...next, updatedAt: nowIso() };
-    const past = [...get().past, current].slice(-HISTORY_CAP);
+    const historyUpdate = get().transactionBase
+      ? {}
+      : { past: [...get().past, current].slice(-HISTORY_CAP), future: [] };
     set({
       project: stamped,
-      past,
-      future: [],
+      ...historyUpdate,
+      save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
+    });
+    scheduleSave(persistCurrentProject);
+  };
+
+  let transactionOwner: unknown;
+  const mayClose = (owner: unknown): boolean => owner === undefined || owner === transactionOwner;
+
+  /** Put the project back as it was when the open transaction began, and close it. */
+  const restoreTransactionBase = (): void => {
+    const { transactionBase, project } = get();
+    if (!transactionBase) return;
+    if (project === transactionBase) {
+      set({ transactionBase: null });
+      return;
+    }
+    set({
+      project: transactionBase,
+      transactionBase: null,
       save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
     });
     scheduleSave(persistCurrentProject);
@@ -353,6 +422,7 @@ export const useStore = create<StoreState>((set, get) => {
     inspector: { content: null },
     past: [],
     future: [],
+    transactionBase: null,
 
     applyProjectChange: (fn) => commitProject(fn(get().project)),
 
@@ -361,6 +431,44 @@ export const useStore = create<StoreState>((set, get) => {
     setKey: (key) => commitProject({ ...get().project, key }),
     setScale: (scale) => commitProject({ ...get().project, scale }),
     setTitle: (title) => commitProject({ ...get().project, title }),
+    setTimeSignature: (timeSignature, confirmed = false) => {
+      const { project, warnings, droppedHits } = setProjectTimeSignature(get().project, timeSignature);
+      if (droppedHits > 0 && !confirmed) {
+        return {
+          confirm: `拍子を ${timeSignature[0]}/${timeSignature[1]} にすると、ドラムの ${droppedHits} 個の音が別の音と同じステップに重なるため削除されます。変更してもよいですか？(「元に戻す」で戻せます)`,
+          warnings: [],
+        };
+      }
+      commitProject(project);
+      return { confirm: null, warnings };
+    },
+    setLengthBars: (lengthBars, confirmed = false) => {
+      const project = get().project;
+      if (!Number.isInteger(lengthBars) || lengthBars < 1 || lengthBars === project.lengthBars) {
+        return null;
+      }
+      if (!confirmed) {
+        const beyond = contentBeyondBars(project, lengthBars);
+        const count = (label: string, n: number): string | null => (n > 0 ? `${label} ${n} 個` : null);
+        const isPart = (part: string | null): part is string => part !== null;
+        const removed = [
+          count('ノート', beyond.notes),
+          count('コード', beyond.chords),
+          count('ドラム', beyond.drumHits),
+          count('セクション', beyond.sections),
+        ].filter(isPart);
+        const cut = [count('ノート', beyond.truncatedNotes), count('コード', beyond.truncatedChords)].filter(isPart);
+        const sentences = [
+          removed.length > 0 ? `${lengthBars} 小節より後ろにある ${removed.join('・')} が削除されます。` : null,
+          cut.length > 0 ? `${lengthBars} 小節の終わりをまたぐ ${cut.join('・')} は終わりで切られます。` : null,
+        ].filter(isPart);
+        if (sentences.length > 0) {
+          return `${sentences.join('')}短くしてもよいですか？(「元に戻す」で戻せます)`;
+        }
+      }
+      commitProject(setProjectLengthBars(project, lengthBars));
+      return null;
+    },
 
     // --- chords ---
     addChord: (symbol, startBeat, durationBeats) => {
@@ -577,7 +685,33 @@ export const useStore = create<StoreState>((set, get) => {
       set((s) => ({ transport: { ...s.transport, metronome: !s.transport.metronome } })),
 
     // --- history ---
+    beginTransaction: (owner) => {
+      if (get().transactionBase) {
+        if (mayClose(owner)) return;
+        get().commitTransaction();
+      }
+      transactionOwner = owner;
+      set({ transactionBase: get().project });
+    },
+    commitTransaction: (owner) => {
+      const { transactionBase, project, past } = get();
+      if (!transactionBase || !mayClose(owner)) return;
+      if (sameProjectContent(transactionBase, project)) {
+        restoreTransactionBase();
+        return;
+      }
+      set({
+        past: [...past, transactionBase].slice(-HISTORY_CAP),
+        future: [],
+        transactionBase: null,
+      });
+    },
+    cancelTransaction: (owner) => {
+      if (mayClose(owner)) restoreTransactionBase();
+    },
+    ownsTransaction: (owner) => get().transactionBase !== null && owner === transactionOwner,
     undo: () => {
+      restoreTransactionBase();
       const { past, project, future } = get();
       const previous = past[past.length - 1];
       if (!previous) return;
@@ -590,6 +724,7 @@ export const useStore = create<StoreState>((set, get) => {
       scheduleSave(persistCurrentProject);
     },
     redo: () => {
+      restoreTransactionBase();
       const { past, project, future } = get();
       const next = future[0];
       if (!next) return;
@@ -601,7 +736,7 @@ export const useStore = create<StoreState>((set, get) => {
       });
       scheduleSave(persistCurrentProject);
     },
-    canUndo: () => get().past.length > 0,
+    canUndo: () => get().past.length > 0 || get().transactionBase !== null,
     canRedo: () => get().future.length > 0,
 
     // --- persistence ---
@@ -621,6 +756,7 @@ export const useStore = create<StoreState>((set, get) => {
         save: makeIdleSave(),
         past: [],
         future: [],
+        transactionBase: null,
       });
       persistProject(project);
       publishAppEvent({
@@ -639,6 +775,7 @@ export const useStore = create<StoreState>((set, get) => {
         save: makeSavedState(loaded.updatedAt),
         past: [],
         future: [],
+        transactionBase: null,
       });
       return true;
     },
@@ -651,6 +788,7 @@ export const useStore = create<StoreState>((set, get) => {
         save: makeIdleSave(),
         past: [],
         future: [],
+        transactionBase: null,
       });
       persistProject(project);
       publishAppEvent({
@@ -667,6 +805,7 @@ export const useStore = create<StoreState>((set, get) => {
         save: makeIdleSave(),
         past: [],
         future: [],
+        transactionBase: null,
       });
     },
     deleteProject: (id) => {
@@ -684,8 +823,119 @@ export const useStore = create<StoreState>((set, get) => {
           save: savedFallback ? makeSavedState(savedFallback.updatedAt) : makeIdleSave(),
           past: [],
           future: [],
+          transactionBase: null,
         });
       }
     },
   };
 });
+
+/** Keys that move a focused range slider. */
+const SLIDER_STEP_KEYS = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+]);
+
+/** Stops watching the pointer drag in progress; null when there is none. */
+let stopDragWatch: (() => void) | null = null;
+/** Owner of the last drag closed before its pointer was released. */
+let abandonedDragOwner: unknown = null;
+
+/**
+ * Closes the open transaction of `owner` when that pointer is released, even if
+ * the element that captured it is gone or the component has unmounted. The
+ * release is watched on window, and only while the drag's own transaction is
+ * open, so a release after a cancel or Undo is ignored.
+ */
+export function watchDragEnd(owner: unknown, pointerId: number): void {
+  stopDragWatch?.();
+  const { commitTransaction, cancelTransaction } = useStore.getState();
+  const finishWith =
+    (end: (owner: unknown) => void) =>
+    (pointerEvent: PointerEvent): void => {
+      if (pointerEvent.pointerId !== pointerId) return;
+      stop();
+      end(owner);
+    };
+  const onUp = finishWith(commitTransaction);
+  const onCancel = finishWith(cancelTransaction);
+  const stop = (): void => {
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+    unsubscribe();
+    stopDragWatch = null;
+  };
+  const unsubscribe = useStore.subscribe((state) => {
+    if (state.ownsTransaction(owner)) return;
+    stop();
+    abandonedDragOwner = owner;
+  });
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onCancel);
+  stopDragWatch = stop;
+}
+
+/**
+ * Spread onto `<input type="range">`: pointerdown..pointerup, or one key press
+ * up to its keyup, is one undo step. A drag ended early by a cancel or Undo stays
+ * over: its remaining changes are reverted until the next press or key.
+ */
+export const sliderUndoProps = {
+  onChangeCapture: (event: {
+    currentTarget: EventTarget;
+    nativeEvent: { type: string };
+  }): void => {
+    const owner = event.currentTarget;
+    const { beginTransaction, cancelTransaction } = useStore.getState();
+    beginTransaction(owner);
+    if (owner !== abandonedDragOwner) return;
+    // React runs a target's onChange even if its capture handler stops
+    // propagation, so the change is undone once it has bubbled past the handler.
+    window.addEventListener(event.nativeEvent.type, () => cancelTransaction(owner), { once: true });
+  },
+  onPointerDown: (event: { currentTarget: EventTarget; pointerId: number }): void => {
+    abandonedDragOwner = null;
+    useStore.getState().beginTransaction(event.currentTarget);
+    watchDragEnd(event.currentTarget, event.pointerId);
+  },
+  onKeyDown: (event: { key: string }): void => {
+    if (SLIDER_STEP_KEYS.has(event.key)) abandonedDragOwner = null;
+  },
+  onKeyUp: (event: { key: string; currentTarget: EventTarget }): void => {
+    if (SLIDER_STEP_KEYS.has(event.key) && !stopDragWatch) {
+      useStore.getState().commitTransaction(event.currentTarget);
+    }
+  },
+  // Tabbing away with a key held never delivers the keyup here. A window blur
+  // also blurs the slider, but that one must cancel (see TransportBar).
+  onBlur: (event: { currentTarget: EventTarget }): void => {
+    if (document.hasFocus() && !stopDragWatch) {
+      useStore.getState().commitTransaction(event.currentTarget);
+    }
+  },
+};
+
+/** Spread onto a text or number input: edits up to blur or Enter are one undo step. */
+export const textUndoProps = {
+  onChangeCapture: (event: { currentTarget: EventTarget }): void =>
+    useStore.getState().beginTransaction(event.currentTarget),
+  onBlur: (event: { currentTarget: EventTarget }): void =>
+    useStore.getState().commitTransaction(event.currentTarget),
+  onKeyDown: (event: {
+    key: string;
+    keyCode: number;
+    currentTarget: EventTarget;
+    nativeEvent: { isComposing: boolean };
+  }): void => {
+    // Enter while composing Japanese confirms the conversion, not the edit.
+    // WebKit reports that Enter with keyCode 229 and isComposing false.
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
+    useStore.getState().commitTransaction(event.currentTarget);
+  },
+};

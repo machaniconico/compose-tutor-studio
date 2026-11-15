@@ -8,6 +8,8 @@ import {
 } from '../src/smf.js';
 import type { MidiMessage } from '../src/smf.js';
 import { exportProjectToMidi, exportNotesToMidi } from '../src/export.js';
+import { parseMidi } from '../src/import.js';
+import { setLengthBars } from '@cts/project-model';
 import type { Project, NoteEvent } from '@cts/project-model';
 
 // ---------------------------------------------------------------------------
@@ -320,5 +322,72 @@ describe('exportProjectToMidi', () => {
     const midi = exportProjectToMidi(project, { ppq: 960 });
     const view = new DataView(midi.buffer);
     expect(view.getUint16(12, false)).toBe(960);
+  });
+
+  it('places 3/4 drum steps (12 per bar) a quarter beat apart', () => {
+    const drumProject: Project = {
+      ...project,
+      timeSignature: [3, 4],
+      tracks: [
+        {
+          id: 'track-drums',
+          name: 'Drums',
+          type: 'drum',
+          clips: [
+            {
+              id: 'clip-drums',
+              trackId: 'track-drums',
+              type: 'drum',
+              startBeat: 0,
+              lengthBeats: 3,
+              loop: false,
+              stepsPerBar: 12,
+              drumEvents: [
+                { id: 'd1', lane: 'kick', stepIndex: 0, velocity: 100 },
+                { id: 'd2', lane: 'snare', stepIndex: 4, velocity: 100 },
+                { id: 'd3', lane: 'kick', stepIndex: 12, velocity: 100 },
+              ],
+            },
+          ],
+          volume: 1,
+          pan: 0,
+          mute: false,
+          solo: false,
+          effects: [],
+        },
+      ],
+    };
+    const parsed = parseMidi(exportProjectToMidi(drumProject));
+    const drums = parsed.tracks.find((t) => t.name === 'Drums');
+    const onsets = drums?.notes.map((n) => n.startBeat).sort((a, b) => a - b);
+    // 1 step = 1/4 beat: step 4 is beat 1 (the 2nd beat), step 12 is beat 3 (bar 2).
+    expect(onsets).toEqual([0, 1, 3]);
+    expect(drums?.notes.every((n) => n.channel === 9)).toBe(true);
+  });
+
+  it('ends the exported notes at the song end after the song is shortened across a note', () => {
+    // 8 bars of 4/4 with a note that starts in bar 4 and rings 8 beats, past the 4-bar line.
+    const longProject: Project = {
+      ...project,
+      lengthBars: 8,
+      tracks: project.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => ({
+          ...c,
+          lengthBeats: 32,
+          notes: [
+            ...(c.notes ?? []),
+            { id: 'n-cross', pitch: 67, startBeat: 15, durationBeats: 8, velocity: 100 },
+          ],
+        })),
+      })),
+    };
+    const shortened = setLengthBars(longProject, 4, () => new Date('2026-01-02T00:00:00Z'));
+    const parsed = parseMidi(exportProjectToMidi(shortened));
+    const piano = parsed.tracks.find((t) => t.name === 'Piano');
+    const crossing = piano?.notes.find((n) => n.startBeat === 15);
+    expect(crossing?.durationBeats).toBe(1);
+    const lastEnd = Math.max(...(piano?.notes.map((n) => n.startBeat + n.durationBeats) ?? [0]));
+    expect(lastEnd).toBe(16);
   });
 });

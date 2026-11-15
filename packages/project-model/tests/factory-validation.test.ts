@@ -61,7 +61,14 @@ describe('createDefaultProject', () => {
     expect(p.scale).toBe('major');
     expect(p.timeSignature).toEqual([4, 4]);
     expect(p.lengthBars).toBe(8);
-    expect(p.schemaVersion).toBe(1);
+    expect(p.schemaVersion).toBe(2);
+  });
+
+  it('sizes the drum grid to the meter (16 steps in 4/4, 12 in 3/4)', () => {
+    const drumSteps = (timeSignature: [number, number]): number | undefined =>
+      createDefaultProject({ timeSignature }).tracks.find((t) => t.type === 'drum')?.clips[0]?.stepsPerBar;
+    expect(drumSteps([4, 4])).toBe(16);
+    expect(drumSteps([3, 4])).toBe(12);
   });
 
   it('accepts overrides', () => {

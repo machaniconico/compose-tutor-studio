@@ -292,6 +292,14 @@ input[type='range'] {
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel-2);
   padding: var(--sp-2);
+  /* Grid item: let the lane shrink to the pane so the scroll viewport below can scroll. */
+  min-width: 0;
+}
+
+/* One horizontal viewport for the ruler and the chord grid: later bars scroll into view. */
+.chord-lane__scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .chord-lane__header {
@@ -424,7 +432,7 @@ input[type='range'] {
 
 .drum-grid__row {
   display: grid;
-  grid-template-columns: 64px repeat(var(--steps, 16), 22px);
+  grid-template-columns: 64px repeat(var(--steps, 16), var(--step-px, 22px));
   gap: 3px;
   align-items: center;
 }
@@ -437,7 +445,7 @@ input[type='range'] {
 }
 
 .drum-cell {
-  width: 22px;
+  width: var(--step-px, 22px);
   height: 22px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -453,6 +461,12 @@ input[type='range'] {
 .drum-cell.is-on {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+/* Steps after the clip end in a partial last bar: visible but not editable. */
+.drum-cell.is-outside {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1604,6 +1618,12 @@ input[type='range'] {
 
 .dialog--wide { max-width: 640px; }
 
+.shortcut-help { display: flex; flex-direction: column; gap: var(--sp-4); }
+.shortcut-help h3 { margin: 0 0 var(--sp-1); font-size: inherit; }
+.shortcut-help table { width: 100%; border-collapse: collapse; }
+.shortcut-help th { text-align: left; font-weight: normal; white-space: nowrap; padding-right: var(--sp-4); }
+.shortcut-help kbd { font-family: inherit; }
+
 .dialog__header {
   display: flex;
   align-items: center;
@@ -2286,4 +2306,88 @@ input[type='range'] {
   font: 12px/1.45 var(--mono);
   padding: var(--sp-3);
   white-space: pre;
+}
+
+/* ------------------------------------------------------------------ */
+/* Timeline ruler + playhead                                           */
+/* ------------------------------------------------------------------ */
+.timeline-ruler {
+  position: relative;
+  height: 20px;
+  flex: 0 0 20px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.timeline-ruler__bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding-left: 3px;
+  border-left: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 20px;
+  color: var(--text-dim);
+}
+
+.pr__main {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.pr__main > .timeline-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.pr__keyboard {
+  margin-top: 22px;
+}
+
+.drum-grid {
+  position: relative;
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.playhead.is-hidden {
+  display: none;
+}
+
+/* 用語ツールチップ・用語集 */
+.term { position: relative; display: inline; border-bottom: 1px dotted currentColor; cursor: help; }
+.term:focus-visible { outline: 2px solid var(--accent, #4f8cff); outline-offset: 2px; }
+/* body 直下に描画し、位置は Term.tsx が画面内に収まるよう決めて inline で与える(パネルの overflow で切れない) */
+.term__tip { position: fixed; z-index: 100; width: max-content; max-width: 240px; padding: 6px 8px; border-radius: 4px; background: #222; color: #fff; font-size: 12px; font-weight: normal; line-height: 1.5; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+/* 語と説明の隙間(4px)でもホバーが切れないよう、隙間を説明側の当たり判定で埋める */
+.term__tip::before { content: ''; position: absolute; left: 0; right: 0; top: -4px; height: 4px; }
+.term__tip--above::before { top: auto; bottom: -4px; }
+.term__tip strong { display: block; margin-bottom: 2px; }
+.glossary-panel { display: flex; flex-direction: column; gap: var(--sp-3); }
+.glossary-panel__search { width: 100%; }
+.glossary-panel__list { margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.glossary-panel__item dt { font-weight: bold; }
+.glossary-panel__item dd { margin: 0; font-size: 12px; line-height: 1.5; }
+
+.mix-ch__hint {
+  display: block;
+  color: var(--text-dim, #8a8f98);
+  font-size: 10px;
+  line-height: 1.3;
+  max-width: 180px;
 }

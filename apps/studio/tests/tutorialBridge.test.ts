@@ -104,4 +104,50 @@ describe('tutorialBridge event flow', () => {
     expect(grade.correct).toBe(true);
     expect(grade.advanced).toBe(true);
   });
+
+  describe('renamed tracks', () => {
+    const renameTrack = (from: string, to: string): string => {
+      useStore.getState().applyProjectChange((project) => ({
+        ...project,
+        tracks: project.tracks.map((t) => (t.name === from ? { ...t, name: to } : t)),
+      }));
+      const track = useStore.getState().project.tracks.find((t) => t.name === to);
+      return track?.clips[0]?.id ?? '';
+    };
+    const addNote = (clipId: string, startBeat: number) =>
+      useStore.getState().addNote(clipId, { pitch: 48, startBeat, durationBeats: 1, velocity: 100 });
+
+    it('advances compose-3 when notes go on a renamed Bass track', () => {
+      const clipId = renameTrack('Bass', 'ベース');
+      bridge.startLesson('compose-3');
+      expect(bridge.getBridgeSnapshot().engineState?.stepIndex).toBe(0);
+
+      addNote(clipId, 0); // s1: note.added matching 'Bass'
+      expect(bridge.getBridgeSnapshot().engineState?.stepIndex).toBe(1);
+
+      for (const beat of [1, 2, 3]) addNote(clipId, beat); // s2: noteCountAtLeast(Bass>=4)
+      expect(bridge.getBridgeSnapshot().engineState?.stepIndex).toBe(2);
+    });
+
+    it('advances compose-4 when notes go on a renamed Melody track', () => {
+      const clipId = renameTrack('Melody', 'メロディ');
+      bridge.startLesson('compose-4');
+      appEvents.publishAppEvent({
+        type: 'scale_snap.enabled',
+        payload: { key: 'C', scale: 'major' },
+      });
+      expect(bridge.getBridgeSnapshot().engineState?.stepIndex).toBe(1);
+
+      addNote(clipId, 0); // s2: note.added matching 'Melody'
+      expect(bridge.getBridgeSnapshot().engineState?.stepIndex).toBe(2);
+    });
+
+    it('does not advance compose-3 for a note on a different track', () => {
+      renameTrack('Bass', 'ベース');
+      const melodyClip = useStore.getState().project.tracks.find((t) => t.name === 'Melody');
+      bridge.startLesson('compose-3');
+      addNote(melodyClip?.clips[0]?.id ?? '', 0);
+      expect(bridge.getBridgeSnapshot().engineState?.stepIndex).toBe(0);
+    });
+  });
 });

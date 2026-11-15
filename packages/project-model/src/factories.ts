@@ -3,7 +3,7 @@
 
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
-import { beatsPerBar } from './time';
+import { beatsPerBar, drumStepsPerBar } from './time';
 import { makeId } from './ids';
 import type {
   Clip,
@@ -12,10 +12,11 @@ import type {
   Project,
   ScaleName,
   Track,
+  TrackRole,
   TrackType,
 } from './types';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export type CreateProjectOptions = {
   title?: string;
@@ -43,11 +44,13 @@ export function createTrack(
   type: TrackType,
   instrument?: InstrumentConfig,
   color?: string,
+  role?: TrackRole,
 ): Track {
   return {
     id: makeId('track'),
     name,
     type,
+    ...(role !== undefined ? { role } : {}),
     ...(color !== undefined ? { color } : {}),
     clips: [],
     volume: 1,
@@ -113,16 +116,16 @@ export function createEmptyProject(options: CreateProjectOptions = {}): Project 
   const lengthBeats = lengthBars * beatsPerBar(timeSignature);
   const timestamp = nowIso(clock);
 
-  const chords = createTrack('Chords', 'instrument', { type: 'synth', preset: 'pad' }, '#7c9cf0');
-  const bass = createTrack('Bass', 'instrument', { type: 'synth', preset: 'bass' }, '#f0a07c');
-  const melody = createTrack('Melody', 'instrument', { type: 'synth', preset: 'lead' }, '#7cf0a0');
-  const drums = createTrack('Drums', 'drum', { type: 'drumkit', preset: 'acoustic' }, '#f07c9c');
+  const chords = createTrack('Chords', 'instrument', { type: 'synth', preset: 'pad' }, '#7c9cf0', 'chords');
+  const bass = createTrack('Bass', 'instrument', { type: 'synth', preset: 'bass' }, '#f0a07c', 'bass');
+  const melody = createTrack('Melody', 'instrument', { type: 'synth', preset: 'lead' }, '#7cf0a0', 'melody');
+  const drums = createTrack('Drums', 'drum', { type: 'drumkit', preset: 'acoustic' }, '#f07c9c', 'drums');
   const master = createTrack('Master', 'master');
 
   chords.clips.push(createMidiClip(chords.id, 0, lengthBeats));
   bass.clips.push(createMidiClip(bass.id, 0, lengthBeats));
   melody.clips.push(createMidiClip(melody.id, 0, lengthBeats));
-  drums.clips.push(createDrumClip(drums.id, 0, lengthBeats));
+  drums.clips.push(createDrumClip(drums.id, 0, lengthBeats, drumStepsPerBar(timeSignature)));
 
   return {
     id: makeId('project'),

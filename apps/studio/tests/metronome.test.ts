@@ -22,6 +22,15 @@ describe('metronomeBeatEvents', () => {
     expect(clicks.filter((c) => c.accent).map((c) => c.beat)).toEqual([0, 3]);
   });
 
+  it('clicks 3 times in one 3/4 bar, the first one accented', () => {
+    const clicks = metronomeBeatEvents(0, 3, 3);
+    expect(clicks).toEqual([
+      { beat: 0, accent: true },
+      { beat: 1, accent: false },
+      { beat: 2, accent: false },
+    ]);
+  });
+
   it('returns nothing for an empty range', () => {
     expect(metronomeBeatEvents(4, 4, 4)).toEqual([]);
   });

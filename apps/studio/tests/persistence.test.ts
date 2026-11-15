@@ -33,6 +33,15 @@ class ProjectWriteFailingStorage extends MemoryStorage {
   }
 }
 
+class QuotaOnBackupStorage extends MemoryStorage {
+  override setItem(key: string, value: string): void {
+    if (key.startsWith('cts.project.backup.')) {
+      throw new DOMException('quota exceeded', 'QuotaExceededError');
+    }
+    super.setItem(key, value);
+  }
+}
+
 function makeBeforeUnloadTarget() {
   const listeners = new Map<string, Set<() => void>>();
   const addListener = (type: string, listener: () => void): void => {
@@ -223,6 +232,87 @@ describe('persistence', () => {
 
     expect(loadProject(future.id, storage)).toBeNull();
     expect(loadMostRecentProject(storage)).toBeNull();
+  });
+
+  describe('migration from an older schema', () => {
+    const MIGRATION_BACKUP_KEY = 'cts.project.backup.v1';
+
+    function storedV1(title: string): { id: string; raw: string } {
+      const project = { ...createDefaultProject(title), schemaVersion: 1 };
+      return { id: project.id, raw: JSON.stringify(project) };
+    }
+
+    it('keeps the untouched v1 JSON and returns a v2 project', () => {
+      const storage = new MemoryStorage();
+      const { id, raw } = storedV1('古い曲');
+      storage.setItem(projectKey(id), raw);
+
+      const loaded = loadProject(id, storage);
+
+      expect(loaded?.schemaVersion).toBe(2);
+      expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBe(raw);
+    });
+
+    it('keeps the backup when the JSON starts with a UTF-8 BOM', () => {
+      const storage = new MemoryStorage();
+      const { id, raw } = storedV1('BOM付き');
+      storage.setItem(projectKey(id), `﻿${raw}`);
+
+      expect(loadProject(id, storage)?.schemaVersion).toBe(2);
+      expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBe(`﻿${raw}`);
+    });
+
+    it('still loads the project when the backup hits the storage quota', () => {
+      const storage = new QuotaOnBackupStorage();
+      const { id, raw } = storedV1('容量いっぱい');
+      storage.setItem(projectKey(id), raw);
+
+      expect(loadProject(id, storage)?.schemaVersion).toBe(2);
+      expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBeNull();
+    });
+
+    it('keeps the v1 JSON when a corrupt primary is recovered from a v1 backup', () => {
+      const storage = new MemoryStorage();
+      const { id, raw } = storedV1('復旧');
+      storage.setItem(projectKey(id), '{ not json');
+      storage.setItem(projectBackupKey(id), raw);
+
+      expect(loadProject(id, storage)?.schemaVersion).toBe(2);
+      expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBe(raw);
+    });
+
+    it('still recovers from a v1 backup when the migration backup hits the quota', () => {
+      const storage = new QuotaOnBackupStorage();
+      const { id, raw } = storedV1('復旧・容量いっぱい');
+      storage.setItem(projectKey(id), '{ not json');
+      storage.setItem(projectBackupKey(id), raw);
+
+      expect(loadProject(id, storage)?.schemaVersion).toBe(2);
+      expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBeNull();
+    });
+
+    it('does not back up a project already at the current schema', () => {
+      const storage = new MemoryStorage();
+      const project = createDefaultProject('最新');
+      saveProject(project, storage);
+
+      loadProject(project.id, storage);
+
+      expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBeNull();
+    });
+
+    it('does not list the backup as a saved or broken project', () => {
+      const storage = new MemoryStorage();
+      const { id, raw } = storedV1('一覧');
+      storage.setItem(projectKey(id), raw);
+      storage.setItem(MIGRATION_BACKUP_KEY, raw);
+      storage.setItem('cts.project.backup.v0', '{ not json');
+
+      expect(listSavedProjects(storage).map((summary) => summary.id)).toEqual([id]);
+      expect(listProjectRecoveryIssues(storage)).toEqual([]);
+      expect(deleteProjectRecoveryIssue('cts.project.backup.v0', storage)).toBe(false);
+      expect(storage.getItem('cts.project.backup.v0')).not.toBeNull();
+    });
   });
 
   it('deletes a project', () => {

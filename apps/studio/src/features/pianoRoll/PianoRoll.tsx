@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from '../../state/store';
+import { useStore, watchDragEnd } from '../../state/store';
+import { findShortcut } from '../../state/keymap';
 import type { Clip, NoteEvent, Project, Track } from '@cts/project-model';
+import { beatsPerBar } from '@cts/project-model';
 import { midiToNoteName } from '@cts/theory-engine';
 import { pxPerBeat } from '../timeline';
+import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { useScaleInfo } from './useScaleInfo';
 import {
@@ -76,6 +79,9 @@ function hasVelocityChanges(
   return false;
 }
 
+/** Undo transaction owner: a stale pointer event only closes a note drag's own step. */
+const NOTE_DRAG = Symbol('noteDrag');
+
 type DragState = {
   kind: 'move' | 'resize' | 'marquee';
   noteId: string | null;
@@ -113,6 +119,8 @@ export function PianoRoll() {
   const setZoomX = useStore((s) => s.setZoomX);
   const toggleScaleSnap = useStore((s) => s.toggleScaleSnap);
   const toggleChordToneHighlight = useStore((s) => s.toggleChordToneHighlight);
+  const beginTransaction = useStore((s) => s.beginTransaction);
+  const commitTransaction = useStore((s) => s.commitTransaction);
 
   const clip = findClip(project.tracks, editor.selectedClipId);
   const scaleInfo = useScaleInfo(project);
@@ -127,9 +135,11 @@ export function PianoRoll() {
   const ppb = pxPerBeat(editor.zoomX);
   const rows = useMemo(() => buildRows(), []);
   const gridHeight = rows.length * ROW_HEIGHT;
-  const lengthBeats = project.lengthBars * project.timeSignature[0];
+  const bpb = beatsPerBar(project.timeSignature);
+  const lengthBeats = project.lengthBars * bpb;
   const gridWidth = lengthBeats * ppb;
   const selected = useMemo(() => new Set(editor.selectedNoteIds), [editor.selectedNoteIds]);
+  const positionBeat = useStore((s) => s.transport.positionBeat);
 
   const notes = clip?.type === 'midi' ? clip.notes ?? [] : [];
 
@@ -164,17 +174,20 @@ export function PianoRoll() {
       if (isAnyDialogOpen()) return;
       if (editor.activeView !== 'pianoRoll') return;
       const ids = editor.selectedNoteIds;
-      if ((e.key === 'Delete' || e.key === 'Backspace') && clip && ids.length > 0) {
+      const action = findShortcut('pianoRoll', e);
+      if (action === 'deleteSelectedNotes' && clip && ids.length > 0) {
         e.preventDefault();
         removeNotes(clip.id, ids);
         selectNotes([]);
-      } else if ((e.key === 'q' || e.key === 'Q') && clip && ids.length > 0) {
+        // Deleting the dragged note removes the pointer capture: a drag ends here.
+        commitTransaction(NOTE_DRAG);
+      } else if (action === 'quantizeSelection' && clip && ids.length > 0) {
         e.preventDefault();
         quantizeSelectedNotes();
-      } else if (e.key === 's' || e.key === 'S') {
+      } else if (action === 'toggleScaleSnap') {
         e.preventDefault();
         toggleScaleSnap();
-      } else if (e.key === 'c' || e.key === 'C') {
+      } else if (action === 'toggleChordToneHighlight') {
         e.preventDefault();
         toggleChordToneHighlight();
       }
@@ -185,6 +198,7 @@ export function PianoRoll() {
     editor.activeView,
     editor.selectedNoteIds,
     clip,
+    commitTransaction,
     quantizeSelectedNotes,
     selectNotes,
     toggleScaleSnap,
@@ -236,6 +250,8 @@ export function PianoRoll() {
         nextSelected = editor.selectedNoteIds;
       }
       selectNotes(nextSelected);
+      beginTransaction(NOTE_DRAG);
+      watchDragEnd(NOTE_DRAG, e.pointerId);
 
       // Alt+drag duplicates the selection, then drags the copies.
       let dragIds = nextSelected.includes(note.id) ? nextSelected : [note.id];
@@ -265,7 +281,7 @@ export function PianoRoll() {
         shiftKey: e.shiftKey,
       };
     },
-    [clip, localPoint, ppb, selected, editor.selectedNoteIds, selectNotes],
+    [beginTransaction, clip, localPoint, ppb, selected, editor.selectedNoteIds, selectNotes],
   );
 
   const onGridPointerDown = useCallback(
@@ -294,6 +310,11 @@ export function PianoRoll() {
     (e: React.PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
+      // Undo or a lost window focus closed the transaction: this drag is over.
+      if (drag.kind !== 'marquee' && !useStore.getState().ownsTransaction(NOTE_DRAG)) {
+        dragRef.current = null;
+        return;
+      }
       const dx = e.clientX - drag.startX;
       const dy = e.clientY - drag.startY;
       if (drag.kind === 'move') {
@@ -339,6 +360,11 @@ export function PianoRoll() {
     dragRef.current = null;
     setMarquee(null);
   }, [marquee, notes, ppb, editor.selectedNoteIds, selectNotes]);
+
+  const onPointerCancel = useCallback(() => {
+    dragRef.current = null;
+    setMarquee(null);
+  }, []);
 
   const onGridDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -430,6 +456,8 @@ export function PianoRoll() {
           })}
         </div>
 
+        <div className="pr__main">
+        <TimelineRuler originBeat={clip.startBeat} />
         <div
           ref={gridRef}
           className="pr__grid"
@@ -437,6 +465,7 @@ export function PianoRoll() {
           onPointerDown={onGridPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
           onDoubleClick={onGridDoubleClick}
         >
           {/* pitch-row tints */}
@@ -454,7 +483,7 @@ export function PianoRoll() {
 
           {/* bar / beat gridlines */}
           {Array.from({ length: lengthBeats + 1 }, (_, beat) => {
-            const isBar = beat % project.timeSignature[0] === 0;
+            const isBar = beat % bpb === 0;
             return (
               <div
                 key={`gl-${beat}`}
@@ -527,6 +556,12 @@ export function PianoRoll() {
               }}
             />
           ) : null}
+          <Playhead
+            ppb={ppb}
+            offsetBeats={clip.startBeat}
+            hidden={positionBeat < clip.startBeat}
+          />
+        </div>
         </div>
       </div>
 

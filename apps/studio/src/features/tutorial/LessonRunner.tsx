@@ -15,6 +15,7 @@ import { requestHint, stopLesson } from '../../state/tutorialBridge';
 import { useStore } from '../../state/store';
 import { useTutorialBridge } from './useTutorialBridge';
 import { ExerciseView } from './ExerciseView';
+import { TermText } from '../common/Term';
 
 /** Render the active lesson, or null when none is running. */
 export function LessonRunner() {
@@ -66,12 +67,12 @@ export function LessonRunner() {
 
           <div className="lesson-runner__block">
             <span className="lesson-runner__label">やること</span>
-            <p>{step.instruction}</p>
+            <p><TermText text={step.instruction} /></p>
           </div>
 
           <div className="lesson-runner__block lesson-runner__why">
             <span className="lesson-runner__label">なぜ？</span>
-            <p>{step.explanation}</p>
+            <p><TermText text={step.explanation} /></p>
           </div>
 
           {predicateFeedback ? (

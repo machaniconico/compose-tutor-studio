@@ -9,6 +9,7 @@ import {
   analyzeNotesWithinScale,
 } from './checker.js';
 import { evaluateProjectPredicate } from './goals.js';
+import { resolveTrackByPredicateName } from './trackResolve.js';
 import type { DrumPatternType, ProjectPredicate } from './types.js';
 
 // ─── Return type ──────────────────────────────────────────────────────────────
@@ -274,19 +275,17 @@ function explainNoteCountAtLeast(
   project: Project,
   satisfied: boolean,
 ): PredicateFeedback {
-  const current = (() => {
-    for (const track of project.tracks) {
-      if (track.name !== trackName) continue;
-      return track.clips.reduce((sum, clip) => sum + (clip.notes?.length ?? 0), 0);
-    }
-    return 0;
-  })();
+  const track = resolveTrackByPredicateName(project, trackName);
+  const label = track?.name ?? trackName;
+  const current = track
+    ? track.clips.reduce((sum, clip) => sum + (clip.notes?.length ?? 0), 0)
+    : 0;
 
   if (satisfied) {
     return {
       satisfied: true,
       grade: 'success',
-      reason: `「${trackName}」トラックに ${current} 個のノートが入力されました。メロディになってきましたね！`,
+      reason: `「${label}」トラックに ${current} 個のノートが入力されました。メロディになってきましたね！`,
       nextAction: '',
     };
   }
@@ -297,8 +296,8 @@ function explainNoteCountAtLeast(
   return {
     satisfied: false,
     grade,
-    reason: `「${trackName}」トラックのノートが ${current} 個しかありません。あと ${remaining} 個必要です。`,
-    nextAction: `ピアノロールを開いて「${trackName}」トラックにノートをあと ${remaining} 個以上追加してください。`,
+    reason: `「${label}」トラックのノートが ${current} 個しかありません。あと ${remaining} 個必要です。`,
+    nextAction: `ピアノロールを開いて「${label}」トラックにノートをあと ${remaining} 個以上追加してください。`,
   };
 }
 
@@ -361,7 +360,8 @@ function explainTrackVolumeInRange(
   project: Project,
   satisfied: boolean,
 ): PredicateFeedback {
-  const track = project.tracks.find((t) => t.name === trackName);
+  const track = resolveTrackByPredicateName(project, trackName);
+  const label = track?.name ?? trackName;
   const current = track ? track.volume : null;
 
   if (satisfied) {
@@ -369,7 +369,7 @@ function explainTrackVolumeInRange(
     return {
       satisfied: true,
       grade: 'success',
-      reason: `「${trackName}」のボリュームが目標範囲（${Math.round(min * 100)}〜${Math.round(max * 100)}%）に入っています（現在 ${volPct}%）。`,
+      reason: `「${label}」のボリュームが目標範囲（${Math.round(min * 100)}〜${Math.round(max * 100)}%）に入っています（現在 ${volPct}%）。`,
       nextAction: '',
     };
   }
@@ -377,8 +377,8 @@ function explainTrackVolumeInRange(
     return {
       satisfied: false,
       grade: 'needs_work',
-      reason: `「${trackName}」トラックが見つかりません。`,
-      nextAction: `トラックリストに「${trackName}」トラックを追加してください。`,
+      reason: `「${label}」トラックが見つかりません。`,
+      nextAction: `トラックリストに「${label}」トラックを追加してください。`,
     };
   }
 
@@ -397,8 +397,8 @@ function explainTrackVolumeInRange(
   return {
     satisfied: false,
     grade,
-    reason: `「${trackName}」のボリュームが ${volPct}% で${direction}。目標は ${Math.round(min * 100)}〜${Math.round(max * 100)}% です。`,
-    nextAction: `ミキサーで「${trackName}」のボリュームを ${target} に調整してください。`,
+    reason: `「${label}」のボリュームが ${volPct}% で${direction}。目標は ${Math.round(min * 100)}〜${Math.round(max * 100)}% です。`,
+    nextAction: `ミキサーで「${label}」のボリュームを ${target} に調整してください。`,
   };
 }
 
@@ -447,6 +447,7 @@ function explainBassRootOnDownbeat(
   project: Project,
   satisfied: boolean,
 ): PredicateFeedback {
+  const label = resolveTrackByPredicateName(project, trackName)?.name ?? trackName;
   const analysis = analyzeBassRootOnDownbeat(project, trackName);
 
   if (satisfied) {
@@ -463,7 +464,7 @@ function explainBassRootOnDownbeat(
       satisfied: false,
       grade: 'needs_work',
       reason: 'コードがまだ置かれていないため、ベースのルート音判定ができません。',
-      nextAction: `先にコードトラックへコードを置いてから、「${trackName}」トラックの各小節1拍目にルート音を入れてみましょう。`,
+      nextAction: `先にコードトラックへコードを置いてから、「${label}」トラックの各小節1拍目にルート音を入れてみましょう。`,
     };
   }
 
@@ -496,6 +497,7 @@ function explainMelodyChordToneOnStrongBeat(
   project: Project,
   satisfied: boolean,
 ): PredicateFeedback {
+  const label = resolveTrackByPredicateName(project, trackName)?.name ?? trackName;
   const analysis = analyzeMelodyChordToneOnStrongBeat(project, trackName);
 
   if (satisfied) {
@@ -511,7 +513,7 @@ function explainMelodyChordToneOnStrongBeat(
     return {
       satisfied: false,
       grade: 'needs_work',
-      reason: `「${trackName}」トラックには、強拍（各小節の1拍目・3拍目）に着地しているノートがまだありません。`,
+      reason: `「${label}」トラックには、強拍（各小節の1拍目・3拍目）に着地しているノートがまだありません。`,
       nextAction: '各小節の1拍目か3拍目にノートを置いてみましょう。そのとき鳴っているコードの音に合わせると安定します。',
     };
   }
@@ -545,6 +547,7 @@ function explainNotesWithinScale(
   project: Project,
   satisfied: boolean,
 ): PredicateFeedback {
+  const label = resolveTrackByPredicateName(project, trackName)?.name ?? trackName;
   const analysis = analyzeNotesWithinScale(project, trackName);
   const scaleText = `${project.key} ${scaleLabel(project.scale)}`;
 
@@ -552,7 +555,7 @@ function explainNotesWithinScale(
     return {
       satisfied: true,
       grade: 'success',
-      reason: `「${trackName}」トラックのノートの ${percent(analysis.ratio)}% が ${scaleText} の音です。キーのまとまりが感じられます！`,
+      reason: `「${label}」トラックのノートの ${percent(analysis.ratio)}% が ${scaleText} の音です。キーのまとまりが感じられます！`,
       nextAction: '',
     };
   }
@@ -561,8 +564,8 @@ function explainNotesWithinScale(
     return {
       satisfied: false,
       grade: 'needs_work',
-      reason: `「${trackName}」トラックにはまだノートがありません。`,
-      nextAction: `ピアノロールを開いて「${trackName}」トラックにノートを入力してみましょう。`,
+      reason: `「${label}」トラックにはまだノートがありません。`,
+      nextAction: `ピアノロールを開いて「${label}」トラックにノートを入力してみましょう。`,
     };
   }
 
@@ -606,7 +609,11 @@ function explainDrumPattern(
   const first = analysis.missing[0];
   if (first) {
     const laneText = drumLaneLabel(first.lane);
-    const posText = describeStepPositions(first.stepIndices, analysis.stepsPerBar);
+    const posText = describeStepPositions(
+      first.stepIndices,
+      analysis.stepsPerBar,
+      analysis.beatsPerBar,
+    );
     return {
       satisfied: false,
       grade,
@@ -623,8 +630,12 @@ function explainDrumPattern(
 }
 
 /** ステップ位置を拍数表現にする（4分音符グリッドに乗らない位置はステップ番号で示す） */
-function describeStepPositions(stepIndices: number[], stepsPerBar: number): string {
-  const quarter = stepsPerBar / 4;
+function describeStepPositions(
+  stepIndices: number[],
+  stepsPerBar: number,
+  beatsPerBar: number,
+): string {
+  const quarter = stepsPerBar / Math.max(1, Math.round(beatsPerBar));
   const parts = stepIndices.map((step) => {
     const beat = step / quarter + 1;
     return Number.isInteger(beat) ? `${beat}拍目` : `ステップ${step + 1}`;

@@ -80,6 +80,8 @@ export type Clip = {
   type: ClipType;
   startBeat: number;
   lengthBeats: number;
+  /** Loop period in beats. Unset means the content repeats every `lengthBeats`. */
+  contentLengthBeats?: number;
   loop: boolean;
   aliasOf?: string;
   notes?: NoteEvent[];
@@ -91,10 +93,13 @@ export type Clip = {
 
 export type TrackType = 'instrument' | 'drum' | 'audio' | 'bus' | 'master';
 
+export type TrackRole = 'chords' | 'bass' | 'melody' | 'drums';
+
 export type Track = {
   id: string;
   name: string;
   type: TrackType;
+  role?: TrackRole;
   color?: string;
   clips: Clip[];
   volume: number;
@@ -114,6 +119,10 @@ export type Project = {
   key: MusicalKey;
   scale: ScaleName;
   lengthBars: number;
+  /** Beat range repeated during playback. */
+  loopRange?: { startBeat: number; endBeat: number };
+  /** Swing amount, 0 to 60. Unset means 0. */
+  swing?: number;
   tracks: Track[];
   chordTrack: ChordEvent[];
   sections: Section[];

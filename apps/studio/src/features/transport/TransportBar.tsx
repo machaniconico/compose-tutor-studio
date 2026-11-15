@@ -1,11 +1,21 @@
-import { useEffect } from 'react';
-import { useStore, type SaveState, type Difficulty } from '../../state/store';
+import { useEffect, useState } from 'react';
+import {
+  textUndoProps,
+  useStore,
+  type SaveState,
+  type Difficulty,
+} from '../../state/store';
+import { findShortcut, type ShortcutAction } from '../../state/keymap';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
-import { formatPosition } from '../timeline';
-import { initAudioBridge } from '../../audio/playback';
+import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
+import { pushToast } from '../../state/tutorialBridge';
+import { formatPosition, keyboardSeekBeat } from '../timeline';
+import { initAudioBridge, restartAt } from '../../audio/playback';
 import { ProjectMenu } from '../projectMenu/ProjectMenu';
 import { ExportMenu } from '../export/ExportMenu';
 import { SupportMenu } from '../support/SupportMenu';
+import { isAnyDialogOpen } from '../common/dialogState';
+import { ShortcutHelpDialog } from '../common/ShortcutHelpDialog';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -14,6 +24,19 @@ const DIFFICULTIES: { value: Difficulty; label: string }[] = [
   { value: 'standard', label: '標準' },
   { value: 'advanced', label: '上級' },
 ];
+
+/**
+ * Time signatures offered in the UI. 6/8 is computed correctly but stays hidden
+ * until the metronome accent and drum patterns are tuned for it.
+ */
+export const TIME_SIGNATURES: { value: string; signature: [number, number]; label: string }[] = [
+  { value: '4/4', signature: [4, 4], label: '4/4(1小節に4拍)' },
+  { value: '3/4', signature: [3, 4], label: '3/4(1小節に3拍)' },
+];
+
+/** Song length limits for the bar-count input. */
+export const MIN_LENGTH_BARS = 4;
+export const MAX_LENGTH_BARS = 64;
 
 const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'major', label: 'メジャー' },
@@ -24,8 +47,6 @@ const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'minorPentatonic', label: 'マイナーペンタ' },
   { value: 'blues', label: 'ブルース' },
 ];
-
-export type TransportShortcut = 'save' | 'togglePlayback' | 'undo' | 'redo';
 
 export type TransportShortcutEvent = Pick<
   KeyboardEvent,
@@ -45,6 +66,8 @@ type TransportShortcutActions = {
   play: () => void;
   redo: () => void;
   saveToLocalStorage: () => void;
+  seek?: (action: 'seekToStart' | 'seekBarBack' | 'seekBarForward') => void;
+  showShortcutHelp: () => void;
   stop: () => void;
   undo: () => void;
 };
@@ -69,23 +92,11 @@ export function isEditableShortcutTarget(target: EventTarget | null): boolean {
   return false;
 }
 
-export function getTransportShortcut(event: TransportShortcutEvent): TransportShortcut | null {
-  if (event.defaultPrevented || isEditableShortcutTarget(event.target)) return null;
-
-  const key = event.key.toLowerCase();
-  const usesCommandKey = event.ctrlKey || event.metaKey;
-
-  if (usesCommandKey) {
-    if (key === 's') return 'save';
-    if (!event.altKey && key === 'z') return event.shiftKey ? 'redo' : 'undo';
-    if (!event.altKey && !event.shiftKey && key === 'y') return 'redo';
+export function getTransportShortcut(event: TransportShortcutEvent): ShortcutAction | null {
+  if (event.defaultPrevented || isEditableShortcutTarget(event.target) || isAnyDialogOpen()) {
+    return null;
   }
-
-  const isSpace =
-    event.key === ' ' || event.key === 'Space' || event.key === 'Spacebar' || event.code === 'Space';
-  if (!usesCommandKey && !event.altKey && !event.shiftKey && isSpace) return 'togglePlayback';
-
-  return null;
+  return findShortcut('global', event);
 }
 
 export function handleTransportShortcutKeyDown(
@@ -105,8 +116,16 @@ export function handleTransportShortcutKeyDown(
     else actions.play();
   } else if (shortcut === 'undo') {
     actions.undo();
-  } else {
+  } else if (shortcut === 'redo') {
     actions.redo();
+  } else if (
+    shortcut === 'seekToStart' ||
+    shortcut === 'seekBarBack' ||
+    shortcut === 'seekBarForward'
+  ) {
+    actions.seek?.(shortcut);
+  } else if (shortcut === 'showShortcutHelp') {
+    actions.showShortcutHelp();
   }
 }
 
@@ -140,13 +159,42 @@ export function TransportBar() {
   const setKey = useStore((s) => s.setKey);
   const setScale = useStore((s) => s.setScale);
   const setTitle = useStore((s) => s.setTitle);
+  const setTimeSignature = useStore((s) => s.setTimeSignature);
+  const setLengthBars = useStore((s) => s.setLengthBars);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
-  const canUndo = useStore((s) => s.past.length > 0);
+  const canUndo = useStore((s) => s.past.length > 0 || s.transactionBase !== null);
   const canRedo = useStore((s) => s.future.length > 0);
   const saveToLocalStorage = useStore((s) => s.saveToLocalStorage);
   const difficulty = useStore((s) => s.editor.difficulty);
   const setDifficulty = useStore((s) => s.setDifficulty);
+  const cancelTransaction = useStore((s) => s.cancelTransaction);
+  const startScreenOpen = useStore((s) => s.startScreenOpen);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  // The bar-count input is committed on blur / Enter so a half-typed number
+  // never triggers the "content will be deleted" confirmation.
+  const [lengthDraft, setLengthDraft] = useState<string | null>(null);
+
+  const commitLengthBars = (): void => {
+    if (lengthDraft === null) return;
+    setLengthDraft(null);
+    const parsed = Number.parseInt(lengthDraft, 10);
+    if (!Number.isFinite(parsed)) return;
+    const bars = Math.min(MAX_LENGTH_BARS, Math.max(MIN_LENGTH_BARS, parsed));
+    const warning = setLengthBars(bars);
+    if (warning !== null && window.confirm(warning)) setLengthBars(bars, true);
+  };
+
+  const onTimeSignatureChange = (value: string): void => {
+    const option = TIME_SIGNATURES.find((t) => t.value === value);
+    if (!option) return;
+    let result = setTimeSignature(option.signature);
+    if (result.confirm !== null) {
+      if (!window.confirm(result.confirm)) return;
+      result = setTimeSignature(option.signature, true);
+    }
+    for (const warning of result.warnings) pushToast(warning, 'info');
+  };
 
   // Connect the store to the audio engine once. The bridge subscribes to
   // transport.isPlaying so the play/stop buttons below only touch store state.
@@ -160,6 +208,13 @@ export function TransportBar() {
         play,
         redo,
         saveToLocalStorage,
+        seek: (action) => {
+          const { project: p, transport: t } = useStore.getState();
+          const bpb = beatsPerBarOf(p.timeSignature);
+          restartAt(keyboardSeekBeat(action, t.positionBeat, bpb, p.lengthBars * bpb));
+        },
+        // The start screen sits above dialogs, so help would open out of sight.
+        showShortcutHelp: () => setShortcutHelpOpen(!startScreenOpen),
         stop,
         undo,
       });
@@ -168,9 +223,22 @@ export function TransportBar() {
     return () => {
       window.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [isPlaying, play, redo, saveToLocalStorage, stop, undo]);
+  }, [isPlaying, play, redo, saveToLocalStorage, startScreenOpen, stop, undo]);
 
-  const beatsPerBar = project.timeSignature[0];
+  // A pointer can be lost when the window loses focus, so an unfinished edit
+  // is dropped rather than left open. Focused text inputs commit on their own
+  // blur, which fires first.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onWindowBlur = (): void => cancelTransaction();
+    window.addEventListener('blur', onWindowBlur);
+    return () => {
+      window.removeEventListener('blur', onWindowBlur);
+    };
+  }, [cancelTransaction]);
+
+  const beatsPerBar = beatsPerBarOf(project.timeSignature);
+  const timeSignatureValue = `${project.timeSignature[0]}/${project.timeSignature[1]}`;
 
   return (
     <header className="transport-bar">
@@ -214,19 +282,54 @@ export function TransportBar() {
           メトロノーム
         </button>
 
-        <div className="position-display" aria-label="再生位置">
+        <div className="position-display" aria-label="再生位置(小節.拍)" title="小節.拍">
           {formatPosition(transport.positionBeat, beatsPerBar)}
         </div>
 
         <div className="field">
           <label htmlFor="bpm-input">BPM</label>
           <input
+            {...textUndoProps}
             id="bpm-input"
             type="number"
             min={20}
             max={300}
             value={project.bpm}
             onChange={(e) => setBpm(Number(e.target.value) || project.bpm)}
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="time-signature-select">拍子</label>
+          <select
+            id="time-signature-select"
+            value={timeSignatureValue}
+            title="1小節に入る拍の数。音の位置(拍)はそのまま保たれます"
+            onChange={(e) => onTimeSignatureChange(e.target.value)}
+          >
+            {TIME_SIGNATURES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <label htmlFor="length-bars-input">小節数</label>
+          <input
+            id="length-bars-input"
+            type="number"
+            min={MIN_LENGTH_BARS}
+            max={MAX_LENGTH_BARS}
+            title={`曲の長さ(${MIN_LENGTH_BARS}〜${MAX_LENGTH_BARS}小節)。短くすると、はみ出した音は確認のうえ削除します`}
+            value={lengthDraft ?? String(project.lengthBars)}
+            onChange={(e) => setLengthDraft(e.target.value)}
+            onBlur={commitLengthBars}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+              if (e.key === 'Escape') setLengthDraft(null);
+            }}
           />
         </div>
 
@@ -287,6 +390,7 @@ export function TransportBar() {
         </button>
 
         <input
+          {...textUndoProps}
           className="transport-bar__title"
           aria-label="プロジェクト名"
           value={project.title}
@@ -301,6 +405,15 @@ export function TransportBar() {
 
         <SupportMenu />
 
+        <button
+          type="button"
+          aria-label="キーボード操作の一覧を見る"
+          title="キーボード操作の一覧 (?)"
+          onClick={() => setShortcutHelpOpen(true)}
+        >
+          ？
+        </button>
+
         <span
           className={`save-indicator save-indicator--${save.status}`}
           role={save.status === 'error' ? 'alert' : 'status'}
@@ -309,6 +422,7 @@ export function TransportBar() {
           {saveIndicatorText(save)}
         </span>
       </div>
+      {shortcutHelpOpen ? <ShortcutHelpDialog onClose={() => setShortcutHelpOpen(false)} /> : null}
     </header>
   );
 }

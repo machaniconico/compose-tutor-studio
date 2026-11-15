@@ -4,6 +4,7 @@
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
 import { makeId } from './ids';
+import { beatsPerBar, drumStepsPerBar } from './time';
 import type {
   ChordEvent,
   Clip,
@@ -190,4 +191,254 @@ export function updateSection(
 ): Project {
   const sections = project.sections.map((s) => (s.id === sectionId ? { ...s, ...patch } : s));
   return touch({ ...project, sections }, clock);
+}
+
+// --- Time signature / song length ---
+
+/** Default steps per bar for a drum clip when not specified. */
+const DEFAULT_STEPS_PER_BAR = 16;
+const BEAT_EPSILON = 1e-9;
+
+export type TimeSignatureChange = {
+  project: Project;
+  /** Beginner-facing notes (Japanese) about content that could not be kept exactly. */
+  warnings: string[];
+  /**
+   * Drum hits removed because two hits of the same lane landed on one step of the
+   * new grid. This is the only lossy part of the change, so callers should ask
+   * before applying when it is above zero.
+   */
+  droppedHits: number;
+};
+
+type RegriddedHit = {
+  event: DrumEvent;
+  stepIndex: number;
+  /** The old beat position lies exactly on the new grid. */
+  exact: boolean;
+  beat: number;
+};
+
+/**
+ * Which of two hits that collide on one step survives: the one that was on the
+ * grid already, then the louder one, then the earlier one. Independent of the
+ * order the events are stored in.
+ */
+function outranks(candidate: RegriddedHit, current: RegriddedHit): boolean {
+  if (candidate.exact !== current.exact) return candidate.exact;
+  if (candidate.event.velocity !== current.event.velocity) {
+    return candidate.event.velocity > current.event.velocity;
+  }
+  return candidate.beat < current.beat;
+}
+
+/** Nearest integer, treating values within BEAT_EPSILON of an integer as exact. */
+function isWholeNumber(value: number): boolean {
+  return Math.abs(value - Math.round(value)) < BEAT_EPSILON;
+}
+
+/** Beat position of a drum step, relative to its clip start. */
+function drumStepBeat(stepIndex: number, stepsPerBar: number, bpb: number): number {
+  return stepIndex * (bpb / stepsPerBar);
+}
+
+/**
+ * Change the time signature. Note and chord positions are kept in beats, so no
+ * content is lost: `lengthBars` is rounded up to cover the old total beats.
+ * Sections are converted by beat and snapped to the nearest bar; drum clips are
+ * regridded to `beatsPerBar * 4` steps with every hit at its old beat position.
+ * Clips that ended with the song grow to the new (rounded-up) song end.
+ * Anything that did not land exactly is reported in `warnings`.
+ */
+export function setTimeSignature(
+  project: Project,
+  timeSignature: [number, number],
+  clock: Clock = systemClock,
+): TimeSignatureChange {
+  const oldBpb = beatsPerBar(project.timeSignature);
+  const newBpb = beatsPerBar(timeSignature);
+  const warnings: string[] = [];
+
+  const totalBeats = project.lengthBars * oldBpb;
+  const lengthBars = Math.max(1, Math.ceil(totalBeats / newBpb - BEAT_EPSILON));
+
+  const sections: Section[] = project.sections.map((section) => {
+    const startBar = (section.startBar * oldBpb) / newBpb;
+    const endBar = ((section.startBar + section.lengthBars) * oldBpb) / newBpb;
+    if (!isWholeNumber(startBar) || !isWholeNumber(endBar)) {
+      warnings.push(
+        `セクション「${section.name}」の区切りが新しい拍子の小節に合わないため、いちばん近い小節に合わせました。`,
+      );
+    }
+    const snappedStart = Math.round(startBar);
+    return {
+      ...section,
+      startBar: snappedStart,
+      lengthBars: Math.max(1, Math.round(endBar) - snappedStart),
+    };
+  });
+
+  // Clips that ended with the song keep ending with it (as in `setLengthBars`),
+  // so the rounded-up bars stay editable and a later lengthening still grows them.
+  const newEndBeat = lengthBars * newBpb;
+  const followSongEnd = (clip: Clip): Clip =>
+    Math.abs(clip.startBeat + clip.lengthBeats - totalBeats) < BEAT_EPSILON
+      ? { ...clip, lengthBeats: newEndBeat - clip.startBeat }
+      : clip;
+
+  const newStepsPerBar = drumStepsPerBar(timeSignature);
+  let shiftedHits = 0;
+  let droppedHits = 0;
+  const tracks = project.tracks.map((track) => {
+    if (track.type !== 'drum') return { ...track, clips: track.clips.map(followSongEnd) };
+    const clips = track.clips.map(followSongEnd).map((clip) => {
+      const oldStepsPerBar = clip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR;
+      // One hit per lane and step: when the new grid is coarser, hits can collide
+      // and only one can be kept (see `outranks`). Nothing is dropped silently.
+      const survivors = new Map<string, RegriddedHit>();
+      for (const event of clip.drumEvents ?? []) {
+        const beat = drumStepBeat(event.stepIndex, oldStepsPerBar, oldBpb);
+        const exactStep = beat * (newStepsPerBar / newBpb);
+        const candidate: RegriddedHit = {
+          event,
+          stepIndex: Math.round(exactStep),
+          exact: isWholeNumber(exactStep),
+          beat,
+        };
+        const key = `${event.lane}:${candidate.stepIndex}`;
+        const current = survivors.get(key);
+        if (current === undefined) {
+          survivors.set(key, candidate);
+          continue;
+        }
+        droppedHits += 1;
+        if (outranks(candidate, current)) survivors.set(key, candidate);
+      }
+      const drumEvents: DrumEvent[] = [];
+      for (const hit of survivors.values()) {
+        if (!hit.exact) shiftedHits += 1;
+        drumEvents.push({ ...hit.event, stepIndex: hit.stepIndex });
+      }
+      return { ...clip, stepsPerBar: newStepsPerBar, drumEvents };
+    });
+    return { ...track, clips };
+  });
+  if (shiftedHits > 0) {
+    warnings.push(
+      `ドラムの ${shiftedHits} 個の音が新しいグリッドに乗らないため、いちばん近いステップに動かしました。`,
+    );
+  }
+  if (droppedHits > 0) {
+    warnings.push(
+      `ドラムの ${droppedHits} 個の音が新しいグリッドで別の音と同じステップに重なるため、拍に合っていた音(同じなら強い音)を残して削除しました。`,
+    );
+  }
+
+  return {
+    project: touch({ ...project, timeSignature, lengthBars, sections, tracks }, clock),
+    warnings,
+    droppedHits,
+  };
+}
+
+export type ContentBeyondBars = {
+  /** Notes that start at or after the new end (removed). */
+  notes: number;
+  /** Chords that start at or after the new end (removed). */
+  chords: number;
+  drumHits: number;
+  sections: number;
+  /** Notes that start before the new end but ring past it (cut at the end). */
+  truncatedNotes: number;
+  /** Chords that start before the new end but last past it (cut at the end). */
+  truncatedChords: number;
+};
+
+/**
+ * Count the content affected by shortening the song to `lengthBars`: notes,
+ * chords, drum hits and sections that start at or after the new end, plus the
+ * notes and chords that start before it and run past it.
+ */
+export function contentBeyondBars(project: Project, lengthBars: number): ContentBeyondBars {
+  const bpb = beatsPerBar(project.timeSignature);
+  const endBeat = lengthBars * bpb;
+  const beyond = (beat: number): boolean => beat >= endBeat - BEAT_EPSILON;
+  const crosses = (start: number, duration: number): boolean =>
+    !beyond(start) && start + duration > endBeat + BEAT_EPSILON;
+
+  let notes = 0;
+  let truncatedNotes = 0;
+  let drumHits = 0;
+  for (const track of project.tracks) {
+    for (const clip of track.clips) {
+      for (const note of clip.notes ?? []) {
+        const start = clip.startBeat + note.startBeat;
+        if (beyond(start)) notes += 1;
+        else if (crosses(start, note.durationBeats)) truncatedNotes += 1;
+      }
+      const stepsPerBar = clip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR;
+      for (const hit of clip.drumEvents ?? []) {
+        if (beyond(clip.startBeat + drumStepBeat(hit.stepIndex, stepsPerBar, bpb))) drumHits += 1;
+      }
+    }
+  }
+  const chords = project.chordTrack.filter((c) => beyond(c.startBeat)).length;
+  const truncatedChords = project.chordTrack.filter((c) => crosses(c.startBeat, c.durationBeats)).length;
+  const sections = project.sections.filter((s) => s.startBar >= lengthBars).length;
+  return { notes, chords, drumHits, sections, truncatedNotes, truncatedChords };
+}
+
+/**
+ * Set the song length in bars. Content that starts at or after the new end is
+ * removed, and notes and chords that run past it are cut at the new end (see
+ * `contentBeyondBars` to warn first). Clips are cut at the new end, and clips
+ * that ended exactly with the song grow with it; sections are trimmed.
+ */
+export function setLengthBars(
+  project: Project,
+  lengthBars: number,
+  clock: Clock = systemClock,
+): Project {
+  const bpb = beatsPerBar(project.timeSignature);
+  const oldEndBeat = project.lengthBars * bpb;
+  const endBeat = lengthBars * bpb;
+  const beyond = (beat: number): boolean => beat >= endBeat - BEAT_EPSILON;
+  /** Cut `durationBeats` so that `start + duration` does not pass the new end. */
+  const cutAtEnd = <T extends { durationBeats: number }>(item: T, start: number): T =>
+    start + item.durationBeats > endBeat + BEAT_EPSILON
+      ? { ...item, durationBeats: endBeat - start }
+      : item;
+
+  const tracks = project.tracks.map((track) => {
+    const clips: Clip[] = [];
+    for (const clip of track.clips) {
+      if (beyond(clip.startBeat)) continue;
+      const clipEnd = clip.startBeat + clip.lengthBeats;
+      const endsWithSong = Math.abs(clipEnd - oldEndBeat) < BEAT_EPSILON;
+      const lengthBeats = clipEnd > endBeat || endsWithSong ? endBeat - clip.startBeat : clip.lengthBeats;
+      const stepsPerBar = clip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR;
+      const next: Clip = { ...clip, lengthBeats };
+      if (clip.notes) {
+        next.notes = clip.notes
+          .filter((n) => !beyond(clip.startBeat + n.startBeat))
+          .map((n) => cutAtEnd(n, clip.startBeat + n.startBeat));
+      }
+      if (clip.drumEvents) {
+        next.drumEvents = clip.drumEvents.filter(
+          (hit) => !beyond(clip.startBeat + drumStepBeat(hit.stepIndex, stepsPerBar, bpb)),
+        );
+      }
+      clips.push(next);
+    }
+    return { ...track, clips };
+  });
+
+  const chordTrack = project.chordTrack
+    .filter((c) => !beyond(c.startBeat))
+    .map((c) => cutAtEnd(c, c.startBeat));
+  const sections = project.sections
+    .filter((s) => s.startBar < lengthBars)
+    .map((s) => ({ ...s, lengthBars: Math.min(s.lengthBars, lengthBars - s.startBar) }));
+
+  return touch({ ...project, lengthBars, tracks, chordTrack, sections }, clock);
 }

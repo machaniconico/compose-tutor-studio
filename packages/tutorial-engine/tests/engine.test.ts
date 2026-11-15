@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TutorialEngine } from '../src/engine.js';
-import { COURSE0_LESSONS } from '../src/content/index.js';
+import { COMPOSE_LESSONS, COURSE0_LESSONS } from '../src/content/index.js';
 import type { AppEvent, TutorialLesson } from '../src/types.js';
 import {
   makeBassTrack,
@@ -634,5 +634,42 @@ describe('COURSE0_LESSONS — 0-1 through 0-8 integration', () => {
     );
     expect(result.advanced).toBe(false);
     expect(engine.getState().stepIndex).toBe(1);
+  });
+});
+
+describe('compose-3: 同じ role のトラックが複数あるプロジェクト', () => {
+  const lesson = COMPOSE_LESSONS.find((l) => l.id === 'compose-3')!;
+  const noteAdded = (trackId: string, trackName: string): AppEvent => ({
+    type: 'note.added',
+    payload: { pitch: 36, startBeat: 0, durationBeats: 1, trackId, trackName, inScale: true },
+  });
+  const fourNotes = [makeNote(36, 0), makeNote(36, 1), makeNote(36, 2), makeNote(36, 3)];
+
+  it('2本目のベースへの入力では最初のステップが進まず、1本目の入力で最後まで進む', () => {
+    const engine = new TutorialEngine();
+    engine.loadLesson(lesson);
+    expect(engine.getState().stepIndex).toBe(0);
+
+    const inputOnSecond = makeProject({
+      tracks: [
+        makeBassTrack([], { id: 'b1', name: 'ベース1', role: 'bass' }),
+        makeBassTrack(fourNotes, { id: 'b2', name: 'ベース2', role: 'bass' }),
+      ],
+    });
+    const ignored = engine.handleEvent(noteAdded('b2', 'ベース2'), inputOnSecond);
+    expect(ignored.advanced).toBe(false);
+    expect(engine.getState().stepIndex).toBe(0);
+
+    const inputOnFirst = makeProject({
+      tracks: [
+        makeBassTrack(fourNotes, { id: 'b1', name: 'ベース1', role: 'bass' }),
+        makeBassTrack(fourNotes, { id: 'b2', name: 'ベース2', role: 'bass' }),
+      ],
+    });
+    expect(engine.handleEvent(noteAdded('b1', 'ベース1'), inputOnFirst).advanced).toBe(true);
+    expect(engine.getState().stepIndex).toBe(1);
+
+    expect(engine.handleEvent(noteAdded('b1', 'ベース1'), inputOnFirst).advanced).toBe(true);
+    expect(engine.getState().stepIndex).toBe(2);
   });
 });

@@ -115,6 +115,12 @@ const BEGINNER_TERM_TABLE: Array<[string, string]> = [
   ['サブドミナント (中間)', '動き出す和音'],
   ['ドミナント (緊張)', 'もどりたくなる和音'],
   ['トニック (安定)', '安らぐ和音'],
+  // ミックス(EQ・コンプレッサー)関連
+  ['スレッショルド', 'これを超えた音を抑え始める大きさ'],
+  ['レシオ', '抑える強さ'],
+  ['アタック', '抑え始めるまでの速さ'],
+  ['リリース', '抑えるのをやめるまでの速さ'],
+  ['シェルフ', '端から広い範囲'],
   // その他の上級用語
   ['推進力', 'ドラマティックな流れ'],
 ];
@@ -230,4 +236,20 @@ export function scalePresenceLabel(inScale: boolean, difficulty: Difficulty): st
   if (difficulty === 'beginner') return '外（少し個性的な音）';
   if (difficulty === 'advanced') return '外（クロマチック・ノンダイアトニック）';
   return '外（色付けの音）';
+}
+
+/** EQ・コンプレッサーのパラメータ説明(標準の文面。初心者向けは simplifyExplanation で言い換える)。 */
+const EFFECT_PARAM_EXPLANATIONS: Record<string, string> = {
+  lowGainDb: '低い音(約200Hz以下)をシェルフで増減します。上げると太く、下げるとすっきりします。',
+  midGainDb: '中くらいの音(約1000Hz付近)を増減します。上げると音が前に出ます。',
+  highGainDb: '高い音(約4000Hz以上)をシェルフで増減します。上げると明るく、下げるとやわらかくなります。',
+  thresholdDb: 'スレッショルドより大きい音が抑えられます。下げるほど多くの音が抑えられます。',
+  ratio: 'レシオは抑える強さです。大きいほど音量のばらつきが小さくなります。',
+  attackSeconds: 'アタックは音が大きくなってから抑え始めるまでの時間です。',
+  releaseSeconds: 'リリースは音が小さくなってから抑えるのをやめるまでの時間です。',
+};
+
+/** EQ・コンプレッサーの各パラメータの説明文を難易度に合わせて返す。未知のキーは空文字。 */
+export function effectParamExplanation(key: string, difficulty: Difficulty): string {
+  return simplifyExplanation(EFFECT_PARAM_EXPLANATIONS[key] ?? '', difficulty);
 }

@@ -11,12 +11,14 @@
  */
 
 import type { ChordEvent, Project } from '@cts/project-model';
+import { beatsPerBar, drumBeatToStep, drumStepsPerBar } from '@cts/project-model';
 import { isInScale, parseChord, pitchClassOf } from '@cts/theory-engine';
 import type { CheckCondition, EditEvent, Lesson, LessonStep } from './dsl.js';
 // NOTE: goals.ts とは相互import（goals → checker: 音楽的判定の委譲 /
 // checker → goals: 従来predicateの委譲）。両モジュールとも関数宣言のみで
 // トップレベル実行が無いため、ESM の循環importとして安全。
 import { evaluateProjectPredicate } from './goals.js';
+import { resolveTrackByPredicateName } from './trackResolve.js';
 import type { DrumPatternType, ProjectPredicate } from './types.js';
 
 // ─── Runtime State ────────────────────────────────────────────────────────────
@@ -152,8 +154,7 @@ function meetsRatio(ratio: number, minRatio: number): boolean {
 
 /** 1小節あたりの拍数（4分音符基準）。例: 4/4→4, 3/4→3, 6/8→3 */
 function beatsPerBarOf(project: Project): number {
-  const [numerator, denominator] = project.timeSignature;
-  return numerator * (4 / denominator);
+  return beatsPerBar(project.timeSignature);
 }
 
 /** トラック名で集めた絶対拍位置つきノート */
@@ -165,13 +166,12 @@ type AbsoluteNote = {
 
 function collectTrackNotes(project: Project, trackName: string): AbsoluteNote[] {
   const out: AbsoluteNote[] = [];
-  for (const track of project.tracks) {
-    if (track.name !== trackName) continue;
-    for (const clip of track.clips) {
-      if (!clip.notes) continue;
-      for (const note of clip.notes) {
-        out.push({ pitch: note.pitch, startBeat: clip.startBeat + note.startBeat });
-      }
+  const track = resolveTrackByPredicateName(project, trackName);
+  if (!track) return out;
+  for (const clip of track.clips) {
+    if (!clip.notes) continue;
+    for (const note of clip.notes) {
+      out.push({ pitch: note.pitch, startBeat: clip.startBeat + note.startBeat });
     }
   }
   return out;
@@ -404,29 +404,40 @@ export type DrumPatternAnalysis = {
   requiredSteps: number;
   /** 判定に使った1小節のステップ数（クリップ未存在時は16） */
   stepsPerBar: number;
+  /** 判定に使った1小節の拍数（拍子から。4/4=4、3/4=3） */
+  beatsPerBar: number;
 };
 
-/** パターン種別ごとの必要レーン×ステップ位置（stepsPerBar=16 なら 1拍=4ステップ） */
+/**
+ * パターン種別ごとの必要レーン×ステップ位置。
+ * 拍 → ステップは project-model の `drumBeatToStep`（パターン適用と同じ丸め）で求める。
+ * 4/4 の 16 ステップなら 1拍 = 4 ステップ、3/4 の 12 ステップでも 4。
+ * 小節を割り切れないグリッド（3/4 に 16 ステップ）でも整数ステップになる。
+ */
 function drumPatternRequirements(
   patternType: DrumPatternType,
   stepsPerBar: number,
+  bpb: number,
 ): DrumPatternRequirement[] {
-  const quarter = stepsPerBar / 4;
-  const eighth = stepsPerBar / 8;
+  const beats = Math.max(1, Math.round(bpb));
+  const step = (beat: number): number => drumBeatToStep(beat, stepsPerBar, bpb);
+  const everyBeat = Array.from({ length: beats }, (_, i) => step(i));
+  // 裏拍（2・4拍目…）: 拍子が 3 拍なら 2 拍目だけ
+  const offBeats = everyBeat.filter((_, i) => i % 2 === 1);
   switch (patternType) {
     case 'fourOnFloor':
       // 四つ打ち: キックを毎拍（1・2・3・4拍目）に置く
-      return [{ lane: 'kick', stepIndices: [0, quarter, 2 * quarter, 3 * quarter] }];
+      return [{ lane: 'kick', stepIndices: everyBeat }];
     case 'eightBeat':
       // 8ビート: クローズハイハット8分刻み + キック1拍目 + スネア2・4拍目
       return [
-        { lane: 'closedHat', stepIndices: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => i * eighth) },
+        { lane: 'closedHat', stepIndices: Array.from({ length: beats * 2 }, (_, i) => step(i / 2)) },
         { lane: 'kick', stepIndices: [0] },
-        { lane: 'snare', stepIndices: [quarter, 3 * quarter] },
+        { lane: 'snare', stepIndices: offBeats },
       ];
     case 'backbeat':
       // バックビート: スネアを2・4拍目に置く
-      return [{ lane: 'snare', stepIndices: [quarter, 3 * quarter] }];
+      return [{ lane: 'snare', stepIndices: offBeats }];
   }
 }
 
@@ -442,6 +453,7 @@ export function analyzeDrumPattern(
   project: Project,
   patternType: DrumPatternType,
 ): DrumPatternAnalysis {
+  const bpb = beatsPerBarOf(project);
   let best: { missing: DrumPatternRequirement[]; requiredSteps: number; stepsPerBar: number } | null =
     null;
 
@@ -450,7 +462,7 @@ export function analyzeDrumPattern(
     for (const clip of track.clips) {
       if (!clip.drumEvents || clip.drumEvents.length === 0) continue;
       const stepsPerBar = clip.stepsPerBar ?? 16;
-      const requirements = drumPatternRequirements(patternType, stepsPerBar);
+      const requirements = drumPatternRequirements(patternType, stepsPerBar, bpb);
       const requiredSteps = countMissingSteps(requirements);
 
       // 小節ごとにアクティブなステップ集合を作る（複数小節クリップ対応）
@@ -470,7 +482,7 @@ export function analyzeDrumPattern(
           if (lacking.length > 0) missing.push({ lane: req.lane, stepIndices: lacking });
         }
         if (missing.length === 0) {
-          return { satisfied: true, missing: [], requiredSteps, stepsPerBar };
+          return { satisfied: true, missing: [], requiredSteps, stepsPerBar, beatsPerBar: bpb };
         }
         if (best === null || countMissingSteps(missing) < countMissingSteps(best.missing)) {
           best = { missing, requiredSteps, stepsPerBar };
@@ -480,15 +492,17 @@ export function analyzeDrumPattern(
   }
 
   if (best !== null) {
-    return { satisfied: false, ...best };
+    return { satisfied: false, ...best, beatsPerBar: bpb };
   }
-  // ドラムイベントがまだ1つも無い場合: 既定の16ステップ基準で全要件を不足として返す
-  const requirements = drumPatternRequirements(patternType, 16);
+  // ドラムイベントがまだ1つも無い場合: 拍子に合う既定グリッド（1拍=4ステップ）で全要件を不足として返す
+  const defaultStepsPerBar = drumStepsPerBar(project.timeSignature);
+  const requirements = drumPatternRequirements(patternType, defaultStepsPerBar, bpb);
   return {
     satisfied: false,
     missing: requirements,
     requiredSteps: countMissingSteps(requirements),
-    stepsPerBar: 16,
+    stepsPerBar: defaultStepsPerBar,
+    beatsPerBar: bpb,
   };
 }
 

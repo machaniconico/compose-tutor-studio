@@ -1,4 +1,4 @@
-import { useStore } from '../../state/store';
+import { sliderUndoProps, useStore } from '../../state/store';
 import type { TrackType } from '@cts/project-model';
 
 /** Tiny text label for each track type (no emoji, no SVG — simple shapes). */
@@ -49,6 +49,7 @@ export function TrackList() {
             <div className="track-row__controls" onClick={(e) => e.stopPropagation()}>
               <input
                 type="range"
+                {...sliderUndoProps}
                 min={0}
                 max={1}
                 step={0.01}

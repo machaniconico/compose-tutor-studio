@@ -133,6 +133,28 @@ describe('buildScheduleEvents', () => {
     expect(kick.trackId).toBe('dr');
   });
 
+  it('spreads a 3/4 bar over 3 quarter-note beats (12 steps = 0.25 beats/step)', () => {
+    const clip: Clip = {
+      id: 'd1',
+      trackId: 'dr',
+      type: 'drum',
+      startBeat: 0,
+      lengthBeats: 6,
+      loop: false,
+      stepsPerBar: 12,
+      drumEvents: [
+        { id: 'e0', lane: 'kick', stepIndex: 0, velocity: 110 },
+        { id: 'e1', lane: 'snare', stepIndex: 4, velocity: 100 },
+        { id: 'e2', lane: 'kick', stepIndex: 12, velocity: 110 },
+      ],
+    };
+    const threeFour: Project = { ...project([drumTrack('dr', clip)]), timeSignature: [3, 4] };
+    expect(buildScheduleEvents(threeFour).map((e) => e.beat)).toEqual([0, 1, 3]);
+    // 6/8 has the same 3 quarter-note beats per bar.
+    const sixEight: Project = { ...threeFour, timeSignature: [6, 8] };
+    expect(buildScheduleEvents(sixEight).map((e) => e.beat)).toEqual([0, 1, 3]);
+  });
+
   it('skips the master track and empty clips', () => {
     const master: Track = {
       id: 'm',

@@ -8,18 +8,21 @@
 //   transport.isPlaying  false->true  => startPlayback()
 //                        true ->false  => stopAudio()
 //   project / mixer changes            => live volume/pan/mute/solo update
+//   time signature / length changes    => schedule rebuilt from the playhead
 //
 // The bridge writes transport.positionBeat back to the store ~30fps while
 // playing so the playhead UI tracks the audio clock. The store owns play/stop
 // *intent* and the position semantics (see store.stop(reset?)); this bridge owns
 // the actual audio lifecycle.
 
+import { beatsPerBar as beatsPerBarOf, type Project } from '@cts/project-model';
 import { useStore } from '../state/store';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
 import { getAudioEngine } from './engine';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import { applyMixState, buildTrackGraphs, type TrackGraph } from './graph';
+import { applyMasterVolume } from './masterChain';
 import {
   beatToTime,
   projectLengthBeats,
@@ -51,6 +54,8 @@ type BridgeState = {
   anchorTime: number;
   loop: LoopRegion | null;
   positionTimer: ReturnType<typeof setInterval> | null;
+  /** Bumped by every play and stop; a start that no longer matches is abandoned. */
+  playGeneration: number;
   /** Unsubscribe handles. */
   unsub: Array<() => void>;
   installed: boolean;
@@ -69,6 +74,7 @@ const state: BridgeState = {
   anchorTime: 0,
   loop: null,
   positionTimer: null,
+  playGeneration: 0,
   unsub: [],
   installed: false,
 };
@@ -89,18 +95,31 @@ export function initAudioBridge(): () => void {
   const unsubPlaying = useStore.subscribe((s, prev) => {
     if (s.transport.isPlaying === prev.transport.isPlaying) return;
     if (s.transport.isPlaying) {
-      void startPlayback().catch(handlePlaybackStartFailure);
+      const generation = ++state.playGeneration;
+      void startPlayback(generation).catch((error: unknown) => {
+        if (generation === state.playGeneration) handlePlaybackStartFailure(error);
+      });
     } else {
       stopAudio();
     }
   });
 
-  // React to project / mixer changes for live mix updates while playing.
+  // React to project / mixer changes while playing: the mix is updated live;
+  // a new meter or song length (also via undo/redo) changes the events, the end
+  // position and the metronome accent, so the schedule is rebuilt from the
+  // current playhead.
   const unsubProject = useStore.subscribe((s, prev) => {
     if (s.project === prev.project) return;
     if (!state.scheduler?.isRunning) return;
+    if (timingChanged(s.project, prev.project)) {
+      restartPlayback();
+      return;
+    }
     const engine = getAudioEngine();
     applyMixState(state.graphs, s.project.tracks, engine.now());
+    if (engine.isInitialized) {
+      applyMasterVolume(engine.requireMaster(), s.project.tracks, engine.now());
+    }
   });
 
   state.unsub = [unsubPlaying, unsubProject];
@@ -111,6 +130,62 @@ export function initAudioBridge(): () => void {
     state.installed = false;
     stopAudio();
   };
+}
+
+/**
+ * Jump the playhead to `beat`. While playing, audio restarts from there
+ * (pause, move, resume); when stopped only the position changes. Seeking is
+ * transport state, so it never touches undo history.
+ */
+export function restartAt(beat: number): void {
+  const store = useStore.getState();
+  if (!store.transport.isPlaying) {
+    store.setPosition(beat);
+    return;
+  }
+  store.stop(); // pause: keeps position and tears the audio down
+  store.setPosition(beat);
+  store.play();
+}
+
+/** True when the meter or the song length differs between two project states. */
+function timingChanged(next: Project, prev: Project): boolean {
+  return (
+    next.lengthBars !== prev.lengthBars ||
+    next.timeSignature.join('/') !== prev.timeSignature.join('/')
+  );
+}
+
+/**
+ * Tear the running audio down and start again from the store's current
+ * playhead. Notes that were sounding across the playhead are started again
+ * for their remaining length, so a meter or length change does not cut them.
+ * Play intent is untouched; a start past the new end stops through the
+ * scheduler's own end handling, as usual.
+ */
+function restartPlayback(): void {
+  stopAudio();
+  const generation = ++state.playGeneration;
+  void startPlayback(generation, true).catch((error: unknown) => {
+    if (generation === state.playGeneration) handlePlaybackStartFailure(error);
+  });
+}
+
+/**
+ * Start the notes that began before `beat` and still sound at it, for their
+ * remaining length from `now`. Used when the voices were rebuilt mid-note.
+ */
+function resumeSoundingNotes(events: readonly ScheduledEvent[], beat: number, now: number): void {
+  const spb = secondsPerBeat(state.bpm);
+  for (const ev of events) {
+    const payload = ev.payload as SchedulePayload;
+    if (payload.kind !== 'note' || ev.beat >= beat) continue;
+    const remainingBeats = ev.beat + payload.durationBeats - beat;
+    if (remainingBeats <= 0) continue;
+    state.synths
+      .get(payload.trackId)
+      ?.noteOn(payload.pitch, now, remainingBeats * spb, payload.velocity);
+  }
 }
 
 export function audioPlaybackFailureMessage(error: unknown): string {
@@ -168,18 +243,25 @@ function buildVoices(
   }
 }
 
-/** Start audio playback from the current transport position. */
-async function startPlayback(): Promise<void> {
+/**
+ * Start audio playback from the current transport position. With
+ * `resumeSounding` the notes already sounding at that position are restored
+ * (see `resumeSoundingNotes`); a plain start or seek leaves them silent.
+ */
+async function startPlayback(generation: number, resumeSounding = false): Promise<void> {
   const engine = getAudioEngine();
   const { context, master } = await engine.ensureContext();
 
-  // The store could have been stopped again during the await.
+  // A stop or a newer seek during the await replaced this request.
+  if (generation !== state.playGeneration) return;
+
   const store = useStore.getState();
-  if (!store.transport.isPlaying) return;
 
   const project = store.project;
   const transport = store.transport;
-  const beatsPerBar = project.timeSignature[0] > 0 ? project.timeSignature[0] : 4;
+  applyMasterVolume(master, project.tracks, context.currentTime);
+  const bpb = beatsPerBarOf(project.timeSignature);
+  const beatsPerBar = bpb > 0 ? bpb : 4;
   const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
 
   state.beatsPerBar = beatsPerBar;
@@ -200,6 +282,7 @@ async function startPlayback(): Promise<void> {
 
   const events: ScheduledEvent[] = buildScheduleEvents(project);
   const endBeat = state.loop ? Infinity : lengthBeats;
+  if (resumeSounding && startBeat < endBeat) resumeSoundingNotes(events, startBeat, now);
 
   const scheduler = new Scheduler({
     clock: () => engine.now(),
@@ -215,6 +298,10 @@ async function startPlayback(): Promise<void> {
   });
   state.scheduler = scheduler;
   scheduler.start(events, project.bpm, startBeat, state.loop, endBeat);
+
+  // Starting at the project end ends synchronously: onEnd already reset the
+  // transport and the store subscription tore the audio down, so no loop.
+  if (!scheduler.isRunning) return;
 
   startPositionLoop();
 }
@@ -284,6 +371,7 @@ function stopPositionLoop(): void {
 
 /** Stop the audio: scheduler + voices + position loop. Does not touch store. */
 function stopAudio(): void {
+  state.playGeneration += 1;
   state.scheduler?.stop();
   state.scheduler = null;
   stopPositionLoop();

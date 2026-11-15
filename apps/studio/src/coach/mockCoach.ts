@@ -7,12 +7,14 @@
  */
 
 import type { Project } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
 import {
   suggestNextChords,
   getDiatonicChords,
   analyzeMelody,
   getScalePitchClasses,
 } from '@cts/theory-engine';
+import { resolveTrack } from '@cts/tutorial-engine';
 import type { CoachAdapter, CoachFocus, CoachSuggestion } from './adapter';
 
 /** コードトラックから現在のコード進行シンボル配列を取得 */
@@ -24,17 +26,15 @@ function currentProgression(project: Project): string[] {
 
 /** メロディノートをanalyzeMelody用に整形 */
 function melodyNotesFrom(project: Project): { pitch: number; startBeat: number; durationBeats: number }[] {
-  for (const track of project.tracks) {
-    if (track.name === 'Melody') {
-      for (const clip of track.clips) {
-        if (clip.notes && clip.notes.length > 0) {
-          return clip.notes.map((n) => ({
-            pitch: n.pitch,
-            startBeat: n.startBeat,
-            durationBeats: n.durationBeats,
-          }));
-        }
-      }
+  const track = resolveTrack(project, { role: 'melody', trackName: 'Melody' });
+  if (!track) return [];
+  for (const clip of track.clips) {
+    if (clip.notes && clip.notes.length > 0) {
+      return clip.notes.map((n) => ({
+        pitch: n.pitch,
+        startBeat: n.startBeat,
+        durationBeats: n.durationBeats,
+      }));
     }
   }
   return [];
@@ -51,7 +51,7 @@ function chordInputsFrom(project: Project): { symbol: string; startBeat: number;
 
 /** ビート数/小節を取得 */
 function beatsPerBar(project: Project): number {
-  return project.timeSignature[0] ?? 4;
+  return beatsPerBarOf(project.timeSignature);
 }
 
 /** 和声提案を生成 */

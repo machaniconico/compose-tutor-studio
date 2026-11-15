@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   advanceBeat,
   beatToTime,
   isValidLoop,
   nextEventsInWindow,
   projectLengthBeats,
+  Scheduler,
   secondsPerBeat,
   timeToBeat,
   wrapBeat,
@@ -152,5 +153,48 @@ describe('nextEventsInWindow (loop wrap)', () => {
     // Subsequent passes: the in-region event recurs, the outside one never does.
     const secondPass = nextEventsInWindow(mixed, 4, 8, 120, 0, 0, loop);
     expect(secondPass.map((d) => d.payload)).toEqual(['inside']);
+  });
+});
+
+describe('Scheduler start at the project end (loop off)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('ends inside the first tick and leaves no interval behind', () => {
+    const onEnd = vi.fn();
+    const fire = vi.fn();
+    const scheduler = new Scheduler({ clock: () => 10, fire, onEnd });
+
+    scheduler.start([{ beat: 0, payload: 'kick' }], 120, 32, null, 32);
+
+    expect(onEnd).toHaveBeenCalledOnce();
+    expect(fire).not.toHaveBeenCalled();
+    expect(scheduler.isRunning).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not accumulate intervals over repeated starts at the end', () => {
+    const scheduler = new Scheduler({ clock: () => 10, fire: () => undefined });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      scheduler.start([], 120, 32, null, 32);
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('still keeps its interval when started before the end', () => {
+    const onEnd = vi.fn();
+    const scheduler = new Scheduler({ clock: () => 10, fire: () => undefined, onEnd });
+
+    scheduler.start([], 120, 28, null, 32);
+
+    expect(scheduler.isRunning).toBe(true);
+    expect(onEnd).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+    scheduler.stop();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

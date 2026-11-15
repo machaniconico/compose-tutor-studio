@@ -7,6 +7,7 @@ import {
   noteRelationLabel,
   scalePresenceLabel,
   simplifyExplanation,
+  effectParamExplanation,
   type Difficulty,
 } from '../src/features/inspector/difficultyText';
 import { analyzeChord } from '@cts/theory-engine';
@@ -238,5 +239,34 @@ describe('simplifyExplanation', () => {
     const result = analyzeChord({ symbol: 'A7', key: 'C', scale: 'major' });
     const kept = simplifyExplanation(result.explanation, 'standard');
     expect(kept).toContain('セカンダリドミナント');
+  });
+});
+
+describe('effectParamExplanation', () => {
+  const keys = [
+    'lowGainDb',
+    'midGainDb',
+    'highGainDb',
+    'thresholdDb',
+    'ratio',
+    'attackSeconds',
+    'releaseSeconds',
+  ];
+
+  it('has an explanation for every eq / compressor parameter', () => {
+    for (const key of keys) {
+      expect(effectParamExplanation(key, 'standard').length).toBeGreaterThan(0);
+    }
+    expect(effectParamExplanation('unknown', 'standard')).toBe('');
+  });
+
+  it('beginner: replaces mixing jargon with plain words', () => {
+    for (const key of keys) {
+      const text = effectParamExplanation(key, 'beginner');
+      for (const term of ['スレッショルド', 'レシオ', 'アタック', 'リリース', 'シェルフ']) {
+        expect(text).not.toContain(term);
+      }
+    }
+    expect(effectParamExplanation('ratio', 'standard')).toContain('レシオ');
   });
 });

@@ -12,7 +12,7 @@ describe('createEmptyProject', () => {
     expect(project.scale).toBe('major');
     expect(project.timeSignature).toEqual([4, 4]);
     expect(project.lengthBars).toBe(8);
-    expect(project.schemaVersion).toBe(1);
+    expect(project.schemaVersion).toBe(2);
     expect(project.createdAt).toBe('2026-06-11T00:00:00.000Z');
     expect(project.updatedAt).toBe('2026-06-11T00:00:00.000Z');
   });
@@ -56,6 +56,13 @@ describe('createEmptyProject', () => {
     expect(drums.clips[0]!.type).toBe('drum');
     expect(drums.clips[0]!.stepsPerBar).toBe(16);
     expect(master.clips).toHaveLength(0);
+  });
+
+  it('sizes the drum grid to the meter: 12 steps in 3/4, 12 in 6/8', () => {
+    const waltz = createEmptyProject({ clock: fixedClock, timeSignature: [3, 4] });
+    expect(waltz.tracks.find((t) => t.type === 'drum')!.clips[0]!.stepsPerBar).toBe(12);
+    const compound = createEmptyProject({ clock: fixedClock, timeSignature: [6, 8] });
+    expect(compound.tracks.find((t) => t.type === 'drum')!.clips[0]!.stepsPerBar).toBe(12);
   });
 
   it('produces unique ids and valid clip back-references', () => {

@@ -8,7 +8,7 @@
 // This module is the only place that constructs a (live, non-offline)
 // AudioContext, which keeps the singleton invariant simple.
 
-import { METER_ANALYSER_FFT_SIZE } from './metering';
+import { createMasterChain } from './masterChain';
 
 /**
  * The app-wide audio engine. Wraps a lazily-created AudioContext and the master
@@ -49,28 +49,12 @@ export class AudioEngine {
   async ensureContext(): Promise<{ context: AudioContext; master: GainNode }> {
     if (!this.context) {
       this.context = new AudioContext();
-      const master = this.context.createGain();
-      master.gain.value = 1;
-      const analyser = this.context.createAnalyser();
-      analyser.fftSize = METER_ANALYSER_FFT_SIZE;
-      analyser.smoothingTimeConstant = 0;
+      // Gain follows the master track volume once playback applies the project.
+      const chain = createMasterChain(this.context, []);
 
-      // Soft limiter: gentle compression with a high threshold acts as a
-      // brick-wall-ish safety net against summed-voice clipping.
-      const limiter = this.context.createDynamicsCompressor();
-      limiter.threshold.value = -3;
-      limiter.knee.value = 6;
-      limiter.ratio.value = 12;
-      limiter.attack.value = 0.002;
-      limiter.release.value = 0.12;
-
-      master.connect(analyser);
-      master.connect(limiter);
-      limiter.connect(this.context.destination);
-
-      this.masterBus = master;
-      this.masterAnalyser = analyser;
-      this.limiter = limiter;
+      this.masterBus = chain.input;
+      this.masterAnalyser = chain.analyser;
+      this.limiter = chain.limiter;
     }
 
     if (this.context.state === 'suspended') {

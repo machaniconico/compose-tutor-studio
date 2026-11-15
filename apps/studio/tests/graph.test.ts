@@ -7,6 +7,7 @@ import {
   clampVolume,
   computeAudibleTracks,
 } from '../src/audio/graph';
+import { delayTimeSeconds } from '../src/audio/effects';
 
 /** Minimal Track factory for mute/solo tests. */
 function track(
@@ -73,10 +74,20 @@ class FakeBiquadFilterNode extends FakeNode {
   type: BiquadFilterType = 'lowpass';
   readonly frequency = new FakeAudioParam(350);
   readonly Q = new FakeAudioParam(1);
+  readonly gain = new FakeAudioParam(0);
+}
+
+class FakeDynamicsCompressorNode extends FakeNode {
+  readonly threshold = new FakeAudioParam(-24);
+  readonly knee = new FakeAudioParam(30);
+  readonly ratio = new FakeAudioParam(12);
+  readonly attack = new FakeAudioParam(0.003);
+  readonly release = new FakeAudioParam(0.25);
 }
 
 class FakeDelayNode extends FakeNode {
   readonly delayTime = new FakeAudioParam(0);
+  maxDelayTime = 1;
 }
 
 class FakeConvolverNode extends FakeNode {
@@ -130,8 +141,16 @@ class FakeAudioContext {
     ) as unknown as BiquadFilterNode;
   }
 
-  createDelay(): DelayNode {
-    return this.node(new FakeDelayNode('Delay', this.name('Delay'), this.connections)) as unknown as DelayNode;
+  createDynamicsCompressor(): DynamicsCompressorNode {
+    return this.node(
+      new FakeDynamicsCompressorNode('DynamicsCompressor', this.name('DynamicsCompressor'), this.connections),
+    ) as unknown as DynamicsCompressorNode;
+  }
+
+  createDelay(maxDelayTime = 1): DelayNode {
+    const node = new FakeDelayNode('Delay', this.name('Delay'), this.connections);
+    node.maxDelayTime = maxDelayTime;
+    return this.node(node) as unknown as DelayNode;
   }
 
   createConvolver(): ConvolverNode {
@@ -160,7 +179,7 @@ function fakeContext(): BaseAudioContext & FakeAudioContext {
 }
 
 function effect(
-  type: 'filter' | 'delay' | 'reverb',
+  type: EffectConfig['type'],
   params: Record<string, number> = {},
 ): EffectConfig {
   return {
@@ -307,5 +326,132 @@ describe('TrackGraph effects', () => {
     expect(graph.effectTypes).toEqual(['filter']);
     expect(panner?.connections).toEqual([filter]);
     expect(filter?.connections).toEqual([originalMeterTap]);
+  });
+
+  it('orders eq -> compressor -> filter -> delay -> reverb regardless of list order', () => {
+    const ctx = fakeContext();
+    const master = ctx.createGain();
+    const graph = new TrackGraph(
+      ctx,
+      master,
+      track('a', {
+        effects: [
+          effect('reverb', { mix: 0.35 }),
+          effect('delay'),
+          effect('filter'),
+          effect('compressor', { thresholdDb: -18, ratio: 4 }),
+          effect('eq', { highGainDb: 6 }),
+        ],
+      }),
+    );
+    const panner = ctx.created.find((node) => node.kind === 'StereoPanner');
+    const biquads = ctx.created.filter((node) => node.kind === 'BiquadFilter') as unknown as FakeBiquadFilterNode[];
+    const compressor = ctx.created.find((node) => node.kind === 'DynamicsCompressor') as unknown as FakeDynamicsCompressorNode;
+
+    expect(graph.effectTypes).toEqual(['eq', 'compressor', 'filter', 'delay', 'reverb']);
+    // eq is three biquads (low shelf, peaking, high shelf) then the filter biquad.
+    expect(biquads.map((node) => node.type)).toEqual(['lowshelf', 'peaking', 'highshelf', 'lowpass']);
+    expect(panner?.connections).toEqual([biquads[0]]);
+    expect(biquads[2]?.connections).toEqual([compressor]);
+    expect(compressor.connections).toEqual([biquads[3]]);
+    expect(biquads[2]?.gain.value).toBe(6);
+    expect(compressor.threshold.value).toBe(-18);
+    expect(compressor.ratio.value).toBe(4);
+  });
+
+  it('gives the delay node room for a quarter note at 40 BPM', () => {
+    const ctx = fakeContext();
+    new TrackGraph(
+      ctx,
+      ctx.createGain(),
+      track('a', { effects: [effect('delay', { timeSeconds: delayTimeSeconds(40, '1/4') })] }),
+    );
+    const delay = ctx.created.find((node) => node.kind === 'Delay') as unknown as FakeDelayNode;
+    expect(delay.delayTime.value).toBe(1.5);
+    expect(delay.maxDelayTime).toBeGreaterThanOrEqual(1.5);
+  });
+
+  it.each([
+    ['legacy delayTime over the limit', { delayTime: 4 }, 1.5],
+    ['legacy time in range', { time: 0.6 }, 0.6],
+    ['timeSeconds over the limit', { timeSeconds: 3 }, 1.5],
+  ])('resolves %s to the same delay time as before tempo sync', (_label, params, expected) => {
+    const ctx = fakeContext();
+    new TrackGraph(ctx, ctx.createGain(), track('a', { effects: [effect('delay', params)] }));
+    const delay = ctx.created.find((node) => node.kind === 'Delay') as unknown as FakeDelayNode;
+    expect(delay.delayTime.value).toBe(expected);
+  });
+
+  it.each([
+    [['reverb', 'delay', 'filter'], ['reverb', 'delay', 'filter']],
+    [['delay', 'filter', 'delay'], ['delay', 'filter', 'delay']],
+  ] as const)('keeps saved order %j when EQ and compressor are off', (saved, expected) => {
+    const ctx = fakeContext();
+    const graph = new TrackGraph(
+      ctx,
+      ctx.createGain(),
+      track('a', {
+        effects: [{ ...effect('eq'), enabled: false }, ...saved.map((type) => effect(type))],
+      }),
+    );
+    const panner = ctx.created.find((node) => node.kind === 'StereoPanner');
+    const seen = new Set<FakeNode>();
+    const queue = panner ? [panner] : [];
+    const reached: string[] = [];
+    for (const node of queue) {
+      if (seen.has(node)) continue;
+      seen.add(node);
+      if (['BiquadFilter', 'Delay', 'Convolver'].includes(node.kind)) reached.push(node.kind);
+      queue.push(...node.connections);
+    }
+
+    expect(graph.effectTypes).toEqual(expected);
+    expect(reached).toEqual(
+      expected.map((type) => ({ filter: 'BiquadFilter', delay: 'Delay', reverb: 'Convolver' })[type]),
+    );
+  });
+
+  it('keeps node sequence and parameters for filter/delay/reverb-only projects', () => {
+    const ctx = fakeContext();
+    const master = ctx.createGain();
+    new TrackGraph(
+      ctx,
+      master,
+      track('a', {
+        effects: [
+          effect('filter', { cutoffHz: 1200, resonance: 2 }),
+          effect('delay', { timeSeconds: 0.2, feedback: 0.4, mix: 0.5 }),
+          effect('reverb', { mix: 0.35 }),
+        ],
+      }),
+    );
+    const snapshot = ctx.created.map((node) => {
+      if (node instanceof FakeBiquadFilterNode) {
+        return [node.kind, node.type, node.frequency.value, node.Q.value];
+      }
+      if (node instanceof FakeDelayNode) return [node.kind, node.delayTime.value];
+      if (node instanceof FakeGainNode) return [node.kind, node.gain.value];
+      if (node instanceof FakeStereoPannerNode) return [node.kind, node.pan.value];
+      return [node.kind];
+    });
+    expect(snapshot).toEqual([
+      ['Gain', 1],
+      ['Gain', 0.8],
+      ['StereoPanner', 0],
+      ['Gain', 1],
+      ['Analyser'],
+      ['BiquadFilter', 'lowpass', 1200, 2],
+      ['Gain', 1],
+      ['Gain', 0.5],
+      ['Delay', 0.2],
+      ['Gain', 0.4],
+      ['Gain', 0.5],
+      ['Gain', 1],
+      ['Gain', 1],
+      ['Gain', 0.65],
+      ['Convolver'],
+      ['Gain', 0.35],
+      ['Gain', 1],
+    ]);
   });
 });

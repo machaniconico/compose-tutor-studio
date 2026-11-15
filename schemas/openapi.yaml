@@ -235,6 +235,11 @@ components:
           type: string
         schemaVersion:
           type: integer
+          description: >-
+            Current version is 2. Files at version 1 are migrated on load: each clip's
+            lengthBeats is raised to at least its last note or drum step end, master
+            track volume becomes 1, and track role is inferred from the track name
+            (type drum becomes drums). Files at a newer version are rejected.
         title:
           type: string
         bpm:
@@ -247,6 +252,21 @@ components:
           type: string
         scale:
           type: string
+        loopRange:
+          type: object
+          description: Beat range repeated during playback. 0 <= startBeat < endBeat.
+          required: [startBeat, endBeat]
+          properties:
+            startBeat:
+              type: number
+              minimum: 0
+            endBeat:
+              type: number
+        swing:
+          type: number
+          minimum: 0
+          maximum: 60
+          description: Unset means 0.
         tracks:
           type: array
           items:
@@ -265,6 +285,8 @@ components:
           type: string
         type:
           enum: [instrument, drum, audio, bus, master]
+        role:
+          enum: [chords, bass, melody, drums]
         clips:
           type: array
           items:
@@ -289,6 +311,10 @@ components:
           type: number
         lengthBeats:
           type: number
+        contentLengthBeats:
+          type: number
+          exclusiveMinimum: 0
+          description: Loop period in beats. Unset means lengthBeats.
         loop:
           type: boolean
         notes:

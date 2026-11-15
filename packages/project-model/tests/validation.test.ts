@@ -15,6 +15,72 @@ describe('validateProject', () => {
     expect(result.errors).toHaveLength(0);
   });
 
+  it('flags eq and compressor params outside their ranges', () => {
+    const project = baseProject();
+    const track = project.tracks[0]!;
+    const withEffects = (params: Record<string, number>, type: 'eq' | 'compressor'): Project => ({
+      ...project,
+      tracks: [
+        { ...track, effects: [{ id: `fx-${type}`, type, enabled: true, params }] },
+        ...project.tracks.slice(1),
+      ],
+    });
+    const paths = (p: Project) => validateProject(p).errors.map((e) => e.path);
+    expect(paths(withEffects({ highGainDb: 13 }, 'eq'))).toContain(
+      'tracks[0].effects[0].params.highGainDb',
+    );
+    expect(paths(withEffects({ ratio: 0.5 }, 'compressor'))).toContain(
+      'tracks[0].effects[0].params.ratio',
+    );
+    expect(paths(withEffects({ highGainDb: 12, lowGainDb: -12 }, 'eq'))).toEqual([]);
+    expect(paths(withEffects({ thresholdDb: -24, ratio: 3 }, 'compressor'))).toEqual([]);
+  });
+
+  it('flags swing outside 0..60', () => {
+    const paths = (swing: number) =>
+      validateProject({ ...baseProject(), swing }).errors.map((e) => e.path);
+    expect(paths(61)).toContain('swing');
+    expect(paths(-1)).toContain('swing');
+    expect(paths(0)).toEqual([]);
+    expect(paths(60)).toEqual([]);
+  });
+
+  it('flags a loopRange that does not move forward', () => {
+    const paths = (loopRange: Project['loopRange']) =>
+      validateProject({ ...baseProject(), loopRange }).errors.map((e) => e.path);
+    expect(paths({ startBeat: 4, endBeat: 4 })).toContain('loopRange');
+    expect(paths({ startBeat: 8, endBeat: 4 })).toContain('loopRange');
+    expect(paths({ startBeat: -4, endBeat: 4 })).toContain('loopRange');
+    expect(paths({ startBeat: 4, endBeat: 8 })).toEqual([]);
+  });
+
+  it('reports a null loopRange from a hand-edited file instead of crashing', () => {
+    const project = { ...baseProject(), loopRange: null } as unknown as Project;
+    expect(validateProject(project).errors.map((e) => e.path)).toContain('loopRange');
+  });
+
+  it('flags contentLengthBeats that is not positive', () => {
+    const project = baseProject();
+    const clip = project.tracks[0]?.clips[0];
+    if (!clip) throw new Error('expected a default clip');
+    clip.contentLengthBeats = 0;
+    expect(validateProject(project).errors.map((e) => e.path)).toContain(
+      'tracks[0].clips[0].contentLengthBeats',
+    );
+    clip.contentLengthBeats = 4;
+    expect(validateProject(project).errors).toEqual([]);
+  });
+
+  it('flags an unknown track role', () => {
+    const project = baseProject();
+    const track = project.tracks[0];
+    if (!track) throw new Error('expected a default track');
+    (track as { role?: string }).role = 'vocal';
+    expect(validateProject(project).errors.map((e) => e.path)).toContain('tracks[0].role');
+    track.role = 'bass';
+    expect(validateProject(project).errors).toEqual([]);
+  });
+
   it('flags bpm out of range', () => {
     const low = { ...baseProject(), bpm: 10 };
     const high = { ...baseProject(), bpm: 400 };
