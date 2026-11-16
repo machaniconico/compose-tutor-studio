@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   textUndoProps,
   useStore,
@@ -7,7 +7,7 @@ import {
 } from '../../state/store';
 import { findShortcut, type ShortcutAction } from '../../state/keymap';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
-import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf, tapTempo } from '@cts/project-model';
 import { pushToast } from '../../state/tutorialBridge';
 import { formatPosition, keyboardSeekBeat } from '../timeline';
 import { initAudioBridge, restartAt } from '../../audio/playback';
@@ -145,6 +145,17 @@ export function saveIndicatorText(save: SaveState): string {
   return '未保存';
 }
 
+/** A pause this long (ms) between taps starts a new tap-tempo run; 3000ms is 20 BPM. */
+const TAP_RESET_MS = 3000;
+
+/** Native button activation must reach the button without a global shortcut. */
+function isTapActivation(event: Event, button: HTMLButtonElement | null): boolean {
+  if (!(event.target instanceof Node) || !button?.contains(event.target)) return false;
+  if (!(event instanceof KeyboardEvent)) return true;
+  const plainKey = !event.ctrlKey && !event.metaKey && !event.altKey;
+  return plainKey && (event.key === 'Enter' || event.key === ' ');
+}
+
 /** Top transport + project metadata bar. */
 export function TransportBar() {
   const project = useStore((s) => s.project);
@@ -169,11 +180,62 @@ export function TransportBar() {
   const difficulty = useStore((s) => s.editor.difficulty);
   const setDifficulty = useStore((s) => s.setDifficulty);
   const cancelTransaction = useStore((s) => s.cancelTransaction);
+  const beginTransaction = useStore((s) => s.beginTransaction);
+  const commitTransaction = useStore((s) => s.commitTransaction);
+  const setLoopRange = useStore((s) => s.setLoopRange);
   const startScreenOpen = useStore((s) => s.startScreenOpen);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   // The bar-count input is committed on blur / Enter so a half-typed number
   // never triggers the "content will be deleted" confirmation.
   const [lengthDraft, setLengthDraft] = useState<string | null>(null);
+  // Tap tempo: tap times of the current run. One run of taps is one undo step,
+  // closed when the taps pause.
+  const tapTimes = useRef<number[]>([]);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onTap = (): void => {
+    const now = performance.now();
+    const last = tapTimes.current[tapTimes.current.length - 1];
+    if (last !== undefined && now - last > TAP_RESET_MS) tapTimes.current = [];
+    tapTimes.current = [...tapTimes.current, now].slice(-5);
+    if (tapTimer.current !== null) clearTimeout(tapTimer.current);
+    tapTimer.current = setTimeout(() => {
+      tapTimer.current = null;
+      commitTransaction(tapTimes);
+    }, TAP_RESET_MS);
+    const bpm = tapTempo(tapTimes.current);
+    if (bpm === null) return;
+    beginTransaction(tapTimes);
+    setBpm(bpm);
+  };
+
+  const tapButton = useRef<HTMLButtonElement | null>(null);
+
+  // Any other click or key (Undo/Redo included) closes the tap run first, so
+  // the next operation (a ruler drag, a clear, an edit) is its own undo step.
+  // A window blur closes it too, keeping the tapped tempo. These listeners are
+  // added before the shortcut and blur listeners below, so they run first.
+  useEffect(() => {
+    const closeTapRun = (): void => {
+      if (tapTimer.current === null) return;
+      clearTimeout(tapTimer.current);
+      tapTimer.current = null;
+      tapTimes.current = [];
+      commitTransaction(tapTimes);
+    };
+    const onOtherInput = (event: Event): void => {
+      if (!isTapActivation(event, tapButton.current)) closeTapRun();
+    };
+    window.addEventListener('pointerdown', onOtherInput, true);
+    window.addEventListener('keydown', onOtherInput, true);
+    window.addEventListener('blur', closeTapRun);
+    return () => {
+      window.removeEventListener('pointerdown', onOtherInput, true);
+      window.removeEventListener('keydown', onOtherInput, true);
+      window.removeEventListener('blur', closeTapRun);
+      closeTapRun();
+    };
+  }, [commitTransaction]);
 
   const commitLengthBars = (): void => {
     if (lengthDraft === null) return;
@@ -203,6 +265,7 @@ export function TransportBar() {
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (isTapActivation(event, tapButton.current)) return;
       handleTransportShortcutKeyDown(event, {
         isPlaying,
         play,
@@ -268,10 +331,21 @@ export function TransportBar() {
           type="button"
           className={transport.loopEnabled ? 'is-active' : ''}
           aria-pressed={transport.loopEnabled}
+          title="ループ範囲をくり返し再生します。範囲は定規を左右にドラッグして選べます"
           onClick={() => toggleLoop()}
         >
           ループ
         </button>
+
+        {project.loopRange ? (
+          <button
+            type="button"
+            title="定規で選んだループ範囲(くり返す小節)を消します"
+            onClick={() => setLoopRange(null)}
+          >
+            ループ範囲をクリア
+          </button>
+        ) : null}
 
         <button
           type="button"
@@ -297,6 +371,15 @@ export function TransportBar() {
             value={project.bpm}
             onChange={(e) => setBpm(Number(e.target.value) || project.bpm)}
           />
+          <button
+            type="button"
+            ref={tapButton}
+            aria-label="タップテンポ"
+            title="曲の速さに合わせて何回か押すと、その速さが BPM(1 分間の拍の数)になります"
+            onClick={onTap}
+          >
+            タップ
+          </button>
         </div>
 
         <div className="field">

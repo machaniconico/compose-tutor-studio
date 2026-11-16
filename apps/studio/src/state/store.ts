@@ -18,8 +18,10 @@ import type {
   Track,
 } from '@cts/project-model';
 import {
+  beatsPerBar as beatsPerBarOf,
   contentBeyondBars,
   setLengthBars as setProjectLengthBars,
+  setLoopRange as setProjectLoopRange,
   setTimeSignature as setProjectTimeSignature,
 } from '@cts/project-model';
 import { getScalePitchClasses } from '@cts/theory-engine';
@@ -45,9 +47,8 @@ export type RightPanelTab = 'inspector' | 'assistant' | 'tutorial';
 export type TransportState = {
   isPlaying: boolean;
   positionBeat: number;
+  /** Loop on/off. The looped beats live in `project.loopRange` (see `activeLoopRange`). */
   loopEnabled: boolean;
-  loopStartBeat: number;
-  loopEndBeat: number;
   metronome: boolean;
 };
 
@@ -176,8 +177,14 @@ type StoreState = {
    */
   stop: (reset?: boolean) => void;
   setPosition: (beat: number) => void;
+  /**
+   * Turn loop on/off. Turning it on without a loop range first sets the bar
+   * holding the playhead as the range (one undo step).
+   */
   toggleLoop: () => void;
   toggleMetronome: () => void;
+  /** Set the looped beat range, or clear it with null (one undo step). */
+  setLoopRange: (range: { startBeat: number; endBeat: number } | null) => void;
 
   // history actions
   /**
@@ -264,8 +271,6 @@ function makeTransport(): TransportState {
     isPlaying: false,
     positionBeat: 0,
     loopEnabled: false,
-    loopStartBeat: 0,
-    loopEndBeat: 0,
     metronome: false,
   };
 }
@@ -680,9 +685,26 @@ export const useStore = create<StoreState>((set, get) => {
         };
       }),
     setPosition: (beat) => set((s) => ({ transport: { ...s.transport, positionBeat: beat } })),
-    toggleLoop: () => set((s) => ({ transport: { ...s.transport, loopEnabled: !s.transport.loopEnabled } })),
+    toggleLoop: () => {
+      const { project, transport } = get();
+      const loopEnabled = !transport.loopEnabled;
+      if (loopEnabled && !project.loopRange) {
+        // The default range is its own undo step, apart from an open (tap tempo) transaction.
+        get().commitTransaction();
+        const bpb = beatsPerBarOf(project.timeSignature);
+        const lastBar = Math.max(0, project.lengthBars - 1);
+        const bar = Math.min(lastBar, Math.max(0, Math.floor(transport.positionBeat / bpb + 1e-9)));
+        commitProject(setProjectLoopRange(project, { startBeat: bar * bpb, endBeat: (bar + 1) * bpb }));
+      }
+      set((s) => ({ transport: { ...s.transport, loopEnabled } }));
+    },
     toggleMetronome: () =>
       set((s) => ({ transport: { ...s.transport, metronome: !s.transport.metronome } })),
+    setLoopRange: (range) => {
+      // A loop range change is its own undo step, apart from an open (tap tempo) transaction.
+      get().commitTransaction();
+      commitProject(setProjectLoopRange(get().project, range));
+    },
 
     // --- history ---
     beginTransaction: (owner) => {
@@ -846,6 +868,13 @@ const SLIDER_STEP_KEYS = new Set([
 let stopDragWatch: (() => void) | null = null;
 /** Owner of the last drag closed before its pointer was released. */
 let abandonedDragOwner: unknown = null;
+
+/** The beat range playback repeats: `project.loopRange` while loop is on, else null. */
+export function activeLoopRange(
+  state: Pick<StoreState, 'project' | 'transport'>,
+): { startBeat: number; endBeat: number } | null {
+  return state.transport.loopEnabled ? (state.project.loopRange ?? null) : null;
+}
 
 /**
  * Closes the open transaction of `owner` when that pointer is released, even if

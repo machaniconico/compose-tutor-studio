@@ -45,3 +45,55 @@ export function isClipPeak(
 ): boolean {
   return Number.isFinite(peakDb) && peakDb >= thresholdDb;
 }
+
+/** Web Audio analyser size used by the optional master spectrum view. */
+export const SPECTRUM_FFT_SIZE = 256;
+
+/**
+ * Bring the optional spectrum analyser in line with the toggle. While the
+ * spectrum is off no AnalyserNode exists, so it costs nothing at playback.
+ * Returns the analyser to keep (null when off or before audio has started).
+ */
+export function syncSpectrumTap(
+  current: AnalyserNode | null,
+  enabled: boolean,
+  context: Pick<BaseAudioContext, 'createAnalyser'> | null,
+  source: AudioNode | null,
+): AnalyserNode | null {
+  if (!enabled) {
+    if (current) {
+      try {
+        source?.disconnect(current);
+      } catch {
+        // Already disconnected (e.g. the context was rebuilt).
+      }
+      current.disconnect();
+    }
+    return null;
+  }
+  if (current) return current;
+  if (!context || !source) return null;
+  const analyser = context.createAnalyser();
+  analyser.fftSize = SPECTRUM_FFT_SIZE;
+  analyser.smoothingTimeConstant = 0.8;
+  source.connect(analyser);
+  return analyser;
+}
+
+/** Average byte frequency bins (0..255) into `barCount` bars of 0..1. Pure. */
+export function spectrumBars(bins: Uint8Array, barCount: number): number[] {
+  if (!Number.isInteger(barCount) || barCount <= 0) return [];
+  const bars: number[] = [];
+  for (let bar = 0; bar < barCount; bar += 1) {
+    const start = Math.floor((bar * bins.length) / barCount);
+    const end = Math.max(start + 1, Math.floor(((bar + 1) * bins.length) / barCount));
+    let sum = 0;
+    let count = 0;
+    for (let i = start; i < end && i < bins.length; i += 1) {
+      sum += bins[i] ?? 0;
+      count += 1;
+    }
+    bars.push(count > 0 ? sum / count / 255 : 0);
+  }
+  return bars;
+}

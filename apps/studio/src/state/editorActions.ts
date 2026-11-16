@@ -46,6 +46,8 @@ import { useStore } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { quantizeStart } from '../features/pianoRoll/gridMath';
+import { upsertEffect, type SupportedEffectType } from '../audio/effects';
+import { findChannelPreset } from '../features/mixer/channelPresets';
 
 /** Bar index (0-based) for a beat offset under the project's time signature. */
 function barOf(project: Project, startBeat: number): number {
@@ -788,4 +790,31 @@ export function setDrumStepVelocity(
       return { ...clip, drumEvents: [...events, created] };
     }),
   );
+}
+
+/**
+ * Apply a channel preset (EQ / compressor / filter values) to one track as a
+ * single undo step. The preset's effects are switched on; others are untouched.
+ */
+export function applyChannelPreset(trackId: string, presetId: string): void {
+  const preset = findChannelPreset(presetId);
+  const state = useStore.getState();
+  if (!preset || !state.project.tracks.some((t) => t.id === trackId)) return;
+  // A preset is its own undo step, apart from an open (tap tempo) transaction.
+  state.commitTransaction();
+  state.applyProjectChange((project) => ({
+    ...project,
+    tracks: project.tracks.map((track) => {
+      if (track.id !== trackId) return track;
+      let effects = track.effects;
+      for (const [type, params] of Object.entries(preset.effects)) {
+        effects = upsertEffect(effects, type as SupportedEffectType, (effect) => ({
+          ...effect,
+          enabled: true,
+          params: { ...effect.params, ...params },
+        }));
+      }
+      return { ...track, effects };
+    }),
+  }));
 }

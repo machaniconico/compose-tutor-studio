@@ -7,6 +7,7 @@ export * from './factories';
 export * from './templates';
 export * from './serialization';
 export * from './mutations';
+export * from './tapTempo';
 // New deterministic id helper (counter-based, no Math.random/Date.now)
 export * from './ids';
 // New factory helpers (createDefaultProject, createInstrumentTrack, createDrumTrack,

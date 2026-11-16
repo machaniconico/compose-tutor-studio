@@ -98,6 +98,12 @@ describe('transport shortcut key matching', () => {
     }
   });
 
+  it('leaves T unbound globally: tap tempo is a button only', () => {
+    for (const key of ['t', 'T']) {
+      expect(getTransportShortcut(shortcutEvent(key))).toBeNull();
+    }
+  });
+
   it('maps command-key save, undo, and redo shortcuts', () => {
     expect(getTransportShortcut(shortcutEvent('s', { ctrlKey: true }))).toBe('save');
     expect(getTransportShortcut(shortcutEvent('S', { metaKey: true }))).toBe('save');

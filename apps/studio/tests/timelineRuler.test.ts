@@ -6,6 +6,7 @@ import {
   stepGridPxPerBeat,
   xToSeekBeat,
 } from '../src/features/timeline';
+import { dragToLoopRange } from '../src/features/transport/TimelineRuler';
 
 const BAR_PX = 4 * BASE_PX_PER_BEAT; // 4/4 at zoom 1
 
@@ -56,5 +57,38 @@ describe('stepGridPxPerBeat', () => {
 
   it('uses the shared scale once that is wide enough', () => {
     expect(stepGridPxPerBeat(4, 16, 4, 25)).toBe(pxPerBeat(4));
+  });
+});
+
+describe('dragToLoopRange', () => {
+  it('covers every bar the drag touches, snapped to bar lines', () => {
+    // From inside bar 2 (beats 4-8) to inside bar 3 (beats 8-12).
+    expect(dragToLoopRange(BAR_PX + 10, 2 * BAR_PX + 30, 1, 4, 32)).toEqual({
+      startBeat: 4,
+      endBeat: 12,
+    });
+  });
+
+  it('swaps a right-to-left drag so end is after start', () => {
+    expect(dragToLoopRange(2 * BAR_PX + 30, BAR_PX + 10, 1, 4, 32)).toEqual({
+      startBeat: 4,
+      endBeat: 12,
+    });
+  });
+
+  it('keeps at least one bar when start and end fall in the same bar', () => {
+    const range = dragToLoopRange(BAR_PX + 10, BAR_PX + 20, 1, 4, 32);
+    expect(range).toEqual({ startBeat: 4, endBeat: 8 });
+    expect(range.endBeat).toBeGreaterThan(range.startBeat);
+  });
+
+  it('clamps to the song and uses the time signature and zoom', () => {
+    expect(dragToLoopRange(-50, 99999, 1, 4, 32)).toEqual({ startBeat: 0, endBeat: 32 });
+    // 3/4 at zoom 2: a bar is 3 beats of 2x width.
+    const bar34 = 3 * BASE_PX_PER_BEAT * 2;
+    expect(dragToLoopRange(bar34 + 1, 3 * bar34 + 1, 2, 3, 24)).toEqual({
+      startBeat: 3,
+      endBeat: 12,
+    });
   });
 });

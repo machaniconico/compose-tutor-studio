@@ -14,6 +14,8 @@ import {
   setTrackSolo,
   addSection,
   updateSection,
+  setLoopRange,
+  setLengthBars,
 } from '../src/index';
 import type { Project } from '../src/index';
 
@@ -118,5 +120,41 @@ describe('section mutations', () => {
     const id = added.sections[0]!.id;
     const updated = updateSection(added, id, { lengthBars: 4 }, t1);
     expect(updated.sections[0]!.lengthBars).toBe(4);
+  });
+});
+
+describe('loop range mutations', () => {
+  it('sets and clears the loop range', () => {
+    const project = base();
+    const looped = setLoopRange(project, { startBeat: 4, endBeat: 12 }, t1);
+    expect(looped.loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+    expect(looped.updatedAt).toBe('2026-06-11T01:00:00.000Z');
+    expect(project.loopRange).toBeUndefined();
+    const cleared = setLoopRange(looped, null, t1);
+    expect(cleared.loopRange).toBeUndefined();
+    expect('loopRange' in cleared).toBe(false);
+  });
+
+  it('rejects a range that does not satisfy 0 <= start < end', () => {
+    const project = base();
+    expect(() => setLoopRange(project, { startBeat: 8, endBeat: 8 }, t1)).toThrow();
+    expect(() => setLoopRange(project, { startBeat: -1, endBeat: 4 }, t1)).toThrow();
+  });
+
+  it('setLengthBars cuts a loop range that runs past the new end', () => {
+    const project = setLoopRange({ ...base(), lengthBars: 8 }, { startBeat: 12, endBeat: 24 }, t1);
+    expect(setLengthBars(project, 4, t1).loopRange).toEqual({ startBeat: 12, endBeat: 16 });
+  });
+
+  it('setLengthBars removes a loop range that starts at or after the new end', () => {
+    const project = setLoopRange({ ...base(), lengthBars: 8 }, { startBeat: 16, endBeat: 32 }, t1);
+    const shortened = setLengthBars(project, 4, t1);
+    expect('loopRange' in shortened).toBe(false);
+  });
+
+  it('setLengthBars keeps the loop range when the song grows or the range still fits', () => {
+    const project = setLoopRange({ ...base(), lengthBars: 8 }, { startBeat: 4, endBeat: 12 }, t1);
+    expect(setLengthBars(project, 16, t1).loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+    expect(setLengthBars(project, 3, t1).loopRange).toEqual({ startBeat: 4, endBeat: 12 });
   });
 });

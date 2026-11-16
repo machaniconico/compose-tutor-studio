@@ -10,9 +10,12 @@ import {
   type DelayDivision,
   type SupportedEffectType,
 } from '../../audio/effects';
-import { effectParamExplanation } from '../inspector/difficultyText';
+import { effectParamExplanation, simplifyExplanation } from '../inspector/difficultyText';
+import { applyChannelPreset } from '../../state/editorActions';
+import { CHANNEL_PRESETS } from './channelPresets';
 import { sliderUndoProps, useStore } from '../../state/store';
 import { LevelMeter, type LevelMeterReading } from './LevelMeter';
+import { SpectrumView } from './SpectrumView';
 import './meter.css';
 
 /** Convert a linear gain (0..2) to an approximate dB label for display. */
@@ -83,6 +86,7 @@ export function MixerStrip() {
       {master ? (
         <div className="mixer-strip__master">
           <ChannelStrip track={master} isMaster onLevelChange={updateMeterLevel} />
+          <SpectrumView />
           {masterClipping ? (
             <div className="mixer-clip-warning" role="alert">
               音が大きすぎて歪んでいます。一番大きいトラックの音量を下げてみましょう
@@ -310,6 +314,7 @@ function EffectControls(props: {
   return (
     <details className="mix-ch__effects">
       <summary>FX</summary>
+      <ChannelPresetPicker trackId={track.id} trackName={track.name} />
       <div className="mix-ch__effect">
         <label>
           <input
@@ -484,5 +489,45 @@ function EffectControls(props: {
         <span>{percentLabel(reverbMix)}</span>
       </div>
     </details>
+  );
+}
+
+/** Preset picker: applies EQ / compressor / filter values in one undo step. */
+function ChannelPresetPicker(props: { trackId: string; trackName: string }) {
+  const { trackId, trackName } = props;
+  const difficulty = useStore((s) => s.editor.difficulty);
+  // The select always shows the prompt so the same preset can be applied again.
+  const [appliedId, setAppliedId] = useState('');
+  const selected = CHANNEL_PRESETS.find((preset) => preset.id === appliedId);
+  const hint = selected ? simplifyExplanation(selected.description, difficulty) : '';
+
+  return (
+    <div className="mix-ch__preset">
+      <label>
+        おすすめ設定
+        <select
+          value=""
+          aria-label={`${trackName} おすすめ設定`}
+          onChange={(event) => {
+            const id = event.target.value;
+            if (!id) return;
+            applyChannelPreset(trackId, id);
+            setAppliedId(id);
+          }}
+        >
+          <option value="">選んで適用…</option>
+          {CHANNEL_PRESETS.map((preset) => (
+            <option
+              key={preset.id}
+              value={preset.id}
+              title={simplifyExplanation(preset.description, difficulty)}
+            >
+              {preset.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {hint ? <small className="mix-ch__hint">{hint}</small> : null}
+    </div>
   );
 }

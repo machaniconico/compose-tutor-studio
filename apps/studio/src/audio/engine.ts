@@ -9,6 +9,7 @@
 // AudioContext, which keeps the singleton invariant simple.
 
 import { createMasterChain } from './masterChain';
+import { syncSpectrumTap } from './metering';
 
 /**
  * The app-wide audio engine. Wraps a lazily-created AudioContext and the master
@@ -22,6 +23,9 @@ export class AudioEngine {
   private masterAnalyser: AnalyserNode | null = null;
   /** Soft limiter on the master bus before the destination. */
   private limiter: DynamicsCompressorNode | null = null;
+  /** Optional spectrum tap after the limiter; only exists while the view is on. */
+  private spectrumAnalyser: AnalyserNode | null = null;
+  private spectrumEnabled = false;
 
   /** True once an AudioContext has been created. */
   get isInitialized(): boolean {
@@ -55,6 +59,7 @@ export class AudioEngine {
       this.masterBus = chain.input;
       this.masterAnalyser = chain.analyser;
       this.limiter = chain.limiter;
+      this.syncSpectrum();
     }
 
     if (this.context.state === 'suspended') {
@@ -75,6 +80,29 @@ export class AudioEngine {
   /** Master level analyser, tapped before the limiter. */
   getMasterAnalyser(): AnalyserNode | null {
     return this.masterAnalyser;
+  }
+
+  /**
+   * Turn the master spectrum tap on or off. Off disconnects and drops the
+   * AnalyserNode; on before audio has started connects it on the first play.
+   */
+  setSpectrumEnabled(enabled: boolean): void {
+    this.spectrumEnabled = enabled;
+    this.syncSpectrum();
+  }
+
+  /** Spectrum analyser, or null while the spectrum view is off. */
+  getSpectrumAnalyser(): AnalyserNode | null {
+    return this.spectrumAnalyser;
+  }
+
+  private syncSpectrum(): void {
+    this.spectrumAnalyser = syncSpectrumTap(
+      this.spectrumAnalyser,
+      this.spectrumEnabled,
+      this.context,
+      this.limiter,
+    );
   }
 
   /** Suspend the audio hardware (no-op if no context). */
@@ -100,6 +128,7 @@ export class AudioEngine {
     this.masterBus = null;
     this.masterAnalyser = null;
     this.limiter = null;
+    this.spectrumAnalyser = null;
   }
 }
 

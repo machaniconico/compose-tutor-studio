@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CLIP_THRESHOLD_DB,
   isClipPeak,
@@ -6,6 +6,9 @@ import {
   peakAmplitude,
   peakAmplitudeToDb,
   peakDbFromSamples,
+  SPECTRUM_FFT_SIZE,
+  spectrumBars,
+  syncSpectrumTap,
 } from '../src/audio/metering';
 
 describe('metering helpers', () => {
@@ -45,5 +48,64 @@ describe('metering helpers', () => {
     expect(isClipPeak(CLIP_THRESHOLD_DB)).toBe(true);
     expect(isClipPeak(0)).toBe(true);
     expect(isClipPeak(Number.NEGATIVE_INFINITY)).toBe(false);
+  });
+});
+
+describe('spectrum tap', () => {
+  function mockAudio() {
+    const analyser = {
+      fftSize: 0,
+      smoothingTimeConstant: 0,
+      disconnect: vi.fn(),
+    };
+    const context = { createAnalyser: vi.fn(() => analyser as unknown as AnalyserNode) };
+    const source = { connect: vi.fn(), disconnect: vi.fn() };
+    return { analyser, context, source };
+  }
+
+  it('creates no AnalyserNode while the spectrum is off', () => {
+    const { context, source } = mockAudio();
+    const tap = syncSpectrumTap(null, false, context, source as unknown as AudioNode);
+    expect(tap).toBeNull();
+    expect(context.createAnalyser).not.toHaveBeenCalled();
+    expect(source.connect).not.toHaveBeenCalled();
+  });
+
+  it('creates and connects an AnalyserNode when turned on, and reuses it', () => {
+    const { analyser, context, source } = mockAudio();
+    const tap = syncSpectrumTap(null, true, context, source as unknown as AudioNode);
+    expect(tap).toBe(analyser);
+    expect(context.createAnalyser).toHaveBeenCalledTimes(1);
+    expect(source.connect).toHaveBeenCalledWith(analyser);
+    expect(analyser.fftSize).toBe(SPECTRUM_FFT_SIZE);
+
+    const again = syncSpectrumTap(tap, true, context, source as unknown as AudioNode);
+    expect(again).toBe(analyser);
+    expect(context.createAnalyser).toHaveBeenCalledTimes(1);
+  });
+
+  it('disconnects the AnalyserNode when turned off', () => {
+    const { analyser, context, source } = mockAudio();
+    const tap = syncSpectrumTap(null, true, context, source as unknown as AudioNode);
+    const off = syncSpectrumTap(tap, false, context, source as unknown as AudioNode);
+    expect(off).toBeNull();
+    expect(source.disconnect).toHaveBeenCalledWith(analyser);
+    expect(analyser.disconnect).toHaveBeenCalled();
+  });
+
+  it('waits for the audio context before connecting', () => {
+    expect(syncSpectrumTap(null, true, null, null)).toBeNull();
+  });
+});
+
+describe('spectrumBars', () => {
+  it('averages frequency bins into normalized bars', () => {
+    const bins = new Uint8Array([255, 255, 0, 0, 51, 51, 102, 102]);
+    expect(spectrumBars(bins, 4)).toEqual([1, 0, 0.2, 0.4]);
+  });
+
+  it('returns silent bars for empty data or invalid counts', () => {
+    expect(spectrumBars(new Uint8Array(), 3)).toEqual([0, 0, 0]);
+    expect(spectrumBars(new Uint8Array([10]), 0)).toEqual([]);
   });
 });

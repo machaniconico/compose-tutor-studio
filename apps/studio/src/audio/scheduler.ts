@@ -156,11 +156,21 @@ export function nextEventsInWindow(
   const length = region.endBeat - region.startBeat;
 
   for (const ev of events) {
-    // Events outside the loop region are unreachable once looping: the playhead
-    // wraps at endBeat and never advances to them. Skip them entirely.
-    if (ev.beat < region.startBeat || ev.beat >= region.endBeat) {
+    // Events before the region play once, on the way in: playhead beats before
+    // `startBeat` are only ever reached before the first wrap.
+    if (ev.beat < region.startBeat) {
+      if (ev.beat >= windowStartBeat && ev.beat < windowEndBeat) {
+        due.push({
+          time: beatToTime(ev.beat, bpm, anchorBeat, anchorTime),
+          beat: ev.beat,
+          payload: ev.payload,
+        });
+      }
       continue;
     }
+    // Events at or after the region end are unreachable once looping: the
+    // playhead wraps at endBeat and never advances to them.
+    if (ev.beat >= region.endBeat) continue;
 
     // The event recurs at ev.beat + k*length for every integer k >= 0 such that
     // the recurrence lands in the window.

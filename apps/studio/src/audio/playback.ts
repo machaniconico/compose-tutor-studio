@@ -8,7 +8,7 @@
 //   transport.isPlaying  false->true  => startPlayback()
 //                        true ->false  => stopAudio()
 //   project / mixer changes            => live volume/pan/mute/solo update
-//   time signature / length changes    => schedule rebuilt from the playhead
+//   tempo / time signature / length    => schedule rebuilt from the playhead
 //
 // The bridge writes transport.positionBeat back to the store ~30fps while
 // playing so the playhead UI tracks the audio clock. The store owns play/stop
@@ -16,7 +16,7 @@
 // the actual audio lifecycle.
 
 import { beatsPerBar as beatsPerBarOf, type Project } from '@cts/project-model';
-import { useStore } from '../state/store';
+import { activeLoopRange, useStore } from '../state/store';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
 import { getAudioEngine } from './engine';
@@ -105,7 +105,7 @@ export function initAudioBridge(): () => void {
   });
 
   // React to project / mixer changes while playing: the mix is updated live;
-  // a new meter or song length (also via undo/redo) changes the events, the end
+  // a new tempo, meter or song length (also via undo/redo) changes event timing, the end
   // position and the metronome accent, so the schedule is rebuilt from the
   // current playhead.
   const unsubProject = useStore.subscribe((s, prev) => {
@@ -122,7 +122,17 @@ export function initAudioBridge(): () => void {
     }
   });
 
-  state.unsub = [unsubPlaying, unsubProject];
+  // Turning loop on/off or changing the loop range while playing rebuilds the
+  // schedule from the current playhead, so the new range is heard at once.
+  const unsubLoop = useStore.subscribe((s, prev) => {
+    if (!state.scheduler?.isRunning) return;
+    const next = activeLoopRange(s);
+    const before = activeLoopRange(prev);
+    if (next?.startBeat === before?.startBeat && next?.endBeat === before?.endBeat) return;
+    restartPlayback();
+  });
+
+  state.unsub = [unsubPlaying, unsubProject, unsubLoop];
 
   return () => {
     for (const u of state.unsub) u();
@@ -148,23 +158,30 @@ export function restartAt(beat: number): void {
   store.play();
 }
 
-/** True when the meter or the song length differs between two project states. */
+/** True when tempo, meter or song length differs between two project states. */
 function timingChanged(next: Project, prev: Project): boolean {
   return (
+    next.bpm !== prev.bpm ||
     next.lengthBars !== prev.lengthBars ||
     next.timeSignature.join('/') !== prev.timeSignature.join('/')
   );
 }
 
 /**
- * Tear the running audio down and start again from the store's current
+ * Tear the running audio down and start again from the audio clock's current
  * playhead. Notes that were sounding across the playhead are started again
- * for their remaining length, so a meter or length change does not cut them.
+ * for their remaining length at the new tempo, so timing edits keep them sounding.
  * Play intent is untouched; a start past the new end stops through the
  * scheduler's own end handling, as usual.
  */
 function restartPlayback(): void {
+  // The displayed position can lag the audio by a position-timer tick. Capture
+  // the old scheduler position before stopping it, using its old tempo.
+  const beat = state.scheduler?.currentBeat();
   stopAudio();
+  if (beat !== undefined && Number.isFinite(beat) && beat >= 0) {
+    useStore.getState().setPosition(beat);
+  }
   const generation = ++state.playGeneration;
   void startPlayback(generation, true).catch((error: unknown) => {
     if (generation === state.playGeneration) handlePlaybackStartFailure(error);
@@ -267,10 +284,8 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
   state.beatsPerBar = beatsPerBar;
   state.bpm = project.bpm;
   state.metronomeOn = transport.metronome;
-  state.loop =
-    transport.loopEnabled && transport.loopEndBeat > transport.loopStartBeat
-      ? { startBeat: transport.loopStartBeat, endBeat: transport.loopEndBeat }
-      : null;
+  const loop = activeLoopRange(store);
+  state.loop = loop ? { startBeat: loop.startBeat, endBeat: loop.endBeat } : null;
 
   const startBeat = transport.positionBeat;
   const now = engine.now();

@@ -193,6 +193,28 @@ export function updateSection(
   return touch({ ...project, sections }, clock);
 }
 
+// --- Loop range ---
+
+/**
+ * Set the beat range repeated while looping, or clear it with null. Throws
+ * unless 0 <= startBeat < endBeat.
+ */
+export function setLoopRange(
+  project: Project,
+  range: { startBeat: number; endBeat: number } | null,
+  clock: Clock = systemClock,
+): Project {
+  if (range === null) {
+    const { loopRange: _cleared, ...rest } = project;
+    return touch(rest, clock);
+  }
+  const { startBeat, endBeat } = range;
+  if (!Number.isFinite(startBeat) || !Number.isFinite(endBeat) || startBeat < 0 || endBeat <= startBeat) {
+    throw new Error(`loop range must satisfy 0 <= start < end (got ${startBeat} to ${endBeat})`);
+  }
+  return touch({ ...project, loopRange: { startBeat, endBeat } }, clock);
+}
+
 // --- Time signature / song length ---
 
 /** Default steps per bar for a drum clip when not specified. */
@@ -493,5 +515,13 @@ export function setLengthBars(
     .filter((s) => s.startBar < lengthBars)
     .map((s) => ({ ...s, lengthBars: Math.min(s.lengthBars, lengthBars - s.startBar) }));
 
-  return touch({ ...project, lengthBars, tracks, chordTrack, sections }, clock);
+  // The loop range is cut at the new end, or dropped when it starts at or after
+  // it, so loop playback never repeats beats past the song.
+  const { loopRange, ...rest } = project;
+  const keptLoop =
+    loopRange === undefined || beyond(loopRange.startBeat)
+      ? {}
+      : { loopRange: { startBeat: loopRange.startBeat, endBeat: Math.min(loopRange.endBeat, endBeat) } };
+
+  return touch({ ...rest, ...keptLoop, lengthBars, tracks, chordTrack, sections }, clock);
 }

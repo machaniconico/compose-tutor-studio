@@ -156,6 +156,61 @@ describe('nextEventsInWindow (loop wrap)', () => {
   });
 });
 
+describe('loop region that starts after beat 0', () => {
+  const loop: LoopRegion = { startBeat: 4, endBeat: 12 }; // length 8
+  const events: ScheduledEvent[] = [
+    { beat: 0, payload: 'intro' }, // before the region
+    { beat: 4, payload: 'loopStart' },
+    { beat: 13, payload: 'after' }, // past the region end
+  ];
+
+  it('plays events before the region once, then only the region', () => {
+    // Playhead beats [0, 20): pre-roll 0-4, first pass 4-12, second pass 12-20.
+    const due = nextEventsInWindow(events, 0, 20, 120, 0, 0, loop);
+    expect(due.map((d) => d.payload)).toEqual(['intro', 'loopStart', 'loopStart']);
+    expect(due.map((d) => d.time)).toEqual([0, 2, 6]); // beats 0, 4, 12 at 0.5s/beat
+  });
+
+  it('never replays the pre-region events on later passes', () => {
+    const due = nextEventsInWindow(events, 12, 28, 120, 0, 0, loop);
+    expect(due.map((d) => d.payload)).toEqual(['loopStart', 'loopStart']);
+  });
+
+  it('starting inside the region skips the pre-region events', () => {
+    const due = nextEventsInWindow(events, 6, 14, 120, 6, 0, loop);
+    expect(due.map((d) => d.payload)).toEqual(['loopStart']);
+    expect(due[0]?.time).toBeCloseTo(3, 10); // playhead beat 12 is 6 beats after the anchor
+  });
+
+  describe('Scheduler', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('sounds the note at beat 0 when playing from 0 with the loop at 4-12', () => {
+      const fire = vi.fn();
+      let now = 0;
+      const scheduler = new Scheduler({ clock: () => now, fire, tickMs: 25, lookaheadS: 0.1 });
+
+      scheduler.start(events, 120, 0, loop, Infinity);
+      expect(fire).toHaveBeenCalledTimes(1);
+      expect(fire.mock.calls[0]?.[0]).toEqual([{ time: 0, beat: 0, payload: 'intro' }]);
+
+      // Run 9.5s (19 beats): the loop start sounds at playhead beats 4 and 12, the intro never again.
+      for (let i = 0; i < 380; i += 1) {
+        now += 0.025;
+        vi.advanceTimersByTime(25);
+      }
+      const payloads = fire.mock.calls.flatMap(([due]) => (due as { payload: unknown }[]).map((d) => d.payload));
+      expect(payloads).toEqual(['intro', 'loopStart', 'loopStart']);
+      scheduler.stop();
+    });
+  });
+});
+
 describe('Scheduler start at the project end (loop off)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });

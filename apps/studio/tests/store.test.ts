@@ -8,6 +8,9 @@ import { projectKey } from '../src/state/persistence';
 
 // Audio is mocked so the bridge's start beat can be observed without Web Audio.
 const schedulerStarts = vi.hoisted(() => [] as number[]);
+const schedulerLoops = vi.hoisted(
+  () => [] as Array<{ startBeat: number; endBeat: number } | null>,
+);
 vi.mock('../src/audio/engine', () => ({
   getAudioEngine: () => ({
     now: () => 0,
@@ -25,8 +28,14 @@ vi.mock('../src/audio/scheduler', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/audio/scheduler')>();
   class FakeScheduler {
     isRunning = false;
-    start(_events: unknown, _bpm: number, startBeat: number): void {
+    start(
+      _events: unknown,
+      _bpm: number,
+      startBeat: number,
+      loop: { startBeat: number; endBeat: number } | null,
+    ): void {
       schedulerStarts.push(startBeat);
+      schedulerLoops.push(loop);
       this.isRunning = true;
     }
     stop(): void {
@@ -42,6 +51,7 @@ vi.mock('../src/audio/scheduler', async (importOriginal) => {
 // The store reads localStorage at module-import time, so install the stub
 // BEFORE importing it. We import dynamically inside beforeAll for that reason.
 let useStore: typeof import('../src/state/store')['useStore'];
+let activeLoopRange: typeof import('../src/state/store')['activeLoopRange'];
 let installProjectSaveGuards: typeof import('../src/state/projectSaveGuard')['installProjectSaveGuards'];
 let storage: MemoryStorage;
 
@@ -92,7 +102,7 @@ function makeBeforeUnloadTarget() {
 
 beforeAll(async () => {
   storage = installLocalStorage();
-  ({ useStore } = await import('../src/state/store'));
+  ({ useStore, activeLoopRange } = await import('../src/state/store'));
   ({ installProjectSaveGuards } = await import('../src/state/projectSaveGuard'));
 });
 
@@ -549,6 +559,180 @@ describe('transport toggles', () => {
 
     expect(useStore.getState().transport.loopEnabled).toBe(true);
     expect(useStore.getState().transport.metronome).toBe(true);
+  });
+});
+
+describe('loop range', () => {
+  it('setLoopRange saves the range in the project and undo restores the previous one', () => {
+    useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+
+    useStore.getState().undo();
+    expect(useStore.getState().project.loopRange).toBeUndefined();
+    expect(useStore.getState().canUndo()).toBe(false);
+  });
+
+  it('setLoopRange(null) clears the range in one undo step', () => {
+    useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
+    useStore.getState().setLoopRange(null);
+    expect(useStore.getState().project.loopRange).toBeUndefined();
+    useStore.getState().undo();
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+  });
+
+  it('turning loop on without a range loops the bar holding the playhead', () => {
+    useStore.getState().setPosition(9.5); // bar 3 in 4/4 (beats 8-12)
+    useStore.getState().toggleLoop();
+    expect(useStore.getState().transport.loopEnabled).toBe(true);
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 8, endBeat: 12 });
+  });
+
+  it('turning loop on at the song end loops the last bar', () => {
+    const lengthBeats = useStore.getState().project.lengthBars * 4;
+    useStore.getState().setPosition(lengthBeats);
+    useStore.getState().toggleLoop();
+    expect(useStore.getState().project.loopRange).toEqual({
+      startBeat: lengthBeats - 4,
+      endBeat: lengthBeats,
+    });
+  });
+
+  it('turning loop on keeps an existing range, and turning it off keeps the range', () => {
+    useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
+    useStore.getState().setPosition(20);
+    useStore.getState().toggleLoop();
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+    useStore.getState().toggleLoop();
+    expect(useStore.getState().transport.loopEnabled).toBe(false);
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+  });
+
+  it('derives the transport loop bounds from project.loopRange', () => {
+    useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
+    expect(activeLoopRange(useStore.getState())).toBeNull(); // loop is off
+    useStore.getState().toggleLoop();
+    expect(activeLoopRange(useStore.getState())).toEqual({ startBeat: 4, endBeat: 12 });
+  });
+
+  it('passes the loop range to playback, and restarts when the range changes while playing', async () => {
+    const { initAudioBridge } = await import('../src/audio/playback');
+    const teardown = initAudioBridge();
+    schedulerStarts.length = 0;
+    schedulerLoops.length = 0;
+    try {
+      useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
+      useStore.getState().toggleLoop();
+      useStore.getState().setPosition(4);
+      useStore.getState().play();
+      await vi.waitFor(() => expect(schedulerLoops).toEqual([{ startBeat: 4, endBeat: 12 }]));
+
+      useStore.getState().setLoopRange({ startBeat: 0, endBeat: 8 });
+      await vi.waitFor(() =>
+        expect(schedulerLoops).toEqual([
+          { startBeat: 4, endBeat: 12 },
+          { startBeat: 0, endBeat: 8 },
+        ]),
+      );
+      expect(schedulerLoops.at(-1)).toEqual(useStore.getState().project.loopRange);
+    } finally {
+      useStore.getState().stop();
+      teardown();
+    }
+  });
+
+  it('a loop range change after tap tempo is its own undo step', () => {
+    const owner = {};
+    const pastBefore = useStore.getState().past.length;
+    useStore.getState().beginTransaction(owner);
+    useStore.getState().setBpm(100);
+    useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
+    useStore.getState().commitTransaction(owner); // the tap run ends later: no-op
+    expect(useStore.getState().past.length).toBe(pastBefore + 2);
+
+    useStore.getState().undo();
+    expect(useStore.getState().project.loopRange).toBeUndefined();
+    expect(useStore.getState().project.bpm).toBe(100);
+    useStore.getState().undo();
+    expect(useStore.getState().project.bpm).toBe(120);
+    useStore.getState().redo();
+    useStore.getState().redo();
+    expect(useStore.getState().project.bpm).toBe(100);
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+  });
+
+  it('clearing the range or creating the default range after tap tempo is its own undo step', () => {
+    useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
+    const owner = {};
+    useStore.getState().beginTransaction(owner);
+    useStore.getState().setBpm(100);
+    useStore.getState().setLoopRange(null);
+    useStore.getState().undo();
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+    expect(useStore.getState().project.bpm).toBe(100);
+
+    useStore.getState().setLoopRange(null);
+    useStore.getState().beginTransaction(owner);
+    useStore.getState().setBpm(90);
+    useStore.getState().toggleLoop();
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 0, endBeat: 4 });
+    useStore.getState().undo();
+    expect(useStore.getState().project.loopRange).toBeUndefined();
+    expect(useStore.getState().project.bpm).toBe(90);
+  });
+
+  it('shortening the song cuts the loop range in the same undo step', () => {
+    useStore.getState().setLoopRange({ startBeat: 12, endBeat: 24 });
+    const pastBefore = useStore.getState().past.length;
+    expect(useStore.getState().setLengthBars(4, true)).toBeNull();
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 12, endBeat: 16 });
+    expect(useStore.getState().past.length).toBe(pastBefore + 1);
+    useStore.getState().undo();
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 12, endBeat: 24 });
+    useStore.getState().redo();
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 12, endBeat: 16 });
+  });
+
+  it('shortening the song before the loop range removes it, and undo brings it back', () => {
+    useStore.getState().setLoopRange({ startBeat: 24, endBeat: 32 });
+    useStore.getState().setLengthBars(4, true);
+    expect(useStore.getState().project.loopRange).toBeUndefined();
+    useStore.getState().undo();
+    expect(useStore.getState().project.lengthBars).toBe(8);
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 24, endBeat: 32 });
+  });
+
+  it('shortening the song while loop-playing restarts playback with a loop inside the song', async () => {
+    const { initAudioBridge } = await import('../src/audio/playback');
+    const teardown = initAudioBridge();
+    schedulerLoops.length = 0;
+    try {
+      useStore.getState().setLoopRange({ startBeat: 24, endBeat: 32 });
+      useStore.getState().toggleLoop();
+      useStore.getState().setPosition(24);
+      useStore.getState().play();
+      await vi.waitFor(() => expect(schedulerLoops).toEqual([{ startBeat: 24, endBeat: 32 }]));
+
+      useStore.getState().setLengthBars(4, true);
+      // The range left the song, so playback runs to the song end instead of looping silence.
+      await vi.waitFor(() => expect(schedulerLoops).toEqual([{ startBeat: 24, endBeat: 32 }, null]));
+    } finally {
+      useStore.getState().stop();
+      teardown();
+    }
+  });
+
+  it('passes no loop to playback while loop is off', async () => {
+    const { initAudioBridge } = await import('../src/audio/playback');
+    const teardown = initAudioBridge();
+    schedulerLoops.length = 0;
+    try {
+      useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
+      useStore.getState().play();
+      await vi.waitFor(() => expect(schedulerLoops).toEqual([null]));
+    } finally {
+      useStore.getState().stop();
+      teardown();
+    }
   });
 });
 
