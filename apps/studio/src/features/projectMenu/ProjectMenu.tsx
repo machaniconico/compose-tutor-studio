@@ -135,7 +135,12 @@ function NewProjectGallery({ onDone }: { onDone: () => void }) {
   const importMidiBytes = (bytes: Uint8Array): void => {
     setImportError(null);
     try {
-      const result = importMidiTracks(parseMidi(bytes));
+      const parsed = parseMidi(bytes);
+      let result = importMidiTracks(parsed);
+      if (result.confirm !== null) {
+        if (!window.confirm(result.confirm)) return;
+        result = importMidiTracks(parsed, true);
+      }
       onDone();
       pushToast(
         `MIDIを読み込みました。${result.importedTrackCount}トラック、${result.importedNoteCount}音を追加しました。`,

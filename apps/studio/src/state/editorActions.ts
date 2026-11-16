@@ -443,6 +443,12 @@ export type MidiImportResult = {
   importedNoteCount: number;
   /** Beginner-facing notes (Japanese) from adopting the file's meter, if any. */
   warnings: string[];
+  /**
+   * Japanese question when adopting the file's meter would merge drum hits on
+   * the new grid and the import was not `confirmed`; nothing was imported.
+   * Null once the import is applied.
+   */
+  confirm: string | null;
 };
 
 /**
@@ -450,12 +456,31 @@ export type MidiImportResult = {
  * The file's tempo and meter are adopted: the meter goes through the shared
  * `setTimeSignature` so existing drum clips are regridded and sections are
  * converted by beat, and the song only ever grows (through `setLengthBars`) to
- * hold the imported notes. All of it is one undo step.
+ * hold the imported notes. All of it is one undo step. Like the transport's
+ * meter change, it asks first (`confirm`) when drum hits would be merged.
  */
-export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
+export function importMidiTracks(parsed: ParsedMidi, confirmed = false): MidiImportResult {
   const sourceTracks = parsed.tracks.filter((track) => track.notes.length > 0);
   if (sourceTracks.length === 0) {
     throw new Error('MIDIの中に読み込めるノートが見つかりませんでした。');
+  }
+  const sameMeter = (current: Project): boolean =>
+    current.timeSignature[0] === parsed.timeSignature[0] &&
+    current.timeSignature[1] === parsed.timeSignature[1];
+  if (!confirmed) {
+    const current = useStore.getState().project;
+    const droppedHits = sameMeter(current)
+      ? 0
+      : setProjectTimeSignature(current, parsed.timeSignature).droppedHits;
+    if (droppedHits > 0) {
+      const [num, den] = parsed.timeSignature;
+      return {
+        importedTrackCount: 0,
+        importedNoteCount: 0,
+        warnings: [],
+        confirm: `このMIDIは ${num}/${den} 拍子です。曲の拍子を ${num}/${den} にすると、ドラムの ${droppedHits} 個の音が新しいグリッドで別の音と重なるか曲の終わりにかかるため削除されます。読み込んでもよいですか？(「元に戻す」で戻せます)`,
+      };
+    }
   }
 
   let firstTrackId: string | null = null;
@@ -464,10 +489,7 @@ export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
   const importedNoteCount = sourceTracks.reduce((sum, track) => sum + track.notes.length, 0);
 
   useStore.getState().applyProjectChange((current) => {
-    const sameMeter =
-      current.timeSignature[0] === parsed.timeSignature[0] &&
-      current.timeSignature[1] === parsed.timeSignature[1];
-    const meterChange = sameMeter
+    const meterChange = sameMeter(current)
       ? { project: current, warnings: [] }
       : setProjectTimeSignature(current, parsed.timeSignature);
     warnings = meterChange.warnings;
@@ -560,6 +582,7 @@ export function importMidiTracks(parsed: ParsedMidi): MidiImportResult {
     importedTrackCount: sourceTracks.length,
     importedNoteCount,
     warnings,
+    confirm: null,
   };
 }
 
@@ -629,12 +652,21 @@ export type DrumPattern = {
   id: DrumPatternId;
   name: string;
   /**
-   * lane -> beat offsets within one bar that are ON (0 = 1st beat, 0.5 = its
-   * off-beat). Written for a 4-beat bar; in a shorter bar (3/4) the hits past
-   * the bar end are dropped.
+   * lane -> beat offsets within one bar of `bpb` beats that are ON (0 = 1st
+   * beat, 0.5 = its off-beat). Hits at or past the bar end are dropped.
    */
-  beats: Partial<Record<DrumLane, number[]>>;
+  beats: (bpb: number) => Partial<Record<DrumLane, number[]>>;
 };
+
+/** Whole beats of a bar (0, 1, ...), as many as fit before `bpb`. */
+function barBeats(bpb: number): number[] {
+  return Array.from({ length: Math.ceil(bpb) }, (_, i) => i).filter((beat) => beat < bpb);
+}
+
+/** Every 8th note of a bar (0, 0.5, 1, ...). */
+function barEighths(bpb: number): number[] {
+  return Array.from({ length: Math.ceil(bpb * 2) }, (_, i) => i / 2).filter((beat) => beat < bpb);
+}
 
 /**
  * One-bar drum pattern presets. Original beginner-friendly patterns;
@@ -644,50 +676,52 @@ export const DRUM_PATTERNS: DrumPattern[] = [
   {
     id: 'fourOnFloor',
     name: 'Four on the floor',
-    beats: {
-      kick: [0, 1, 2, 3],
-      closedHat: [0.5, 1.5, 2.5, 3.5],
-      clap: [1, 3],
-    },
+    // Kick on every beat of the bar, hi-hat on each off-beat, clap on beats 2, 4, ...
+    beats: (bpb) => ({
+      kick: barBeats(bpb),
+      closedHat: barBeats(bpb).map((beat) => beat + 0.5),
+      clap: barBeats(bpb).filter((beat) => beat % 2 === 1),
+    }),
   },
   {
     id: 'eightBeat',
     name: '8ビート',
-    beats: {
-      kick: [0, 2],
-      snare: [1, 3],
-      closedHat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
-    },
+    // Hi-hat on every 8th, kick on beats 1, 3, ..., snare on beats 2, 4, ...
+    beats: (bpb) => ({
+      kick: barBeats(bpb).filter((beat) => beat % 2 === 0),
+      snare: barBeats(bpb).filter((beat) => beat % 2 === 1),
+      closedHat: barEighths(bpb),
+    }),
   },
   {
     id: 'hiphop',
     name: 'ヒップホップ',
-    beats: {
+    beats: () => ({
       kick: [0, 1.5, 2.5],
       snare: [1, 3],
       closedHat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
       openHat: [3.5],
-    },
+    }),
   },
   {
     id: 'gameLoop',
     name: 'ゲームループ',
-    beats: {
+    beats: () => ({
       kick: [0, 2],
       snare: [1, 3],
       closedHat: [0, 0.75, 1.5, 2.25, 3, 3.75],
       perc: [0.5, 2.5],
-    },
+    }),
   },
   {
     id: 'lofi',
     name: 'ローファイ',
-    beats: {
+    beats: () => ({
       kick: [0, 2.5],
       snare: [1, 3],
       closedHat: [0, 1, 2, 3],
       perc: [1.75],
-    },
+    }),
   },
 ];
 
@@ -710,7 +744,7 @@ export function applyDrumPattern(clipId: string, patternId: DrumPatternId): void
       const events: DrumEvent[] = [];
       for (let bar = 0; bar < bars; bar += 1) {
         const barOffset = bar * stepsPerBar;
-        for (const [lane, beats] of Object.entries(pattern.beats)) {
+        for (const [lane, beats] of Object.entries(pattern.beats(bpb))) {
           for (const beat of beats ?? []) {
             if (beat >= bpb || bar * bpb + beat >= clip.lengthBeats) continue;
             events.push({

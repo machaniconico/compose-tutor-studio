@@ -312,6 +312,41 @@ describe('time signature (setTimeSignature)', () => {
       ['kick-loud', 2, 127],
     ]);
   });
+
+  it('asks before removing a drum hit that the new grid rounds onto the song end', () => {
+    // 8 bars of 3/4 (24 beats) with a 32-step grid: step 255 (beat 23.9) rounds to beat 24 in 4/4.
+    const seeded = useStore.getState().project;
+    useStore.setState({
+      project: {
+        ...seeded,
+        timeSignature: [3, 4],
+        lengthBars: 8,
+        tracks: seeded.tracks.map((t) => ({
+          ...t,
+          clips: t.clips.map((c) => ({
+            ...c,
+            startBeat: 0,
+            lengthBeats: 24,
+            ...(t.type === 'drum'
+              ? {
+                  stepsPerBar: 32,
+                  drumEvents: [{ id: 'kick-last', lane: 'kick' as const, stepIndex: 255, velocity: 100 }],
+                }
+              : {}),
+          })),
+        })),
+      },
+    });
+
+    const first = useStore.getState().setTimeSignature([4, 4]);
+    expect(first.confirm).toMatch(/ドラムの 1 個/);
+    expect(useStore.getState().project.timeSignature).toEqual([3, 4]);
+
+    const second = useStore.getState().setTimeSignature([4, 4], true);
+    expect(second.confirm).toBeNull();
+    expect(second.warnings.some((w) => w.includes('曲の終わり'))).toBe(true);
+    expect(useStore.getState().project.tracks.find((t) => t.type === 'drum')?.clips[0]?.drumEvents).toEqual([]);
+  });
 });
 
 describe('chord actions', () => {

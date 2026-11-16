@@ -317,6 +317,43 @@ describe('importMidiTracks: 拍子の取り込み', () => {
     expect(drumClip()?.lengthBeats).toBe(42);
   });
 
+  it('ドラムの音が重なって消えるときは、確認するまで何も読み込まない', () => {
+    // A 32-step (8 per beat) clip: kicks on steps 1 and 2 (beats 1/8 and 1/4) both round to 3/4 step 1.
+    const clipId = drumClip()?.id ?? '';
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) =>
+          clip.id === clipId
+            ? {
+                ...clip,
+                stepsPerBar: 32,
+                drumEvents: [
+                  { id: 'k1', lane: 'kick' as const, stepIndex: 1, velocity: 100 },
+                  { id: 'k2', lane: 'kick' as const, stepIndex: 2, velocity: 100 },
+                ],
+              }
+            : clip,
+        ),
+      })),
+    }));
+    const before = useStore.getState().project;
+
+    const asked = actions.importMidiTracks(parsedWaltz());
+    expect(asked.confirm).toContain('1 個');
+    expect(asked.importedTrackCount).toBe(0);
+    expect(useStore.getState().project).toBe(before);
+
+    const applied = actions.importMidiTracks(parsedWaltz(), true);
+    expect(applied.confirm).toBeNull();
+    expect(applied.importedTrackCount).toBe(1);
+    expect(useStore.getState().project.timeSignature).toEqual([3, 4]);
+    expect(drumClip()?.drumEvents).toHaveLength(1);
+    useStore.getState().undo();
+    expect(useStore.getState().project).toEqual(before);
+  });
+
   it('読み込み全体が Undo 1 段で戻る', () => {
     const before = useStore.getState().project;
     actions.importMidiTracks(parsedWaltz());
@@ -467,6 +504,40 @@ describe('applyDrumPattern', () => {
     project = useStore.getState().project;
     expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'eightBeat' }, project)).toBe(true);
     expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'backbeat' }, project)).toBe(true);
+  });
+
+  describe.each([
+    { sig: [2, 4] as [number, number], beats: 2, steps: 8 },
+    { sig: [3, 4] as [number, number], beats: 3, steps: 12 },
+    { sig: [5, 4] as [number, number], beats: 5, steps: 20 },
+    { sig: [6, 8] as [number, number], beats: 3, steps: 12 },
+  ])('in $sig.0/$sig.1', ({ sig, beats, steps }) => {
+    const firstBar = (lane: string) =>
+      (useStore.getState().project.tracks.find((t) => t.type === 'drum')?.clips[0]?.drumEvents ?? [])
+        .filter((e) => e.lane === lane && e.stepIndex < steps)
+        .map((e) => e.stepIndex)
+        .sort((a, b) => a - b);
+    const prepare = (): string => {
+      useStore.getState().setTimeSignature(sig, true);
+      const clip = useStore.getState().project.tracks.find((t) => t.type === 'drum')?.clips[0];
+      expect(clip?.stepsPerBar).toBe(steps);
+      return clip?.id ?? '';
+    };
+
+    it('fourOnFloor puts a kick on every beat of the bar and passes its lesson check', () => {
+      actions.applyDrumPattern(prepare(), 'fourOnFloor');
+      expect(firstBar('kick')).toEqual(Array.from({ length: beats }, (_, i) => i * 4));
+      const project = useStore.getState().project;
+      expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project)).toBe(true);
+    });
+
+    it('eightBeat puts a hi-hat on every 8th of the bar and passes its lesson check', () => {
+      actions.applyDrumPattern(prepare(), 'eightBeat');
+      expect(firstBar('closedHat')).toEqual(Array.from({ length: beats * 2 }, (_, i) => i * 2));
+      const project = useStore.getState().project;
+      expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'eightBeat' }, project)).toBe(true);
+      expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'backbeat' }, project)).toBe(true);
+    });
   });
 });
 

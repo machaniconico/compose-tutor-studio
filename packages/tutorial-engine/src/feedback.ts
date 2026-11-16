@@ -2,6 +2,7 @@
 // Pure functions only; no side effects.
 
 import type { Project, ScaleName } from '@cts/project-model';
+import { drumBeatToStep } from '@cts/project-model';
 import {
   analyzeBassRootOnDownbeat,
   analyzeDrumPattern,
@@ -629,16 +630,21 @@ function explainDrumPattern(
   };
 }
 
-/** ステップ位置を拍数表現にする（4分音符グリッドに乗らない位置はステップ番号で示す） */
+/**
+ * ステップ位置を拍数表現にする（4分音符グリッドに乗らない位置はステップ番号で示す）。
+ * 拍の位置は判定と同じ `drumBeatToStep` の丸めで求める。
+ */
 function describeStepPositions(
   stepIndices: number[],
   stepsPerBar: number,
   beatsPerBar: number,
 ): string {
-  const quarter = stepsPerBar / Math.max(1, Math.round(beatsPerBar));
+  const beats = Math.max(1, Math.round(beatsPerBar));
   const parts = stepIndices.map((step) => {
-    const beat = step / quarter + 1;
-    return Number.isInteger(beat) ? `${beat}拍目` : `ステップ${step + 1}`;
+    for (let beat = 0; beat < beats; beat += 1) {
+      if (drumBeatToStep(beat, stepsPerBar, beatsPerBar) === step) return `${beat + 1}拍目`;
+    }
+    return `ステップ${step + 1}`;
   });
   return parts.join('・');
 }

@@ -226,6 +226,61 @@ describe('setTimeSignature', () => {
     expect(project.lengthBars).toBe(8);
     expect(drumClip(project).stepsPerBar).toBe(16);
   });
+
+  it('counts a drum hit that rounds onto the new song end as dropped and removes it', () => {
+    // 8 bars of 3/4 (24 beats), 32 steps per bar: step 255 sits at beat 23.906.
+    let before = createDefaultProject({ lengthBars: 8, timeSignature: [3, 4] });
+    const drums = drumClip(before).id;
+    before = {
+      ...before,
+      tracks: before.tracks.map((t) =>
+        t.type === 'drum'
+          ? { ...t, clips: t.clips.map((c) => ({ ...c, stepsPerBar: 32, drumEvents: [] })) }
+          : t,
+      ),
+    };
+    before = toggleDrumStep(before, drums, 'kick', 255, 100, t0);
+    before = toggleDrumStep(before, drums, 'kick', 0, 100, t0);
+
+    const { project, warnings, droppedHits } = setTimeSignature(before, [4, 4], t1);
+
+    // 24 beats in 4/4 = 6 bars; the 16-step grid rounds beat 23.906 to step 96 = beat 24 = the end.
+    expect(project.lengthBars).toBe(6);
+    expect(droppedHits).toBe(1);
+    const clip = drumClip(project);
+    expect(clip.drumEvents?.map((e) => e.stepIndex)).toEqual([0]);
+    const endStep = (project.lengthBars * 4 * (clip.stepsPerBar ?? 16)) / 4;
+    expect(clip.drumEvents?.every((e) => e.stepIndex < endStep)).toBe(true);
+    expect(warnings.some((w) => /ドラム/.test(w) && /曲の終わり/.test(w))).toBe(true);
+  });
+
+  it('keeps every section inside the song when a section would start at or after the new end', () => {
+    // 8 bars of 2/4 = 16 beats -> 4 bars of 4/4. The last section (bar 7, beats 14-16)
+    // snaps to bar 4 (= the new end) without a clamp.
+    let before = createDefaultProject({ lengthBars: 8, timeSignature: [2, 4] });
+    before = addSection(before, { name: 'Aメロ', type: 'verse', startBar: 0, lengthBars: 7 }, t0);
+    before = addSection(before, { name: 'おわり', type: 'outro', startBar: 7, lengthBars: 1 }, t0);
+    const { project, warnings } = setTimeSignature(before, [4, 4], t1);
+
+    expect(project.lengthBars).toBe(4);
+    for (const s of project.sections) {
+      expect(s.startBar).toBeGreaterThanOrEqual(0);
+      expect(s.lengthBars).toBeGreaterThanOrEqual(1);
+      expect(s.startBar + s.lengthBars).toBeLessThanOrEqual(project.lengthBars);
+    }
+    // The section that no longer fits is merged into the one before it, which runs to the end.
+    expect(project.sections.map((s) => [s.name, s.startBar, s.lengthBars])).toEqual([['Aメロ', 0, 4]]);
+    expect(warnings.some((w) => /セクション「おわり」/.test(w) && /曲の終わり/.test(w) && /「Aメロ」/.test(w))).toBe(true);
+  });
+
+  it('keeps a lone section that would start past the new end on the last bar', () => {
+    let before = createDefaultProject({ lengthBars: 8, timeSignature: [2, 4] });
+    before = addSection(before, { name: 'おわり', type: 'outro', startBar: 7, lengthBars: 1 }, t0);
+    const { project, warnings } = setTimeSignature(before, [4, 4], t1);
+
+    expect(project.sections.map((s) => [s.name, s.startBar, s.lengthBars])).toEqual([['おわり', 3, 1]]);
+    expect(warnings.some((w) => /セクション「おわり」/.test(w) && /曲の終わり/.test(w))).toBe(true);
+  });
 });
 
 describe('contentBeyondBars / setLengthBars', () => {

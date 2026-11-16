@@ -11,7 +11,7 @@ import { delaySettings, enabledSupportedEffects } from './effects';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import { buildTrackGraphs } from './graph';
 import { createMasterChain } from './masterChain';
-import { beatToTime, projectLengthBeats, secondsPerBeat } from './scheduler';
+import { nextEventsInWindow, projectLengthBeats, secondsPerBeat, type DueEvent } from './scheduler';
 import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
 
@@ -40,6 +40,17 @@ export function renderLengthSeconds(project: Project): number {
     }
   }
   return songSeconds + longestDelay + RENDER_TAIL_SECONDS;
+}
+
+/**
+ * The events the offline render plays: the song window `[0, end)` resolved to
+ * seconds with the same rule live playback (loop off) uses, so an event at or
+ * after the last bar sounds in neither.
+ */
+export function renderScheduleEvents(project: Project): DueEvent[] {
+  const bpb = beatsPerBarOf(project.timeSignature);
+  const lengthBeats = projectLengthBeats(project.lengthBars, bpb > 0 ? bpb : 4);
+  return nextEventsInWindow(buildScheduleEvents(project), 0, lengthBeats, project.bpm, 0, 0, null);
 }
 
 /** Clamp a float sample to [-1, 1] and convert to a signed 16-bit int. */
@@ -152,11 +163,10 @@ export async function renderProjectToWav(project: Project): Promise<Blob> {
     }
   }
 
-  // Schedule everything. anchorBeat=0, anchorTime=0 => beat n maps to n*spb.
-  const events = buildScheduleEvents(project);
+  // Schedule the song window. anchorBeat=0, anchorTime=0 => beat n maps to n*spb.
   const spb = secondsPerBeat(project.bpm);
-  for (const ev of events) {
-    const time = beatToTime(ev.beat, project.bpm, 0, 0);
+  for (const ev of renderScheduleEvents(project)) {
+    const time = ev.time;
     const payload = ev.payload as SchedulePayload;
     if (payload.kind === 'note') {
       const synth = synths.get(payload.trackId);

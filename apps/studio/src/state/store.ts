@@ -435,7 +435,7 @@ export const useStore = create<StoreState>((set, get) => {
       const { project, warnings, droppedHits } = setProjectTimeSignature(get().project, timeSignature);
       if (droppedHits > 0 && !confirmed) {
         return {
-          confirm: `拍子を ${timeSignature[0]}/${timeSignature[1]} にすると、ドラムの ${droppedHits} 個の音が別の音と同じステップに重なるため削除されます。変更してもよいですか？(「元に戻す」で戻せます)`,
+          confirm: `拍子を ${timeSignature[0]}/${timeSignature[1]} にすると、ドラムの ${droppedHits} 個の音が新しいグリッドで別の音と重なるか曲の終わりにかかるため削除されます。変更してもよいですか？(「元に戻す」で戻せます)`,
           warnings: [],
         };
       }

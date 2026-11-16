@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { createEmptyProject, type Track } from '@cts/project-model';
+import {
+  beatsPerBar,
+  createDefaultProject,
+  createEmptyProject,
+  setTimeSignature,
+  type Project,
+  type Track,
+} from '@cts/project-model';
+import { buildScheduleEvents, type SchedulePayload } from '../src/audio/events';
+import { nextEventsInWindow, projectLengthBeats } from '../src/audio/scheduler';
 import {
   encodeWav,
   floatToInt16,
   RENDER_TAIL_SECONDS,
   renderLengthSeconds,
+  renderScheduleEvents,
 } from '../src/audio/wav';
 
 /** Read a 4-char ASCII tag from an ArrayBuffer at an offset. */
@@ -132,5 +142,57 @@ describe('renderLengthSeconds', () => {
   it('uses the clamped legacy delay time, not the raw saved value', () => {
     const project = { ...base, tracks: [delayTrack(true, { delayTime: 4 })] };
     expect(renderLengthSeconds(project)).toBe(12 + 1.5 + RENDER_TAIL_SECONDS);
+  });
+});
+
+describe('renderScheduleEvents (WAV) matches live playback', () => {
+  const drumHits = (events: readonly { payload: unknown }[]) =>
+    events.filter((e) => (e.payload as SchedulePayload).kind === 'drum').length;
+  /** What live playback (loop off, from the start) sounds: the scheduler's song window. */
+  const liveDrumHits = (project: Project) =>
+    drumHits(
+      nextEventsInWindow(
+        buildScheduleEvents(project),
+        0,
+        projectLengthBeats(project.lengthBars, beatsPerBar(project.timeSignature)),
+        project.bpm,
+        0,
+        0,
+        null,
+      ),
+    );
+
+  /** 8 bars of 3/4 with a 32-step drum grid and kicks on the given steps. */
+  const threeFour = (steps: number[]): Project => {
+    const project = createDefaultProject({ lengthBars: 8, timeSignature: [3, 4] });
+    return {
+      ...project,
+      tracks: project.tracks.map((t) =>
+        t.type === 'drum'
+          ? {
+              ...t,
+              clips: t.clips.map((c) => ({
+                ...c,
+                stepsPerBar: 32,
+                drumEvents: steps.map((stepIndex) => ({ id: `k${stepIndex}`, lane: 'kick' as const, stepIndex, velocity: 100 })),
+              })),
+            }
+          : t,
+      ),
+    };
+  };
+
+  it('leaves out a drum hit placed exactly on the song end, as live playback does', () => {
+    // Step 256 of a 32-step 3/4 grid is beat 24 = the end of 8 bars.
+    const project = threeFour([0, 256]);
+    expect(liveDrumHits(project)).toBe(1);
+    expect(drumHits(renderScheduleEvents(project))).toBe(1);
+  });
+
+  it('agrees with live playback after 3/4 -> 4/4 moves the last hit onto the end', () => {
+    const { project, droppedHits } = setTimeSignature(threeFour([0, 255]), [4, 4]);
+    expect(droppedHits).toBe(1);
+    expect(liveDrumHits(project)).toBe(1);
+    expect(drumHits(renderScheduleEvents(project))).toBe(liveDrumHits(project));
   });
 });

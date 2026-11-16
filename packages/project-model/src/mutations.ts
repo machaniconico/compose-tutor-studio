@@ -205,8 +205,10 @@ export type TimeSignatureChange = {
   warnings: string[];
   /**
    * Drum hits removed because two hits of the same lane landed on one step of the
-   * new grid. This is the only lossy part of the change, so callers should ask
-   * before applying when it is above zero.
+   * new grid, or because rounding moved a hit onto (or past) the end of its clip
+   * or the song, where playback and export never sound it. This is the only
+   * lossy part of the change, so callers should ask before applying when it is
+   * above zero.
    */
   droppedHits: number;
 };
@@ -262,21 +264,54 @@ export function setTimeSignature(
   const totalBeats = project.lengthBars * oldBpb;
   const lengthBars = Math.max(1, Math.ceil(totalBeats / newBpb - BEAT_EPSILON));
 
-  const sections: Section[] = project.sections.map((section) => {
+  const snapped = project.sections.map((section) => {
     const startBar = (section.startBar * oldBpb) / newBpb;
     const endBar = ((section.startBar + section.lengthBars) * oldBpb) / newBpb;
-    if (!isWholeNumber(startBar) || !isWholeNumber(endBar)) {
-      warnings.push(
-        `セクション「${section.name}」の区切りが新しい拍子の小節に合わないため、いちばん近い小節に合わせました。`,
-      );
-    }
     const snappedStart = Math.round(startBar);
-    return {
+    const snappedSection: Section = {
       ...section,
       startBar: snappedStart,
       lengthBars: Math.max(1, Math.round(endBar) - snappedStart),
     };
+    return { section: snappedSection, offGrid: !isWholeNumber(startBar) || !isWholeNumber(endBar) };
   });
+  // Snapping can push a section that started in the last partial bar onto the
+  // new end. Such a section is merged into the latest section that still fits
+  // (which then runs to the end); with none, the first one is kept on the last
+  // bar and any further ones merge into it.
+  const fitting = snapped.filter(({ section }) => section.startBar < lengthBars);
+  let mergeTarget = fitting.reduce<Section | undefined>(
+    (latest, { section }) => (latest === undefined || section.startBar >= latest.startBar ? section : latest),
+    undefined,
+  );
+  let extendMergeTarget = false;
+  const sections: Section[] = [];
+  for (const { section, offGrid } of snapped) {
+    if (section.startBar < lengthBars) {
+      if (offGrid) {
+        warnings.push(
+          `セクション「${section.name}」の区切りが新しい拍子の小節に合わないため、いちばん近い小節に合わせました。`,
+        );
+      }
+      sections.push({ ...section, lengthBars: Math.min(section.lengthBars, lengthBars - section.startBar) });
+    } else if (mergeTarget !== undefined) {
+      warnings.push(
+        `セクション「${section.name}」は新しい拍子では曲の終わりより後ろになるため、前のセクション「${mergeTarget.name}」にまとめました。`,
+      );
+      extendMergeTarget = true;
+    } else {
+      warnings.push(
+        `セクション「${section.name}」は新しい拍子では曲の終わりより後ろになるため、最後の小節に収めました。`,
+      );
+      mergeTarget = { ...section, startBar: lengthBars - 1, lengthBars: 1 };
+      sections.push(mergeTarget);
+    }
+  }
+  if (extendMergeTarget && mergeTarget !== undefined) {
+    const index = sections.findIndex((s) => s.id === mergeTarget.id);
+    const target = sections[index];
+    if (target !== undefined) sections[index] = { ...target, lengthBars: lengthBars - target.startBar };
+  }
 
   // Clips that ended with the song keep ending with it (as in `setLengthBars`),
   // so the rounded-up bars stay editable and a later lengthening still grows them.
@@ -289,10 +324,14 @@ export function setTimeSignature(
   const newStepsPerBar = drumStepsPerBar(timeSignature);
   let shiftedHits = 0;
   let droppedHits = 0;
+  let pastEndHits = 0;
   const tracks = project.tracks.map((track) => {
     if (track.type !== 'drum') return { ...track, clips: track.clips.map(followSongEnd) };
-    const clips = track.clips.map(followSongEnd).map((clip) => {
+    const clips = track.clips.map((oldClip) => {
+      const clip = followSongEnd(oldClip);
       const oldStepsPerBar = clip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR;
+      const oldEnd = Math.min(oldClip.lengthBeats, totalBeats - oldClip.startBeat);
+      const newEnd = Math.min(clip.lengthBeats, newEndBeat - clip.startBeat);
       // One hit per lane and step: when the new grid is coarser, hits can collide
       // and only one can be kept (see `outranks`). Nothing is dropped silently.
       const survivors = new Map<string, RegriddedHit>();
@@ -305,6 +344,14 @@ export function setTimeSignature(
           exact: isWholeNumber(exactStep),
           beat,
         };
+        // Rounding up can put a hit that sounded before the end exactly on (or
+        // past) the end of its clip or song, where playback never reaches it.
+        const newBeat = drumStepBeat(candidate.stepIndex, newStepsPerBar, newBpb);
+        if (beat < oldEnd - BEAT_EPSILON && newBeat >= newEnd - BEAT_EPSILON) {
+          droppedHits += 1;
+          pastEndHits += 1;
+          continue;
+        }
         const key = `${event.lane}:${candidate.stepIndex}`;
         const current = survivors.get(key);
         if (current === undefined) {
@@ -328,9 +375,15 @@ export function setTimeSignature(
       `ドラムの ${shiftedHits} 個の音が新しいグリッドに乗らないため、いちばん近いステップに動かしました。`,
     );
   }
-  if (droppedHits > 0) {
+  const collidedHits = droppedHits - pastEndHits;
+  if (collidedHits > 0) {
     warnings.push(
-      `ドラムの ${droppedHits} 個の音が新しいグリッドで別の音と同じステップに重なるため、拍に合っていた音(同じなら強い音)を残して削除しました。`,
+      `ドラムの ${collidedHits} 個の音が新しいグリッドで別の音と同じステップに重なるため、拍に合っていた音(同じなら強い音)を残して削除しました。`,
+    );
+  }
+  if (pastEndHits > 0) {
+    warnings.push(
+      `ドラムの ${pastEndHits} 個の音が新しいグリッドでは曲の終わり(またはクリップの終わり)に重なって鳴らなくなるため、削除しました。`,
     );
   }
 
