@@ -273,6 +273,44 @@ describe('generation into a clip that starts at beat 16', () => {
   });
 });
 
+describe('boundary clips never crash the clip-relative paths', () => {
+  const cases: Array<[string, Partial<Clip>]> = [
+    ['fractional start', { startBeat: 16.37, lengthBeats: 7.25 }],
+    ['crossing the song end', { startBeat: 30, lengthBeats: 20 }],
+    ['loop period that does not divide the length', { loop: true, contentLengthBeats: 3, lengthBeats: 8 }],
+    ['circular link', { aliasOf: 'self-loop' }],
+    ['dangling link', { aliasOf: 'missing' }],
+  ];
+  for (const [name, patch] of cases) {
+    it(`${name}: generation and the piano roll do not throw`, () => {
+      const clip = withClipAt16('Melody', { ...patch, ...(patch.aliasOf === 'self-loop' ? { aliasOf: undefined } : {}) });
+      if (patch.aliasOf === 'self-loop') {
+        act(() => useStore.getState().applyProjectChange((p) => ({
+          ...p,
+          tracks: p.tracks.map((t) => ({ ...t, clips: t.clips.map((c) => (c.id === clip.id ? { ...c, aliasOf: c.id } : c)) })),
+        })));
+      }
+      expect(() => actions.generateMelodyIntoClip(clip.id, 1)).not.toThrow();
+      expect(() => actions.generateBassIntoClip(clip.id, 'rootOnly')).not.toThrow();
+      act(() => {
+        useStore.getState().selectTrack(clip.trackId);
+        useStore.getState().selectClip(clip.id);
+      });
+      expect(() => render(createElement(PianoRoll))).not.toThrow();
+    });
+  }
+
+  it('a muted track still generates and renders', () => {
+    const clip = withClipAt16('Bass');
+    act(() => useStore.getState().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => (t.id === clip.trackId ? { ...t, mute: true } : t)),
+    })));
+    expect(() => actions.generateBassIntoClip(clip.id, 'rootOnly')).not.toThrow();
+    expect((liveClip(clip.id).notes ?? []).length).toBeGreaterThan(0);
+  });
+});
+
 describe('MockCoach melody input', () => {
   it('uses the same absolute beats as the chord track', () => {
     withClipAt16('Melody', {
@@ -323,6 +361,17 @@ describe('PianoRoll edit range', () => {
     const left = `${(20 - startBeat) * ppb}px`;
     expect(document.querySelector<HTMLElement>('.timeline-ruler__bar')?.style.left).toBe(left);
     expect(document.querySelector<HTMLElement>('.pr__gridline.is-bar')?.style.left).toBe(left);
+  });
+
+  it('opens a clip in a huge-time-signature song without building a grid of every beat', () => {
+    const clip = withClipAt16('Melody', { startBeat: 0, lengthBeats: 4 });
+    act(() => {
+      useStore.getState().replaceProject({ ...useStore.getState().project, timeSignature: [4294967296, 4], lengthBars: 1 });
+      useStore.getState().selectClip(clip.id);
+    });
+    expect(() => render(createElement(PianoRoll))).not.toThrow();
+    expect(document.querySelectorAll('[aria-disabled="true"]').length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('.pr__gridline').length).toBeLessThan(5000);
   });
 
   it('hides a note past a shortened clip end and leaves it alone when adding in range', () => {

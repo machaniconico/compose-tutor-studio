@@ -118,7 +118,7 @@ function mapClip(project: Project, clipId: string, fn: (c: Clip) => Clip): Proje
 
 /** Find a clip across all tracks (read-only). */
 export function findClip(project: Project, clipId: string | null): Clip | null {
-  if (!clipId) return null;
+  if (clipId === null) return null;
   for (const track of project.tracks) {
     const clip = track.clips.find((c) => c.id === clipId);
     if (clip) return clip;

@@ -17,6 +17,7 @@ import { MAX_LENGTH_BARS } from '../transport/TransportBar';
 import {
   barStartAtX,
   canSplitAt,
+  splitBlockedReason,
   dropStartBeat,
   nextClipStart,
   resizedLengthBeats,
@@ -73,6 +74,7 @@ export function ArrangeView() {
   const laneWidth = Math.max(project.lengthBars * bpb, clipEnd) * ppb;
   const selected = project.tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId) ?? null;
   const splitEnabled = canSplitAt(project, selected?.id ?? null, positionBeat);
+  const splitReason = splitBlockedReason(project, selected?.id ?? null);
 
   const select = (clip: Clip) => {
     const store = useStore.getState();
@@ -202,6 +204,7 @@ export function ArrangeView() {
         >
           分割
         </button>
+        {splitReason && <span className="arrange__split-reason" role="status">{splitReason}</span>}
         <button
           type="button"
           disabled={!selected}

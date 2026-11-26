@@ -62,9 +62,19 @@ export function nextClipStart(clips: readonly Clip[], clip: Clip): number | unde
  * available so the split can explain them.
  */
 export function canSplitAt(project: Project, clipId: string | null, beat: number): boolean {
-  if (!clipId) return false;
+  if (clipId === null) return false;
   const result = splitClip(project, clipId, beat);
   return result.ok;
+}
+
+/**
+ * Why a loop or linked clip cannot be split (D4), as the beginner-friendly
+ * sentence splitClip returns. Null for any other clip or failure.
+ */
+export function splitBlockedReason(project: Project, clipId: string | null): string | null {
+  if (clipId === null) return null;
+  const result = splitClip(project, clipId, 0);
+  return !result.ok && (result.code === 'loopingClip' || result.code === 'linkedClip') ? result.reason : null;
 }
 
 /**

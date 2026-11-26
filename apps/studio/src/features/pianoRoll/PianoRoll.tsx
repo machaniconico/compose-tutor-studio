@@ -43,6 +43,10 @@ const MIN_VELOCITY = 1;
 const MAX_VELOCITY = 127;
 /** Extra rows rendered above/below the viewport (covers the sticky ruler too). */
 const ROW_OVERSCAN = 8;
+// Most DOM columns (beats / bars) drawn at once: the longest song, 64 bars, at 16 beats
+// per bar. validateProject accepts huge time signatures, whose full-song grid would
+// not fit in an array; cells past this are still not editable (clicks are clamped to the clip).
+const MAX_RENDERED_BEATS = 64 * 16;
 
 /** Find a clip across all tracks. */
 function findClip(tracks: readonly Track[], clipId: string | null): Clip | null {
@@ -732,7 +736,7 @@ export function PianoRoll() {
           })}
 
           {/* bar / beat gridlines */}
-          {Array.from({ length: Math.floor(gridLength) + 1 }, (_, beat) => (
+          {Array.from({ length: Math.min(Math.floor(gridLength), MAX_RENDERED_BEATS) + 1 }, (_, beat) => (
             (clip.startBeat + beat) % bpb === 0 ? null : (
               <div
                 key={`beat-${beat}`}
@@ -741,7 +745,7 @@ export function PianoRoll() {
               />
             )
           ))}
-          {Array.from({ length: project.lengthBars + 1 }, (_, bar) => {
+          {Array.from({ length: Math.min(project.lengthBars, MAX_RENDERED_BEATS) + 1 }, (_, bar) => {
             const beat = bar * bpb - clip.startBeat;
             return beat < 0 ? null : (
               <div key={`bar-${bar}`} className="pr__gridline is-bar" style={{ left: beat * ppb }} />
@@ -749,7 +753,7 @@ export function PianoRoll() {
           })}
 
           {/* The shaded range ends at the song boundary, even on a partial beat. */}
-          {Array.from({ length: Math.ceil(gridLength) - Math.floor(clipLength) }, (_, k) => {
+          {Array.from({ length: Math.min(Math.ceil(gridLength) - Math.floor(clipLength), MAX_RENDERED_BEATS) }, (_, k) => {
             const beat = Math.floor(clipLength) + k;
             const left = Math.max(beat, clipLength);
             const right = Math.min(beat + 1, gridLength);

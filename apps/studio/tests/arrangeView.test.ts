@@ -172,6 +172,61 @@ describe('ArrangeView: playhead and split', () => {
     expect(pastLength()).toBe(before + 1);
   });
 
+  it('disables split for a looping or linked clip and shows the reason (D4)', async () => {
+    const { SPLIT_FAILURE_MESSAGES } = await import('@cts/project-model');
+    const drum = firstClip('drum');
+    const midi = allClips().find((c) => c.type === 'midi')!;
+    const link = { ...midi, id: 'link-d4', startBeat: 16, lengthBeats: 8, aliasOf: midi.id, loop: false, notes: undefined };
+    act(() => {
+      useStore.getState().applyProjectChange((p) => ({
+        ...p,
+        tracks: p.tracks.map((t) => ({
+          ...t,
+          clips: t.id === drum.trackId
+            ? t.clips.map((c) => (c.id === drum.id ? { ...c, loop: true, contentLengthBeats: 4 } : c))
+            : t.id === midi.trackId ? [...t.clips, link] : t.clips,
+        })),
+      }));
+      useStore.getState().setPosition(2);
+    });
+
+    select(drum);
+    render(createElement(ArrangeView));
+    const split = screen.getByRole('button', { name: '分割' }) as HTMLButtonElement;
+    expect(split.disabled).toBe(true);
+    expect(screen.getByText(SPLIT_FAILURE_MESSAGES.loopingClip)).toBeTruthy();
+
+    act(() => {
+      useStore.getState().selectTrack(midi.trackId);
+      useStore.getState().selectClip('link-d4');
+      useStore.getState().setPosition(18);
+    });
+    expect(split.disabled).toBe(true);
+    expect(screen.getByText(SPLIT_FAILURE_MESSAGES.linkedClip)).toBeTruthy();
+  });
+
+  it('shows the reason for a looping clip whose id is the empty string', async () => {
+    const { SPLIT_FAILURE_MESSAGES } = await import('@cts/project-model');
+    const drum = firstClip('drum');
+    act(() => {
+      useStore.getState().applyProjectChange((p) => ({
+        ...p,
+        tracks: p.tracks.map((t) => ({
+          ...t,
+          clips: t.id === drum.trackId
+            ? [{ ...drum, id: '', startBeat: 0, lengthBeats: 4, loop: true, contentLengthBeats: 2 }]
+            : t.clips,
+        })),
+      }));
+      useStore.getState().selectTrack(drum.trackId);
+      useStore.getState().selectClip('');
+      useStore.getState().setPosition(2);
+    });
+    render(createElement(ArrangeView));
+    expect((screen.getByRole('button', { name: '分割' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(SPLIT_FAILURE_MESSAGES.loopingClip)).toBeTruthy();
+  });
+
   it('keeps split disabled while no clip is selected', () => {
     act(() => {
       useStore.getState().selectClip(null);
