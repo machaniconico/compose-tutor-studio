@@ -54,7 +54,8 @@ export function beatToSeconds(bpm: number): number {
   return 60 / bpm;
 }
 
-/** Total length of the project in quarter-note beats. */
-export function projectLengthBeats(project: Project): number {
-  return project.lengthBars * beatsPerBar(project.timeSignature);
+export const PPQ = 480;
+
+export function beatTick(beat: number): number {
+  return Math.round(beat * PPQ);
 }

@@ -2,8 +2,8 @@
 // Project データを静的に評価する純粋関数だけを置く。リアルタイム解析
 // (メーター連動のクリッピング検出など) は US-303 側の担当で、ここでは扱わない。
 
-import type { Clip, EffectConfig, Project, Track } from '@cts/project-model';
-import { beatsPerBar, expandClip } from '@cts/project-model';
+import type { EffectConfig, Project, Track } from '@cts/project-model';
+import { findProjectSoundingLimitProblem, soundingEvents } from '@cts/project-model';
 
 export type ExportChecklistLevel = 'ok' | 'warning';
 
@@ -233,23 +233,12 @@ function checkEmptyTracks(project: Project): ExportChecklistItem {
   };
 }
 
-/**
- * 再生や書き出しと同じ expandClip で各クリップを展開し、鳴らせない理由
- * (リンク切れ・リンクの循環など)をまとめて 1 件の warning にする。
- */
 function checkClipLinks(project: Project): ExportChecklistItem {
   const title = 'クリップのリンクとループ';
-  const allClips = project.tracks.flatMap((track) => track.clips);
-  // Every track, buses and master too: a clip there that cannot sound is
-  // reported, not hidden behind "all clips OK".
-  const problems = project.tracks.flatMap((track) =>
-    track.clips.flatMap((clip) =>
-      expandClip(clip, allClips, beatsPerBar(project.timeSignature), track.type).problems.map(
-        (problem) => `${joinTrackNames([track])}: ${problem}`,
-      ),
-    ),
-  );
+  const limit = findProjectSoundingLimitProblem(project);
+  if (limit) return { id: 'clipLinks', level: 'warning', title, advice: limit };
 
+  const { problems } = soundingEvents(project, { includeMuted: true });
   if (problems.length === 0) {
     return {
       id: 'clipLinks',
@@ -286,25 +275,11 @@ function soundTracks(project: Project): Track[] {
 }
 
 function trackHasContent(track: Track, project: Project): boolean {
-  const allClips = project.tracks.flatMap((candidate) => candidate.clips);
-  const bpb = beatsPerBar(project.timeSignature);
-  return track.clips.some((clip) => clipHasContent(clip, track.type, allClips, bpb));
-}
-
-/**
- * 再生と同じ expandClip で、実際に鳴る音があるかを見る。クリップの長さより
- * 後ろにしかノートが無いクリップは鳴らないので「空」と数える。リンク切れ・
- * 循環は「クリップのリンクとループ」で警告するので、ここでは二重に数えない。
- */
-function clipHasContent(
-  clip: Clip,
-  trackType: Track['type'],
-  allClips: readonly Clip[],
-  bpb: number,
-): boolean {
-  if (clip.type === 'audio' && typeof clip.audioAssetId === 'string') return true;
-  const { notes, drumHits, problems } = expandClip(clip, allClips, bpb, trackType);
-  return notes.length > 0 || drumHits.length > 0 || problems.length > 0;
+  return track.clips.some((clip) => {
+    if (clip.type === 'audio' && typeof clip.audioAssetId === 'string') return true;
+    const { events, problems } = soundingEvents(project, { clipId: clip.id, includeMuted: true });
+    return events.length > 0 || problems.length > 0;
+  });
 }
 
 function joinTrackNames(tracks: readonly Track[]): string {

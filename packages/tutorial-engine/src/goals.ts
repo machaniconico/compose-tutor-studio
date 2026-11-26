@@ -1,10 +1,10 @@
 // Goal evaluation — project predicates and event matching
 
-import type { Project } from '@cts/project-model';
+import { beatTick, soundingEvents, type Project } from '@cts/project-model';
 // NOTE: checker.ts とは相互import（goals → checker: 音楽的判定の委譲 /
 // checker → goals: 従来predicateの委譲）。両モジュールとも関数宣言のみで
 // トップレベル実行が無いため、ESM の循環importとして安全。
-import { checkProjectPredicate, clipContentSource } from './checker.js';
+import { checkProjectPredicate } from './checker.js';
 import { resolveTrackByPredicateName } from './trackResolve.js';
 import type {
   AppEvent,
@@ -34,58 +34,27 @@ export function evaluateProjectPredicate(
       return predicate.symbols.every((s, i) => symbols[i] === s);
     }
 
-    case 'drumLaneActive': {
-      for (const track of project.tracks) {
-        if (track.type !== 'drum') continue;
-        for (const linkOrClip of track.clips) {
-          // A linked (aliasOf) clip counts its source's content.
-          const clip = clipContentSource(project, linkOrClip);
-          if (!clip?.drumEvents) continue;
-          // Count unique step indices for the requested lane (dedup in case of duplicates)
-          const stepIndices = new Set(
-            clip.drumEvents
-              .filter((e) => e.lane === predicate.lane)
-              .map((e) => e.stepIndex),
-          );
-          if (stepIndices.size >= predicate.minSteps) return true;
-        }
-      }
-      return false;
-    }
-
+    case 'drumLaneActive':
     case 'drumPatternHas': {
-      // Every lane requirement must be satisfied (AND semantics)
-      for (const req of predicate.lanes) {
-        let satisfied = false;
-        for (const track of project.tracks) {
-          if (track.type !== 'drum') continue;
-          for (const linkOrClip of track.clips) {
-            const clip = clipContentSource(project, linkOrClip);
-            if (!clip?.drumEvents) continue;
-            const stepIndices = new Set(
-              clip.drumEvents
-                .filter((e) => e.lane === req.lane)
-                .map((e) => e.stepIndex),
-            );
-            if (stepIndices.size >= req.minSteps) {
-              satisfied = true;
-              break;
-            }
-          }
-          if (satisfied) break;
-        }
-        if (!satisfied) return false;
+      const lanes = predicate.type === 'drumLaneActive' ? [predicate] : predicate.lanes;
+      const byLane = new Map<string, Map<string, Set<number>>>();
+      for (const event of soundingEvents(project).events) {
+        if (event.kind !== 'drum') continue;
+        const clips = byLane.get(event.lane) ?? new Map<string, Set<number>>();
+        const ticks = clips.get(event.clipId) ?? new Set<number>();
+        ticks.add(beatTick(event.startBeat));
+        clips.set(event.clipId, ticks);
+        byLane.set(event.lane, clips);
       }
-      return true;
+      return lanes.every(({ lane, minSteps }) =>
+        [...(byLane.get(lane)?.values() ?? [])].some((ticks) => ticks.size >= minSteps),
+      );
     }
 
     case 'noteCountAtLeast': {
       const track = resolveTrackByPredicateName(project, predicate.trackName);
       if (!track) return false;
-      let count = 0;
-      for (const clip of track.clips) {
-        count += clipContentSource(project, clip)?.notes?.length ?? 0;
-      }
+      const count = soundingEvents(project).events.filter((event) => event.kind === 'note' && event.trackId === track.id).length;
       return count >= predicate.value;
     }
 

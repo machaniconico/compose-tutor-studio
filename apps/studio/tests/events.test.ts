@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Clip, Project, Track } from '@cts/project-model';
-import { deserializeProject, expandClip, serializeProject, validateProject } from '@cts/project-model';
+import { deserializeProject, soundingEvents, serializeProject, validateProject } from '@cts/project-model';
 import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
 import { renderScheduleEvents } from '../src/audio/wav';
 import {
@@ -10,10 +10,10 @@ import {
   type NoteScheduleEvent,
 } from '../src/audio/events';
 
-// Pass-through spy: playback must expand clips through expandClip (US-007).
+// Pass-through spy: Playback maps the shared sounding events.
 vi.mock('@cts/project-model', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@cts/project-model')>();
-  return { ...actual, expandClip: vi.fn(actual.expandClip) };
+  return { ...actual, soundingEvents: vi.fn(actual.soundingEvents) };
 });
 
 describe('drumStepToBeat', () => {
@@ -221,8 +221,8 @@ describe('buildScheduleEvents', () => {
   });
 });
 
-describe('buildScheduleEvents uses expandClip', () => {
-  it('expands every clip through expandClip, honoring length and links', () => {
+describe('buildScheduleEvents uses soundingEvents', () => {
+  it('maps soundingEvents, honoring length and links', () => {
     const source: Clip = {
       id: 'src',
       trackId: 'mel',
@@ -238,13 +238,14 @@ describe('buildScheduleEvents uses expandClip', () => {
     const linked: Clip = { ...source, id: 'link', startBeat: 8, aliasOf: 'src', notes: [] };
     const track = instrumentTrack('mel', 'warmPad', source);
     track.clips.push(linked);
-    const spy = vi.mocked(expandClip);
+    const spy = vi.mocked(soundingEvents);
     spy.mockClear();
 
-    const events = buildScheduleEvents(project([track]));
+    const sourceProject = project([track]);
+    const events = buildScheduleEvents(sourceProject);
 
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(spy.mock.calls.map(([clip]) => clip.id)).toEqual(['src', 'link']);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBe(sourceProject);
     expect(events.map((e) => [e.beat, (e.payload as NoteScheduleEvent).durationBeats])).toEqual([
       [3.5, 0.5],
       [11.5, 0.5],
@@ -253,15 +254,15 @@ describe('buildScheduleEvents uses expandClip', () => {
 });
 
 describe('live playback and MIDI export expand the same project the same way', () => {
-  it('calls expandClip for the same clips and sounds the same beats on both paths', () => {
-    // One project for both paths: a looping drum-type clip on an instrument
-    // track that holds notes, a midi-type clip linked to it, a note past the
+  it('maps the same project through soundingEvents and sounds the same beats on both paths', () => {
+    // One project for both paths: a looping MIDI clip on an instrument
+    // track, a clip linked to it, a note past the
     // clip end, and a 0.3-beat period whose 4th repeat lands on the end only
     // by rounding.
     const looped: Clip = {
       id: 'looped',
       trackId: 'mel',
-      type: 'drum',
+      type: 'midi',
       startBeat: 0,
       lengthBeats: 4,
       contentLengthBeats: 2,
@@ -285,16 +286,16 @@ describe('live playback and MIDI export expand the same project the same way', (
     const track = instrumentTrack('mel', 'warmPad', looped);
     track.clips.push(linked, fractional);
     const shared = project([track]);
-    const spy = vi.mocked(expandClip);
+    const spy = vi.mocked(soundingEvents);
 
     spy.mockClear();
     const live = buildScheduleEvents(shared);
-    const liveCalls = spy.mock.calls.map(([clip]) => clip.id);
+    const liveCalls = spy.mock.calls.map(([input]) => input);
     spy.mockClear();
     const midi = parseMidi(exportProjectToMidi(shared));
-    const midiCalls = spy.mock.calls.map(([clip]) => clip.id);
+    const midiCalls = spy.mock.calls.map(([input]) => input);
 
-    expect(liveCalls).toEqual(['looped', 'linked', 'fractional']);
+    expect(liveCalls).toEqual([shared]);
     expect(midiCalls).toEqual(liveCalls);
     const liveNotes = live
       .map((e) => [e.beat, (e.payload as NoteScheduleEvent).pitch] as const)
@@ -309,6 +310,32 @@ describe('live playback and MIDI export expand the same project the same way', (
       expect(pitch).toBe(liveNotes[i]![1]);
     });
     expect(liveNotes.map(([beat]) => Math.round(beat * 10) / 10)).toEqual([0, 2, 4, 8.1, 8.4, 8.7]);
+  });
+
+  it('applies swing and mute precedence consistently in live scheduling, WAV and MIDI', () => {
+    const track = (id: string, pitch: number, solo: boolean, mute: boolean): Track => ({
+      ...instrumentTrack(id, 'warmPad', {
+        id: `${id}-clip`, trackId: id, type: 'midi', startBeat: 0, lengthBeats: 4, loop: false,
+        notes: [
+          { id: `${id}-downbeat`, pitch, startBeat: 0, durationBeats: 0.125, velocity: 100 },
+          { id: `${id}-offbeat`, pitch, startBeat: 0.25, durationBeats: 0.125, velocity: 100 },
+        ],
+      }),
+      solo,
+      mute,
+    });
+    const shared = {
+      ...project([track('featured', 60, true, false), track('muted', 62, true, true), track('other', 64, false, false)]),
+      swing: 50,
+    };
+    const onsets = (events: ReadonlyArray<{ beat: number; payload: unknown }>) =>
+      events.map(({ beat, payload }) => [beat, (payload as NoteScheduleEvent).pitch]);
+    const expected = [[0, 60], [0.375, 60]];
+    expect(onsets(buildScheduleEvents(shared))).toEqual(expected);
+    expect(onsets(renderScheduleEvents(shared))).toEqual(expected);
+    expect(parseMidi(exportProjectToMidi(shared)).tracks.flatMap((t) =>
+      t.notes.map((note) => [note.startBeat, note.pitch]),
+    )).toEqual(expected);
   });
 
   it('sounds a link placed on an audio track on neither path (instrument note at 0, link at 4)', () => {

@@ -21,4 +21,6 @@ export {
   createChordEvent,
 } from './factory';
 export type { CreateDefaultProjectOpts } from './factory';
-export * from './clipExpand';
+export { DEFAULT_STEPS_PER_BAR, expandClip, resolveLinkSource } from './clipExpand';
+export * from './sounding';
+export { songEndBeat as projectLengthBeats } from './sounding';

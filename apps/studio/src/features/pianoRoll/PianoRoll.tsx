@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useStore, watchDragEnd } from '../../state/store';
 import { findShortcut } from '../../state/keymap';
 import type { Clip, NoteEvent, Project, Track } from '@cts/project-model';
-import { beatsPerBar, clipFirstPassEnd, resizeClip, resolveLinkSource, startsBeforeClipEnd } from '@cts/project-model';
+import { beatTick, beatsPerBar, clipEditSpan, firstPassBeatAt, resizeClip, resolveLinkSource, songEndBeat, soundingEvents } from '@cts/project-model';
 import { midiToNoteName } from '@cts/theory-engine';
 import { pxPerBeat } from '../timeline';
 import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
@@ -23,7 +23,6 @@ import {
   windowScrollTop,
   normalizeRect,
   pitchToY,
-  quantizeNotes as quantizeNoteStarts,
   rectsOverlap,
   snapBeat,
   snapPitchToPitchClasses,
@@ -31,7 +30,7 @@ import {
   xToBeat,
   yToPitch,
 } from './gridMath';
-import { duplicateNotes, removeNotes } from '../../state/editorActions';
+import { duplicateNotes, quantizeNotes, removeNotes } from '../../state/editorActions';
 import { pushToast } from '../../state/tutorialBridge';
 
 const ROW_HEIGHT = 16;
@@ -162,18 +161,21 @@ export function PianoRoll() {
   const rows = useMemo(() => buildRows(), []);
   const gridHeight = rows.length * ROW_HEIGHT;
   const bpb = beatsPerBar(project.timeSignature);
-  const songEndBeat = project.lengthBars * bpb;
-  const gridLength = Math.max(0, songEndBeat - (clip?.startBeat ?? 0));
+  const endBeat = songEndBeat(project);
+  const gridLength = Math.max(0, endBeat - (clip?.startBeat ?? 0));
   const gridWidth = gridLength * ppb;
   const positionBeat = useStore((s) => s.transport.positionBeat);
 
-  const clipLength = Math.min(clip?.lengthBeats ?? 0, gridLength);
-  const firstPassEnd = clip ? Math.min(clipFirstPassEnd(clip), gridLength) : 0;
-  const storedNotes = clip?.type === 'midi' ? clip.notes : undefined;
-  const notes = useMemo(
-    () => (storedNotes ?? []).filter((note) => startsBeforeClipEnd(note.startBeat, clipLength)),
-    [storedNotes, clipLength],
-  );
+  const { length: clipLength, firstPassLength: firstPassEnd } = clip
+    ? clipEditSpan(project, clip)
+    : { length: 0, firstPassLength: 0 };
+  const notes = useMemo(() => {
+    if (clip?.type !== 'midi' || !clip.notes) return [];
+    return soundingEvents(project, { clipId: clip.id, includeMuted: true }).events.flatMap((event) => {
+      const note = clip.notes?.[event.sourceIndex];
+      return event.kind === 'note' && event.repeat === 0 && note ? [note] : [];
+    });
+  }, [clip, project]);
   const selected = useMemo(() => {
     const ids = new Set(editor.selectedNoteIds);
     return new Set(notes.filter((note) => ids.has(note.id)).map((note) => note.id));
@@ -273,28 +275,9 @@ export function PianoRoll() {
   );
 
   const quantizeSelectedNotes = useCallback(() => {
-    if (!clip || clip.type !== 'midi' || editor.selectedNoteIds.length === 0) return;
-    const ids = new Set(editor.selectedNoteIds);
-    const selectedNotes = notes.filter((note) => ids.has(note.id));
-    // Quantized notes must still fit inside the first pass to sound in a loop.
-    const quantized = quantizeNoteStarts(selectedNotes, gridSnap).map((note) => ({
-      ...note,
-      ...clampNoteToClip(note, firstPassEnd, { snap: gridSnap, keep: 'length' }),
-    }));
-    const changed = quantized.some(
-      (note, index) =>
-        note.startBeat !== selectedNotes[index]?.startBeat ||
-        note.durationBeats !== selectedNotes[index]?.durationBeats,
-    );
-    if (!changed) return;
-    const quantizedById = new Map(quantized.map((note) => [note.id, note]));
-
-    applyProjectChange((project) =>
-      mapClipNotes(project, clip.id, (clipNotes) =>
-        clipNotes.map((note) => quantizedById.get(note.id) ?? note),
-      ),
-    );
-  }, [applyProjectChange, clip, editor.selectedNoteIds, firstPassEnd, gridSnap, notes]);
+    if (clip?.type !== 'midi' || editor.selectedNoteIds.length === 0) return;
+    quantizeNotes(clip.id, editor.selectedNoteIds, gridSnap);
+  }, [clip, editor.selectedNoteIds, gridSnap]);
 
   // --- keyboard shortcuts (ignored while typing in inputs) ---
   useEffect(() => {
@@ -545,7 +528,7 @@ export function PianoRoll() {
       if (!clip || clip.type !== 'midi') return;
       const { x, y } = localPoint(e);
       const rawBeat = xToBeat(x, ppb);
-      if (rawBeat < 0 || !startsBeforeClipEnd(rawBeat, gridLength)) {
+      if (rawBeat < 0 || beatTick(rawBeat) >= beatTick(gridLength)) {
         setExtendHint(null);
         return;
       }
@@ -558,21 +541,12 @@ export function PianoRoll() {
         return;
       }
       setExtendHint(null);
-      let beat = snapBeat(rawBeat, gridSnap);
-      // A looping clip only sounds its first repeat's content, so a note placed
-      // in a later repeat goes into the first one: it then sounds at the click
-      // (and in every repeat) instead of being saved silent.
-      const period = clip.contentLengthBeats ?? clip.lengthBeats;
-      if (clip.loop && period > 0 && beat >= period) {
-        beat %= period;
-        // Float remainders a hair under the period mean "the next repeat's start".
-        if (period - beat < 1e-9) beat = 0;
-      }
+      const beat = firstPassBeatAt(clip, snapBeat(rawBeat, gridSnap));
       let pitch = clampPitch(yToPitch(y, ROW_HEIGHT));
       if (editor.scaleSnap) pitch = clampPitch(snapPitchToPitchClasses(pitch, scaleInfo.scalePcs, PIANO_LOW_MIDI, PIANO_HIGH_MIDI));
       // Snapping can round a click just before the clip end onto it: the note
       // stays inside the clip instead of lengthening it.
-      const fitted = clampNoteToClip({ startBeat: beat, durationBeats: gridSnap }, clipLength, {
+      const fitted = clampNoteToClip({ startBeat: beat, durationBeats: gridSnap }, firstPassEnd, {
         snap: gridSnap,
         keep: 'start',
       });
@@ -583,6 +557,7 @@ export function PianoRoll() {
       clip,
       clipLength,
       gridLength,
+      firstPassEnd,
       localPoint,
       ppb,
       bpb,
@@ -803,7 +778,7 @@ export function PianoRoll() {
               absolute; the grid starts at the clip start. */}
           {editor.chordToneHighlight
             ? project.chordTrack
-                .filter((chord) => chord.startBeat < songEndBeat && chord.startBeat + chord.durationBeats > clip.startBeat)
+                .filter((chord) => chord.startBeat < endBeat && chord.startBeat + chord.durationBeats > clip.startBeat)
                 .map((chord) =>
                 visibleRows.map((midi, j) => {
                   const i = firstRow + j;
@@ -821,7 +796,7 @@ export function PianoRoll() {
                         height: ROW_HEIGHT,
                         left: Math.max(0, chord.startBeat - clip.startBeat) * ppb,
                         width:
-                          (Math.min(chord.startBeat + chord.durationBeats, songEndBeat) -
+                          (Math.min(chord.startBeat + chord.durationBeats, endBeat) -
                             Math.max(chord.startBeat, clip.startBeat)) * ppb,
                       }}
                     />

@@ -196,16 +196,17 @@ describe('generation into a clip that starts at beat 16', () => {
   it('reports the event cap to the user without displaying or emitting rejected notes', () => {
     const source = withClipAt16('Bass', {
       startBeat: 0,
-      notes: [{ id: 'original', pitch: 36, startBeat: 0, durationBeats: 0.0005, velocity: 90 }],
+      notes: [{ id: 'original', pitch: 36, startBeat: 0, durationBeats: 1 / 480, velocity: 90 }],
     });
     const link: Clip = {
-      ...source, id: 'cap-link', aliasOf: source.id, startBeat: 8, lengthBeats: 64,
-      loop: true, contentLengthBeats: 0.001, notes: undefined,
+      ...source, id: 'cap-link', aliasOf: source.id, startBeat: 8, lengthBeats: 248,
+      loop: true, contentLengthBeats: 1 / 64, notes: undefined,
     };
     const project = useStore.getState().project;
     act(() => useStore.getState().replaceProject({
       ...project,
-      chordTrack: [chord('tiny-a', 'F', 0, 0.0005), chord('tiny-b', 'G', 0.0005, 0.0005)],
+      lengthBars: 64,
+      chordTrack: Array.from({ length: 7 }, (_, i) => chord(`tiny-${i}`, 'F', i / 480, 1 / 480)),
       tracks: project.tracks.map((t) => t.id === source.trackId ? { ...t, clips: [source, link] } : t),
     }));
     const before = useStore.getState().project;

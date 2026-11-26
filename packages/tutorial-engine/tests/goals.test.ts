@@ -616,7 +616,7 @@ describe('linked (aliasOf) clips', () => {
   it.each(['missing', 'cyclic'] as const)('ignores notes stored on a %s link', (kind) => {
     const project = makeBrokenLinkProject(kind);
     const clips = project.tracks.flatMap((track) => track.clips);
-    expect(validateProject(project).valid).toBe(true);
+    expect(validateProject(project).valid).toBe(false);
     expect(expandClip(clips[0]!, clips).notes).toEqual([]);
     expect(evaluateProjectPredicate({ type: 'noteCountAtLeast', trackName: 'Melody', value: 1 }, project)).toBe(false);
   });

@@ -126,7 +126,7 @@ describe('addClip', () => {
 });
 
 describe('splitClip', () => {
-  it('reports when a looped hit cannot be placed on the right clip’s grid', () => {
+  it('refuses a looping drum clip with off-grid repeats', () => {
     const project = createEmptyProject({ clock: t0 });
     const track = drums(project);
     const clip: Clip = {
@@ -138,11 +138,11 @@ describe('splitClip', () => {
     expect(validateProject(base).ok).toBe(true);
     expect(soundedHits(base, track.id)[4]).toBeCloseTo(1.2);
     const result = splitClip(base, clip.id, 1);
-    expect(result).toMatchObject({ ok: false, reason: 'offGridDrumHit' });
+    expect(result).toMatchObject({ ok: false, reason: 'loopingClip' });
     expect(result.project).toBe(base);
   });
 
-  it('splits a drum loop after its last hit even if that hit is off the right step grid', () => {
+  it('refuses splitting a drum loop after its last hit', () => {
     const project = createEmptyProject({ clock: t0 });
     const track = drums(project);
     const clip: Clip = {
@@ -152,10 +152,9 @@ describe('splitClip', () => {
     };
     const base = { ...project, tracks: project.tracks.map((t) => (t.id === track.id ? { ...t, clips: [clip] } : t)) };
     expect(soundedHits(base, track.id)).toEqual([0, 0.9]);
-    const next = splitClip(base, clip.id, 1).project;
-    expect(drums(next).clips).toHaveLength(2);
-    expect(drums(next).clips[1]).toMatchObject({ startBeat: 1, drumEvents: [] });
-    expect(soundedHits(next, track.id)).toEqual([0, 0.9]);
+    const result = splitClip(base, clip.id, 1);
+    expect(result).toMatchObject({ ok: false, reason: 'loopingClip' });
+    expect(result.project).toBe(base);
   });
 
   it('cuts a note that crosses the boundary into 3+1 and 0+1, keeping the total note length', () => {
@@ -245,41 +244,30 @@ describe('splitClip', () => {
     expect(soundedHits(next, track.id)).toEqual([0, 2]);
   });
 
-  it('splits a looping clip: the left part keeps looping, the right part plays what sounded there', () => {
+  it('refuses a looping clip with an explicit period', () => {
     const project = withMelodyClips([
       { ...midi('loop', 8, 8, [note('n2', 0, 1), note('n3', 1.5, 1)]), loop: true, contentLengthBeats: 2 },
     ]);
-    const next = splitClip(project, 'loop', 12).project;
-    expect(next).not.toBe(project);
-    const [left, right] = melody(next).clips;
-    expect(left).toMatchObject({ id: 'loop', startBeat: 8, lengthBeats: 4, loop: true, contentLengthBeats: 2 });
-    expect(right).toMatchObject({ startBeat: 12, lengthBeats: 4, loop: false });
-    expect(right!.contentLengthBeats).toBeUndefined();
-    expect(soundedNotes(next)).toEqual(soundedNotes(project));
+    const result = splitClip(project, 'loop', 12);
+    expect(result).toMatchObject({ ok: false, reason: 'loopingClip' });
+    expect(result.project).toBe(project);
   });
 
-  it('a loop without a set period keeps repeating every old length on the left part', () => {
+  it('refuses a looping clip with an implicit period', () => {
     const project = withMelodyClips([{ ...midi('loop', 0, 4, [note('n1', 3, 2)]), loop: true }]);
-    const next = splitClip(project, 'loop', 3.5).project;
-    expect(melody(next).clips[0]).toMatchObject({ lengthBeats: 3.5, contentLengthBeats: 4, loop: true });
-    expect(totalSounded(next)).toBeCloseTo(totalSounded(project));
-    expect(soundedNotes(next).map((n) => n[0])).toEqual([3, 3.5]);
+    const result = splitClip(project, 'loop', 3.5);
+    expect(result).toMatchObject({ ok: false, reason: 'loopingClip' });
+    expect(result.project).toBe(project);
   });
 
-  it('splits a link: the left part stays linked, the right part gets its own copy, and nothing moves', () => {
+  it('refuses to split a linked clip', () => {
     const project = withMelodyClips([
       midi('a', 0, 8, [note('n1', 0, 1), note('n2', 4, 2)]),
       { ...midi('link', 16, 8), aliasOf: 'a' },
     ]);
-    const next = splitClip(project, 'link', 21).project;
-    const [, left, right] = melody(next).clips;
-    expect(left).toMatchObject({ id: 'link', startBeat: 16, lengthBeats: 5, aliasOf: 'a' });
-    expect(right!.aliasOf).toBeUndefined();
-    expect(right).toMatchObject({ startBeat: 21, lengthBeats: 3 });
-    expect(right!.notes!.map((n) => [n.startBeat, n.durationBeats])).toEqual([[0, 1]]);
-    expect(clipById(next, 'a')).toEqual(clipById(project, 'a'));
-    expect(soundedNotes(next)).toEqual(soundedNotes(project).flatMap(splitAt(21)));
-    expect(totalSounded(next)).toBe(totalSounded(project));
+    const result = splitClip(project, 'link', 21);
+    expect(result).toMatchObject({ ok: false, reason: 'linkedClip' });
+    expect(result.project).toBe(project);
   });
 
   it('splits a link source without changing what its links play', () => {
@@ -365,7 +353,7 @@ describe('resizeClip', () => {
   it('changes lengthBeats and keeps the loop period', () => {
     const project = withMelodyClips([
       { ...midi('a', 0, 8), loop: true, contentLengthBeats: 2 },
-      { ...midi('b', 8, 4), loop: true },
+      { ...midi('b', 12, 4), loop: true },
     ]);
     const next = resizeClip(resizeClip(project, 'a', 12), 'b', 8);
     expect(clipById(next, 'a')).toMatchObject({ lengthBeats: 12, contentLengthBeats: 2 });
@@ -436,7 +424,7 @@ describe('removeClip', () => {
       drumEvents: [{ id: 'silent-kick', lane: 'kick', stepIndex: 0, velocity: 100 }],
     };
     const base = { ...project, tracks: project.tracks.map((t) => (t.id === track.id ? { ...t, clips: [source, link] } : t)) };
-    expect(validateProject(base).ok).toBe(true);
+    expect(validateProject(base).ok).toBe(false);
     expect(soundedHits(base, track.id)).toEqual([]);
     const next = removeClip(base, source.id);
     expect(soundedHits(next, track.id)).toEqual([]);

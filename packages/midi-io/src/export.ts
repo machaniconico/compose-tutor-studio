@@ -3,14 +3,15 @@
  * bytes. See docs/02_feature_specification.md section 10 (Export).
  */
 
-import type { Project, NoteEvent, DrumLane, Track, Clip } from '@cts/project-model';
-import { beatsPerBar, expandClip } from '@cts/project-model';
+import type { Project, NoteEvent, DrumLane, Track, SoundingEvent } from '@cts/project-model';
+import { soundingEvents } from '@cts/project-model';
 import {
   PPQ,
   writeVarLen,
   buildHeaderChunk,
   buildTrackChunk,
   concatChunks,
+  joinChunks,
 } from './smf.js';
 import type { MidiMessage } from './smf.js';
 
@@ -29,6 +30,9 @@ const DRUM_HIT_DURATION_BEATS = 0.25; // 1/4 beat
 
 /** GM percussion channel (0-indexed). */
 const DRUM_CHANNEL = 9;
+
+/** Maximum value of the SMF header's 16-bit track count. */
+const MAX_SMF_TRACKS = 0xffff;
 
 // --- Meta event builders ---
 
@@ -83,65 +87,25 @@ export function panToCc(pan: number): number {
 
 // --- Note / clip conversion ---
 
-/**
- * Append a clip's absolute-tick MIDI messages to `msgs`. The clip goes through
- * `expandClip`, so its length, loop and link rules match live playback and the
- * WAV render: a drum track sounds only drum hits (channel 9), any other track
- * only notes (the track channel), and nothing starting at or after the song
- * end (`songEndBeat`) sounds. Messages are appended one by one; a spread of a
- * long loop overflows the call stack.
- */
-function appendClipMessages(
-  msgs: MidiMessage[],
-  clip: Clip,
-  allClips: readonly Clip[],
-  channel: number,
-  ppq: number,
-  bpb: number,
-  trackType: Track['type'],
-  songEndBeat: number,
-): void {
-  const { notes, drumHits } = expandClip(clip, allClips, bpb, trackType);
-
-  for (const note of notes) {
-    if (note.startBeat >= songEndBeat) continue;
-    const startTick = Math.round(note.startBeat * ppq);
-    // A note cut at the clip end can be shorter than a tick; keep it 1 tick
-    // long so it is still written, as it still sounds live and in the WAV.
-    const endTick = Math.max(startTick + 1, Math.round((note.startBeat + note.durationBeats) * ppq));
-    const vel = clamp(Math.round(note.velocity), 0, 127);
-    msgs.push({ tick: startTick, bytes: [0x90 | channel, note.pitch, vel] });
-    msgs.push({ tick: endTick, bytes: [0x80 | channel, note.pitch, 0] });
-  }
-
-  for (const hit of drumHits) {
-    if (hit.beat >= songEndBeat) continue;
-    const pitch = DRUM_NOTE[hit.lane];
-    const startTick = Math.round(hit.beat * ppq);
-    const endTick = Math.round((hit.beat + DRUM_HIT_DURATION_BEATS) * ppq);
-    const vel = clamp(Math.round(hit.velocity), 0, 127);
-    msgs.push({ tick: startTick, bytes: [0x90 | DRUM_CHANNEL, pitch, vel] });
-    msgs.push({ tick: endTick, bytes: [0x80 | DRUM_CHANNEL, pitch, 0] });
-  }
-}
-
 /** Build one MTrk for an instrument/drum track, including CC7/CC10 at start. */
 function buildInstrumentTrack(
   track: Track,
-  allClips: readonly Clip[],
+  events: readonly SoundingEvent[],
   channel: number,
   ppq: number,
-  bpb: number,
-  songEndBeat: number,
 ): Uint8Array {
   const msgs: MidiMessage[] = [
     { tick: 0, bytes: trackNameMeta(track.name) },
     { tick: 0, bytes: [0xb0 | channel, 7, volumeToCc(track.volume)] },
     { tick: 0, bytes: [0xb0 | channel, 10, panToCc(track.pan)] },
   ];
-
-  for (const clip of track.clips) {
-    appendClipMessages(msgs, clip, allClips, channel, ppq, bpb, track.type, songEndBeat);
+  for (const event of events) {
+    const startTick = Math.round(event.startBeat * ppq);
+    const pitch = event.kind === 'note' ? event.pitch : DRUM_NOTE[event.lane];
+    const duration = event.kind === 'note' ? event.durationBeats : DRUM_HIT_DURATION_BEATS;
+    const endTick = Math.max(startTick + 1, Math.round((event.startBeat + duration) * ppq));
+    msgs.push({ tick: startTick, bytes: [0x90 | channel, pitch, event.velocity] });
+    msgs.push({ tick: endTick, bytes: [0x80 | channel, pitch, 0] });
   }
   return buildTrackChunk(msgs);
 }
@@ -155,7 +119,8 @@ function buildInstrumentTrack(
  *   - Track 0 (tempo track): track name, tempo, time signature, and chord
  *     symbols as marker meta events (FF 06) at each chord's startBeat.
  *   - One track per instrument/drum track, with CC7 (volume) and CC10 (pan)
- *     at the track start.
+ *     at the track start. If the full layout exceeds the SMF track limit,
+ *     only instrument/drum tracks with sounding events are written.
  *
  * Channels are assigned sequentially to non-drum tracks, skipping channel 9
  * (reserved for GM percussion), and wrap back to 0 after 15, so any number of
@@ -175,8 +140,10 @@ export function projectToMidi(project: Project, options?: { ppq?: number }): Uin
   }
   const tempoTrack = buildTrackChunk(metaMessages);
 
-  // --- One track per instrument/drum track ---
-  const trackChunks: Uint8Array[] = [];
+  const playableTracks = project.tracks.filter(
+    (track) => track.type === 'instrument' || track.type === 'drum',
+  );
+  const omitSilentTracks = playableTracks.length + 1 > MAX_SMF_TRACKS;
   let nextChannel = 0;
   const allocChannel = (): number => {
     if (nextChannel > 15) nextChannel = 0; // wrap: MIDI has only channels 0-15
@@ -184,23 +151,25 @@ export function projectToMidi(project: Project, options?: { ppq?: number }): Uin
     return nextChannel++;
   };
 
-  const bpb = beatsPerBar(project.timeSignature);
-  // Same song end as live playback and the WAV render (scheduler projectLengthBeats).
-  const songEndBeat = (project.lengthBars > 0 ? project.lengthBars : 0) * (bpb > 0 ? bpb : 4);
-  const allClips = project.tracks.flatMap((track) => track.clips);
-  for (const track of project.tracks) {
-    if (track.type !== 'instrument' && track.type !== 'drum') continue;
+  const byTrack = new Map<string, SoundingEvent[]>();
+  for (const event of soundingEvents(project).events) {
+    const events = byTrack.get(event.trackId);
+    if (events) events.push(event);
+    else byTrack.set(event.trackId, [event]);
+  }
+  const trackChunks = [tempoTrack];
+  for (const track of playableTracks) {
     const channel = track.type === 'drum' ? DRUM_CHANNEL : allocChannel();
-    trackChunks.push(buildInstrumentTrack(track, allClips, channel, ppq, bpb, songEndBeat));
+    const events = byTrack.get(track.id);
+    if (omitSilentTracks && events === undefined) continue;
+    trackChunks.push(buildInstrumentTrack(track, events ?? [], channel, ppq));
   }
 
-  const allTracks = [tempoTrack, ...trackChunks];
-  // The SMF header stores the track count in 16 bits.
-  if (allTracks.length > 0xffff) {
-    throw new RangeError(`MIDI files hold at most 65535 tracks (this song needs ${allTracks.length})`);
+  if (trackChunks.length > MAX_SMF_TRACKS) {
+    throw new RangeError(`MIDI files hold at most ${MAX_SMF_TRACKS} tracks (this song needs ${trackChunks.length})`);
   }
-  const header = buildHeaderChunk(1, allTracks.length, ppq);
-  return concatChunks(header, ...allTracks);
+  const header = buildHeaderChunk(1, trackChunks.length, ppq);
+  return joinChunks([header, ...trackChunks]);
 }
 
 /**

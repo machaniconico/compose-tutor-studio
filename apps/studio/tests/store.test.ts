@@ -505,8 +505,10 @@ describe('note actions', () => {
       ...track.clips[0]!,
       lengthBeats: 128,
       loop: true,
-      contentLengthBeats: 1 / 512,
-      notes: [{ id: 'original', pitch: 60, startBeat: 0, durationBeats: 1 / 512, velocity: 100 }],
+      contentLengthBeats: 1 / 64,
+      notes: Array.from({ length: 12 }, (_, i) => ({
+        id: i === 0 ? 'original' : `loop-${i}`, pitch: 60, startBeat: 0, durationBeats: 1 / 64, velocity: 100,
+      })),
     };
     state.applyProjectChange((project) => ({
       ...project,
@@ -519,7 +521,7 @@ describe('note actions', () => {
 
     state.updateNote(clip.id, 'original', { pitch: 64 });
     const edited = useStore.getState();
-    state.addNote(clip.id, { id: 'extra', pitch: 67, startBeat: 0, durationBeats: 1 / 512, velocity: 100 });
+    state.addNote(clip.id, { id: 'extra', pitch: 67, startBeat: 0, durationBeats: 1 / 64, velocity: 100 });
     expect(useStore.getState().project).toBe(edited.project);
     expect(useStore.getState().past).toBe(edited.past);
     expect(state.flushPendingSave()).toBe(true);
@@ -533,11 +535,11 @@ describe('note actions', () => {
     const clip = project.tracks.find((track) => track.type === 'instrument')!.clips[0]!;
     clip.lengthBeats = 128;
     clip.loop = true;
-    clip.contentLengthBeats = 1 / 512;
-    clip.notes = [
-      { id: 'a', pitch: 60, startBeat: 0, durationBeats: 1 / 512, velocity: 100 },
-      { id: 'b', pitch: 64, startBeat: 0, durationBeats: 1 / 512, velocity: 100 },
-    ];
+    clip.contentLengthBeats = 1 / 64;
+    project.lengthBars = 32;
+    clip.notes = Array.from({ length: 13 }, (_, i) => ({
+      id: `loop-${i}`, pitch: 60, startBeat: 0, durationBeats: 1 / 64, velocity: 100,
+    }));
     const saved = storage.getItem(projectKey(project.id));
     expect(saveProject(project, storage)).toBe(false);
     expect(storage.getItem(projectKey(project.id))).toBe(saved);
@@ -716,7 +718,7 @@ describe('track management (US-010)', () => {
     expect(loadProject(project.id, saved)).toEqual(next);
   });
 
-  it('keeps deleted clip links silent after saving, reopening and duplicating a track', () => {
+  it('detaches deleted clip links on reopen and keeps them silent after duplicating a track', () => {
     const project = createDefaultProject();
     const bass = project.tracks.find((t) => t.name === 'Bass')!;
     const melody = project.tracks.find((t) => t.name === 'Melody')!;
@@ -738,7 +740,7 @@ describe('track management (US-010)', () => {
     const next = duplicateTrack(reopened, melody.id);
     const clips = next.tracks.flatMap((t) => t.clips);
     const link = clips.find((clip) => clip.id === 'melody-link')!;
-    expect(link.aliasOf).toBe('clip-4');
+    expect(link.aliasOf).toBeUndefined();
     expect(expandClip(link, clips).notes).toEqual([]);
   });
 

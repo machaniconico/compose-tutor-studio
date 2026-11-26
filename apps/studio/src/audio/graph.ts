@@ -7,7 +7,7 @@
 // always wins") is unit-testable without any audio nodes, then applied to the
 // live gain nodes.
 
-import type { Track } from '@cts/project-model';
+import { computeAudibleTracks, type Track } from '@cts/project-model';
 import {
   buildTrackEffectChain,
   effectSignature,
@@ -18,27 +18,7 @@ import { METER_ANALYSER_FFT_SIZE } from './metering';
 
 const liveTrackAnalysers = new Map<string, AnalyserNode>();
 
-/**
- * Resolve which tracks are audible given mute/solo flags.
- *
- * Rules:
- *  - If at least one track is soloed, only soloed tracks are audible.
- *  - A muted track is never audible (mute overrides solo).
- *  - The master track is not a sound source and is excluded.
- *
- * Pure: returns a Set of audible track ids. Unit tested.
- */
-export function computeAudibleTracks(tracks: readonly Track[]): Set<string> {
-  const soundTracks = tracks.filter((t) => t.type !== 'master');
-  const anySolo = soundTracks.some((t) => t.solo && !t.mute);
-  const audible = new Set<string>();
-  for (const t of soundTracks) {
-    if (t.mute) continue;
-    if (anySolo && !t.solo) continue;
-    audible.add(t.id);
-  }
-  return audible;
-}
+export { computeAudibleTracks };
 
 /** Clamp a volume into the supported 0..2 range. */
 export function clampVolume(volume: number): number {

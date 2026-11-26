@@ -24,8 +24,9 @@ import type { ParsedMidi } from '@cts/midi-io';
 import {
   addClip,
   beatsPerBar as beatsPerBarOf,
-  CLIP_EDGE_TOLERANCE_BEATS,
-  clipFirstPassEnd,
+  beatTick,
+  clipEditSpan,
+  soundingEvents,
   createDrumClip,
   createMidiClip,
   drumStepsPerBar,
@@ -39,7 +40,6 @@ import {
   resolveLinkSource,
   setLengthBars as setProjectLengthBars,
   setTimeSignature as setProjectTimeSignature,
-  startsBeforeClipEnd,
 } from '@cts/project-model';
 import {
   analyzeChord,
@@ -62,7 +62,7 @@ import { roleForTrackName } from '@cts/tutorial-engine';
 import { fitClipToNotes, useStore, type NoteEditOptions } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
-import { quantizeStart } from '../features/pianoRoll/gridMath';
+import { clampNoteToClip, quantizeStart } from '../features/pianoRoll/gridMath';
 import { upsertEffect, type SupportedEffectType } from '../audio/effects';
 import { findChannelPreset } from '../features/mixer/channelPresets';
 import { withSongLength } from '../features/arranger/arrangeMath';
@@ -347,16 +347,38 @@ export function insertProgressionAtBeat(templateId: string, startBeat: number): 
 /** Quantize the start of the given notes (within a clip) to a grid snap. */
 export function quantizeNotes(clipId: string, noteIds: readonly string[], snap: number): void {
   const ids = new Set(noteIds);
-  useStore.getState().applyProjectChange((project) =>
-    mapClip(project, clipId, (c) =>
-      fitClipToNotes({
-        ...c,
-        notes: (c.notes ?? []).map((n) =>
-          ids.has(n.id) ? { ...n, startBeat: quantizeStart(n.startBeat, snap) } : n,
-        ),
-      }),
-    ),
-  );
+  if (!Number.isFinite(snap) || snap <= 0) return;
+  const store = useStore.getState();
+  const { project } = store;
+  const clip = findClip(project, clipId);
+  if (!clip?.notes) return;
+  const { firstPassLength } = clipEditSpan(project, clip);
+  const sounding = (candidate: Project) =>
+    soundingEvents(candidate, { sourceClipId: clipId, includeMuted: true }).events;
+  const before = sounding(project);
+  const visible = new Set(before.filter((event) => event.clipId === clipId && event.kind === 'note' && event.repeat === 0)
+    .map((event) => event.sourceIndex));
+  const proposed = clip.notes.map((note, index) => {
+    if (!ids.has(note.id) || !visible.has(index)) return note;
+    const startBeat = quantizeStart(note.startBeat, snap);
+    const fitted = clampNoteToClip({ ...note, startBeat }, firstPassLength, { snap, keep: 'length' });
+    if (fitted.startBeat === note.startBeat && fitted.durationBeats === note.durationBeats) return note;
+    return { ...note, ...fitted };
+  });
+  if (proposed.every((note, index) => note === clip.notes?.[index])) return;
+
+  const remaining = new Map<number, number>();
+  const after = sounding(mapClip(project, clipId, (c) => ({ ...c, notes: proposed })));
+  for (const event of after) {
+    if (event.kind === 'note') remaining.set(event.sourceIndex, (remaining.get(event.sourceIndex) ?? 0) + 1);
+  }
+  for (const event of before) {
+    if (event.kind === 'note') remaining.set(event.sourceIndex, (remaining.get(event.sourceIndex) ?? 0) - 1);
+  }
+  // Rounding a note forward can also hide its placement in a partial repeat.
+  const notes = clip.notes.map((note, index) => (remaining.get(index) ?? 0) < 0 ? note : proposed[index]!);
+  if (notes.every((note, index) => note === clip.notes?.[index])) return;
+  store.applyProjectChange(() => mapClip(project, clipId, (c) => ({ ...c, notes })));
 }
 
 /**
@@ -501,7 +523,7 @@ function chordNotesDestination(project: Project, track: Track) {
 function chordNoteTiming(chord: ChordEvent, clip: ChordNotesSpan) {
   const start = Math.max(chord.startBeat, clip.startBeat);
   const startBeat = start - clip.startBeat;
-  if (!startsBeforeClipEnd(startBeat, clip.lengthBeats)) return undefined;
+  if (beatTick(start) >= beatTick(clip.startBeat + clip.lengthBeats)) return undefined;
 
   const end = Math.min(chord.startBeat + chord.durationBeats, clip.startBeat + clip.lengthBeats);
   if (end <= start) return undefined;
@@ -827,19 +849,18 @@ function generateIntoClip(
   const chords = clipChordInputs(project, clip);
   if (chords.length === 0) return fail('noChords');
   const generated: GeneratedNote[] = [];
+  const { length, firstPassLength } = clipEditSpan(project, clip);
   for (const note of generate(project, chords, clip)) {
-    if (!startsBeforeClipEnd(note.startBeat, clip.lengthBeats)) continue;
-    const durationBeats = Math.min(note.durationBeats, clip.lengthBeats - note.startBeat);
+    if (beatTick(note.startBeat) >= beatTick(length)) continue;
+    const durationBeats = Math.min(note.durationBeats, length - note.startBeat);
     generated.push(durationBeats === note.durationBeats ? note : { ...note, durationBeats });
   }
   if (generated.length === 0) return fail('noNotes');
-  const firstPassEnd = clipFirstPassEnd(clip);
-  const firstPassTolerance = CLIP_EDGE_TOLERANCE_BEATS * Math.min(1, firstPassEnd);
   if (
-    firstPassEnd < clip.lengthBeats &&
+    firstPassLength < length &&
     generated.some((note) =>
-      !startsBeforeClipEnd(note.startBeat, firstPassEnd) ||
-      note.startBeat + note.durationBeats > firstPassEnd + firstPassTolerance,
+      beatTick(note.startBeat) >= beatTick(firstPassLength) ||
+      beatTick(note.startBeat + note.durationBeats) > beatTick(firstPassLength),
     )
   ) {
     return fail('loopRange');
@@ -1143,9 +1164,8 @@ export function removeClipFromSong(clipId: string): void {
 const SPLIT_FAILURE_MESSAGES: Record<SplitClipFailure, string> = {
   missingClip: 'クリップが見つからないため分けられません。',
   invalidBoundary: '再生ヘッドをクリップの内側(端ではない場所)に置くと分けられます。',
-  brokenLink: 'リンク元のクリップが見つからないため、このクリップは分けられません。',
-  eventLimit: 'ループで鳴る音が多すぎるため分けられません。クリップを短くしてから試してください。',
-  offGridDrumHit: 'ドラムの音がマス目からずれているため分けられません。',
+  loopingClip: 'ループを使っているクリップは分けられません。',
+  linkedClip: 'ほかのクリップと中身を共有しているため分けられません。',
 };
 
 /** Split a clip at the song beat `atBeat` into two clips. Returns whether it split. */

@@ -15,7 +15,7 @@
 // *intent* and the position semantics (see store.stop(reset?)); this bridge owns
 // the actual audio lifecycle.
 
-import { beatsPerBar as beatsPerBarOf, type Project, type Track } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf, computeAudibleTracks, songEndBeat, type Project, type Track } from '@cts/project-model';
 import { activeLoopRange, useStore } from '../state/store';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
@@ -25,7 +25,6 @@ import { applyMixState, buildTrackGraphs, type TrackGraph } from './graph';
 import { applyMasterVolume } from './masterChain';
 import {
   beatToTime,
-  projectLengthBeats,
   Scheduler,
   secondsPerBeat,
   type DueEvent,
@@ -35,7 +34,7 @@ import {
 import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
 import { metronomeBeatEvents, scheduleMetronomeClick } from './metronome';
-import { songSoundEndBeat, songTailSeconds } from './wav';
+import { songTailSeconds } from './wav';
 
 /** Position update rate while playing (ms ~= 30fps). */
 const POSITION_TICK_MS = 33;
@@ -51,13 +50,7 @@ type BridgeState = {
   playbackTracks: Map<string, Track>;
   synths: Map<string, SynthVoiceManager>;
   drums: Map<string, DrumVoiceManager>;
-  /** Metronome clicks already scheduled up to this beat (exclusive). */
-  metronomeBeatFrontier: number;
-  metronomeOn: boolean;
-  beatsPerBar: number;
   bpm: number;
-  anchorBeat: number;
-  anchorTime: number;
   loop: LoopRegion | null;
   positionTimer: ReturnType<typeof setInterval> | null;
   /** Bumped by every play and stop; a start that no longer matches is abandoned. */
@@ -81,12 +74,7 @@ const state: BridgeState = {
   playbackTracks: new Map(),
   synths: new Map(),
   drums: new Map(),
-  metronomeBeatFrontier: 0,
-  metronomeOn: false,
-  beatsPerBar: 4,
   bpm: 120,
-  anchorBeat: 0,
-  anchorTime: 0,
   loop: null,
   positionTimer: null,
   playGeneration: 0,
@@ -133,10 +121,14 @@ export function initAudioBridge(): () => void {
   const unsubProject = useStore.subscribe((s, prev) => {
     if (s.project === prev.project) return;
     let clipsChanged = false;
+    let previousAudible: Set<string> | undefined;
     for (const track of s.project.tracks) {
       const playingTrack = state.playbackTracks.get(track.id);
       if (!playingTrack || playingTrack === track) continue;
       clipsChanged ||= track.clips !== playingTrack.clips;
+      if (track.mute !== playingTrack.mute || track.solo !== playingTrack.solo) {
+        previousAudible ??= computeAudibleTracks([...state.playbackTracks.values()]);
+      }
       state.playbackTracks.set(track.id, track);
     }
     const engine = getAudioEngine();
@@ -150,9 +142,18 @@ export function initAudioBridge(): () => void {
       restartPlayback();
       return;
     }
-    applyMixState(state.graphs, [...state.playbackTracks.values()], engine.now());
+    const tracks = [...state.playbackTracks.values()];
+    applyMixState(state.graphs, tracks, engine.now());
     if (engine.isInitialized) {
       applyMasterVolume(engine.requireMaster(), s.project.tracks, engine.now());
+    }
+    if (previousAudible) {
+      const audible = computeAudibleTracks(tracks);
+      const before = previousAudible;
+      if (audible.size !== before.size || [...audible].some((id) => !before.has(id))) {
+        // The queued events reflect the previous mix. Rebuild from the playhead.
+        restartPlayback();
+      }
     }
   });
 
@@ -318,40 +319,39 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
   applyMasterVolume(master, project.tracks, context.currentTime);
   const bpb = beatsPerBarOf(project.timeSignature);
   const beatsPerBar = bpb > 0 ? bpb : 4;
-  const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
+  const lengthBeats = songEndBeat(project);
 
-  state.beatsPerBar = beatsPerBar;
   state.bpm = project.bpm;
-  state.metronomeOn = transport.metronome;
   const loop = activeLoopRange(store);
   state.loop = loop ? { startBeat: loop.startBeat, endBeat: loop.endBeat } : null;
 
   const startBeat = transport.positionBeat;
   const now = engine.now();
-  state.anchorBeat = startBeat;
-  state.anchorTime = now;
-  state.metronomeBeatFrontier = startBeat;
 
   silenceRinging();
   buildVoices(context, master, project.tracks, now);
 
-  const events: ScheduledEvent[] = buildScheduleEvents(project);
+  const events = buildScheduleEvents(project);
   const endBeat = state.loop ? Infinity : lengthBeats;
   if (resumeSounding && startBeat < endBeat) resumeSoundingNotes(events, startBeat, now);
 
-  const soundEndBeat = songSoundEndBeat(project);
   const tailSeconds = songTailSeconds(project);
   const scheduler = new Scheduler({
     clock: () => engine.now(),
-    fire: (due) => fireEvents(due, context, master),
+    fire: fireEvents,
+    onWindow: (fromBeat, toBeat) => {
+      if (!transport.metronome) return;
+      for (const click of metronomeBeatEvents(fromBeat, toBeat, beatsPerBar)) {
+        scheduleMetronomeClick(context, master, beatToTime(click.beat, project.bpm, startBeat, now), click.accent);
+      }
+    },
     onEnd: () => {
       // Stop at project end and reset the store transport to the start.
-      // No new note starts, but notes started before the end ring out in full
-      // (with their release and echoes), as in the WAV render and MIDI.
+      // Keep the release and effect tails after the shared note cutoff.
       const s = useStore.getState();
       if (s.transport.isPlaying) {
         if (startBeat < lengthBeats) {
-          state.ringUntil = beatToTime(soundEndBeat, state.bpm, state.anchorBeat, state.anchorTime) + tailSeconds;
+          state.ringUntil = beatToTime(lengthBeats, project.bpm, startBeat, now) + tailSeconds;
         }
         s.stop(true);
       }
@@ -368,7 +368,7 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
 }
 
 /** Schedule a batch of due note/drum events (light work only). */
-function fireEvents(due: DueEvent[], ctx: AudioContext, master: GainNode): void {
+function fireEvents(due: DueEvent[]): void {
   const spb = secondsPerBeat(state.bpm);
   for (const ev of due) {
     const payload = ev.payload as SchedulePayload;
@@ -385,30 +385,6 @@ function fireEvents(due: DueEvent[], ctx: AudioContext, master: GainNode): void 
         drum.trigger(payload.lane, ev.time, payload.velocity);
       }
     }
-  }
-
-  if (state.metronomeOn) {
-    scheduleMetronomeForWindow(due, ctx, master);
-  }
-}
-
-/**
- * Schedule metronome clicks for the playhead window covered by `due`. Uses the
- * resolved audio times of the batch to bound the window so clicks line up with
- * the same lookahead the scheduler used.
- */
-function scheduleMetronomeForWindow(due: DueEvent[], ctx: AudioContext, master: GainNode): void {
-  if (due.length === 0) return;
-  const lastTime = due[due.length - 1]?.time ?? state.anchorTime;
-  const horizonBeat =
-    state.anchorBeat + (lastTime - state.anchorTime) / secondsPerBeat(state.bpm) + 0.001;
-  const clicks = metronomeBeatEvents(state.metronomeBeatFrontier, horizonBeat, state.beatsPerBar);
-  for (const click of clicks) {
-    const time = beatToTime(click.beat, state.bpm, state.anchorBeat, state.anchorTime);
-    scheduleMetronomeClick(ctx, master, time, click.accent);
-  }
-  if (clicks.length > 0) {
-    state.metronomeBeatFrontier = horizonBeat;
   }
 }
 
@@ -460,7 +436,6 @@ function stopAudio(): void {
   }
   state.synths.clear();
   state.drums.clear();
-  state.metronomeBeatFrontier = 0;
 }
 
 /** Disconnect the graphs still ringing after the song end, if any. */

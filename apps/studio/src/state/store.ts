@@ -24,7 +24,7 @@ import {
   beatsPerBar as beatsPerBarOf,
   contentBeyondBars,
   duplicateTrack as duplicateProjectTrack,
-  findProjectLoopLimitProblem,
+  findProjectSoundingLimitProblem,
   moveTrack as moveProjectTrack,
   removeTrack as removeProjectTrack,
   renameTrack as renameProjectTrack,
@@ -438,10 +438,10 @@ export const useStore = create<StoreState>((set, get) => {
   /** Apply an immutable project change: bump updatedAt, push history, save. */
   const commitProject = (next: Project): boolean => {
     const current = get().project;
-    if (next.tracks !== current.tracks || next.timeSignature !== current.timeSignature) {
-      const problem = findProjectLoopLimitProblem(next);
+    if (next.tracks !== current.tracks || next.timeSignature !== current.timeSignature || next.lengthBars !== current.lengthBars) {
+      const problem = findProjectSoundingLimitProblem(next);
       if (problem) {
-        pushToast('変更するとループで鳴る音の数が上限を超えます。クリップを短くするか、音の数を減らしてください。', 'error');
+        pushToast(problem, 'error');
         return false;
       }
     }

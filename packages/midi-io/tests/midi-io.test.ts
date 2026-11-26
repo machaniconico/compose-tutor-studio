@@ -9,13 +9,13 @@ import {
 import type { MidiMessage } from '../src/smf.js';
 import { exportProjectToMidi, exportNotesToMidi } from '../src/export.js';
 import { parseMidi } from '../src/import.js';
-import { deserializeProject, expandClip, serializeProject, setLengthBars, validateProject } from '@cts/project-model';
+import { deserializeProject, expandClip, soundingEvents, serializeProject, setLengthBars, validateProject } from '@cts/project-model';
 import type { Clip, Project, NoteEvent } from '@cts/project-model';
 
-// Pass-through spy: MIDI export must expand clips through expandClip (US-007).
+// Pass-through spy: MIDI export must map the shared sounding events.
 vi.mock('@cts/project-model', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@cts/project-model')>();
-  return { ...actual, expandClip: vi.fn(actual.expandClip) };
+  return { ...actual, soundingEvents: vi.fn(actual.soundingEvents) };
 });
 
 // ---------------------------------------------------------------------------
@@ -401,7 +401,7 @@ describe('exportProjectToMidi', () => {
 // ---------------------------------------------------------------------------
 // Clip expansion is shared with live playback (US-007)
 // ---------------------------------------------------------------------------
-describe('exportProjectToMidi uses expandClip', () => {
+describe('exportProjectToMidi uses soundingEvents', () => {
   const loopClip: Clip = {
     id: 'loop',
     trackId: 'track-1',
@@ -443,12 +443,12 @@ describe('exportProjectToMidi uses expandClip', () => {
     updatedAt: '2026-01-01T00:00:00Z',
   };
 
-  it('expands every clip through expandClip', () => {
-    const spy = vi.mocked(expandClip);
+  it('maps the project through soundingEvents', () => {
+    const spy = vi.mocked(soundingEvents);
     spy.mockClear();
     exportProjectToMidi(loopProject);
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy.mock.calls[0]![0].id).toBe('loop');
+    expect(spy).toHaveBeenCalledWith(loopProject);
   });
 
   it('writes the same notes for a loop clip as expandClip returns', () => {
@@ -501,7 +501,7 @@ describe('exportProjectToMidi uses expandClip', () => {
   });
 
   it('keeps the v3 explicit loop period and the link after save and reload', () => {
-    const linked: Clip = { ...loopClip, id: 'linked', startBeat: 0, aliasOf: loopClip.id, notes: [] };
+    const linked: Clip = { ...loopClip, id: 'linked', startBeat: loopClip.startBeat + loopClip.lengthBeats, aliasOf: loopClip.id, notes: [] };
     const project = { ...loopProject, schemaVersion: 3, tracks: [{ ...loopProject.tracks[0]!, clips: [loopClip, linked] }] };
     const reloaded = deserializeProject(serializeProject(project));
     expect(reloaded.tracks[0]!.clips).toEqual([loopClip, linked]);
@@ -641,7 +641,7 @@ describe('exportProjectToMidi: long loops and mixed clip types (US-007)', () => 
     expect(parseMidi(bytes).tracks.flatMap((track) => track.notes)).toEqual([]);
   });
 
-  it('keeps a note cut at the clip end to less than one tick (3.9999 beats + 1 in a 4-beat clip)', () => {
+  it('omits a note whose onset rounds to the clip end tick', () => {
     const clip: Clip = {
       id: 'cut',
       trackId: 'keys',
@@ -651,15 +651,12 @@ describe('exportProjectToMidi: long loops and mixed clip types (US-007)', () => 
       loop: false,
       notes: [{ id: 'tail', pitch: 64, startBeat: 3.9999, durationBeats: 1, velocity: 100 }],
     };
-    // expandClip cuts it to 0.0001 beats; start and end round to the same tick.
-    expect(expandClip(clip, [clip]).notes).toHaveLength(1);
+    expect(expandClip(clip, [clip]).notes).toEqual([]);
     const bytes = exportProjectToMidi(
       projectWith([{ ...baseTrack, id: 'keys', type: 'instrument', clips: [clip] }]),
     );
     const notes = parseMidi(bytes).tracks.flatMap((track) => track.notes);
-    expect(notes).toHaveLength(1);
-    expect(notes[0]!.pitch).toBe(64);
-    expect(notes[0]!.durationBeats).toBeGreaterThan(0);
+    expect(notes).toEqual([]);
   });
 
   it('writes nothing that starts at or after the song end, like playback', () => {
@@ -813,5 +810,21 @@ describe('exportProjectToMidi: many tracks (US-010)', () => {
   it('refuses a song whose tracks do not fit the 16-bit track count of the header', () => {
     // 65,535 instrument tracks plus the tempo track would wrap the count to 0.
     expect(() => exportProjectToMidi(projectWithInstrumentTracks(65535))).toThrow(RangeError);
+  });
+
+  it('omits silent tracks when needed and keeps the channel of a sounding track at the end', () => {
+    const project = projectWithInstrumentTracks(1);
+    const sounding = project.tracks[0]!;
+    const silent = Array.from({ length: 65_534 }, (_, i) => ({
+      ...sounding,
+      id: `silent${i}`,
+      clips: [],
+    }));
+    project.tracks = [...silent, sounding];
+
+    const bytes = exportProjectToMidi(project);
+    expect(new DataView(bytes.buffer).getUint16(10)).toBe(2);
+    expect(noteOnStatusesPerTrack(bytes)).toEqual([[], [0x9f]]);
+    expect(parseMidi(bytes).tracks.map((track) => track.name)).toEqual([project.title, sounding.name]);
   });
 });

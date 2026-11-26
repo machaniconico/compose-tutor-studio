@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  beatsPerBar,
+  songEndBeat,
   createDefaultProject,
   createEmptyProject,
   setTimeSignature,
@@ -10,7 +10,7 @@ import {
 } from '@cts/project-model';
 import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
 import { buildScheduleEvents, type SchedulePayload } from '../src/audio/events';
-import { nextEventsInWindow, projectLengthBeats } from '../src/audio/scheduler';
+import { nextEventsInWindow } from '../src/audio/scheduler';
 import {
   encodeWav,
   floatToInt16,
@@ -156,7 +156,7 @@ describe('renderScheduleEvents (WAV) matches live playback', () => {
       nextEventsInWindow(
         buildScheduleEvents(project),
         0,
-        projectLengthBeats(project.lengthBars, beatsPerBar(project.timeSignature)),
+        songEndBeat(project),
         project.bpm,
         0,
         0,
@@ -227,7 +227,7 @@ describe('live playback, WAV and MIDI sound the same events', () => {
   });
   /** [beat, kind] of everything each path sounds, in beat order. */
   const live = (project: Project) =>
-    nextEventsInWindow(buildScheduleEvents(project), 0, projectLengthBeats(project.lengthBars, 4), project.bpm, 0, 0, null)
+    nextEventsInWindow(buildScheduleEvents(project), 0, songEndBeat(project), project.bpm, 0, 0, null)
       .map((e) => [e.beat, (e.payload as SchedulePayload).kind])
       .sort((a, b) => Number(a[0]) - Number(b[0]));
   const wav = (project: Project) =>
@@ -275,8 +275,8 @@ describe('live playback, WAV and MIDI sound the same events', () => {
     expect(midi(project)).toEqual([]);
   });
 
-  it('a note starting inside the song and ending past it sounds its full length on every path, and the WAV lasts until it ends', () => {
-    // 1 bar of 4/4: song end at beat 4. The 4-beat note at beat 3 ends at beat 7.
+  it('a note crossing the song end is cut on every path and WAV retains the tail', () => {
+    // 1 bar of 4/4: song end at beat 4. The 4-beat note at beat 3 is cut at beat 4.
     const project = songOf(1, [
       sounding('instrument', 'keys', [
         noteClip('cross', 'keys', 0, {
@@ -289,8 +289,9 @@ describe('live playback, WAV and MIDI sound the same events', () => {
       events.map((e) => (e.payload as Extract<SchedulePayload, { kind: 'note' }>).durationBeats);
     const spb = 60 / project.bpm;
 
-    expect(durations(renderScheduleEvents(project))).toEqual([4]);
-    expect(parseMidi(exportProjectToMidi(project)).tracks.flatMap((t) => t.notes).map((n) => n.durationBeats)).toEqual([4]);
-    expect(renderLengthSeconds(project)).toBeCloseTo(7 * spb + RENDER_TAIL_SECONDS, 9);
+    expect(durations(buildScheduleEvents(project))).toEqual([1]);
+    expect(durations(renderScheduleEvents(project))).toEqual([1]);
+    expect(parseMidi(exportProjectToMidi(project)).tracks.flatMap((t) => t.notes).map((n) => n.durationBeats)).toEqual([1]);
+    expect(renderLengthSeconds(project)).toBeCloseTo(4 * spb + RENDER_TAIL_SECONDS, 9);
   });
 });

@@ -192,16 +192,6 @@ export function nextEventsInWindow(
   return due;
 }
 
-/**
- * Total length of a project in beats.
- * Stop-at-end (loop off) uses this as the hard cutoff.
- */
-export function projectLengthBeats(lengthBars: number, beatsPerBar: number): number {
-  const bars = lengthBars > 0 ? lengthBars : 0;
-  const bpb = beatsPerBar > 0 ? beatsPerBar : 4;
-  return bars * bpb;
-}
-
 // ---------------------------------------------------------------------------
 // Scheduler class — owns the coarse timer; delegates math to the pure fns.
 // ---------------------------------------------------------------------------
@@ -221,6 +211,8 @@ export type EndFn = () => void;
 export type SchedulerOptions = {
   clock: ClockFn;
   fire: FireFn;
+  /** Observe the lookahead window, including windows without musical events. */
+  onWindow?: (fromBeat: number, toBeat: number) => void;
   onEnd?: EndFn;
   /** Override timer interval (ms); defaults to {@link TICK_MS}. */
   tickMs?: number;
@@ -236,6 +228,7 @@ export type SchedulerOptions = {
 export class Scheduler {
   private readonly clock: ClockFn;
   private readonly fire: FireFn;
+  private readonly onWindow?: SchedulerOptions['onWindow'];
   private readonly onEnd?: EndFn;
   private readonly tickMs: number;
   private readonly lookaheadS: number;
@@ -257,6 +250,7 @@ export class Scheduler {
   constructor(options: SchedulerOptions) {
     this.clock = options.clock;
     this.fire = options.fire;
+    this.onWindow = options.onWindow;
     this.onEnd = options.onEnd;
     this.tickMs = options.tickMs ?? TICK_MS;
     this.lookaheadS = options.lookaheadS ?? LOOKAHEAD_S;
@@ -338,6 +332,7 @@ export class Scheduler {
         this.loop,
       );
       if (due.length > 0) this.fire(due);
+      this.onWindow?.(this.scheduledBeat, effectiveHorizon);
       this.scheduledBeat = effectiveHorizon;
     }
 

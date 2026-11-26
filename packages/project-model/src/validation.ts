@@ -2,8 +2,8 @@
 // integrity checks (unique ids, clip.trackId references an existing track).
 
 import type { Project, TrackRole } from './types';
-import { clipLoopLimitProblem, MAX_LOOP_EVENTS } from './clipExpand';
-import { beatsPerBar } from './time';
+import { findProjectSoundingLimitProblem, MAX_SONG_BARS, MIN_LOOP_PERIOD_BEATS } from './sounding';
+import { beatTick } from './time';
 
 export type ValidationError = {
   /** Dot/bracket path to the offending value, e.g. `tracks[0].clips[1].startBeat`. */
@@ -60,8 +60,8 @@ export function validateProject(project: Project): ValidationResult {
     push('timeSignature[0]', `time signature numerator must be a positive integer (got ${project.timeSignature[0]})`);
   }
 
-  if (!Number.isInteger(project.lengthBars) || project.lengthBars <= 0) {
-    push('lengthBars', `lengthBars must be a positive integer (got ${project.lengthBars})`);
+  if (!Number.isInteger(project.lengthBars) || project.lengthBars <= 0 || project.lengthBars > MAX_SONG_BARS) {
+    push('lengthBars', `lengthBars must be an integer from 1 to ${MAX_SONG_BARS} (got ${project.lengthBars})`);
   }
 
   if (project.swing !== undefined && !inRange(project.swing, 0, 60)) {
@@ -93,6 +93,9 @@ export function validateProject(project: Project): ValidationResult {
     markId(track.id, `tracks[${ti}].id`);
     trackIds.add(track.id);
 
+    if (typeof track.name !== 'string') {
+      push(`tracks[${ti}].name`, 'track name must be a string');
+    }
     if (!inRange(track.volume, 0, 2)) {
       push(`tracks[${ti}].volume`, `volume must be between 0 and 2 (got ${track.volume})`);
     }
@@ -118,10 +121,12 @@ export function validateProject(project: Project): ValidationResult {
   });
 
   // --- Clips + nested events ---
-  const allClips = project.tracks.flatMap((track) => track.clips);
-  const bpb = beatsPerBar(project.timeSignature);
+  const allClips = new Map(project.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)));
   project.tracks.forEach((track, ti) => {
-    track.clips.forEach((clip, ci) => {
+    let previousEndTick = 0;
+    const sorted = track.clips.map((clip, index) => ({ clip, index }))
+      .sort((a, b) => a.clip.startBeat - b.clip.startBeat);
+    sorted.forEach(({ clip, index: ci }) => {
       const clipPath = `tracks[${ti}].clips[${ci}]`;
       markId(clip.id, `${clipPath}.id`);
 
@@ -140,12 +145,24 @@ export function validateProject(project: Project): ValidationResult {
           `clip content length must be > 0 (got ${clip.contentLengthBeats})`,
         );
       }
-      if (clipLoopLimitProblem(clip, allClips, bpb, track.type)) {
-        push(
-          `${clipPath}.contentLengthBeats`,
-          `the looping clip would sound more than ${MAX_LOOP_EVENTS} notes and drum hits`,
-        );
+      if (clip.loop && (clip.contentLengthBeats ?? clip.lengthBeats) < MIN_LOOP_PERIOD_BEATS) {
+        push(`${clipPath}.contentLengthBeats`, `loop period must be at least ${MIN_LOOP_PERIOD_BEATS} beats`);
       }
+      if (clip.aliasOf !== undefined) {
+        const source = allClips.get(clip.aliasOf);
+        if (!source || source.aliasOf !== undefined || source.type !== clip.type) {
+          push(`${clipPath}.aliasOf`, 'a link must point directly to a clip of the same type');
+        }
+        if (clip.notes?.length || clip.drumEvents?.length || clip.audioAssetId !== undefined) {
+          push(`${clipPath}.aliasOf`, 'a linked clip cannot own content');
+        }
+      }
+      const startTick = beatTick(clip.startBeat);
+      const endTick = beatTick(clip.startBeat + clip.lengthBeats);
+      if (startTick < previousEndTick && endTick > startTick) {
+        push(`${clipPath}.startBeat`, 'clips on the same track cannot overlap');
+      }
+      previousEndTick = Math.max(previousEndTick, endTick);
       if (clip.trackId !== track.id) {
         push(`${clipPath}.trackId`, `clip.trackId "${clip.trackId}" does not match containing track "${track.id}"`);
       } else if (!trackIds.has(clip.trackId)) {
@@ -207,10 +224,14 @@ export function validateProject(project: Project): ValidationResult {
       push(`${sectionPath}.startBar`, `section startBar must be a non-negative integer (got ${section.startBar})`);
     }
     if (!Number.isInteger(section.lengthBars) || section.lengthBars <= 0) {
-      push(`${sectionPath}.lengthBars`, `section lengthBars must be a positive integer (got ${section.lengthBars})`);
+      push(`${sectionPath}.lengthBars`, `section lengthBars must be an integer from 1 to ${MAX_SONG_BARS} (got ${section.lengthBars})`);
     }
   });
 
+  if (errors.length === 0) {
+    const problem = findProjectSoundingLimitProblem(project);
+    if (problem) push('tracks', problem);
+  }
   return { ok: errors.length === 0, valid: errors.length === 0, errors };
 }
 

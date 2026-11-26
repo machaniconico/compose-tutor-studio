@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../../state/store';
-import type { Clip, DrumEvent, DrumLane, Track } from '@cts/project-model';
-import { beatsPerBar, CLIP_EDGE_TOLERANCE_BEATS, resolveLinkSource, startsBeforeClipEnd } from '@cts/project-model';
+import type { Clip, DrumLane, Track } from '@cts/project-model';
+import { beatTick, beatsPerBar, clipEditSpan, editableDrumStepAt, resolveLinkSource, soundingEvents } from '@cts/project-model';
 import { DEFAULT_STEPS_PER_BAR } from '../../audio/events';
 import { stepGridPxPerBeat } from '../timeline';
 import { Playhead } from '../transport/TimelineRuler';
@@ -54,15 +54,26 @@ function findDrumClip(tracks: readonly Track[], selectedClipId: string | null): 
  * the grid when the clip spans multiple bars.
  */
 export function DrumGrid() {
-  const tracks = useStore((s) => s.project.tracks);
+  const project = useStore((s) => s.project);
+  const { tracks, timeSignature } = project;
   const selectedClipId = useStore((s) => s.editor.selectedClipId);
-  const timeSignature = useStore((s) => s.project.timeSignature);
   const positionBeat = useStore((s) => s.transport.positionBeat);
   const zoomX = useStore((s) => s.editor.zoomX);
 
   const [bar, setBar] = useState(0);
 
   const clip = findDrumClip(tracks, selectedClipId);
+  const byCell = useMemo(() => {
+    const result = new Map<string, number>();
+    if (!clip) return result;
+    for (const event of soundingEvents(project, { clipId: clip.id, includeMuted: true }).events) {
+      if (event.kind === 'drum') {
+        const tick = beatTick(event.unswungStartBeat - clip.startBeat);
+        result.set(`${event.lane}:${tick}`, event.sourceIndex);
+      }
+    }
+    return result;
+  }, [clip, project]);
   if (!clip) {
     return <div className="empty-hint">ドラムクリップがありません。</div>;
   }
@@ -79,7 +90,8 @@ export function DrumGrid() {
   const bpb = beatsPerBar(timeSignature);
   // A clip may end part-way through a bar (after a meter change): show that
   // bar too, with the steps past the clip end switched off.
-  const totalBars = Math.max(1, Math.ceil(clip.lengthBeats / bpb - 1e-9));
+  const { length } = clipEditSpan(project, clip);
+  const totalBars = Math.max(1, Math.ceil(beatTick(length) / beatTick(bpb)));
   const activeBar = Math.min(bar, totalBars - 1);
   const barOffset = activeBar * stepsPerBar;
   const beatsPerStep = bpb / stepsPerBar;
@@ -88,26 +100,6 @@ export function DrumGrid() {
   const stepPx = (stepAreaPpb * bpb) / stepsPerBar - STEP_GAP_PX;
   const labelOffsetBeats = (LANE_LABEL_PX + STEP_GAP_PX) / stepAreaPpb;
   const barStartBeat = clip.startBeat + activeBar * bpb;
-
-  // A looping clip only sounds its first repeat's steps, so a cell in a later
-  // repeat shows and edits the step that sounds there (as in the piano roll).
-  const period = clip.contentLengthBeats ?? clip.lengthBeats;
-  const looping = clip.loop && period > 0;
-  /** The saved step that sounds at this cell, or null when no step can. */
-  const soundingStep = (stepIndex: number): number | null => {
-    const beat = stepIndex * beatsPerStep;
-    if (!startsBeforeClipEnd(beat, clip.lengthBeats)) return null;
-    if (!looping || startsBeforeClipEnd(beat, period)) return stepIndex;
-    let local = beat % period;
-    // Float remainders a hair under the period mean "the next repeat's start".
-    if (!startsBeforeClipEnd(local, period)) local = 0;
-    const step = Math.round(local / beatsPerStep);
-    return Math.abs(step * beatsPerStep - local) < CLIP_EDGE_TOLERANCE_BEATS ? step : null;
-  };
-
-  const events = source.drumEvents ?? [];
-  const byKey = new Map<string, DrumEvent>();
-  for (const e of events) byKey.set(`${e.lane}:${e.stepIndex}`, e);
 
   return (
     <div className="drums">
@@ -156,16 +148,16 @@ export function DrumGrid() {
           <div className="drum-grid__row" key={lane}>
             <span className="drum-grid__lane-label">{label}</span>
             {Array.from({ length: stepsPerBar }, (_, stepInBar) => {
-              const sounding = soundingStep(barOffset + stepInBar);
-              const stepIndex = sounding ?? barOffset + stepInBar;
-              const event = sounding === null ? undefined : byKey.get(`${lane}:${stepIndex}`);
+              const beat = (barOffset + stepInBar) * beatsPerStep;
+              const stepIndex = editableDrumStepAt(project, clip, beat, beatsPerStep);
+              const sourceIndex = byCell.get(`${lane}:${beatTick(beat)}`);
+              const event = sourceIndex === undefined ? undefined : source.drumEvents?.[sourceIndex];
               const isOn = event !== undefined;
               const isBeatStart = stepInBar % 4 === 0;
-              const isOutside = sounding === null;
-              const outsideLabel =
-                !startsBeforeClipEnd((barOffset + stepInBar) * beatsPerStep, clip.lengthBeats)
-                  ? '(クリップの外)'
-                  : '(ループで鳴らない位置)';
+              const isOutside = stepIndex === null && !event;
+              const outsideLabel = beatTick(beat) >= beatTick(length)
+                ? '(クリップの外)'
+                : '(ループで鳴らない位置)';
               const shade = isOn ? velocityClass(event.velocity) : '';
               return (
                 <button
@@ -175,9 +167,10 @@ export function DrumGrid() {
                   aria-pressed={isOn}
                   aria-label={`${label} ステップ ${stepInBar + 1}${isOn ? ` 強さ ${event.velocity}` : ''}${isOutside ? outsideLabel : ''}`}
                   disabled={isOutside}
-                  onClick={() =>
-                    setDrumStepVelocity(source.id, lane, stepIndex, nextVelocity(event?.velocity ?? null))
-                  }
+                  onClick={() => {
+                    const target = event?.stepIndex ?? stepIndex;
+                    if (target !== null) setDrumStepVelocity(source.id, lane, target, nextVelocity(event?.velocity ?? null));
+                  }}
                 />
               );
             })}

@@ -64,7 +64,7 @@ export function nextClipStart(clips: readonly Clip[], clip: Clip): number | unde
 export function canSplitAt(project: Project, clipId: string | null, beat: number): boolean {
   if (!clipId) return false;
   const result = splitClip(project, clipId, beat);
-  return result.ok || (result.reason !== 'invalidBoundary' && result.reason !== 'missingClip');
+  return result.ok;
 }
 
 /**

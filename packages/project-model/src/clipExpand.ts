@@ -1,102 +1,39 @@
-// Clip expansion: what a clip actually sounds, in absolute project beats.
-//
-// The single source of truth for clip length, loop and link (aliasOf) rules.
-// Live playback, the WAV render and MIDI export all go through expandClip so
-// they cannot disagree. Pure and deterministic; never throws on bad links.
+import type { Clip, DrumLane, TrackType } from './types';
+import { beatTick, PPQ } from './time';
 
-import type { Clip, DrumEvent, DrumLane, NoteEvent, Project, TrackType } from './types';
-import { beatsPerBar as projectBeatsPerBar } from './time';
+export const DEFAULT_STEPS_PER_BAR = 16;
+export const MIN_LOOP_PERIOD_BEATS = 1 / 64;
 
-/** A note to sound, at an absolute project beat. */
 export type ExpandedNote = {
   pitch: number;
   startBeat: number;
   durationBeats: number;
   velocity: number;
-  /** Set when the clip end (or the loop period) cut the note short. */
   cut?: true;
 };
 
-/** A drum hit to sound, at an absolute project beat. */
-export type ExpandedDrumHit = {
-  lane: DrumLane;
-  beat: number;
-  velocity: number;
-};
+export type ExpandedDrumHit = { lane: DrumLane; beat: number; velocity: number };
 
-export type ExpandedContent = {
-  notes: ExpandedNote[];
-  drumHits: ExpandedDrumHit[];
-  /** Beginner-friendly Japanese reasons why something could not sound. */
-  problems: string[];
-  /**
-   * Set when a loop would sound more than `MAX_LOOP_EVENTS` and was cut short.
-   * validateProject rejects such a clip, so a valid project never sets it.
-   */
-  overLimit?: true;
-};
+type SourcePosition = { sourceIndex: number; repeat: number; unswungStartBeat: number };
+export type ClipOnset = SourcePosition & (
+  | (ExpandedNote & { kind: 'note' })
+  | { kind: 'drum'; lane: DrumLane; startBeat: number; velocity: number }
+);
 
-/** Steps per bar of a drum clip that does not say. */
-const DEFAULT_STEPS_PER_BAR = 16;
-
-/**
- * Upper bound on the notes and drum hits one looping clip may sound, so a tiny
- * period cannot stall playback or fill memory. Part of the expansion rule
- * itself, so live playback, WAV and MIDI all stop at the same place; only whole
- * repeats are kept and the lost range is reported in `problems`.
- */
-export const MAX_LOOP_EVENTS = 100_000;
-
-/**
- * Tolerance for "starts at or after the end" checks. Fractional periods such
- * as 0.3 add up to 0.9999999999999999 instead of 1; content that close to the
- * end is treated as starting at the end, so it is dropped on every path.
- */
-export const CLIP_EDGE_TOLERANCE_BEATS = 1e-9;
-
-/** Keep the rounding tolerance proportional for spans shorter than one beat. */
-function edgeTolerance(span: number): number {
-  return CLIP_EDGE_TOLERANCE_BEATS * Math.min(1, span);
-}
-
-export function startsBeforeClipEnd(start: number, end: number): boolean {
-  return end > 0 && start < end - edgeTolerance(end);
-}
-
-/** End of the first audible pass, before any repeats start. */
-export function clipFirstPassEnd(clip: Clip): number {
-  const period = clip.contentLengthBeats ?? clip.lengthBeats;
-  return clip.loop && period > 0 ? Math.min(clip.lengthBeats, period) : clip.lengthBeats;
-}
-
-/** Count a source hit's first pass and repeats inside the clip and song. */
-export function drumHitRepeatCount(clip: Clip, localBeat: number, availableBeats: number): number {
-  const end = Math.min(clip.lengthBeats, availableBeats);
-  const period = clip.contentLengthBeats ?? clip.lengthBeats;
-  if (!clip.loop || !(period > 0)) return Number(startsBeforeClipEnd(localBeat, end));
-  if (!startsBeforeClipEnd(localBeat, period)) return 0;
-  const completeRepeats = Math.floor(end / period);
-  const partialEnd = end - completeRepeats * period - edgeTolerance(clipFirstPassEnd(clip));
-  return end > 0 ? completeRepeats + Number(localBeat < partialEnd) : 0;
-}
-
-/** What a track that sounds neither notes nor drum hits is called in messages. */
 const SILENT_TRACK_LABEL: Record<Exclude<TrackType, 'instrument' | 'drum'>, string> = {
   audio: 'オーディオのトラック',
   bus: 'まとめ用のトラック(バス)',
   master: 'マスタートラック',
 };
 
-/** A beat count for a message: at most 3 decimals, no trailing zeros. */
-function formatBeats(beats: number): string {
-  return String(Number(beats.toFixed(3)));
-}
-
 /**
  * Follow `aliasOf` links to the clip that owns the content. Returns the
  * problem text instead when the chain is cut or loops back on itself.
  */
-export function resolveLinkSource(clip: Clip, allClips: readonly Clip[]): Clip | string {
+export function resolveLinkSource(clip: Clip, allClips: readonly Clip[] | ReadonlyMap<string, Clip>): Clip | string {
+  const find = (id: string): Clip | undefined => 'get' in allClips
+    ? allClips.get(id)
+    : allClips.find((candidate) => candidate.id === id);
   const visited = new Set<string>([clip.id]);
   let current = clip;
   while (current.aliasOf !== undefined) {
@@ -104,7 +41,7 @@ export function resolveLinkSource(clip: Clip, allClips: readonly Clip[]): Clip |
     if (visited.has(targetId)) {
       return 'リンク(別のクリップと中身を共有する設定)が循環していて、たどると元のクリップに戻ってしまうため、このクリップは鳴りません。';
     }
-    const target = allClips.find((candidate) => candidate.id === targetId);
+    const target = find(targetId);
     if (target === undefined) {
       return 'リンク(別のクリップと中身を共有する設定)の相手のクリップが見つからないため、このクリップは鳴りません。リンク先が削除された可能性があります。';
     }
@@ -114,175 +51,167 @@ export function resolveLinkSource(clip: Clip, allClips: readonly Clip[]): Clip |
   return current;
 }
 
-/**
- * Expand a clip into the notes and drum hits it sounds, in absolute beats.
- *
- * Rules:
- * 1. Content starting at or after `lengthBeats` is dropped; notes crossing the
- *    clip end are cut to end there.
- * 2. With `loop`, the content repeats every `contentLengthBeats ?? lengthBeats`
- *    beats (each repeat keeps only content inside the period). A period of 0 or
- *    less does not repeat.
- * 3. With `aliasOf`, the linked clip's notes and drum hits sound at this clip's
- *    `startBeat`, within this clip's length and loop settings. A missing or
- *    circular link sounds nothing and reports a problem.
- * 4. With `trackType`, only what that track can sound is kept: a drum track
- *    sounds drum hits, an instrument track sounds notes, and audio, bus and
- *    master tracks sound neither. The rest is reported.
- *
- * Content starting within the edge tolerance of an end counts as starting at
- * it, and a note ending within it of an end is not cut. A loop keeps at most
- * `MAX_LOOP_EVENTS` sounds. The final partial repeat counts only its audible events.
- * Whole repeats only; the silent rest is reported. Drum steps become beats with
- * `beatsPerBar` (quarter-note beats per bar).
- */
-export function expandClip(
+export function clipSpan(clip: Clip, songEnd = Infinity) {
+  const end = Math.min(clip.startBeat + clip.lengthBeats, songEnd);
+  const period = clip.loop ? clip.contentLengthBeats ?? clip.lengthBeats : Infinity;
+  return { end, period, firstEnd: Math.min(end, clip.startBeat + period) };
+}
+
+function startsBeforeClipEnd(start: number, end: number): boolean {
+  return beatTick(start) < beatTick(end);
+}
+
+function placeOnset(
   clip: Clip,
-  allClips: readonly Clip[],
-  beatsPerBar = 4,
+  span: ReturnType<typeof clipSpan>,
+  localBeat: number,
+  repeat: number,
+  swing: number,
+) {
+  const offset = repeat === 0 ? 0 : repeat * span.period;
+  const start = clip.startBeat + (offset + localBeat);
+  const repeatEnd = Math.min(span.end, clip.startBeat + (offset + span.period));
+  if (!startsBeforeClipEnd(start, repeatEnd)) return undefined;
+  const step = Math.round(start * 4);
+  const delay = swing > 0 && step % 2 === 1 && beatTick(start) === beatTick(step / 4)
+    ? swing / 400
+    : 0;
+  const startBeat = start + delay;
+  if (!startsBeforeClipEnd(startBeat, repeatEnd)) return undefined;
+  return { startBeat, unswungStartBeat: start, end: repeatEnd };
+}
+
+/** How many passes can contain an onset, before swing is applied. */
+function repeatCount(clip: Clip, span: ReturnType<typeof clipSpan>, localBeat: number): number {
+  if (!startsBeforeClipEnd(localBeat, span.period) || !startsBeforeClipEnd(clip.startBeat + localBeat, span.end)) return 0;
+  if (!Number.isFinite(span.period) || span.period < MIN_LOOP_PERIOD_BEATS) return 1;
+
+  // Rounding an onset to the end tick begins half a tick before the end tick.
+  const endThreshold = (beatTick(span.end) - 0.5) / PPQ;
+  return Math.max(1, Math.ceil((endThreshold - clip.startBeat - localBeat) / span.period));
+}
+
+export function renderClip(
+  clip: Clip,
+  source: Clip,
+  bpb: number,
   trackType?: TrackType,
-): ExpandedContent {
-  return expandClipContent(clip, allClips, beatsPerBar, trackType, true);
-}
+  songEnd = Infinity,
+  swing = 0,
+  emit?: (event: ClipOnset) => void,
+): { count: number; problems: string[] } {
+  const span = clipSpan(clip, songEnd);
+  const problems: string[] = [];
+  const beatsPerStep = bpb / (source.stepsPerBar && source.stepsPerBar > 0 ? source.stepsPerBar : DEFAULT_STEPS_PER_BAR);
+  let count = 0;
+  let rejectedNotes = 0;
+  let rejectedDrums = 0;
 
-/** Check the playback limit without allocating every repeated note or hit. */
-export function clipLoopLimitProblem(
-  clip: Clip,
-  allClips: readonly Clip[],
-  beatsPerBar: number,
-  trackType: TrackType,
-): string | undefined {
-  if (!clip.loop) return undefined;
-  const result = expandClipContent(clip, allClips, beatsPerBar, trackType, false);
-  return result.overLimit ? result.problems.at(-1) : undefined;
-}
+  // Visit events by repeat, preserving the stored order within a pass.
+  const placements: Array<{ repeats: number; place: (repeat: number) => void }> = [];
+  let totalRepeats = 0;
+  const prepare = (repeats: number, place: (repeat: number) => void): void => {
+    count += repeats;
+    if (!emit) return;
+    placements.push({ repeats, place });
+    totalRepeats = Math.max(totalRepeats, repeats);
+  };
 
-/** Find the first loop that would be cut short in this project. */
-export function findProjectLoopLimitProblem(project: Project): string | undefined {
-  const allClips = project.tracks.flatMap((track) => track.clips);
-  const beatsPerBar = projectBeatsPerBar(project.timeSignature);
-  for (const track of project.tracks) {
-    for (const clip of track.clips) {
-      const problem = clipLoopLimitProblem(clip, allClips, beatsPerBar, track.type);
-      if (problem) return problem;
+  source.notes?.forEach((note, sourceIndex) => {
+    const repeats = repeatCount(clip, span, note.startBeat);
+    if (repeats === 0) return;
+    if (trackType !== undefined && trackType !== 'instrument') {
+      rejectedNotes++;
+      return;
     }
+    prepare(repeats, (repeat) => {
+      const timing = placeOnset(clip, span, note.startBeat, repeat, swing);
+      if (!timing) return;
+      const { startBeat, unswungStartBeat, end } = timing;
+      const naturalEnd = startBeat + note.durationBeats;
+      const cut = beatTick(naturalEnd) > beatTick(end) || (end === songEnd && naturalEnd > end);
+      const durationBeats = cut ? end - startBeat : note.durationBeats;
+      emit?.({
+        kind: 'note', sourceIndex, repeat, startBeat, unswungStartBeat, durationBeats,
+        pitch: note.pitch, velocity: note.velocity, ...(cut ? { cut: true } : {}),
+      });
+    });
+  });
+
+  source.drumEvents?.forEach((hit, sourceIndex) => {
+    const localBeat = hit.stepIndex * beatsPerStep;
+    const repeats = repeatCount(clip, span, localBeat);
+    if (repeats === 0) return;
+    if (trackType !== undefined && trackType !== 'drum') {
+      rejectedDrums++;
+      return;
+    }
+    prepare(repeats, (repeat) => {
+      const timing = placeOnset(clip, span, localBeat, repeat, swing);
+      if (!timing) return;
+      emit?.({
+        kind: 'drum', sourceIndex, repeat, startBeat: timing.startBeat,
+        unswungStartBeat: timing.unswungStartBeat, lane: hit.lane, velocity: hit.velocity,
+      });
+    });
+  });
+
+  if (trackType === 'drum' && rejectedNotes > 0) {
+    problems.push(`ドラムのトラックでは音符は鳴らないため、このクリップの音符 ${rejectedNotes} 個は鳴りません。音符は楽器のトラックのクリップに置きましょう。`);
+  } else if (trackType === 'instrument' && rejectedDrums > 0) {
+    problems.push(`楽器のトラックではドラムの音は鳴らないため、このクリップのドラムの音 ${rejectedDrums} 個は鳴りません。ドラムの音はドラムのトラックのクリップに置きましょう。`);
+  } else if (trackType && trackType !== 'drum' && trackType !== 'instrument' && rejectedNotes + rejectedDrums > 0) {
+    problems.push(`${SILENT_TRACK_LABEL[trackType]}では音符もドラムの音も鳴らないため、このクリップの音 ${rejectedNotes + rejectedDrums} 個は鳴りません。音符は楽器のトラック、ドラムの音はドラムのトラックのクリップに置きましょう。`);
   }
-  return undefined;
+
+  for (let repeat = 0; repeat < totalRepeats; repeat++) {
+    let keep = 0;
+    for (const placement of placements) {
+      if (repeat >= placement.repeats) continue;
+      placement.place(repeat);
+      placements[keep++] = placement;
+    }
+    placements.length = keep;
+  }
+  return { count, problems };
 }
 
-function expandClipContent(
-  clip: Clip,
-  allClips: readonly Clip[],
-  beatsPerBar: number,
-  trackType: TrackType | undefined,
-  materialize: boolean,
-): ExpandedContent {
-  const result: ExpandedContent = { notes: [], drumHits: [], problems: [] };
+/** Single-clip expansion for edits that work without a project timeline. */
+export function expandClip(clip: Clip, allClips: readonly Clip[], bpb = 4, trackType?: TrackType) {
+  const notes: ExpandedNote[] = [];
+  const drumHits: ExpandedDrumHit[] = [];
   const source = resolveLinkSource(clip, allClips);
-  if (typeof source === 'string') {
-    result.problems.push(source);
-    return result;
-  }
-
-  const clipEnd = clip.lengthBeats;
-  if (!(clipEnd > 0)) return result;
-
-  const looping = clip.loop && (clip.contentLengthBeats ?? clip.lengthBeats) > 0;
-  const period = looping ? (clip.contentLengthBeats ?? clip.lengthBeats) : 0;
-  // Within one repeat, content must start before this local end.
-  const localEnd = looping ? period : clipEnd;
-
-  const stepsPerBar =
-    source.stepsPerBar !== undefined && source.stepsPerBar > 0 ? source.stepsPerBar : DEFAULT_STEPS_PER_BAR;
-  const beatsPerStep = (beatsPerBar > 0 ? beatsPerBar : 4) / stepsPerBar;
-  const inRepeat = (local: number): boolean => startsBeforeClipEnd(local, localEnd);
-
-  let notes: NoteEvent[] = (source.notes ?? []).filter((note) => inRepeat(note.startBeat));
-  let drums: DrumEvent[] = (source.drumEvents ?? []).filter((drum) => inRepeat(drum.stepIndex * beatsPerStep));
-  if (trackType === 'drum' && notes.length > 0) {
-    result.problems.push(
-      `ドラムのトラックでは音符は鳴らないため、このクリップの音符 ${notes.length} 個は鳴りません。` +
-        '音符は楽器のトラックのクリップに置きましょう。',
-    );
-    notes = [];
-  } else if (trackType === 'instrument' && drums.length > 0) {
-    result.problems.push(
-      `楽器のトラックではドラムの音は鳴らないため、このクリップのドラムの音 ${drums.length} 個は鳴りません。` +
-        'ドラムの音はドラムのトラックのクリップに置きましょう。',
-    );
-    drums = [];
-  } else if (trackType !== undefined && trackType !== 'drum' && trackType !== 'instrument') {
-    if (notes.length + drums.length > 0) {
-      result.problems.push(
-        `${SILENT_TRACK_LABEL[trackType]}では音符もドラムの音も鳴らないため、このクリップの音 ${notes.length + drums.length} 個は鳴りません。` +
-          '音符は楽器のトラック、ドラムの音はドラムのトラックのクリップに置きましょう。',
-      );
+  if (typeof source === 'string') return { notes, drumHits, problems: [source] };
+  const { problems } = renderClip(clip, source, bpb, trackType, Infinity, 0, (event) => {
+    if (event.kind === 'drum') {
+      drumHits.push({ lane: event.lane, beat: event.startBeat, velocity: event.velocity });
+    } else {
+      const { pitch, startBeat, durationBeats, velocity, cut } = event;
+      notes.push({ pitch, startBeat, durationBeats, velocity, ...(cut ? { cut } : {}) });
     }
-    notes = [];
-    drums = [];
+  });
+  return { notes, drumHits, problems };
+}
+
+/** Resolve an empty or filled drum cell to its first-pass grid step. */
+export function drumSourceStep(clip: Clip, localBeat: number, stepBeats: number, songEnd: number, swing: number): number | null {
+  const span = clipSpan(clip, songEnd);
+  const repeat = Number.isFinite(span.period) && span.period >= MIN_LOOP_PERIOD_BEATS
+    ? Math.floor(localBeat / span.period)
+    : 0;
+  // At a fractional seam the integer tick may belong to the next repeat.
+  for (const pass of [repeat, repeat + 1]) {
+    if (pass > 0 && (!Number.isFinite(span.period) || span.period < MIN_LOOP_PERIOD_BEATS)) break;
+    const offset = pass === 0 ? 0 : pass * span.period;
+    const step = Math.round((localBeat - offset) / stepBeats);
+    if (step < 0) continue;
+    const timing = placeOnset(clip, span, step * stepBeats, pass, swing);
+    if (timing && beatTick(timing.unswungStartBeat - clip.startBeat) === beatTick(localBeat)) return step;
   }
-  const eventsPerRepeat = notes.length + drums.length;
-  if (eventsPerRepeat === 0) return result;
+  return null;
+}
 
-  // Once a repeat's content is known, all complete repeats have the same
-  // event count. Adding a large offset before testing boundaries can round
-  // away the difference between a start and the end of a very short period.
-  const completeRepeats = looping ? Math.floor(clipEnd / period) : 1;
-  const keptRepeats = looping
-    ? Math.min(completeRepeats, Math.floor(MAX_LOOP_EVENTS / eventsPerRepeat))
-    : 1;
-  const partialOffset = keptRepeats * period;
-  const partialLength = looping && keptRepeats === completeRepeats ? clipEnd - partialOffset : 0;
-  const partialEnd = partialLength - edgeTolerance(clipFirstPassEnd(clip));
-  const partialNotes = partialEnd > 0 ? notes.filter((note) => note.startBeat < partialEnd) : [];
-  const partialDrums = partialEnd > 0
-    ? drums.filter((drum) => drum.stepIndex * beatsPerStep < partialEnd)
-    : [];
-  const partialFits =
-    keptRepeats * eventsPerRepeat + partialNotes.length + partialDrums.length <= MAX_LOOP_EVENTS;
-
-  if (materialize) {
-    const appendRepeat = (offset: number, end: number, repeatNotes: NoteEvent[], repeatDrums: DrumEvent[]) => {
-      for (const note of repeatNotes) {
-        // A note whose end is within the rounding tolerance keeps its duration.
-        const cut = note.startBeat + note.durationBeats > end + edgeTolerance(end);
-        result.notes.push({
-          pitch: note.pitch,
-          startBeat: clip.startBeat + (offset + note.startBeat),
-          durationBeats: cut ? end - note.startBeat : note.durationBeats,
-          velocity: note.velocity,
-          ...(cut ? { cut: true as const } : {}),
-        });
-      }
-      for (const drum of repeatDrums) {
-        result.drumHits.push({
-          lane: drum.lane,
-          beat: clip.startBeat + (offset + drum.stepIndex * beatsPerStep),
-          velocity: drum.velocity,
-        });
-      }
-    };
-
-    for (let repeat = 0; repeat < keptRepeats; repeat++) {
-      appendRepeat(repeat * period, localEnd, notes, drums);
-    }
-    if (partialFits && partialEnd > 0) {
-      appendRepeat(partialOffset, partialLength, partialNotes, partialDrums);
-    }
-  }
-
-  if (looping && (keptRepeats < completeRepeats || !partialFits)) {
-    result.overLimit = true;
-    const soundedBeats = partialOffset;
-    result.problems.push(
-      `ループで鳴らす音が上限の ${MAX_LOOP_EVENTS} 個を超えます。` +
-        (keptRepeats === 0
-          ? `最初の 1 回分も上限を超えるため、このクリップの ${formatBeats(clipEnd)} 拍は鳴りません。`
-          : `クリップの先頭から ${formatBeats(soundedBeats)} 拍までは鳴りますが、` +
-            `そこからクリップの終わりまでの ${formatBeats(clipEnd - soundedBeats)} 拍は鳴りません。`) +
-        'クリップを短くするか、音の数を減らしましょう。',
-    );
-  }
-
-  return result;
+/** Count drum placements for meter-change previews, without materializing repeats. */
+export function drumHitRepeatCount(clip: Clip, localBeat: number, availableBeats: number): number {
+  return repeatCount(clip, clipSpan(clip, clip.startBeat + availableBeats), localBeat);
 }

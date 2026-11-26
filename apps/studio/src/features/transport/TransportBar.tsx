@@ -7,7 +7,7 @@ import {
 } from '../../state/store';
 import { findShortcut, type ShortcutAction } from '../../state/keymap';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
-import { beatsPerBar as beatsPerBarOf, tapTempo } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf, MAX_SONG_BARS as MAX_LENGTH_BARS, tapTempo } from '@cts/project-model';
 import { pushToast } from '../../state/tutorialBridge';
 import { formatPosition, keyboardSeekBeat } from '../timeline';
 import { initAudioBridge, restartAt } from '../../audio/playback';
@@ -36,7 +36,7 @@ export const TIME_SIGNATURES: { value: string; signature: [number, number]; labe
 
 /** Song length limits for the bar-count input. */
 export const MIN_LENGTH_BARS = 4;
-export const MAX_LENGTH_BARS = 64;
+export { MAX_LENGTH_BARS };
 
 const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'major', label: 'メジャー' },

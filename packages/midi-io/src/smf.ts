@@ -3,7 +3,7 @@
  * Format 1 (multi-track synchronous), no external dependencies.
  */
 
-export const PPQ = 480;
+export { PPQ } from '@cts/project-model';
 
 /**
  * Encode a non-negative integer as a MIDI variable-length quantity (VLQ).
@@ -99,6 +99,11 @@ export function buildHeaderChunk(
 
 /** Concatenate multiple Uint8Array chunks into one. */
 export function concatChunks(...chunks: Uint8Array[]): Uint8Array {
+  return joinChunks(chunks);
+}
+
+/** Concatenate a list of chunks without passing each one as an argument. */
+export function joinChunks(chunks: readonly Uint8Array[]): Uint8Array {
   const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
   const result = new Uint8Array(totalLength);
   let offset = 0;

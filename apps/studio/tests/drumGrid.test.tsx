@@ -29,6 +29,7 @@ describe('DrumGrid with a clip that ends part-way through a bar', () => {
     act(() => {
       useStore.getState().applyProjectChange((project) => ({
         ...project,
+        lengthBars: 9,
         tracks: project.tracks.map((t) =>
           t.type === 'drum' ? { ...t, clips: t.clips.map((c) => ({ ...c, lengthBeats: 33 })) } : t,
         ),

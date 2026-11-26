@@ -10,8 +10,8 @@
  * スケール外音を一律に誤りと断定せず、比率（minRatio）ベースで判定する。
  */
 
-import type { ChordEvent, Clip, Project } from '@cts/project-model';
-import { beatsPerBar, drumBeatToStep, drumStepsPerBar, expandClip, resolveLinkSource } from '@cts/project-model';
+import type { ChordEvent, Project, SoundingEvent } from '@cts/project-model';
+import { beatsPerBar, drumBeatToStep, drumStepsPerBar, soundingEvents } from '@cts/project-model';
 import { isInScale, parseChord, pitchClassOf } from '@cts/theory-engine';
 import type { CheckCondition, EditEvent, Lesson, LessonStep } from './dsl.js';
 // NOTE: goals.ts とは相互import（goals → checker: 音楽的判定の委譲 /
@@ -157,16 +157,6 @@ function beatsPerBarOf(project: Project): number {
   return beatsPerBar(project.timeSignature);
 }
 
-/**
- * クリップの中身(ノート・ドラム)の持ち主。リンク(aliasOf)クリップなら参照先。
- * 参照切れや循環は再生時と同じく中身なしとして扱う。
- */
-export function clipContentSource(project: Project, clip: Clip): Clip | undefined {
-  if (clip.aliasOf === undefined) return clip;
-  const source = resolveLinkSource(clip, project.tracks.flatMap((t) => t.clips));
-  return typeof source === 'string' ? undefined : source;
-}
-
 /** トラック名で集めた絶対拍位置つきノート */
 type AbsoluteNote = {
   pitch: number;
@@ -177,9 +167,9 @@ type AbsoluteNote = {
 function collectTrackNotes(project: Project, trackName: string): AbsoluteNote[] {
   const track = resolveTrackByPredicateName(project, trackName);
   if (!track) return [];
-  const allClips = project.tracks.flatMap((t) => t.clips);
-  const bpb = beatsPerBarOf(project);
-  return track.clips.flatMap((clip) => expandClip(clip, allClips, bpb, track.type).notes);
+  return soundingEvents(project).events.filter(
+    (event): event is Extract<SoundingEvent, { kind: 'note' }> => event.kind === 'note' && event.trackId === track.id,
+  );
 }
 
 /** 指定拍で鳴っているコードイベントを返す（区間 [start, start+duration)） */
@@ -462,38 +452,42 @@ export function analyzeDrumPattern(
   let best: { missing: DrumPatternRequirement[]; requiredSteps: number; stepsPerBar: number } | null =
     null;
 
-  for (const track of project.tracks) {
-    if (track.type !== 'drum') continue;
-    for (const linkOrClip of track.clips) {
-      // リンク(aliasOf)クリップは参照先の中身で判定する
-      const clip = clipContentSource(project, linkOrClip);
-      if (!clip?.drumEvents?.length) continue;
-      const stepsPerBar = clip.stepsPerBar ?? 16;
-      const requirements = drumPatternRequirements(patternType, stepsPerBar, bpb);
-      const requiredSteps = countMissingSteps(requirements);
+  const soundingByClip = new Map<string, Array<Extract<SoundingEvent, { kind: 'drum' }>>>();
+  for (const event of soundingEvents(project).events) {
+    if (event.kind !== 'drum') continue;
+    const hits = soundingByClip.get(event.clipId);
+    if (hits) hits.push(event);
+    else soundingByClip.set(event.clipId, [event]);
+  }
+  const clips = new Map(project.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)));
+  for (const [clipId, hits] of soundingByClip) {
+    const clip = clips.get(clipId);
+    const source = clips.get(hits[0]!.sourceClipId);
+    const stepsPerBar = source?.stepsPerBar ?? 16;
+    const requirements = drumPatternRequirements(patternType, stepsPerBar, bpb);
+    const requiredSteps = countMissingSteps(requirements);
+    const barSteps = new Map<number, Set<string>>();
+    for (const event of hits) {
+      const local = event.unswungStartBeat - (clip?.startBeat ?? 0);
+      const stepIndex = drumBeatToStep(local, stepsPerBar, bpb);
+      const barIndex = Math.floor(stepIndex / stepsPerBar);
+      const stepInBar = stepIndex % stepsPerBar;
+      const set = barSteps.get(barIndex) ?? new Set<string>();
+      set.add(`${event.lane}:${stepInBar}`);
+      barSteps.set(barIndex, set);
+    }
 
-      // 小節ごとにアクティブなステップ集合を作る（複数小節クリップ対応）
-      const barSteps = new Map<number, Set<string>>();
-      for (const ev of clip.drumEvents) {
-        const barIndex = Math.floor(ev.stepIndex / stepsPerBar);
-        const stepInBar = ev.stepIndex - barIndex * stepsPerBar;
-        const set = barSteps.get(barIndex) ?? new Set<string>();
-        set.add(`${ev.lane}:${stepInBar}`);
-        barSteps.set(barIndex, set);
+    for (const steps of barSteps.values()) {
+      const missing: DrumPatternRequirement[] = [];
+      for (const req of requirements) {
+        const lacking = req.stepIndices.filter((s) => !steps.has(`${req.lane}:${s}`));
+        if (lacking.length > 0) missing.push({ lane: req.lane, stepIndices: lacking });
       }
-
-      for (const steps of barSteps.values()) {
-        const missing: DrumPatternRequirement[] = [];
-        for (const req of requirements) {
-          const lacking = req.stepIndices.filter((s) => !steps.has(`${req.lane}:${s}`));
-          if (lacking.length > 0) missing.push({ lane: req.lane, stepIndices: lacking });
-        }
-        if (missing.length === 0) {
-          return { satisfied: true, missing: [], requiredSteps, stepsPerBar, beatsPerBar: bpb };
-        }
-        if (best === null || countMissingSteps(missing) < countMissingSteps(best.missing)) {
-          best = { missing, requiredSteps, stepsPerBar };
-        }
+      if (missing.length === 0) {
+        return { satisfied: true, missing: [], requiredSteps, stepsPerBar, beatsPerBar: bpb };
+      }
+      if (best === null || countMissingSteps(missing) < countMissingSteps(best.missing)) {
+        best = { missing, requiredSteps, stepsPerBar };
       }
     }
   }

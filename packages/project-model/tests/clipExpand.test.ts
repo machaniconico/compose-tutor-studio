@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { expandClip, MAX_LOOP_EVENTS } from '../src/clipExpand';
+import { expandClip } from '../src/clipExpand';
+import { PPQ, soundingEvents, storedEventAt, validateProject } from '../src/index';
 import type { Clip, NoteEvent } from '../src/types';
+import { makeProject, makeTrack } from './acceptance/helpers';
 
 function note(id: string, startBeat: number, durationBeats: number, pitch = 60): NoteEvent {
   return { id, pitch, startBeat, durationBeats, velocity: 100 };
@@ -20,11 +22,9 @@ function midiClip(overrides: Partial<Clip> = {}): Clip {
 }
 
 describe('expandClip: clip length', () => {
-  it.each([false, true])('sounds a beat-zero note in a 1e-9 beat clip (loop: %s)', (loop) => {
+  it.each([false, true])('drops a beat-zero note when the clip end rounds to the same tick (loop: %s)', (loop) => {
     const clip = midiClip({ lengthBeats: 1e-9, loop, notes: [note('n', 0, 1)] });
-    expect(expandClip(clip, [clip]).notes).toEqual([
-      { pitch: 60, startBeat: 0, durationBeats: 1e-9, velocity: 100, cut: true },
-    ]);
+    expect(expandClip(clip, [clip]).notes).toEqual([]);
   });
 
   it('drops notes starting at or after the clip end and cuts notes crossing it', () => {
@@ -103,36 +103,25 @@ describe('expandClip: loop', () => {
     expect(expandClip(clip, [clip], 4).drumHits.map((h) => h.beat)).toEqual([0, 1, 2, 3]);
   });
 
-  it('does not repeat, throw or hang when the period is 0 or negative', () => {
+  it('returns no events when the period is 0 or negative', () => {
     for (const period of [0, -2]) {
       const clip = midiClip({ lengthBeats: 4, contentLengthBeats: period, loop: true, notes: [note('n', 1, 1)] });
       const result = expandClip(clip, [clip]);
-      expect(result.notes.map((n) => n.startBeat)).toEqual([1]);
+      expect(result.notes).toEqual([]);
     }
   });
 });
 
 describe('expandClip: loop limits and rounding', () => {
-  it('keeps notes just inside the period in every complete repeat', () => {
+  it('emits no notes when the period rounds to the zero tick', () => {
     const period = 2 ** -29;
-    const start = (period - 1e-9) * (1 - Number.EPSILON);
     const clip = midiClip({
       lengthBeats: period * 8,
       contentLengthBeats: period,
       loop: true,
-      notes: [note('edge', start, 1e-10)],
+      notes: [note('edge', period / 2, 1e-10)],
     });
-
-    const expanded = expandClip(clip, [clip]);
-    expect(expanded.notes.map((event) => event.startBeat)).toEqual(
-      Array.from({ length: 8 }, (_, repeat) => repeat * period + start),
-    );
-    expect(expanded.problems).toEqual([]);
-
-    const longClip = { ...clip, lengthBeats: 128 };
-    const capped = expandClip(longClip, [longClip]);
-    expect(capped.notes).toHaveLength(MAX_LOOP_EVENTS);
-    expect(capped.overLimit).toBe(true);
+    expect(expandClip(clip, [clip])).toEqual({ notes: [], drumHits: [], problems: [] });
   });
 
   it('sounds every repeat of a valid short loop (128 beats, 1/64-beat period)', () => {
@@ -144,28 +133,12 @@ describe('expandClip: loop limits and rounding', () => {
     expect(result.problems).toEqual([]);
   });
 
-  it('stops at the sound limit on whole repeats and reports exactly the range that is lost', () => {
-    // 2048 / (1/64) = 131,072 repeats of one note, over the 100,000 limit:
-    // 100,000 repeats sound, covering 100,000 / 64 = 1562.5 beats.
-    expect(MAX_LOOP_EVENTS).toBe(100_000);
+  it('expands the whole requested span without cutting off after a fixed repeat count', () => {
     const clip = midiClip({ lengthBeats: 2048, contentLengthBeats: 1 / 64, loop: true, notes: [note('n', 0, 1 / 128)] });
     const result = expandClip(clip, [clip]);
-    expect(result.notes).toHaveLength(100_000);
-    expect(result.notes.at(-1)!.startBeat).toBeCloseTo(1562.5 - 1 / 64, 9);
-    expect(result.problems).toHaveLength(1);
-    expect(result.problems[0]).toContain('先頭から 1562.5 拍までは鳴ります');
-    expect(result.problems[0]).toContain('485.5 拍は鳴りません');
-    expect(result.problems[0]).not.toContain('このクリップは鳴りません');
-  });
-
-  it('skips an oversized first repeat whole and reports the full silent range', () => {
-    const notes = Array.from({ length: MAX_LOOP_EVENTS + 1 }, (_, i) => note(`n${i}`, 0.5, 0.25));
-    const clip = midiClip({ lengthBeats: 2, contentLengthBeats: 1, loop: true, notes });
-    const result = expandClip(clip, [clip]);
-    expect(result.notes).toHaveLength(0);
-    expect(result.overLimit).toBe(true);
-    expect(result.problems).toHaveLength(1);
-    expect(result.problems[0]).toContain('このクリップの 2 拍は鳴りません');
+    expect(result.notes).toHaveLength(131_072);
+    expect(result.notes.at(-1)!.startBeat).toBeCloseTo(2048 - 1 / 64, 9);
+    expect(result.problems).toEqual([]);
   });
 
   it('counts only what a repeat cut by the clip end really sounds (length 4, period 3, 50,001 notes at beat 2)', () => {
@@ -175,7 +148,6 @@ describe('expandClip: loop limits and rounding', () => {
     const clip = midiClip({ lengthBeats: 4, contentLengthBeats: 3, loop: true, notes });
     const result = expandClip(clip, [clip]);
     expect(result.notes).toHaveLength(50_001);
-    expect(result.overLimit).toBeUndefined();
     expect(result.problems).toEqual([]);
   });
 
@@ -276,4 +248,22 @@ describe('expandClip: what the track can sound', () => {
     });
     expect(expandClip(notes, [notes], 4, 'instrument').problems).toEqual([]);
   });
+});
+
+it('looks up a sub-tick onset by its absolute tick before deleting its saved note', () => {
+  const clip = midiClip({
+    startBeat: 0.49 / PPQ,
+    lengthBeats: 1,
+    notes: [note('first', 0, 0.25, 60), note('second', 0.02 / PPQ, 0.25, 62)],
+  });
+  const project = makeProject([makeTrack(clip.trackId, 'instrument', [clip])]);
+  expect(validateProject(project).ok).toBe(true);
+  const { events } = soundingEvents(project);
+  expect(events.map((event) => Math.round(event.startBeat * PPQ))).toEqual([0, 1]);
+
+  const second = events[1]!;
+  const stored = storedEventAt(project, clip.id, second.startBeat - clip.startBeat);
+  expect(stored).toEqual({ sourceClipId: clip.id, sourceIndex: 1 });
+  clip.notes!.splice(stored!.sourceIndex, 1);
+  expect(soundingEvents(project).events.map((event) => Math.round(event.startBeat * PPQ))).toEqual([0]);
 });

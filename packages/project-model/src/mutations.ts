@@ -3,10 +3,11 @@
 
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
-import { clipFirstPassEnd, drumHitRepeatCount, expandClip, resolveLinkSource } from './clipExpand';
+import { drumHitRepeatCount, expandClip, resolveLinkSource } from './clipExpand';
 import { createDrumClip, createMidiClip, createTrack } from './factories';
 import { makeId } from './ids';
-import { beatsPerBar, drumStepsPerBar } from './time';
+import { beatTick, beatsPerBar, drumStepsPerBar } from './time';
+import { songEndBeat, soundingEvents } from './sounding';
 import type {
   ChordEvent,
   Clip,
@@ -238,7 +239,14 @@ export function resizeClip(
   lengthBeats: number,
   clock: Clock = systemClock,
 ): Project {
-  if (!Number.isFinite(lengthBeats) || lengthBeats <= 0 || !locateClip(project, clipId)) return project;
+  if (!Number.isFinite(lengthBeats) || lengthBeats <= 0) return project;
+  const found = locateClip(project, clipId);
+  if (!found || lengthBeats === found.clip.lengthBeats) return project;
+  const start = beatTick(found.clip.startBeat);
+  const end = beatTick(found.clip.startBeat + lengthBeats);
+  if (end > start && found.track.clips.some((other) => other.id !== clipId &&
+    beatTick(other.startBeat) < end && beatTick(other.startBeat + other.lengthBeats) > start &&
+    beatTick(other.startBeat + other.lengthBeats) > beatTick(other.startBeat))) return project;
   const tracks = mapClip(project, clipId, (clip) => {
     const next: Clip = { ...clip, lengthBeats };
     if (clip.loop && clip.contentLengthBeats === undefined) next.contentLengthBeats = clip.lengthBeats;
@@ -260,7 +268,7 @@ function withStepsPerBarOf(target: Clip, source: Clip): Clip {
   return next;
 }
 
-export type SplitClipFailure = 'missingClip' | 'invalidBoundary' | 'brokenLink' | 'eventLimit' | 'offGridDrumHit';
+export type SplitClipFailure = 'missingClip' | 'invalidBoundary' | 'loopingClip' | 'linkedClip';
 
 export type SplitClipResult =
   | { ok: true; project: Project }
@@ -273,11 +281,8 @@ export type SplitClipResult =
  * split on the nearest step boundary, measured on the same step grid playback
  * uses.
  *
- * A looping clip, a link, or the source of a link keeps its loop / link on the
- * left part, which just ends at the cut (a link source keeps all its content,
- * so the clips linked to it do not change). The right part gets its own copy
- * of what sounded from the cut on and neither loops nor links. On failure,
- * the result carries the reason and the original project.
+ * A source used by links keeps its stored content on the left, so those links
+ * continue to sound as before. Loops and linked clips cannot be split.
  */
 export function splitClip(
   project: Project,
@@ -289,13 +294,15 @@ export function splitClip(
   const found = locateClip(project, clipId);
   if (!found) return fail('missingClip');
   const { track, clip } = found;
-  const isInterior = (offset: number) => offset > CLIP_EPSILON && offset < clip.lengthBeats - CLIP_EPSILON;
+  if (clip.loop) return fail('loopingClip');
+  if (clip.aliasOf !== undefined) return fail('linkedClip');
+  const isInterior = (offset: number) =>
+    beatTick(offset) > 0 && beatTick(clip.startBeat + offset) < beatTick(clip.startBeat + clip.lengthBeats);
   let offset = atBeat - clip.startBeat;
   if (!isInterior(offset)) return fail('invalidBoundary');
 
   const allClips = project.tracks.flatMap((t) => t.clips);
-  const source = resolveLinkSource(clip, allClips);
-  if (typeof source === 'string') return fail('brokenLink');
+  const source = clip;
   const bpb = beatsPerBar(project.timeSignature);
   const beatsPerStep = bpb / effectiveStepsPerBar(source);
 
@@ -307,14 +314,12 @@ export function splitClip(
   }
 
   const allocateId = trackIdAllocator(project);
-  const shared = clip.loop || clip.aliasOf !== undefined || allClips.some((c) => c.aliasOf === clipId);
+  const shared = allClips.some((c) => c.aliasOf === clipId);
   let left: Clip;
   let right: Clip;
   if (shared) {
     left = { ...clip, lengthBeats: offset };
-    if (clip.loop && clip.contentLengthBeats === undefined) left.contentLengthBeats = clip.lengthBeats;
     const expanded = expandClip(clip, allClips, bpb);
-    if (expanded.overLimit) return fail('eventLimit');
     right = withStepsPerBarOf(
       {
         ...clip,
@@ -353,7 +358,6 @@ export function splitClip(
         if (start < -CLIP_EPSILON) continue;
         const step = Math.max(0, start) / beatsPerStep;
         const stepIndex = Math.round(step);
-        if (Math.abs(step - stepIndex) > 1e-6) return fail('offGridDrumHit');
         right.drumEvents.push({ id: allocateId('drum'), lane: hit.lane, stepIndex, velocity: hit.velocity });
       }
     }
@@ -953,7 +957,6 @@ export type ContentBeyondBars = {
 export function contentBeyondBars(project: Project, lengthBars: number): ContentBeyondBars {
   const bpb = beatsPerBar(project.timeSignature);
   const endBeat = lengthBars * bpb;
-  const oldEndBeat = project.lengthBars * bpb;
   const beyond = (beat: number): boolean => beat >= endBeat - BEAT_EPSILON;
   const crosses = (start: number, duration: number): boolean =>
     !beyond(start) && start + duration > endBeat + BEAT_EPSILON;
@@ -983,21 +986,18 @@ export function contentBeyondBars(project: Project, lengthBars: number): Content
 
       // Raw content is counted above. Add linked sounds and the later passes of
       // loops, which have no separate stored event to count.
-      const expanded = expandClip(clip, allClips, bpb, track.type);
-      const repeatStart = clip.startBeat + clipFirstPassEnd(clip);
-      const isAdditional = (beat: number): boolean =>
-        beat < oldEndBeat && (clip.aliasOf !== undefined || beat >= repeatStart);
-      for (const note of expanded.notes) {
-        if (!isAdditional(note.startBeat)) continue;
-        if (beyond(note.startBeat)) notes += 1;
-        else if (crosses(note.startBeat, Math.min(note.durationBeats, oldEndBeat - note.startBeat))) truncatedNotes += 1;
+      const expanded = soundingEvents(project, { clipId: clip.id, includeMuted: true }).events;
+      for (const event of expanded) {
+        if (clip.aliasOf === undefined && event.repeat === 0) continue;
+        if (event.kind === 'drum') drumHits += Number(beyond(event.startBeat));
+        else if (beyond(event.startBeat)) notes += 1;
+        else if (crosses(event.startBeat, event.durationBeats)) truncatedNotes += 1;
       }
-      drumHits += expanded.drumHits.filter((hit) => isAdditional(hit.beat) && beyond(hit.beat)).length;
 
       const resized = resizedById.get(clip.id);
       if (clip.aliasOf === undefined || resized === undefined) continue;
       const after = expandClip(resized, resizedClips, bpb, track.type);
-      linkedLosses.drumHits += Math.max(0, expanded.drumHits.filter((hit) => !beyond(hit.beat)).length - after.drumHits.length);
+      linkedLosses.drumHits += Math.max(0, expanded.filter((event) => event.kind === 'drum' && !beyond(event.startBeat)).length - after.drumHits.length);
 
       // Source trimming keeps event order and removes all notes at a removed
       // onset. Group by onset so overlapping notes at the same beat count too.
@@ -1007,9 +1007,9 @@ export function contentBeyondBars(project: Project, lengthBars: number): Content
         if (durations) durations.push(note.durationBeats);
         else remainingAtBeat.set(note.startBeat, [note.durationBeats]);
       }
-      for (let i = expanded.notes.length - 1; i >= 0; i--) {
-        const note = expanded.notes[i]!;
-        if (beyond(note.startBeat)) continue;
+      for (let i = expanded.length - 1; i >= 0; i--) {
+        const note = expanded[i]!;
+        if (note.kind !== 'note' || beyond(note.startBeat)) continue;
         const remaining = remainingAtBeat.get(note.startBeat)?.pop();
         if (remaining === undefined) linkedLosses.notes += 1;
         else if (Math.min(note.durationBeats, endBeat - note.startBeat) > remaining + BEAT_EPSILON) {
@@ -1039,8 +1039,8 @@ function cutAtSongEnd<T extends { durationBeats: number }>(item: T, start: numbe
  * source is going away, give each affected link its own copy of the pattern.
  */
 function resizeClipTracks(project: Project, lengthBars: number): Track[] {
+  const oldEndBeat = songEndBeat(project);
   const bpb = beatsPerBar(project.timeSignature);
-  const oldEndBeat = project.lengthBars * bpb;
   const endBeat = lengthBars * bpb;
   const beyond = (beat: number): boolean => beat >= endBeat - BEAT_EPSILON;
   const allClips = project.tracks.flatMap((track) => track.clips);

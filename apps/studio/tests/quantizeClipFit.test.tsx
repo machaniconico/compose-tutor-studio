@@ -135,11 +135,11 @@ function dragNote(fromBeat: number, deltaBeats: number) {
 }
 
 describe('quantize keeps notes sounding past a short clip end', () => {
-  it('quantizeNotes lengthens the clip so the moved note still sounds, undone in one step', () => {
+  it('quantizeNotes keeps the note on the last grid point, undone in one step', () => {
     const { clipId, noteId } = setUpEdgeNote();
     act(() => actions.quantizeNotes(clipId, [noteId], 1));
-    expect(clipById(clipId).notes![0]!.startBeat).toBe(4);
-    expect(clipById(clipId).lengthBeats).toBe(4.25);
+    expect(clipById(clipId).notes![0]!.startBeat).toBe(3);
+    expect(clipById(clipId).lengthBeats).toBe(4);
     expect(notesSounded()).toBe(1);
 
     act(() => useStore.getState().undo());

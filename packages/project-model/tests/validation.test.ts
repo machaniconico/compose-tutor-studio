@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createEmptyProject, expandClip, MAX_LOOP_EVENTS, validateProject } from '../src/index';
+import { createEmptyProject, expandClip, MAX_SOUNDING_EVENTS, validateProject } from '../src/index';
 import type { Project } from '../src/index';
 
 const clock = () => new Date('2026-06-11T00:00:00.000Z');
@@ -157,7 +157,7 @@ describe('validateProject', () => {
   });
 });
 
-describe('validateProject: loop sound limit agrees with expandClip', () => {
+describe('validateProject: project sound limit', () => {
   function withLoop(lengthBeats: number, contentLengthBeats: number): Project {
     const project = baseProject();
     const ti = project.tracks.findIndex((t) => t.type !== 'drum' && t.clips.length > 0);
@@ -174,8 +174,7 @@ describe('validateProject: loop sound limit agrees with expandClip', () => {
     return { ...project, tracks };
   }
 
-  it('rejects a loop that would sound more than MAX_LOOP_EVENTS (128 beats, 1/1024-beat period)', () => {
-    // 128 * 1024 = 131,072 repeats of one note: expandClip could not sound them all.
+  it('rejects a loop whose period is below the minimum', () => {
     const result = validateProject(withLoop(128, 1 / 1024));
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.path.endsWith('.contentLengthBeats'))).toBe(true);
@@ -200,20 +199,19 @@ describe('validateProject: loop sound limit agrees with expandClip', () => {
     const project = withLoop(4, 4);
     const clip = project.tracks.find((t) => t.clips[0]?.notes?.[0]?.id === 'loop-note')!.clips[0]!;
     const note = clip.notes![0]!;
-    clip.notes = Array.from({ length: MAX_LOOP_EVENTS + 1 }, (_, i) => ({ ...note, id: `n${i}` }));
+    clip.notes = Array.from({ length: MAX_SOUNDING_EVENTS + 1 }, (_, i) => ({ ...note, id: `n${i}` }));
     const result = validateProject(project);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((error) => error.path.endsWith('.contentLengthBeats'))).toBe(true);
+    expect(result.errors.some((error) => error.path === 'tracks')).toBe(true);
   });
 
-  it('accepts a loop at exactly the limit, and expandClip then sounds every repeat', () => {
-    // 100,000 / 1024 beats at a 1/1024-beat period = 100,000 repeats.
-    const project = withLoop(MAX_LOOP_EVENTS / 1024, 1 / 1024);
+  it('accepts a loop covering the song at the minimum period', () => {
+    const project = withLoop(32, 1 / 64);
     expect(validateProject(project).errors).toEqual([]);
     const allClips = project.tracks.flatMap((t) => t.clips);
     const track = project.tracks.find((t) => t.clips[0]?.notes?.[0]?.id === 'loop-note')!;
     const result = expandClip(track.clips[0]!, allClips, 4, track.type);
-    expect(result.notes).toHaveLength(MAX_LOOP_EVENTS);
+    expect(result.notes).toHaveLength(2048);
     expect(result.problems).toEqual([]);
   });
 });

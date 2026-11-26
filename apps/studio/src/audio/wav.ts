@@ -6,12 +6,12 @@
 // clamping are unit testable.
 
 import type { Project } from '@cts/project-model';
-import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
+import { songEndBeat } from '@cts/project-model';
 import { delaySettings, enabledSupportedEffects } from './effects';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import { buildTrackGraphs } from './graph';
 import { createMasterChain } from './masterChain';
-import { nextEventsInWindow, projectLengthBeats, secondsPerBeat, type DueEvent } from './scheduler';
+import { beatToTime, secondsPerBeat, type DueEvent } from './scheduler';
 import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
 
@@ -22,22 +22,7 @@ export const RENDER_CHANNELS = 2;
 /** Silence tail appended after the last event, seconds. */
 export const RENDER_TAIL_SECONDS = 1;
 
-/**
- * The beat the sound of the song ends, before any release or echo: the song
- * end, or later when a note that starts before the song end lasts past it.
- * Such a note sounds its full length on every path (live, WAV and MIDI).
- */
-export function songSoundEndBeat(project: Project): number {
-  const bpb = beatsPerBarOf(project.timeSignature);
-  const lengthBeats = projectLengthBeats(project.lengthBars, bpb > 0 ? bpb : 4);
-  let end = lengthBeats;
-  for (const event of buildScheduleEvents(project)) {
-    const payload = event.payload as SchedulePayload;
-    if (payload.kind !== 'note' || event.beat >= lengthBeats) continue;
-    end = Math.max(end, event.beat + payload.durationBeats);
-  }
-  return end;
-}
+export { songEndBeat as songSoundEndBeat };
 
 /**
  * Seconds kept after `songSoundEndBeat` for releases and echoes: the first
@@ -54,24 +39,16 @@ export function songTailSeconds(project: Project): number {
   return longestDelay + RENDER_TAIL_SECONDS;
 }
 
-/**
- * Total render length in seconds: until the last note that starts in the song
- * has ended (`songSoundEndBeat`), plus the tail (`songTailSeconds`), so the
- * export does not cut off that note, its release or the echoes.
- */
+/** Render through the song end plus the release and echo tail. */
 export function renderLengthSeconds(project: Project): number {
-  return songSoundEndBeat(project) * secondsPerBeat(project.bpm) + songTailSeconds(project);
+  return songEndBeat(project) * secondsPerBeat(project.bpm) + songTailSeconds(project);
 }
 
-/**
- * The events the offline render plays: the song window `[0, end)` resolved to
- * seconds with the same rule live playback (loop off) uses, so an event at or
- * after the last bar sounds in neither.
- */
+/** Resolve the shared schedule to absolute times for the offline context. */
 export function renderScheduleEvents(project: Project): DueEvent[] {
-  const bpb = beatsPerBarOf(project.timeSignature);
-  const lengthBeats = projectLengthBeats(project.lengthBars, bpb > 0 ? bpb : 4);
-  return nextEventsInWindow(buildScheduleEvents(project), 0, lengthBeats, project.bpm, 0, 0, null);
+  return buildScheduleEvents(project)
+    .map(({ beat, payload }) => ({ beat, payload, time: beatToTime(beat, project.bpm, 0, 0) }))
+    .sort((a, b) => a.time - b.time);
 }
 
 /** Clamp a float sample to [-1, 1] and convert to a signed 16-bit int. */

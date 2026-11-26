@@ -301,24 +301,24 @@ describe('evaluateExportChecklist: クリップのリンク', () => {
     expect(warnings[0]!.advice).toMatch(/リンク.*見つからない/);
   });
 
-  it('ループで鳴らす音が上限を超えると、鳴らない範囲を伝える警告が出る', () => {
-    // 2048 拍 / (1/64 拍) = 131,072 回 > 上限 100,000 音 → 先頭 1562.5 拍まで鳴る。
+  it('曲で鳴る音が上限を超えると、縮め方を伝える警告が出る', () => {
     const track = makeTrack({ name: 'ハイハット' });
     track.clips = [
       {
         ...makeNoteClip(track.id),
-        lengthBeats: 2048,
+        lengthBeats: 256,
         contentLengthBeats: 1 / 64,
         loop: true,
-        notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 1 / 128, velocity: 100 }],
+        notes: Array.from({ length: 7 }, (_, i) => ({
+          id: `n-${i}`, pitch: 60, startBeat: 0, durationBeats: 1 / 128, velocity: 100,
+        })),
       },
     ];
-    const item = itemOf(makeProject({ tracks: [makeMaster(), track] }), 'clipLinks');
+    const item = itemOf(makeProject({ lengthBars: 64, tracks: [makeMaster(), track] }), 'clipLinks');
 
     expect(item.level).toBe('warning');
-    expect(item.advice).toContain('「ハイハット」');
-    expect(item.advice).toContain('先頭から 1562.5 拍までは鳴ります');
-    expect(item.advice).not.toContain('無音');
+    expect(item.advice).toContain('上限');
+    expect(item.advice).toContain('クリップを短くするか、音の数を減らして');
   });
   for (const [type, label, shown] of [
     ['bus', 'まとめ用のトラック(バス)', '「置き場-bus」'],

@@ -197,7 +197,7 @@ describe('chordsToNotes review regressions', () => {
     expect((trackById(track.id).clips.find((c) => c.id === 'link') as Clip).aliasOf).toBe(source.id);
   });
 
-  it('asks before replacing local notes in a linked clip whose source is empty', () => {
+  it('asks before replacing local notes in a link detached on load', () => {
     const { project, track } = fourChordProject();
     project.chordTrack = [chord('c', 'C', 0, 4)];
     const source = track.clips[0] as Clip;
@@ -231,7 +231,8 @@ describe('chordsToNotes review regressions', () => {
     expect(trackById(track.id).clips[0]?.notes?.map((note) => note.pitch)).toEqual([60, 64, 67]);
     expect(trackById(track.id).clips[1]).toEqual(source);
     useStore.getState().undo();
-    expect(trackById(track.id).clips[0]).toEqual(linked);
+    const { aliasOf: _aliasOf, ...detached } = linked;
+    expect(trackById(track.id).clips[0]).toEqual(detached);
   });
 
   it('leaves existing notes alone when a chord starts at the fractional clip end', () => {

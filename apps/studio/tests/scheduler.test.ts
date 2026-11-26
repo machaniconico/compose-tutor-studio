@@ -1,10 +1,10 @@
+import { songEndBeat } from '@cts/project-model';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   advanceBeat,
   beatToTime,
   isValidLoop,
   nextEventsInWindow,
-  projectLengthBeats,
   Scheduler,
   secondsPerBeat,
   timeToBeat,
@@ -80,13 +80,13 @@ describe('advanceBeat', () => {
   });
 });
 
-describe('projectLengthBeats', () => {
+describe('songEndBeat', () => {
   it('multiplies bars by beats-per-bar', () => {
-    expect(projectLengthBeats(8, 4)).toBe(32);
+    expect(songEndBeat({ lengthBars: 8, timeSignature: [4, 4] })).toBe(32);
   });
   it('guards against non-positive inputs', () => {
-    expect(projectLengthBeats(0, 4)).toBe(0);
-    expect(projectLengthBeats(8, 0)).toBe(32); // beatsPerBar falls back to 4
+    expect(songEndBeat({ lengthBars: 0, timeSignature: [4, 4] })).toBe(0);
+    expect(songEndBeat({ lengthBars: 8, timeSignature: [0, 4] })).toBe(32); // beatsPerBar falls back to 4
   });
 });
 

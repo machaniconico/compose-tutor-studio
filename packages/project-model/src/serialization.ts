@@ -4,16 +4,16 @@
 // is run through the registered migration functions in sequence until it
 // reaches CURRENT_SCHEMA_VERSION.
 
-import { CLIP_EDGE_TOLERANCE_BEATS } from './clipExpand';
+import { resolveLinkSource } from './clipExpand';
+import { MAX_SONG_BARS, MIN_LOOP_PERIOD_BEATS } from './sounding';
 import { CURRENT_SCHEMA_VERSION } from './factories';
-import { beatsPerBar } from './time';
-import type { Project, TrackRole } from './types';
+import { beatTick, beatsPerBar, PPQ } from './time';
+import type { Clip, Project, Track, TrackRole } from './types';
 
 const UTF8_BOM = '\uFEFF';
 const DEFAULT_STEPS_PER_BAR = 16;
 const DEFAULT_DRUM_BEATS_PER_BAR = 4;
-// Even an event shorter than the clip tolerance used to sound once.
-const MIN_LEGACY_EVENT_ROOM_BEATS = 2 * CLIP_EDGE_TOLERANCE_BEATS;
+const MIN_LEGACY_EVENT_ROOM_BEATS = 1 / PPQ;
 
 /** Track-name words that imply a role, matched as whole words in any case. */
 const ROLE_NAME_PATTERNS: Array<[RegExp, TrackRole]> = [
@@ -252,9 +252,86 @@ export function deserializeProject(json: string): Project {
     throw new Error('Invalid project JSON: expected an object');
   }
   const migrated = migrateProject(parsed as Record<string, unknown>);
-  return migrated as unknown as Project;
+  return normalizeClipDomain(migrated as unknown as Project);
 }
 
 function stripLeadingBom(json: string): string {
   return json.startsWith(UTF8_BOM) ? json.slice(UTF8_BOM.length) : json;
+}
+
+/** Repair clip settings and preserve all stored material at its original beat. */
+function normalizeClipDomain(project: Project): Project {
+  // Structural errors are reported by the caller's normal validation.
+  if (!Array.isArray(project.tracks) || project.tracks.some((track) => !Array.isArray(track?.clips))) return project;
+  const clips = project.tracks.flatMap((track) => track.clips);
+  if (clips.some((clip) => !clip || typeof clip !== 'object')) return project;
+  const byId = new Map(clips.map((clip) => [clip.id, clip]));
+  const ids = new Set([
+    project.id,
+    ...project.tracks.map((track) => track.id),
+    ...clips.flatMap((clip) => [
+      clip.id, ...(clip.notes ?? []).map((note) => note.id), ...(clip.drumEvents ?? []).map((hit) => hit.id),
+    ]),
+    ...(project.chordTrack ?? []).map((chord) => chord.id),
+    ...(project.sections ?? []).map((section) => section.id),
+  ]);
+
+  function normalizeClip(clip: Clip): Clip {
+    let next = clip;
+    if (clip.aliasOf !== undefined) {
+      const source = resolveLinkSource(clip, byId);
+      const ownsContent = Boolean(clip.notes?.length || clip.drumEvents?.length || clip.audioAssetId !== undefined);
+      if (ownsContent || typeof source === 'string' || source.type !== clip.type) {
+        next = { ...clip };
+        delete next.aliasOf;
+      } else if (source.id !== clip.aliasOf) {
+        next = { ...clip, aliasOf: source.id };
+      }
+    }
+    if (next.loop && (next.contentLengthBeats ?? next.lengthBeats) < MIN_LOOP_PERIOD_BEATS) {
+      next = { ...next, contentLengthBeats: MIN_LOOP_PERIOD_BEATS };
+    }
+    return next;
+  }
+
+  function fitTrack(raw: Track): Track[] {
+    const track = typeof raw.name === 'string' ? raw : { ...raw, name: '名前のないトラック' };
+    const normalized = track.clips.map(normalizeClip);
+    const sorted = [...normalized].sort((a, b) => a.startBeat - b.startBeat);
+    const base: Clip[] = [];
+    const layers: Array<{ id: string; endTick: number; clips: Clip[] }> = [];
+    let baseEnd = 0;
+    for (const clip of sorted) {
+      const start = beatTick(clip.startBeat);
+      const end = beatTick(clip.startBeat + clip.lengthBeats);
+      if (start >= baseEnd || end <= start) {
+        base.push(clip);
+        baseEnd = Math.max(baseEnd, end);
+        continue;
+      }
+      let layer = layers.find((candidate) => candidate.endTick <= start);
+      if (!layer) {
+        let suffix = layers.length + 1;
+        while (ids.has(`${track.id}-overlap-${suffix}`)) suffix++;
+        const id = `${track.id}-overlap-${suffix}`;
+        ids.add(id);
+        layer = { id, endTick: 0, clips: [] };
+        layers.push(layer);
+      }
+      layer.clips.push({ ...clip, trackId: layer.id });
+      layer.endTick = end;
+    }
+    // Keep the original clip order on the original track.
+    const keep = new Set(base);
+    return [
+      { ...track, clips: normalized.filter((clip) => keep.has(clip)) },
+      ...layers.map(({ id, clips }) => ({ ...track, id, clips })),
+    ];
+  }
+
+  return {
+    ...project,
+    lengthBars: Math.min(project.lengthBars, MAX_SONG_BARS),
+    tracks: project.tracks.flatMap(fitTrack),
+  };
 }

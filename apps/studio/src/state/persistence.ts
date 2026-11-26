@@ -7,7 +7,7 @@
 import {
   CURRENT_SCHEMA_VERSION,
   deserializeProject,
-  findProjectLoopLimitProblem,
+  findProjectSoundingLimitProblem,
   validateProject,
   type Project,
 } from '@cts/project-model';
@@ -83,7 +83,7 @@ export function saveProject(project: Project, storage: Storage | null = getStora
   const key = projectKey(project.id);
   let payload = '';
   try {
-    const problem = findProjectLoopLimitProblem(project);
+    const problem = findProjectSoundingLimitProblem(project);
     if (problem) throw new Error(problem);
     payload = JSON.stringify(project);
     preservePreviousValidProject(project.id, key, storage);
