@@ -53,6 +53,10 @@ import {
   SECTION_EDIT_FAILURE_MESSAGES,
   soundingEvents,
   tickSpansOverlap,
+  TRANSPOSE_FAILURE_MESSAGES,
+  transposeProject,
+  type MusicalKey,
+  type ScaleName,
 } from '@cts/project-model';
 import {
   analyzeChord,
@@ -70,7 +74,15 @@ import {
   type ChordEventInput,
   type HarmonicFunction,
 } from '@cts/theory-engine';
-import { createPrng, getScalePitchClasses, nearestScalePitch, transposeByDegree } from '@cts/theory-engine';
+import {
+  createPrng,
+  getScalePitchClasses,
+  nearestScalePitch,
+  keyShiftSemitones,
+  transposeByDegree,
+  transposeChordSymbol,
+  transposeKeyName,
+} from '@cts/theory-engine';
 import { roleForTrackName } from '@cts/tutorial-engine';
 import { fitClipToNotes, useStore, type ClipboardNote, type NoteEditOptions } from './store';
 import { uid } from './ids';
@@ -701,6 +713,81 @@ export function transposeSelected(
   return applyPitches(clipId, noteIds, (pitch, project) =>
     transposeByDegree(pitch, by.degrees, project.key, project.scale),
   );
+}
+
+/**
+ * A chord event moved by `semitones` into `key` (US-016): the symbol is
+ * respelled for the new key's signature (transposeChordSymbol) and `root`
+ * follows the symbol. `notes` are pitch classes (every writer stores 0..11 and
+ * every reader takes them mod 12; validation allows 0..127), so each one's
+ * pitch class moves mod 12 and its whole-octave part (a multiple of 12) stays:
+ * moving back always restores the stored numbers. A result above 127 refuses
+ * the move. Degree, function and tags are relative to the key, which moves
+ * with the chords, so they stay. Returns the Japanese reason instead when the
+ * chord cannot move.
+ */
+function transposedChord(chord: ChordEvent, semitones: number, key: MusicalKey, scale: ScaleName): ChordEvent | string {
+  let symbol: string;
+  try {
+    symbol = transposeChordSymbol(chord.symbol, semitones, `${key} ${scale}`);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  const shift = ((semitones % 12) + 12) % 12;
+  const notes = chord.notes.map((n) => n - (n % 12) + (((n % 12) + shift) % 12));
+  if (notes.some((n) => !(n >= 0 && n <= 127))) return TRANSPOSE_FAILURE_MESSAGES.chordNotesRange;
+  return { ...chord, symbol, root: symbol.match(/^[A-G][#b]?/)![0], notes };
+}
+
+/** theory-engine's key-name reader, handed to transposeProject (♯/♭ read like #/b). */
+const KEY_NAMES = { shift: keyShiftSemitones, name: transposeKeyName };
+
+/**
+ * Move the whole song by `semitones` as one undo step: every instrument-track
+ * note (muted tracks too, drum tracks never), every chord and the key
+ * (`key`, or the usual spelling for the scale, see transposeKeyName).
+ * `semitones` must be a safe integer. Refused with an error toast, changing
+ * nothing, when the key cannot be read or is not the old key + semitones
+ * (mod 12), a note would leave MIDI 0..127, a chord cannot be read, or the
+ * sound would change in more than pitch (see transposeProject). Returns
+ * whether the project changed.
+ */
+export function transposeSong(semitones: number, key?: MusicalKey): boolean {
+  const project = useStore.getState().project;
+  const result = transposeProject(project, semitones, {
+    ...(key !== undefined ? { key } : {}),
+    keyNames: KEY_NAMES,
+    transposeChord: (chord, keyAfter) => transposedChord(chord, semitones, keyAfter, project.scale),
+  });
+  if (!result.ok) {
+    pushToast(result.reason, 'error');
+    return false;
+  }
+  return result.project !== project && useStore.getState().applyProjectChange(() => result.project);
+}
+
+/**
+ * Change the song's key from the "曲全体を移調" dialog. With `moveNotesAndChords`
+ * (the default) the song moves the nearer way (-5..+6 semitones, see
+ * transposeSong); without it only the key changes. One undo step either way;
+ * choosing the current key changes nothing. An unreadable key is refused with
+ * a toast. Returns whether the project changed.
+ */
+export function transposeSongToKey(key: MusicalKey, moveNotesAndChords = true): boolean {
+  const project = useStore.getState().project;
+  if (key === project.key) return false;
+  if (!moveNotesAndChords) {
+    useStore.getState().setKey(key);
+    return true;
+  }
+  let semitones: number;
+  try {
+    semitones = keyShiftSemitones(project.key, key);
+  } catch {
+    pushToast(TRANSPOSE_FAILURE_MESSAGES.unreadableKey(project.key), 'error');
+    return false;
+  }
+  return transposeSong(semitones, key);
 }
 
 /**

@@ -13,6 +13,7 @@ import type {
   Clip,
   DrumEvent,
   DrumLane,
+  MusicalKey,
   NoteEvent,
   Project,
   Section,
@@ -1271,4 +1272,137 @@ export function setLengthBars(
       : { loopRange: { startBeat: loopRange.startBeat, endBeat: Math.min(loopRange.endBeat, endBeat) } };
 
   return touch({ ...rest, ...keptLoop, lengthBars, tracks, chordTrack, sections }, clock);
+}
+
+// --- Whole-song transpose (US-016) ---
+
+export const TRANSPOSE_FAILURE_MESSAGES = {
+  notInteger: '移調する量は半音単位の整数で指定してください。',
+  chordNotesRange: 'コードの構成音の番号が 0〜127 の範囲を外れてしまうため、移調できません。コードを入力し直してから移調してください。',
+  tooHigh: 'いちばん高い音が MIDI 127 を超えてしまうため、この高さには移調できません。もっと低いキーを選んでください。',
+  tooLow: 'いちばん低い音が MIDI 0 より下がってしまうため、この高さには移調できません。もっと高いキーを選んでください。',
+  keyMismatch: '選んだキーと移調する量が合いません。キーを選び直してください。',
+  unreadableKey: (key: string): string =>
+    `キー「${key}」を読み取れないため、移調できません。トランスポートバーでキーを選び直してください。`,
+  soundChanged:
+    '移調すると音の高さ以外(鳴る位置や長さ、ドラムの音)まで変わってしまうため、移調を取りやめました。ドラムのトラックのクリップとリンクした楽器のクリップがないか確かめてください。',
+} as const;
+
+export type TransposeProjectResult =
+  | { ok: true; project: Project }
+  | { ok: false; project: Project; reason: string };
+
+/**
+ * Key-name reader (theory-engine's keyShiftSemitones / transposeKeyName). It
+ * is passed in because project-model does not depend on theory-engine; key
+ * names such as 'F♯' are read only there.
+ */
+export type TransposeKeyNames = {
+  /** Semitones from one key to another the nearer way. Throws on an unreadable key. */
+  shift: (from: string, to: string) => number;
+  /** Root name after moving `key` (with its scale, e.g. "C major") by `semitones`. Throws on an unreadable key. */
+  name: (key: string, semitones: number) => string;
+};
+
+export type TransposeProjectOptions = {
+  /** Key after the move. Refused unless it is the old key + semitones (mod 12). Default: keyNames.name. */
+  key?: MusicalKey;
+  keyNames: TransposeKeyNames;
+  /** New chord for each chord event (given the new key), or a reason (Japanese) that refuses the whole move. Unset keeps chords as they are. */
+  transposeChord?: (chord: ChordEvent, key: MusicalKey) => ChordEvent | string;
+};
+
+/** One sound; `pitch` is null for a drum hit. */
+type TransposeSound = { trackId: string; key: string; start: number; end: number; pitch: number | null };
+
+function transposeSounds(project: Project): { sounds: TransposeSound[]; problems: string[] } {
+  const { events, problems } = soundingEvents(project, { includeMuted: true });
+  return {
+    problems,
+    sounds: events.map((e) => {
+      const start = beatTick(e.startBeat);
+      return e.kind === 'note'
+        ? { trackId: e.trackId, key: `${e.clipId}|${e.sourceClipId}|${e.sourceIndex}|${e.repeat}|note|${e.velocity}`, start, end: beatTick(e.startBeat + e.durationBeats), pitch: e.pitch }
+        : { trackId: e.trackId, key: `${e.clipId}|${e.sourceClipId}|${e.sourceIndex}|${e.repeat}|drum|${e.lane}|${e.velocity}`, start, end: start, pitch: null };
+    }),
+  };
+}
+
+/**
+ * Move the whole song by `semitones` (one result for one undo step). Every
+ * note stored on an instrument track moves, muted tracks included (so they
+ * sound in the new key when unmuted); drum tracks never change. A link owns no
+ * content, so moving each source once moves every link and loop that plays it.
+ * The key becomes `options.key` (default: `options.keyNames.name`) and each
+ * chord becomes `options.transposeChord`'s result. Refused when the key cannot
+ * be read or is not the old key + semitones (mod 12). Refused, with the project unchanged (same object) and a Japanese
+ * reason, when `semitones` is not a safe integer, a note would leave MIDI
+ * 0..127, a chord cannot move, or the postcondition fails: every sound
+ * (soundingEvents, muted included) must keep its start and end tick and change
+ * only its pitch, by +semitones on instrument tracks and not at all elsewhere.
+ */
+export function transposeProject(
+  project: Project,
+  semitones: number,
+  options: TransposeProjectOptions,
+  clock: Clock = systemClock,
+): TransposeProjectResult {
+  const fail = (reason: string): TransposeProjectResult => ({ ok: false, project, reason });
+  if (!Number.isSafeInteger(semitones)) return fail(TRANSPOSE_FAILURE_MESSAGES.notInteger);
+  let key: MusicalKey;
+  try {
+    key = options.key ?? (options.keyNames.name(`${project.key} ${project.scale}`, semitones) as MusicalKey);
+    const shift = options.keyNames.shift(project.key, key);
+    if ((((shift - (semitones % 12)) % 12) + 12) % 12 !== 0) return fail(TRANSPOSE_FAILURE_MESSAGES.keyMismatch);
+  } catch {
+    return fail(TRANSPOSE_FAILURE_MESSAGES.unreadableKey(project.key));
+  }
+
+  let tooHigh = false;
+  let tooLow = false;
+  const tracks = project.tracks.map((track) => {
+    if (track.type !== 'instrument') return track;
+    return {
+      ...track,
+      clips: track.clips.map((clip) => {
+        if (clip.aliasOf !== undefined || !clip.notes) return clip;
+        return {
+          ...clip,
+          notes: clip.notes.map((note) => {
+            const pitch = note.pitch + semitones;
+            if (pitch > 127) tooHigh = true;
+            if (pitch < 0) tooLow = true;
+            return { ...note, pitch };
+          }),
+        };
+      }),
+    };
+  });
+  if (tooHigh) return fail(TRANSPOSE_FAILURE_MESSAGES.tooHigh);
+  if (tooLow) return fail(TRANSPOSE_FAILURE_MESSAGES.tooLow);
+
+  const chordTrack: ChordEvent[] = [];
+  for (const chord of project.chordTrack) {
+    const moved = options.transposeChord ? options.transposeChord(chord, key) : chord;
+    if (typeof moved === 'string') return fail(moved);
+    chordTrack.push(moved);
+  }
+
+  if (semitones === 0 && key === project.key && chordTrack.every((c, i) => c === project.chordTrack[i])) {
+    return { ok: true, project };
+  }
+  const next = touch({ ...project, key, tracks, chordTrack }, clock);
+
+  const instruments = new Set(project.tracks.filter((t) => t.type === 'instrument').map((t) => t.id));
+  const before = transposeSounds(project);
+  const after = transposeSounds(next);
+  const same =
+    before.sounds.length === after.sounds.length &&
+    before.problems.join('\n') === after.problems.join('\n') &&
+    before.sounds.every((s, i) => {
+      const a = after.sounds[i]!;
+      const pitch = s.pitch === null ? null : s.pitch + (instruments.has(s.trackId) ? semitones : 0);
+      return a.trackId === s.trackId && a.key === s.key && a.start === s.start && a.end === s.end && a.pitch === pitch;
+    });
+  return same ? { ok: true, project: next } : fail(TRANSPOSE_FAILURE_MESSAGES.soundChanged);
 }

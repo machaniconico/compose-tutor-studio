@@ -48,7 +48,15 @@ export {
 } from './notes';
 
 // スケールに沿った移調とスケール音への丸め
-export { nearestScalePitch, transposeByDegree, type ScaleTie } from './transpose';
+export {
+  nearestScalePitch,
+  transposeByDegree,
+  transposeChordSymbol,
+  keySignatureUsesFlats,
+  keyShiftSemitones,
+  transposeKeyName,
+  type ScaleTie,
+} from './transpose';
 
 // prompt 02 関数 4: スケール構築
 export { buildScale, type BuiltScale } from './build-scale';

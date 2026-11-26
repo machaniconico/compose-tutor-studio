@@ -11,6 +11,7 @@
 import type { ScaleName } from './types';
 import { noteNameToPitchClass, parseKeyRoot, pitchClassOf } from './pitch';
 import { getScaleIntervals, isInScale } from './scales';
+import { parseChord } from './chords';
 
 /** 整数でない値(NaN・Infinity・小数)を拒む。 */
 function requireInteger(name: string, value: number): void {
@@ -70,4 +71,100 @@ export function transposeByDegree(
   const targetOctave = octave + Math.floor(target / size);
   const interval = intervals[((target % size) + size) % size] as number;
   return rootPc + targetOctave * 12 + interval;
+}
+
+/** 安全な整数(Number.isSafeInteger)でない値を拒む。巨大でも精度を失わずに 12 で割れる範囲に限る。 */
+function requireSafeInteger(name: string, value: number): void {
+  if (!Number.isSafeInteger(value)) {
+    throw new RangeError(`${name} は安全な範囲の整数で指定してください: ${value}`);
+  }
+}
+
+/** 移調量を 0〜11 の半音に直す(足す前に余りを取り、巨大な量でも精度を失わない)。 */
+function semitoneClass(semitones: number): number {
+  return ((semitones % 12) + 12) % 12;
+}
+
+/** マイナーとして扱うモード・スケール名(メジャー/マイナーの調号を決めるためだけに使う)。 */
+const MINOR_MODES = new Set(['m', 'min', 'minor', 'naturalminor', 'harmonicminor', 'melodicminor', 'minorpentatonic', 'blues']);
+const MAJOR_MODES = new Set(['', 'maj', 'major', 'majorpentatonic']);
+/** ナチュラルのルートで調号がフラットになるキー(F major / D・G・C・F minor)。 */
+const FLAT_NATURAL_MAJOR = new Set(['F']);
+const FLAT_NATURAL_MINOR = new Set(['D', 'G', 'C', 'F']);
+const SHARP_SPELLING = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
+const FLAT_SPELLING = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
+/** 移調後のキー名に使う綴り(調号の臨時記号が少ない方。6 つ同士は F# major / Eb minor)。 */
+const MAJOR_KEY_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
+const MINOR_KEY_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'] as const;
+
+/**
+ * キー("D major" / "Dm" / "F♯ minor" / "D naturalMinor" / "D")を読む。
+ * ルートの ♯/♭ は #/b と同じに扱い(parseKeyRoot)、ルートは ASCII で返す。
+ * 読めないルート・モードは Error。
+ */
+function readKey(key: string): { root: string; pitchClass: number; minor: boolean } {
+  const root = parseKeyRoot(key);
+  const trimmed = key.trim();
+  const mode = trimmed.slice(trimmed.match(/^[A-Ga-g][#b♯♭]*/)![0].length).trim().toLowerCase();
+  const minor = MINOR_MODES.has(mode);
+  if (!minor && !MAJOR_MODES.has(mode)) throw new Error(`不正なキーです: ${key}`);
+  return { root, pitchClass: noteNameToPitchClass(root), minor };
+}
+
+/**
+ * キーの調号がフラット系か。ルートに b(♭)があればフラット、#(♯)があればシャープ。
+ * ナチュラルのルートは同じ調号のメジャーキーで決める(F major と D・G・C・F minor が
+ * フラット、調号の無い C major / A minor はシャープを既定とする)。読めないキーは Error。
+ */
+export function keySignatureUsesFlats(key: string): boolean {
+  const { root, minor } = readKey(key);
+  if (root.includes('b')) return true;
+  if (root.includes('#')) return false;
+  return (minor ? FLAT_NATURAL_MINOR : FLAT_NATURAL_MAJOR).has(root);
+}
+
+/** キー `from` から `to` へ近い方向に動く半音数(-5〜+6)。♯/♭ も読む。読めないキーは Error。 */
+export function keyShiftSemitones(from: string, to: string): number {
+  const up = semitoneClass(readKey(to).pitchClass - readKey(from).pitchClass);
+  return up > 6 ? up - 12 : up;
+}
+
+/**
+ * キー `key`(モード付き可)を `semitones` 動かした後のルート名(ASCII)。メジャーは
+ * Db・Eb・Ab・Bb・F#、マイナーは C#・Eb・G#・Bb・F# のように調号の少ない綴りを選ぶ。
+ * `semitones` は安全な整数に限り、それ以外は RangeError。
+ */
+export function transposeKeyName(key: string, semitones: number): string {
+  requireSafeInteger('semitones', semitones);
+  const { pitchClass, minor } = readKey(key);
+  return (minor ? MINOR_KEY_NAMES : MAJOR_KEY_NAMES)[(pitchClass + semitoneClass(semitones)) % 12] as string;
+}
+
+/**
+ * コード名を `semitones` 半音動かし、移調後のキー `keyAfter` の調号に合わせて書く
+ * (例: キー D major で 'Am7' +2 → 'Bm7'、'C/E' +2 → 'D/F#')。
+ *
+ * - 読み取りはコード入力欄と同じ規則(parseChord。♯/♭ も読む)。読めない記号は日本語の理由つきの Error。
+ * - 動かすのはルートと分数コードのベース(ピッチクラス)だけ。品質・テンション部分
+ *   (m7、m7b5、add9、maj9 など)は書かれたまま残す。
+ * - 音名は 12 音の綴り(C# / Db など)だけを使い、Cb・E#・ダブルシャープは使わない。
+ * - `semitones` は安全な整数(Number.isSafeInteger)に限り、それ以外は RangeError。
+ *   足す前に 12 で割った余りに直すので、巨大な量でも結果は正しい。
+ */
+export function transposeChordSymbol(symbol: string, semitones: number, keyAfter: string): string {
+  requireSafeInteger('semitones', semitones);
+  const names = keySignatureUsesFlats(keyAfter) ? FLAT_SPELLING : SHARP_SPELLING;
+  let parsed: ReturnType<typeof parseChord>;
+  try {
+    parsed = parseChord(symbol);
+  } catch {
+    throw new Error(
+      `「${symbol}」はコード名として読み取れません。C、Am、G7、Dm7/G のような書き方に直してから移調してください。`,
+    );
+  }
+  const [body = '', bass] = symbol.trim().split('/');
+  const suffix = body.trim().replace(/^[A-Ga-g][#b♯♭]*/, '');
+  const shift = semitoneClass(semitones);
+  const spell = (pc: number) => names[(pc + shift) % 12] as string;
+  return bass === undefined ? `${spell(parsed.rootPc)}${suffix}` : `${spell(parsed.rootPc)}${suffix}/${spell(parsed.bassPc)}`;
 }

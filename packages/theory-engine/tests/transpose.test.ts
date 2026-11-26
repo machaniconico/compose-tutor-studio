@@ -3,10 +3,15 @@ import {
   createPrng,
   getScalePitchClasses,
   isInScale,
+  keyShiftSemitones,
+  keySignatureUsesFlats,
   nearestScalePitch,
+  parseChord,
   randomInt,
   SCALE_NAMES,
   transposeByDegree,
+  transposeChordSymbol,
+  transposeKeyName,
 } from '../src/index';
 
 // `degrees` は「スケールの段数」。1 段上げる = 2 度上(C→D)、2 段 = 3 度上(C→E)。
@@ -127,6 +132,182 @@ describe('プロパティ(seed 固定)', () => {
       expect(transposeByDegree(up, -n, key, scale)).toBe(midi);
       // 段数の符号どおりに動く。
       expect(Math.sign(up - midi)).toBe(Math.sign(n));
+    }
+  });
+});
+
+// --- US-016: コード名の移調 ---
+// 表記規則: 移調後のキーの調号に合わせる(シャープ系はシャープ、フラット系はフラット)。
+// 分数コードはルートとベースの両方を動かし、品質・テンション部分(m7, add9, maj9 など)はそのまま残す。
+// コード入力欄と同じ規則(parseChord)で読めない記号は理由つきで拒否する。
+describe('transposeChordSymbol', () => {
+  it("'Am7' を +2 してキー D major で 'Bm7'", () => {
+    expect(transposeChordSymbol('Am7', 2, 'D major')).toBe('Bm7');
+  });
+
+  it("分数コード 'C/E' を +2 すると 'D/F#'(ルートとベースの両方を動かす)", () => {
+    expect(transposeChordSymbol('C/E', 2, 'D major')).toBe('D/F#');
+  });
+
+  it("'Bb' を +1 するとキー B major の表記で 'B'", () => {
+    expect(transposeChordSymbol('Bb', 1, 'B major')).toBe('B');
+  });
+
+  it('フラット系のキーではフラットで書く(F#→Gb ではなく、キー Eb major で A7+1 は Bb7)', () => {
+    expect(transposeChordSymbol('A7', 1, 'Eb major')).toBe('Bb7');
+    expect(transposeChordSymbol('C', 3, 'Eb major')).toBe('Eb');
+    expect(transposeChordSymbol('G/B', 3, 'Bb major')).toBe('Bb/D');
+  });
+
+  it('マイナーキーは同じ調号のメジャーキーに従う(D minor はフラット 1 つ、B minor はシャープ 2 つ)', () => {
+    expect(transposeChordSymbol('A', 1, 'D minor')).toBe('Bb');
+    expect(transposeChordSymbol('A', 1, 'Dm')).toBe('Bb');
+    expect(transposeChordSymbol('F', 1, 'B minor')).toBe('F#');
+    // ナチュラルの A minor と C major はシャープを既定とする。
+    expect(transposeChordSymbol('C', 1, 'A minor')).toBe('C#');
+  });
+
+  it('キー名の綴りを尊重する(F# major はシャープ、Gb major はフラット)', () => {
+    expect(transposeChordSymbol('C#m', 0, 'Gb major')).toBe('Dbm');
+    expect(transposeChordSymbol('Dbm', 0, 'F# major')).toBe('C#m');
+  });
+
+  it('品質・テンション部分はそのまま残す(m7b5、add9、maj9、dim7、sus4、m6)', () => {
+    expect(transposeChordSymbol('Bm7b5', 2, 'D major')).toBe('C#m7b5');
+    expect(transposeChordSymbol('Cadd9', 2, 'D major')).toBe('Dadd9');
+    expect(transposeChordSymbol('Fmaj9/A', -5, 'C major')).toBe('Cmaj9/E');
+    expect(transposeChordSymbol('Bdim7', 1, 'C major')).toBe('Cdim7');
+    expect(transposeChordSymbol('Gsus4', -2, 'F major')).toBe('Fsus4');
+    expect(transposeChordSymbol('Em6', 3, 'G major')).toBe('Gm6');
+  });
+
+  it('♯/♭ の記号や小文字のルートも読み、出力は # と b に揃える', () => {
+    expect(transposeChordSymbol('F♯m', 1, 'G major')).toBe('Gm');
+    expect(transposeChordSymbol('E♭', 0, 'Bb major')).toBe('Eb');
+    expect(transposeChordSymbol('am', 2, 'D major')).toBe('Bm');
+  });
+
+  it('1 オクターブ以上(±12 以上)でもピッチクラスで回り込む', () => {
+    expect(transposeChordSymbol('C', 12, 'C major')).toBe('C');
+    expect(transposeChordSymbol('C', -13, 'C major')).toBe('B');
+    expect(transposeChordSymbol('C', 25, 'C major')).toBe('C#');
+  });
+
+  it('読み取れないコード名は日本語の理由つきで拒否する', () => {
+    for (const symbol of ['', 'N.C.', 'H7', 'C/H', 'C7b9', 'IV', 'C/E/G', 'Cfoo']) {
+      expect(() => transposeChordSymbol(symbol, 2, 'D major')).toThrow(/コード名として読み取れません/);
+    }
+  });
+
+  it('移調量は有限の整数に限る(NaN・小数・Infinity は RangeError)', () => {
+    for (const bad of [Number.NaN, 0.5, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(() => transposeChordSymbol('C', bad, 'C major')).toThrow(RangeError);
+    }
+  });
+
+  it('読み取れないキーは拒否する', () => {
+    expect(() => transposeChordSymbol('C', 2, 'H major')).toThrow();
+    expect(() => transposeChordSymbol('C', 2, 'D dorian')).toThrow();
+  });
+});
+
+describe('レビュー指摘の回帰(US-016)', () => {
+  it('巨大な移調量は 12 で割った余りで動かす(2^53-1 は +7 と同じ)。安全な整数を超える量は拒否する', () => {
+    expect(transposeChordSymbol('G/B', 2 ** 53 - 1, 'Ab major')).toBe('D/Gb');
+    expect(transposeChordSymbol('G/B', -(2 ** 53 - 1), 'C major')).toBe('C/E');
+    expect(transposeChordSymbol('G/B', 8 + 12 * 1e9, 'Ab major')).toBe('Eb/G');
+    expect(() => transposeChordSymbol('G/B', 2 ** 53, 'Ab major')).toThrow(RangeError);
+  });
+
+  it('キー名の Unicode の ♯/♭ を ASCII の #/b と同じに読む', () => {
+    expect(transposeChordSymbol('C', 6, 'F♯ major')).toBe('F#');
+    expect(transposeChordSymbol('C', 6, 'G♭ major')).toBe('Gb');
+    expect(keySignatureUsesFlats('B♭ minor')).toBe(true);
+    expect(keySignatureUsesFlats('C♯ minor')).toBe(false);
+    expect(keyShiftSemitones('F♯', 'Gb')).toBe(0);
+    expect(keyShiftSemitones('C', 'B♭')).toBe(-2);
+    expect(transposeKeyName('F♯ major', 0)).toBe('F#');
+    expect(transposeKeyName('E♭ naturalMinor', 0)).toBe('Eb');
+  });
+});
+
+describe('keyShiftSemitones / transposeKeyName', () => {
+  it('近い方向(-5〜+6)の半音数を返す', () => {
+    expect(keyShiftSemitones('C', 'D')).toBe(2);
+    expect(keyShiftSemitones('C', 'Bb')).toBe(-2);
+    expect(keyShiftSemitones('C', 'F#')).toBe(6);
+    expect(keyShiftSemitones('C', 'G')).toBe(-5);
+    expect(() => keyShiftSemitones('H', 'C')).toThrow();
+  });
+
+  it('移調後のキー名はスケールに合う綴り(メジャーは Db、マイナーは C#)', () => {
+    expect(transposeKeyName('C major', 1)).toBe('Db');
+    expect(transposeKeyName('C naturalMinor', 1)).toBe('C#');
+    expect(transposeKeyName('C', 2 ** 53 - 1)).toBe('G');
+    expect(() => transposeKeyName('C', 2 ** 53)).toThrow(RangeError);
+    expect(() => transposeKeyName('C', 0.5)).toThrow(RangeError);
+  });
+});
+
+describe('keySignatureUsesFlats', () => {
+  it('メジャーとマイナーの全キーで調号の向きを返す', () => {
+    const flatsMajor = ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'];
+    const sharpsMajor = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#'];
+    for (const k of flatsMajor) expect(keySignatureUsesFlats(`${k} major`)).toBe(true);
+    for (const k of sharpsMajor) expect(keySignatureUsesFlats(`${k} major`)).toBe(false);
+    const flatsMinor = ['D', 'G', 'C', 'F', 'Bb', 'Eb', 'Ab'];
+    const sharpsMinor = ['A', 'E', 'B', 'F#', 'C#', 'G#', 'D#', 'A#'];
+    for (const k of flatsMinor) expect(keySignatureUsesFlats(`${k} minor`)).toBe(true);
+    for (const k of sharpsMinor) expect(keySignatureUsesFlats(`${k} minor`)).toBe(false);
+  });
+
+  it('スケール名(naturalMinor など)もモードとして読む', () => {
+    expect(keySignatureUsesFlats('D naturalMinor')).toBe(true);
+    expect(keySignatureUsesFlats('D harmonicMinor')).toBe(true);
+    expect(keySignatureUsesFlats('D majorPentatonic')).toBe(false);
+  });
+});
+
+describe('transposeChordSymbol ファズ(seed 固定)', () => {
+  const ROOTS = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B', 'C♯', 'B♭', 'E♭'];
+  const SUFFIXES = ['', 'm', 'm7', '7', 'maj7', 'dim', 'aug', 'm7b5', 'dim7', 'sus2', 'sus4', '6', 'm6', 'add9', '9', 'maj9', 'm9', 'mMaj7'];
+  const KEY_ROOTS = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B', 'F♯', 'B♭', 'E♭', 'C♯'];
+  const HUGE = [2 ** 53 - 1, -(2 ** 53 - 1), 2 ** 40 + 5, -(2 ** 33) - 1, 1e15 + 7];
+  const MODES = ['major', 'minor'];
+
+  it('+n して -n すると、元のキーの表記規則で書いた同じコードに戻り、ルートとベースは n 半音動く', () => {
+    const rand = createPrng(16016);
+    for (let i = 0; i < 3000; i += 1) {
+      const symbol =
+        ROOTS[randomInt(rand, 0, ROOTS.length - 1)]! +
+        SUFFIXES[randomInt(rand, 0, SUFFIXES.length - 1)]! +
+        (rand() < 0.3 ? `/${ROOTS[randomInt(rand, 0, ROOTS.length - 1)]!}` : '');
+      const keyBefore = `${KEY_ROOTS[randomInt(rand, 0, KEY_ROOTS.length - 1)]!} ${MODES[randomInt(rand, 0, 1)]!}`;
+      const keyAfter = `${KEY_ROOTS[randomInt(rand, 0, KEY_ROOTS.length - 1)]!} ${MODES[randomInt(rand, 0, 1)]!}`;
+      const n = rand() < 0.1 ? HUGE[randomInt(rand, 0, HUGE.length - 1)]! : randomInt(rand, -12, 12);
+      const moved = transposeChordSymbol(symbol, n, keyAfter);
+      const before = parseChord(symbol);
+      const after = parseChord(moved);
+      const shift = ((n % 12) + 12) % 12;
+      expect(after.rootPc).toBe((before.rootPc + shift) % 12);
+      expect(after.bassPc).toBe((before.bassPc + shift) % 12);
+      expect(after.quality).toBe(before.quality);
+      // 表記はキーの調号の向きだけを使う。
+      const accidentals = [...moved.matchAll(/(?:^|\/)[A-G]([#b]?)/g)].map((m) => m[1]);
+      for (const acc of accidentals) {
+        if (acc === '') continue;
+        expect(acc).toBe(keySignatureUsesFlats(keyAfter) ? 'b' : '#');
+        expect(keySignatureUsesFlats(keyAfter)).toBe(keySignatureUsesFlats(keyAfter.replace('♯', '#').replace('♭', 'b')));
+      }
+      expect(transposeChordSymbol(moved, -n, keyBefore)).toBe(transposeChordSymbol(symbol, 0, keyBefore));
+    }
+  });
+
+  it('移調量が NaN・小数・Infinity なら必ず拒否する', () => {
+    const rand = createPrng(7);
+    for (let i = 0; i < 200; i += 1) {
+      const bad = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, randomInt(rand, -12, 12) + 0.5, 2 ** 53, -(2 ** 60)][randomInt(rand, 0, 5)]!;
+      expect(() => transposeChordSymbol('Am7', bad, 'C major')).toThrow(RangeError);
     }
   });
 });

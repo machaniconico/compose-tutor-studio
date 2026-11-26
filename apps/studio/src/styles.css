@@ -1738,6 +1738,30 @@ input[type='range'] {
   overflow-y: auto;
 }
 
+/* --- Transpose the whole song (US-016) --- */
+.transpose-song {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.transpose-song__lead,
+.transpose-song__hint {
+  margin: 0;
+}
+.transpose-song__hint {
+  color: var(--text-dim);
+}
+.transpose-song__check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.transpose-song__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
 /* --- Export menu --- */
 .export-menu {
   display: flex;

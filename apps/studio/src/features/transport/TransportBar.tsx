@@ -7,7 +7,12 @@ import {
 } from '../../state/store';
 import { findShortcut, type ShortcutAction } from '../../state/keymap';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
-import { beatsPerBar as beatsPerBarOf, MAX_SONG_BARS as MAX_LENGTH_BARS, maxSongBars, tapTempo } from '@cts/project-model';
+import {
+  beatsPerBar as beatsPerBarOf,
+  MAX_SONG_BARS as MAX_LENGTH_BARS,
+  maxSongBars,
+  tapTempo,
+} from '@cts/project-model';
 import { pushToast } from '../../state/tutorialBridge';
 import { formatPosition, keyboardSeekBeat } from '../timeline';
 import { initAudioBridge, restartAt } from '../../audio/playback';
@@ -16,6 +21,9 @@ import { ExportMenu } from '../export/ExportMenu';
 import { SupportMenu } from '../support/SupportMenu';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { ShortcutHelpDialog } from '../common/ShortcutHelpDialog';
+import { Dialog } from '../common/Dialog';
+import { transposeSongToKey } from '../../state/editorActions';
+import { keyShiftSemitones } from '@cts/theory-engine';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
 
@@ -157,6 +165,84 @@ function isTapActivation(event: Event, button: HTMLButtonElement | null): boolea
 }
 
 /** Top transport + project metadata bar. */
+/** How a key change moves the song, for the dialog ("2 半音上へ"). */
+function shiftLabel(semitones: number): string {
+  if (semitones === 0) return '高さは変わりません';
+  return semitones > 0 ? `${semitones} 半音上へ` : `${-semitones} 半音下へ`;
+}
+
+/**
+ * 「曲全体を移調」: pick a new key; by default notes and chords move with it
+ * (drum tracks never do). One undo step. A refusal shows its reason as a toast
+ * and keeps the dialog open.
+ */
+function TransposeSongDialog({ currentKey, onClose }: { currentKey: MusicalKey; onClose: () => void }) {
+  // The select starts on the 12-key option sounding like the saved key (F♯ → F#),
+  // so what it shows is always the value held here. '' when the key cannot be read.
+  const [startKey] = useState<MusicalKey | ''>(() => {
+    try {
+      return KEYS.find((k) => keyShiftSemitones(currentKey, k) === 0) ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const [key, setKey] = useState<MusicalKey | ''>(startKey);
+  const [moveNotes, setMoveNotes] = useState(true);
+  // A key the theory engine cannot read shows why here; "移調する" then reports it as a toast.
+  let shift: string;
+  try {
+    shift = key === '' ? '新しいキーを選んでください' : shiftLabel(keyShiftSemitones(currentKey, key));
+  } catch {
+    shift = `今のキー「${currentKey}」を読み取れません`;
+  }
+  const onApply = (): void => {
+    if (key !== '' && transposeSongToKey(key, moveNotes)) onClose();
+  };
+  return (
+    <Dialog title="曲全体を移調" onClose={onClose}>
+      <div className="transpose-song">
+        <p className="transpose-song__lead">
+          キーを変えると曲の高さ全体が変わります。歌いやすい高さを探すときに使います。
+        </p>
+        <div className="field">
+          <label htmlFor="transpose-song-key">新しいキー</label>
+          <select id="transpose-song-key" value={key} onChange={(e) => setKey(e.target.value as MusicalKey)}>
+            {startKey === '' ? (
+              <option value="" disabled>
+                選んでください
+              </option>
+            ) : null}
+            {KEYS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+        </div>
+        <label className="transpose-song__check">
+          <input type="checkbox" checked={moveNotes} onChange={(e) => setMoveNotes(e.target.checked)} />
+          ノートとコードも動かす
+        </label>
+        <p className="transpose-song__hint">
+          {startKey === ''
+            ? `今のキー「${currentKey}」を読み取れません。新しいキーを選ぶと、理由を表示します。`
+            : moveNotes
+            ? `${currentKey} → ${key}: ${shift}。ドラムのトラックは動きません。`
+            : 'キーの設定だけを変えます。ノートとコードはそのままです。'}
+        </p>
+        <div className="transpose-song__actions">
+          <button type="button" onClick={onClose}>
+            やめる
+          </button>
+          <button type="button" disabled={key === '' || key === startKey} onClick={onApply}>
+            移調する
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 export function TransportBar() {
   const project = useStore((s) => s.project);
   const maxLengthBars = maxSongBars(project);
@@ -186,6 +272,7 @@ export function TransportBar() {
   const setLoopRange = useStore((s) => s.setLoopRange);
   const startScreenOpen = useStore((s) => s.startScreenOpen);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const [transposeOpen, setTransposeOpen] = useState(false);
   // The bar-count input is committed on blur / Enter so a half-typed number
   // never triggers the "content will be deleted" confirmation.
   const [lengthDraft, setLengthDraft] = useState<string | null>(null);
@@ -430,6 +517,13 @@ export function TransportBar() {
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            title="キーを変えて、ノートとコードをまとめて高く・低くします(ドラムは動きません)"
+            onClick={() => setTransposeOpen(true)}
+          >
+            曲全体を移調
+          </button>
         </div>
 
         <div className="field">
@@ -507,6 +601,7 @@ export function TransportBar() {
         </span>
       </div>
       {shortcutHelpOpen ? <ShortcutHelpDialog onClose={() => setShortcutHelpOpen(false)} /> : null}
+      {transposeOpen ? <TransposeSongDialog currentKey={project.key} onClose={() => setTransposeOpen(false)} /> : null}
     </header>
   );
 }
