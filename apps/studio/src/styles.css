@@ -279,6 +279,39 @@ input[type='range'] {
   flex: 1;
 }
 
+.track-list__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.track-row__actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.track-row__color {
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.track-row__role {
+  font-size: 11px;
+}
+
+.track-row__rename {
+  width: 100%;
+  font-weight: 600;
+}
+
 .mini-btn {
   padding: 1px 7px;
   font-size: 11px;

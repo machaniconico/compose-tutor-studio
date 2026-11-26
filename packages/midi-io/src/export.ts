@@ -32,15 +32,15 @@ const DRUM_CHANNEL = 9;
 
 // --- Meta event builders ---
 
-/** Track name meta event (FF 03). */
+/** Track name meta event (FF 03), UTF-8 so Japanese names such as "楽器 4" survive. */
 function trackNameMeta(name: string): number[] {
-  const encoded = asciiBytes(name);
+  const encoded = utf8Bytes(name);
   return [0xff, 0x03, ...writeVarLen(encoded.length), ...encoded];
 }
 
 /** Marker meta event (FF 06) — used for chord symbols on the tempo track. */
 function markerMeta(text: string): number[] {
-  const encoded = asciiBytes(text);
+  const encoded = utf8Bytes(text);
   return [0xff, 0x06, ...writeVarLen(encoded.length), ...encoded];
 }
 
@@ -61,13 +61,9 @@ function timeSigMeta(num: number, denom: number): number[] {
   return [0xff, 0x58, 0x04, num, denomLog2, 24, 8];
 }
 
-/** Encode an ASCII string to byte values (non-ASCII chars are masked to a byte). */
-function asciiBytes(text: string): number[] {
-  const bytes: number[] = [];
-  for (let i = 0; i < text.length; i++) {
-    bytes.push(text.charCodeAt(i) & 0xff);
-  }
-  return bytes;
+/** Encode text as UTF-8 byte values (ASCII text keeps its single bytes). */
+function utf8Bytes(text: string): number[] {
+  return Array.from(new TextEncoder().encode(text));
 }
 
 /** Clamp a number into [min, max]. */
@@ -162,7 +158,8 @@ function buildInstrumentTrack(
  *     at the track start.
  *
  * Channels are assigned sequentially to non-drum tracks, skipping channel 9
- * (reserved for GM percussion). Drum tracks always use channel 9.
+ * (reserved for GM percussion), and wrap back to 0 after 15, so any number of
+ * tracks keeps every status byte valid. Drum tracks always use channel 9.
  */
 export function projectToMidi(project: Project, options?: { ppq?: number }): Uint8Array {
   const ppq = options?.ppq ?? PPQ;
@@ -182,6 +179,7 @@ export function projectToMidi(project: Project, options?: { ppq?: number }): Uin
   const trackChunks: Uint8Array[] = [];
   let nextChannel = 0;
   const allocChannel = (): number => {
+    if (nextChannel > 15) nextChannel = 0; // wrap: MIDI has only channels 0-15
     if (nextChannel === DRUM_CHANNEL) nextChannel++; // skip channel 9
     return nextChannel++;
   };
@@ -197,6 +195,10 @@ export function projectToMidi(project: Project, options?: { ppq?: number }): Uin
   }
 
   const allTracks = [tempoTrack, ...trackChunks];
+  // The SMF header stores the track count in 16 bits.
+  if (allTracks.length > 0xffff) {
+    throw new RangeError(`MIDI files hold at most 65535 tracks (this song needs ${allTracks.length})`);
+  }
   const header = buildHeaderChunk(1, allTracks.length, ppq);
   return concatChunks(header, ...allTracks);
 }

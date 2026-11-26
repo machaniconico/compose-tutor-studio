@@ -17,14 +17,21 @@ import type {
   Project,
   ScaleName,
   Track,
+  TrackRole,
 } from '@cts/project-model';
 import {
+  addTrack as addProjectTrack,
   beatsPerBar as beatsPerBarOf,
   contentBeyondBars,
+  duplicateTrack as duplicateProjectTrack,
   findProjectLoopLimitProblem,
+  moveTrack as moveProjectTrack,
+  removeTrack as removeProjectTrack,
+  renameTrack as renameProjectTrack,
   setLengthBars as setProjectLengthBars,
   setLoopRange as setProjectLoopRange,
   setTimeSignature as setProjectTimeSignature,
+  setTrackColor as setProjectTrackColor,
 } from '@cts/project-model';
 import { getScalePitchClasses } from '@cts/theory-engine';
 import { createDefaultProject } from './defaultProject';
@@ -153,6 +160,20 @@ type StoreState = {
   setTrackPan: (trackId: string, pan: number) => void;
   toggleMute: (trackId: string) => void;
   toggleSolo: (trackId: string) => void;
+
+  // track management (each one undo step; a change that changes nothing adds none)
+  /** Add an instrument or drum track before the master, select it and return its id. */
+  addTrack: (type: 'instrument' | 'drum') => string;
+  /** Remove a track (not the master). A removed selection moves to the neighbouring track. */
+  removeTrack: (trackId: string) => void;
+  /** Copy a track (not the master) right after itself and select the copy. */
+  duplicateTrack: (trackId: string) => void;
+  renameTrack: (trackId: string, name: string) => void;
+  /** Move a track to `toIndex` among the non-master tracks. */
+  moveTrack: (trackId: string, toIndex: number) => void;
+  setTrackColor: (trackId: string, color: string) => void;
+  /** Set the track's role, or clear it with null. */
+  setTrackRole: (trackId: string, role: TrackRole | null) => void;
 
   // selection (UI-only, no history)
   selectTrack: (trackId: string | null) => void;
@@ -379,6 +400,11 @@ function pitchInScale(project: Project, pitch: number): boolean {
 
 const startingProject = initialProject();
 
+/** Whether a role suits a track type: 'drums' only on drum tracks, the other roles only on instrument tracks. */
+export function roleFitsTrackType(role: TrackRole, type: Track['type']): boolean {
+  return role === 'drums' ? type === 'drum' : type === 'instrument';
+}
+
 export const useStore = create<StoreState>((set, get) => {
   const markSaving = (): void => {
     const { lastSavedAt } = get().save;
@@ -426,6 +452,27 @@ export const useStore = create<StoreState>((set, get) => {
     });
     scheduleSave(persistCurrentProject);
     return true;
+  };
+
+  /** Select a track and its first clip (UI only, no history). */
+  const selectTrackAndFirstClip = (trackId: string | null): void => {
+    const track = get().project.tracks.find((t) => t.id === trackId);
+    set((s) => ({
+      editor: {
+        ...s.editor,
+        selectedTrackId: trackId,
+        selectedClipId: track?.clips[0]?.id ?? null,
+        selectedNoteIds: [],
+      },
+    }));
+  };
+
+  /** After Undo/Redo: a selected track that no longer exists gives way to the first track. */
+  const dropRemovedTrackSelection = (): void => {
+    const { project, editor } = get();
+    if (editor.selectedTrackId === null || project.tracks.some((t) => t.id === editor.selectedTrackId)) return;
+    const fallback = project.tracks.find((t) => t.type !== 'master') ?? project.tracks[0];
+    selectTrackAndFirstClip(fallback ? fallback.id : null);
   };
 
   let transactionOwner: unknown;
@@ -679,6 +726,69 @@ export const useStore = create<StoreState>((set, get) => {
       commitProject(mapTracks(project, (t) => (t.id === trackId ? { ...t, solo: !t.solo } : t)));
     },
 
+    // --- track management ---
+    addTrack: (type) => {
+      const project = get().project;
+      const next = addProjectTrack(project, { type, id: uid('track') });
+      if (!commitProject(next)) return '';
+      const added = next.tracks.find((track, index) => track !== project.tracks[index])!;
+      selectTrackAndFirstClip(added.id);
+      return added.id;
+    },
+    removeTrack: (trackId) => {
+      const project = get().project;
+      const next = removeProjectTrack(project, trackId);
+      if (next === project || !commitProject(next)) return;
+      const { selectedTrackId, selectedClipId } = get().editor;
+      if (selectedTrackId !== trackId) {
+        if (selectedClipId !== null && !next.tracks.some((t) => t.clips.some((c) => c.id === selectedClipId))) {
+          set((s) => ({ editor: { ...s.editor, selectedClipId: null, selectedNoteIds: [] } }));
+        }
+        return;
+      }
+      // Select the track that now sits where the removed one was, else the one before it.
+      const index = project.tracks.findIndex((t) => t.id === trackId);
+      const after = project.tracks.slice(index + 1).find((t) => t.type !== 'master');
+      const before = project.tracks.slice(0, index).reverse().find((t) => t.type !== 'master');
+      const neighbour = after ?? before ?? next.tracks.find((t) => t.type === 'master');
+      selectTrackAndFirstClip(neighbour ? neighbour.id : null);
+    },
+    duplicateTrack: (trackId) => {
+      const project = get().project;
+      const next = duplicateProjectTrack(project, trackId, undefined, uid('track'));
+      if (next === project || !commitProject(next)) return;
+      const copy = next.tracks[next.tracks.findIndex((t) => t.id === trackId) + 1];
+      if (copy) selectTrackAndFirstClip(copy.id);
+    },
+    renameTrack: (trackId, name) => {
+      const project = get().project;
+      const next = renameProjectTrack(project, trackId, name);
+      if (next !== project) commitProject(next);
+    },
+    moveTrack: (trackId, toIndex) => {
+      const project = get().project;
+      const next = moveProjectTrack(project, trackId, toIndex);
+      if (next !== project) commitProject(next);
+    },
+    setTrackColor: (trackId, color) => {
+      const project = get().project;
+      const next = setProjectTrackColor(project, trackId, color);
+      if (next !== project) commitProject(next);
+    },
+    setTrackRole: (trackId, role) => {
+      const project = get().project;
+      const track = project.tracks.find((t) => t.id === trackId);
+      if (!track || (track.role ?? null) === role || (role !== null && !roleFitsTrackType(role, track.type))) return;
+      commitProject(
+        mapTracks(project, (t) => {
+          if (t.id !== trackId) return t;
+          if (role !== null) return { ...t, role };
+          const { role: _cleared, ...rest } = t;
+          return rest;
+        }),
+      );
+    },
+
     // --- selection (UI only) ---
     selectTrack: (trackId) => set((s) => ({ editor: { ...s.editor, selectedTrackId: trackId } })),
     selectClip: (clipId) => set((s) => ({ editor: { ...s.editor, selectedClipId: clipId } })),
@@ -793,6 +903,7 @@ export const useStore = create<StoreState>((set, get) => {
         save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
       });
       scheduleSave(persistCurrentProject);
+      dropRemovedTrackSelection();
     },
     redo: () => {
       restoreTransactionBase();
@@ -806,6 +917,7 @@ export const useStore = create<StoreState>((set, get) => {
         save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
       });
       scheduleSave(persistCurrentProject);
+      dropRemovedTrackSelection();
     },
     canUndo: () => get().past.length > 0 || get().transactionBase !== null,
     canRedo: () => get().future.length > 0,

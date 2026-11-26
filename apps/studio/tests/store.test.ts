@@ -1,5 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { expandClip, validateProject, type Clip } from '@cts/project-model';
+import {
+  _resetIdCounter,
+  duplicateTrack,
+  expandClip,
+  removeTrack,
+  validateProject,
+  type Clip,
+} from '@cts/project-model';
 import { installLocalStorage, MemoryStorage } from './localStorageStub';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { createSampleProject, SAMPLE_PROJECT_TITLE } from '../src/state/sampleProject';
@@ -611,6 +618,196 @@ describe('mixer actions', () => {
     expect(track?.pan).toBe(-0.3);
     expect(track?.mute).toBe(true);
     expect(track?.solo).toBe(true);
+  });
+});
+
+describe('track management (US-010)', () => {
+  const names = () => useStore.getState().project.tracks.map((t) => t.name);
+  const idOf = (name: string) => useStore.getState().project.tracks.find((t) => t.name === name)?.id ?? '';
+
+  /** Run one action and check it is exactly one undo step back to the starting tracks. */
+  function expectOneUndoStep(action: () => void): void {
+    const before = useStore.getState().project.tracks;
+    action();
+    expect(useStore.getState().project.tracks).not.toBe(before);
+    expect(useStore.getState().past).toHaveLength(1);
+    useStore.getState().undo();
+    expect(useStore.getState().project.tracks).toBe(before);
+  }
+
+  it('moves the selection to the next track when the selected track is removed', () => {
+    const bass = idOf('Bass');
+    useStore.getState().selectTrack(bass);
+    useStore.getState().selectClip(useStore.getState().project.tracks[1]?.clips[0]?.id ?? null);
+    useStore.getState().removeTrack(bass);
+
+    const melody = useStore.getState().project.tracks.find((t) => t.name === 'Melody');
+    expect(names()).toEqual(['Chords', 'Melody', 'Drums', 'Master']);
+    expect(useStore.getState().editor.selectedTrackId).toBe(melody?.id);
+    expect(useStore.getState().editor.selectedClipId).toBe(melody?.clips[0]?.id);
+  });
+
+  it('moves the selection to the previous track when the last movable track is removed', () => {
+    const drums = idOf('Drums');
+    useStore.getState().selectTrack(drums);
+    useStore.getState().removeTrack(drums);
+    expect(useStore.getState().editor.selectedTrackId).toBe(idOf('Melody'));
+  });
+
+  it('keeps the selection when another track is removed', () => {
+    const chords = idOf('Chords');
+    useStore.getState().selectTrack(chords);
+    useStore.getState().removeTrack(idOf('Melody'));
+    expect(useStore.getState().editor.selectedTrackId).toBe(chords);
+  });
+
+  it('adds a track and selects it', () => {
+    const id = useStore.getState().addTrack('instrument');
+    expect(names()).toEqual(['Chords', 'Bass', 'Melody', 'Drums', '楽器 4', 'Master']);
+    expect(useStore.getState().editor.selectedTrackId).toBe(id);
+    const added = useStore.getState().project.tracks.find((t) => t.id === id);
+    expect(useStore.getState().editor.selectedClipId).toBe(added?.clips[0]?.id);
+  });
+
+  it('makes each track operation one undo step', () => {
+    expectOneUndoStep(() => useStore.getState().addTrack('drum'));
+    useStore.getState().createNewProject('テスト');
+    expectOneUndoStep(() => useStore.getState().removeTrack(idOf('Bass')));
+    useStore.getState().createNewProject('テスト');
+    expectOneUndoStep(() => useStore.getState().duplicateTrack(idOf('Bass')));
+    useStore.getState().createNewProject('テスト');
+    expectOneUndoStep(() => useStore.getState().renameTrack(idOf('Bass'), 'ベース'));
+    useStore.getState().createNewProject('テスト');
+    expectOneUndoStep(() => useStore.getState().moveTrack(idOf('Bass'), 0));
+    useStore.getState().createNewProject('テスト');
+    expectOneUndoStep(() => useStore.getState().setTrackColor(idOf('Bass'), '#123456'));
+    useStore.getState().createNewProject('テスト');
+    expectOneUndoStep(() => useStore.getState().setTrackRole(idOf('Bass'), 'melody'));
+  });
+
+  it('adds no undo step when an operation changes nothing', () => {
+    const masterId = idOf('Master');
+    useStore.getState().removeTrack(masterId);
+    useStore.getState().moveTrack(masterId, 0);
+    useStore.getState().duplicateTrack(masterId);
+    useStore.getState().renameTrack(idOf('Bass'), '  ');
+    expect(useStore.getState().past).toHaveLength(0);
+    expect(names()).toEqual(['Chords', 'Bass', 'Melody', 'Drums', 'Master']);
+  });
+
+  it('leaves the project and undo history alone when the color and role already match', () => {
+    const { project } = useStore.getState();
+    const bass = project.tracks.find((t) => t.name === 'Bass')!;
+    useStore.getState().setTrackColor(bass.id, bass.color!);
+    useStore.getState().setTrackRole(bass.id, 'bass');
+    expect(useStore.getState().past).toHaveLength(0);
+    expect(useStore.getState().project).toBe(project);
+  });
+
+  it('persists a duplicate when an existing project id matches a clip allocation candidate', () => {
+    const project = { ...createDefaultProject(), id: 'clip-2' };
+    const bass = project.tracks.find((t) => t.name === 'Bass')!;
+    const saved = new MemoryStorage();
+    expect(saveProject(project, saved)).toBe(true);
+    const reopened = loadProject(project.id, saved)!;
+    _resetIdCounter();
+    const next = duplicateTrack(reopened, bass.id);
+    expect(saveProject(next, saved)).toBe(true);
+    expect(loadProject(project.id, saved)).toEqual(next);
+  });
+
+  it('keeps deleted clip links silent after saving, reopening and duplicating a track', () => {
+    const project = createDefaultProject();
+    const bass = project.tracks.find((t) => t.name === 'Bass')!;
+    const melody = project.tracks.find((t) => t.name === 'Melody')!;
+    bass.clips[0]!.id = 'clip-4';
+    const source = melody.clips[0]!;
+    melody.clips = [
+      { ...source, id: 'melody-link', aliasOf: 'clip-4' },
+      source,
+      {
+        ...source,
+        id: 'melody-notes',
+        notes: [{ id: 'melody-note', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+      },
+    ];
+    const saved = new MemoryStorage();
+    expect(saveProject(removeTrack(project, bass.id), saved)).toBe(true);
+    const reopened = loadProject(project.id, saved)!;
+    _resetIdCounter();
+    const next = duplicateTrack(reopened, melody.id);
+    const clips = next.tracks.flatMap((t) => t.clips);
+    const link = clips.find((clip) => clip.id === 'melody-link')!;
+    expect(link.aliasOf).toBe('clip-4');
+    expect(expandClip(link, clips).notes).toEqual([]);
+  });
+
+  it('selects the master when the last instrument or drum track is removed', () => {
+    for (const name of ['Chords', 'Bass', 'Melody']) useStore.getState().removeTrack(idOf(name));
+    const drums = idOf('Drums');
+    useStore.getState().selectTrack(drums);
+    useStore.getState().removeTrack(drums);
+    expect(names()).toEqual(['Master']);
+    expect(useStore.getState().editor.selectedTrackId).toBe(idOf('Master'));
+  });
+
+  it('moves the selection off a track that Undo or Redo removes', () => {
+    const id = useStore.getState().addTrack('instrument');
+    expect(useStore.getState().editor.selectedTrackId).toBe(id);
+    useStore.getState().undo();
+    expect(useStore.getState().editor.selectedTrackId).toBe(idOf('Chords'));
+    expect(useStore.getState().editor.selectedClipId).toBe(
+      useStore.getState().project.tracks[0]?.clips[0]?.id,
+    );
+
+    useStore.getState().redo();
+    const melody = idOf('Melody');
+    useStore.getState().selectTrack(melody);
+    useStore.getState().removeTrack(melody);
+    useStore.getState().selectTrack(id);
+    useStore.getState().undo(); // brings Melody back; the selected added track stays
+    expect(useStore.getState().editor.selectedTrackId).toBe(id);
+    useStore.getState().redo(); // removes Melody again, the selection is untouched
+    expect(useStore.getState().editor.selectedTrackId).toBe(id);
+  });
+
+  it('refuses a role that does not suit the track type', () => {
+    const drums = idOf('Drums');
+    const bass = idOf('Bass');
+    useStore.getState().setTrackRole(drums, 'bass');
+    useStore.getState().setTrackRole(bass, 'drums');
+    const tracks = useStore.getState().project.tracks;
+    expect(tracks.find((t) => t.id === drums)?.role).toBe('drums');
+    expect(tracks.find((t) => t.id === bass)?.role).toBe('bass');
+    expect(useStore.getState().past).toHaveLength(0);
+  });
+
+  it('clears the role with null', () => {
+    const bass = idOf('Bass');
+    useStore.getState().setTrackRole(bass, null);
+    expect(useStore.getState().project.tracks.find((t) => t.id === bass)?.role).toBeUndefined();
+  });
+
+  it('adds and removes tracks while playing without throwing', async () => {
+    const { initAudioBridge } = await import('../src/audio/playback');
+    const teardown = initAudioBridge();
+    schedulerStarts.length = 0;
+    try {
+      useStore.getState().play();
+      await vi.waitFor(() => expect(schedulerStarts).toHaveLength(1));
+
+      expect(() => {
+        const id = useStore.getState().addTrack('drum');
+        useStore.getState().duplicateTrack(idOf('Bass'));
+        useStore.getState().removeTrack(idOf('Melody'));
+        useStore.getState().removeTrack(id);
+        useStore.getState().undo();
+      }).not.toThrow();
+      expect(useStore.getState().transport.isPlaying).toBe(true);
+    } finally {
+      useStore.getState().stop();
+      teardown();
+    }
   });
 });
 

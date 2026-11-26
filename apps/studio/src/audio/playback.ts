@@ -15,7 +15,7 @@
 // *intent* and the position semantics (see store.stop(reset?)); this bridge owns
 // the actual audio lifecycle.
 
-import { beatsPerBar as beatsPerBarOf, type Project } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf, type Project, type Track } from '@cts/project-model';
 import { activeLoopRange, useStore } from '../state/store';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
@@ -44,6 +44,11 @@ const POSITION_TICK_MS = 33;
 type BridgeState = {
   scheduler: Scheduler | null;
   graphs: Map<string, TrackGraph>;
+  /**
+   * Sound tracks selected at play time. Live edits refresh tracks still in
+   * the project. Removed tracks keep their last state through graph rebuilds.
+   */
+  playbackTracks: Map<string, Track>;
   synths: Map<string, SynthVoiceManager>;
   drums: Map<string, DrumVoiceManager>;
   /** Metronome clicks already scheduled up to this beat (exclusive). */
@@ -73,6 +78,7 @@ type BridgeState = {
 const state: BridgeState = {
   scheduler: null,
   graphs: new Map(),
+  playbackTracks: new Map(),
   synths: new Map(),
   drums: new Map(),
   metronomeBeatFrontier: 0,
@@ -106,12 +112,16 @@ export function initAudioBridge(): () => void {
   const unsubPlaying = useStore.subscribe((s, prev) => {
     if (s.transport.isPlaying === prev.transport.isPlaying) return;
     if (s.transport.isPlaying) {
+      state.playbackTracks = new Map(
+        s.project.tracks.filter((track) => track.type !== 'master').map((track) => [track.id, track]),
+      );
       const generation = ++state.playGeneration;
       void startPlayback(generation).catch((error: unknown) => {
         if (generation === state.playGeneration) handlePlaybackStartFailure(error);
       });
     } else {
       stopAudio();
+      state.playbackTracks.clear();
     }
   });
 
@@ -123,6 +133,9 @@ export function initAudioBridge(): () => void {
   // current playhead.
   const unsubProject = useStore.subscribe((s, prev) => {
     if (s.project === prev.project) return;
+    for (const track of s.project.tracks) {
+      if (state.playbackTracks.has(track.id)) state.playbackTracks.set(track.id, track);
+    }
     const engine = getAudioEngine();
     if (!state.scheduler?.isRunning) {
       if (engine.isInitialized) {
@@ -134,7 +147,7 @@ export function initAudioBridge(): () => void {
       restartPlayback();
       return;
     }
-    applyMixState(state.graphs, s.project.tracks, engine.now());
+    applyMixState(state.graphs, [...state.playbackTracks.values()], engine.now());
     if (engine.isInitialized) {
       applyMasterVolume(engine.requireMaster(), s.project.tracks, engine.now());
     }
@@ -157,6 +170,7 @@ export function initAudioBridge(): () => void {
     state.unsub = [];
     state.installed = false;
     stopAudio();
+    state.playbackTracks.clear();
     silenceRinging();
   };
 }
@@ -293,7 +307,10 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
 
   const store = useStore.getState();
 
-  const project = store.project;
+  const project: Project = {
+    ...store.project,
+    tracks: [...state.playbackTracks.values(), ...store.project.tracks.filter((track) => track.type === 'master')],
+  };
   const transport = store.transport;
   applyMasterVolume(master, project.tracks, context.currentTime);
   const bpb = beatsPerBarOf(project.timeSignature);

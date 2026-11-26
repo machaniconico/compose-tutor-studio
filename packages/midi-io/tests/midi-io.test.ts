@@ -683,3 +683,135 @@ describe('exportProjectToMidi: long loops and mixed clip types (US-007)', () => 
     expect(starts).toEqual([127]);
   });
 });
+
+describe('exportProjectToMidi: many tracks (US-010)', () => {
+  /** Note-on status bytes of each MTrk chunk, read straight from the file bytes. */
+  function noteOnStatusesPerTrack(bytes: Uint8Array): number[][] {
+    const result: number[][] = [];
+    let pos = 14; // after the MThd chunk
+    while (pos < bytes.length) {
+      const length = (bytes[pos + 4]! << 24) | (bytes[pos + 5]! << 16) | (bytes[pos + 6]! << 8) | bytes[pos + 7]!;
+      const end = pos + 8 + length;
+      let p = pos + 8;
+      const statuses: number[] = [];
+      const readVarLen = (): number => {
+        let value = 0;
+        let byte: number;
+        do {
+          byte = bytes[p++]!;
+          value = (value << 7) | (byte & 0x7f);
+        } while (byte & 0x80);
+        return value;
+      };
+      while (p < end) {
+        readVarLen(); // delta
+        const status = bytes[p++]!;
+        expect(status & 0x80).toBe(0x80); // the writer never uses running status
+        if (status === 0xff || status === 0xf0 || status === 0xf7) {
+          if (status === 0xff) p += 1; // meta type
+          const dataLength = readVarLen();
+          p += dataLength;
+        } else {
+          const kind = status & 0xf0;
+          if (kind === 0x90 && bytes[p + 1]! > 0) statuses.push(status);
+          p += kind === 0xc0 || kind === 0xd0 ? 1 : 2;
+        }
+      }
+      result.push(statuses);
+      pos = end;
+    }
+    return result;
+  }
+
+  function projectWithInstrumentTracks(count: number): Project {
+    return {
+      id: 'many',
+      schemaVersion: 2,
+      title: 'Many',
+      bpm: 120,
+      timeSignature: [4, 4],
+      key: 'C',
+      scale: 'major',
+      lengthBars: 1,
+      tracks: Array.from({ length: count }, (_, i) => ({
+        id: `t${i}`,
+        name: `楽器 ${i + 1}`,
+        type: 'instrument' as const,
+        clips: [
+          {
+            id: `c${i}`,
+            trackId: `t${i}`,
+            type: 'midi' as const,
+            startBeat: 0,
+            lengthBeats: 4,
+            loop: false,
+            notes: [{ id: `n${i}`, pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+          },
+        ],
+        volume: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        effects: [],
+      })),
+      chordTrack: [],
+      sections: [],
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    };
+  }
+
+  // Channels 0-15 without the percussion channel 9, in order, then from 0 again.
+  const CYCLE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
+
+  it('keeps every note-on of 20 instrument tracks in 0x90-0x9F and off channel 9', () => {
+    const perTrack = noteOnStatusesPerTrack(exportProjectToMidi(projectWithInstrumentTracks(20)));
+    const instrumentTracks = perTrack.slice(1); // track 0 is the tempo track
+    expect(instrumentTracks).toHaveLength(20);
+    instrumentTracks.forEach((statuses, i) => {
+      expect(statuses).toHaveLength(1);
+      const status = statuses[0]!;
+      expect(status).toBeGreaterThanOrEqual(0x90);
+      expect(status).toBeLessThanOrEqual(0x9f);
+      expect(status & 0x0f).not.toBe(9);
+      expect(status & 0x0f).toBe(CYCLE[i % CYCLE.length]);
+    });
+  });
+
+  it('wraps the channels so the 26th instrument track does not land on the drum channel', () => {
+    const perTrack = noteOnStatusesPerTrack(exportProjectToMidi(projectWithInstrumentTracks(30)));
+    const channels = perTrack.slice(1).map((statuses) => statuses[0]! & 0x0f);
+    expect(channels).toEqual(Array.from({ length: 30 }, (_, i) => CYCLE[i % CYCLE.length]));
+    expect(channels).not.toContain(9);
+  });
+
+  it('writes a Japanese track name as UTF-8', () => {
+    const bytes = exportProjectToMidi(projectWithInstrumentTracks(1));
+    const expected = new TextEncoder().encode('楽器 1');
+    const at = bytes.findIndex(
+      (b, i) => b === 0xff && bytes[i + 1] === 0x03 && bytes[i + 2] === expected.length,
+    );
+    expect(at).toBeGreaterThan(0);
+    expect(new TextDecoder().decode(bytes.slice(at + 3, at + 3 + expected.length))).toBe('楽器 1');
+  });
+
+  it('preserves a Japanese track name across export and import', () => {
+    const midi = exportProjectToMidi(projectWithInstrumentTracks(4));
+    expect(parseMidi(midi).tracks.map((track) => track.name)).toContain('楽器 4');
+  });
+
+  it('preserves the legacy byte values when a track name is invalid UTF-8', () => {
+    const events: MidiMessage[] = [
+      { tick: 0, bytes: [0xff, 0x03, 5, 0x43, 0x61, 0x66, 0xe9, 0x80] },
+      { tick: 0, bytes: [0x90, 60, 100] },
+      { tick: PPQ, bytes: [0x80, 60, 0] },
+    ];
+    const midi = concatChunks(buildHeaderChunk(0, 1, PPQ), buildTrackChunk(events));
+    expect(parseMidi(midi).tracks[0]?.name).toBe('Café\u0080');
+  });
+
+  it('refuses a song whose tracks do not fit the 16-bit track count of the header', () => {
+    // 65,535 instrument tracks plus the tempo track would wrap the count to 0.
+    expect(() => exportProjectToMidi(projectWithInstrumentTracks(65535))).toThrow(RangeError);
+  });
+});

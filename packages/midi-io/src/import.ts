@@ -182,7 +182,7 @@ function parseTrack(context: ParseContext, chunk: Chunk, index: number): ParsedM
       const length = state.readVarLen();
       const data = state.readBytes(length);
       if (metaType === 0x03) {
-        name = decodeLatin1(data);
+        name = decodeTrackName(data);
       } else if (metaType === 0x51 && data.length === 3) {
         const usPerQuarter = (data[0]! << 16) | (data[1]! << 8) | data[2]!;
         if (usPerQuarter > 0) {
@@ -288,6 +288,16 @@ function systemDataLength(status: number): number | null {
       return 0;
     default:
       return null;
+  }
+}
+
+const utf8TrackNameDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+function decodeTrackName(bytes: Uint8Array): string {
+  try {
+    return utf8TrackNameDecoder.decode(bytes);
+  } catch {
+    return decodeLatin1(bytes);
   }
 }
 

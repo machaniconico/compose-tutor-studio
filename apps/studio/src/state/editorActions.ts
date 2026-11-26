@@ -124,14 +124,19 @@ export function findTrackByRole(project: Project, role: TrackRole): Track | null
 }
 
 /**
- * The first MIDI clip of a track, if any. A conventional name ('Bass', 'Melody', ...)
- * is resolved by role first, so renamed tracks are still found; other names match by name.
+ * The first MIDI clip of an instrument track, if any. A conventional name ('Bass',
+ * 'Melody', ...) is resolved by role first, so renamed tracks are still found;
+ * other names match by name. Drum tracks are skipped: their clips cannot sound notes.
  */
 export function firstMidiClipOfTrack(project: Project, name: string): Clip | null {
   const role = roleForTrackName(name);
-  const track = (role ? findTrackByRole(project, role) : null) ?? findTrackByName(project, name);
-  if (!track) return null;
-  return track.clips.find((c) => c.type === 'midi') ?? track.clips[0] ?? null;
+  const instruments: Project = {
+    ...project,
+    tracks: project.tracks.filter((t) => t.type === 'instrument'),
+  };
+  const track =
+    (role ? findTrackByRole(instruments, role) : null) ?? findTrackByName(instruments, name);
+  return track?.clips.find((c) => c.type === 'midi') ?? null;
 }
 
 /** Beats per bar for the project's time signature. */

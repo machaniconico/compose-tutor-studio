@@ -1,5 +1,5 @@
-// Project/entity factories. All ids come from the makeId helper; timestamps come
-// from an injectable clock (defaults to the real system clock).
+// Project/entity factories. IDs default to makeId and timestamps come from an
+// injectable clock (defaults to the real system clock).
 
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
@@ -45,9 +45,10 @@ export function createTrack(
   instrument?: InstrumentConfig,
   color?: string,
   role?: TrackRole,
+  id = makeId('track'),
 ): Track {
   return {
-    id: makeId('track'),
+    id,
     name,
     type,
     ...(role !== undefined ? { role } : {}),
@@ -63,9 +64,9 @@ export function createTrack(
 }
 
 /** Create an empty MIDI clip covering [startBeat, startBeat + lengthBeats). */
-export function createMidiClip(trackId: string, startBeat: number, lengthBeats: number): Clip {
+export function createMidiClip(trackId: string, startBeat: number, lengthBeats: number, id = makeId('clip')): Clip {
   return {
-    id: makeId('clip'),
+    id,
     trackId,
     type: 'midi',
     startBeat,
@@ -81,9 +82,10 @@ export function createDrumClip(
   startBeat: number,
   lengthBeats: number,
   stepsPerBar = 16,
+  id = makeId('clip'),
 ): Clip {
   return {
-    id: makeId('clip'),
+    id,
     trackId,
     type: 'drum',
     startBeat,

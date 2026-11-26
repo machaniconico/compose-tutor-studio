@@ -4,6 +4,7 @@
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
 import { clipFirstPassEnd, drumHitRepeatCount, expandClip, resolveLinkSource } from './clipExpand';
+import { createDrumClip, createMidiClip, createTrack } from './factories';
 import { makeId } from './ids';
 import { beatsPerBar, drumStepsPerBar } from './time';
 import type {
@@ -15,6 +16,7 @@ import type {
   Project,
   Section,
   Track,
+  TrackRole,
 } from './types';
 
 /** Stamp updatedAt on a (shallow-copied) project. */
@@ -171,6 +173,174 @@ export function setTrackSolo(
   clock: Clock = systemClock,
 ): Project {
   return touch({ ...project, tracks: mapTrack(project, trackId, (t) => ({ ...t, solo })) }, clock);
+}
+
+// --- Track management ---
+//
+// The master track cannot be removed, moved or duplicated: those calls return
+// the project unchanged (same object) instead of throwing.
+
+const DEFAULT_TRACK_NAME: Record<'instrument' | 'drum', string> = {
+  instrument: '楽器',
+  drum: 'ドラム',
+};
+
+/** "楽器 2" style name: one past the tracks of that type, skipping names in use. */
+function nextTrackName(project: Project, type: 'instrument' | 'drum'): string {
+  const used = new Set(project.tracks.map((t) => t.name));
+  let n = project.tracks.filter((t) => t.type === type).length + 1;
+  while (used.has(`${DEFAULT_TRACK_NAME[type]} ${n}`)) n += 1;
+  return `${DEFAULT_TRACK_NAME[type]} ${n}`;
+}
+
+/** Allocate IDs against all saved entities and clip links, including dangling links. */
+function trackIdAllocator(project: Project): (prefix: string, preferred?: string) => string {
+  const ids = new Set([project.id]);
+  for (const chord of project.chordTrack) ids.add(chord.id);
+  for (const section of project.sections) ids.add(section.id);
+  for (const track of project.tracks) {
+    ids.add(track.id);
+    for (const effect of track.effects) ids.add(effect.id);
+    for (const clip of track.clips) {
+      ids.add(clip.id);
+      if (clip.aliasOf !== undefined) ids.add(clip.aliasOf);
+      clip.notes?.forEach((n) => ids.add(n.id));
+      clip.drumEvents?.forEach((d) => ids.add(d.id));
+    }
+  }
+  let sequence = 0;
+  return (prefix, preferred) => {
+    let id = preferred;
+    // Use a separate namespace from the IDs issued by makeId.
+    while (!id || ids.has(id)) id = `${prefix}-track-edit-${++sequence}`;
+    ids.add(id);
+    return id;
+  };
+}
+
+/** Insert a track after the last non-master track (the master keeps its slot). */
+function insertBeforeTrailingMaster(tracks: Track[], track: Track, afterIndex?: number): Track[] {
+  let index = afterIndex;
+  if (index === undefined) {
+    index = -1;
+    tracks.forEach((t, i) => {
+      if (t.type !== 'master') index = i;
+    });
+  }
+  return [...tracks.slice(0, index + 1), track, ...tracks.slice(index + 1)];
+}
+
+/**
+ * Add an instrument or drum track holding one empty clip over the whole song.
+ * The name defaults to a numbered Japanese name; the role stays unset unless given.
+ */
+export function addTrack(
+  project: Project,
+  options: { type: 'instrument' | 'drum'; name?: string; role?: TrackRole; id?: string },
+  clock: Clock = systemClock,
+): Project {
+  const { type } = options;
+  const name = options.name?.trim() || nextTrackName(project, type);
+  const instrument =
+    type === 'drum' ? { type: 'drumkit' as const, preset: 'basic' } : { type: 'synth' as const, preset: 'leadSine' };
+  const allocateId = trackIdAllocator(project);
+  const trackId = allocateId('track', options.id);
+  const track = createTrack(name, type, instrument, undefined, options.role, trackId);
+  const lengthBeats = project.lengthBars * beatsPerBar(project.timeSignature);
+  const clipId = allocateId('clip');
+  const clip =
+    type === 'drum'
+      ? createDrumClip(trackId, 0, lengthBeats, drumStepsPerBar(project.timeSignature), clipId)
+      : createMidiClip(trackId, 0, lengthBeats, clipId);
+  return touch({ ...project, tracks: insertBeforeTrailingMaster(project.tracks, { ...track, clips: [clip] }) }, clock);
+}
+
+/** Remove a track and its clips. The master (or an unknown id) is left as is. */
+export function removeTrack(project: Project, trackId: string, clock: Clock = systemClock): Project {
+  const track = project.tracks.find((t) => t.id === trackId);
+  if (!track || track.type === 'master') return project;
+  return touch({ ...project, tracks: project.tracks.filter((t) => t.id !== trackId) }, clock);
+}
+
+/**
+ * Copy a track right after itself. Every clip, note, drum event and effect gets
+ * a new id; links between clips of the copied track point at the copies, and
+ * links to clips elsewhere are kept.
+ */
+export function duplicateTrack(
+  project: Project,
+  trackId: string,
+  clock: Clock = systemClock,
+  id?: string,
+): Project {
+  const index = project.tracks.findIndex((t) => t.id === trackId);
+  const track = project.tracks[index];
+  if (!track || track.type === 'master') return project;
+  const allocateId = trackIdAllocator(project);
+  const newTrackId = allocateId('track', id);
+  const clipIds = new Map(track.clips.map((c) => [c.id, allocateId('clip')] as const));
+  const clips = track.clips.map((clip): Clip => {
+    const copy: Clip = { ...clip, id: clipIds.get(clip.id)!, trackId: newTrackId };
+    if (clip.aliasOf !== undefined) copy.aliasOf = clipIds.get(clip.aliasOf) ?? clip.aliasOf;
+    if (clip.notes) copy.notes = clip.notes.map((n) => ({ ...n, id: allocateId('note') }));
+    if (clip.drumEvents) copy.drumEvents = clip.drumEvents.map((d) => ({ ...d, id: allocateId('drum') }));
+    return copy;
+  });
+  const copy: Track = {
+    ...track,
+    id: newTrackId,
+    name: `${track.name} のコピー`,
+    clips,
+    effects: track.effects.map((e) => ({ ...e, id: allocateId('fx'), params: { ...e.params } })),
+  };
+  return touch({ ...project, tracks: insertBeforeTrailingMaster(project.tracks, copy, index) }, clock);
+}
+
+/** Rename a track. An empty (after trimming) or unchanged name leaves the project as is. */
+export function renameTrack(
+  project: Project,
+  trackId: string,
+  name: string,
+  clock: Clock = systemClock,
+): Project {
+  const trimmed = name.trim();
+  const track = project.tracks.find((t) => t.id === trackId);
+  if (!track || trimmed === '' || trimmed === track.name) return project;
+  return touch({ ...project, tracks: mapTrack(project, trackId, (t) => ({ ...t, name: trimmed })) }, clock);
+}
+
+/**
+ * Move a track to `toIndex` in the order of the non-master tracks (clamped).
+ * The master stays where it is; moving the master or to the same place is a no-op.
+ */
+export function moveTrack(
+  project: Project,
+  trackId: string,
+  toIndex: number,
+  clock: Clock = systemClock,
+): Project {
+  const movable = project.tracks.filter((t) => t.type !== 'master');
+  const from = movable.findIndex((t) => t.id === trackId);
+  if (from < 0) return project;
+  const to = Math.min(movable.length - 1, Math.max(0, Math.trunc(toIndex)));
+  if (to === from) return project;
+  const reordered = movable.filter((t) => t.id !== trackId);
+  reordered.splice(to, 0, movable[from]!);
+  let next = 0;
+  const tracks = project.tracks.map((t) => (t.type === 'master' ? t : reordered[next++]!));
+  return touch({ ...project, tracks }, clock);
+}
+
+/** Set a track's display color (a CSS color such as "#5bb0a8"). */
+export function setTrackColor(
+  project: Project,
+  trackId: string,
+  color: string,
+  clock: Clock = systemClock,
+): Project {
+  const track = project.tracks.find((t) => t.id === trackId);
+  if (!track || track.color === color) return project;
+  return touch({ ...project, tracks: mapTrack(project, trackId, (t) => ({ ...t, color })) }, clock);
 }
 
 // --- Sections ---

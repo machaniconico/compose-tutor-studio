@@ -188,6 +188,22 @@ describe('role によるトラック解決 (改名後)', () => {
     expect(saved?.notes?.length).toBe(reasons.length);
   });
 
+  it('bass の役割が付いたドラムトラック(古い保存データ)を生成先に選ばない', () => {
+    const project = useStore.getState().project;
+    useStore.getState().replaceProject({
+      ...project,
+      tracks: project.tracks.map((t) => {
+        if (t.type === 'drum') return { ...t, role: 'bass' as const };
+        if (t.role === 'bass') {
+          const { role: _cleared, ...rest } = t;
+          return { ...rest, name: '低音' };
+        }
+        return t;
+      }),
+    });
+    expect(actions.firstMidiClipOfTrack(useStore.getState().project, 'Bass')).toBeNull();
+  });
+
   it('Melody を「メロディ」に改名しても generateMelodyIntoClip の対象クリップが見つかる', () => {
     renameByRole('melody', 'メロディ');
     const project = useStore.getState().project;
