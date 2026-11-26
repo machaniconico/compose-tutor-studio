@@ -23,5 +23,6 @@ export {
 export type { CreateDefaultProjectOpts } from './factory';
 export { DEFAULT_STEPS_PER_BAR, expandClip, placedNoteTicks, resolveLinkSource } from './clipExpand';
 export * from './sounding';
+export * from './groove';
 export { songEndBeat as projectLengthBeats } from './sounding';
 export * from './sections';

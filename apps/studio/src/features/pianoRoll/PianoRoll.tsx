@@ -40,6 +40,7 @@ import {
   cutNotes,
   duplicateNotes,
   fitSelectedToScale,
+  humanizeNotes,
   joinNotes,
   legato,
   nudge,
@@ -54,6 +55,15 @@ import {
 } from '../../state/editorActions';
 import { offScaleNoteHint } from '../inspector/difficultyText';
 import { pushToast } from '../../state/tutorialBridge';
+
+/** Strengths offered for quantize (100% = onto the grid, as before). */
+const QUANTIZE_STRENGTHS = [100, 75, 50, 25] as const;
+/** Humanize amounts: start shift (beats) and velocity spread, each ± from the original. */
+const HUMANIZE_AMOUNTS = {
+  small: { label: '小さめ', timingBeats: 0.01, velocity: 4 },
+  medium: { label: 'ふつう', timingBeats: 0.03, velocity: 8 },
+  large: { label: '大きめ', timingBeats: 0.06, velocity: 16 },
+} as const;
 
 const ROW_HEIGHT = 16;
 /** Height of the sticky ruler above the rows (styles.css: 20px + 2px margin). */
@@ -218,6 +228,8 @@ export function PianoRoll() {
   const [velocityTo, setVelocityTo] = useState(100);
   const [velocityCenter, setVelocityCenter] = useState(80);
   const [velocityWidth, setVelocityWidth] = useState(10);
+  const [quantizeStrength, setQuantizeStrength] = useState(100);
+  const [humanizeAmount, setHumanizeAmount] = useState<keyof typeof HUMANIZE_AMOUNTS>('medium');
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(
     null,
   );
@@ -384,8 +396,8 @@ export function PianoRoll() {
 
   const quantizeSelectedNotes = useCallback(() => {
     if (clip?.type !== 'midi' || editor.selectedNoteIds.length === 0) return;
-    quantizeNotes(clip.id, editor.selectedNoteIds, gridSnap);
-  }, [clip, editor.selectedNoteIds, gridSnap]);
+    quantizeNotes(clip.id, editor.selectedNoteIds, gridSnap, quantizeStrength);
+  }, [clip, editor.selectedNoteIds, gridSnap, quantizeStrength]);
 
   // --- keyboard shortcuts (ignored while typing in inputs) ---
   useEffect(() => {
@@ -763,6 +775,20 @@ export function PianoRoll() {
         >
           選択をクオンタイズ
         </button>
+        <label className="pr__field" title="100% はグリッドにぴったり、50% はグリッドとの間の半分だけ寄せます(少しずれを残すと自然に聞こえます)">
+          <span>寄せる強さ</span>
+          <select
+            value={quantizeStrength}
+            onChange={(e) => setQuantizeStrength(Number(e.target.value))}
+            aria-label="クオンタイズの強さ"
+          >
+            {QUANTIZE_STRENGTHS.map((value) => (
+              <option key={value} value={value}>
+                {value}%
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="pr__transpose" role="group" aria-label="音の高さを変える">
           {TRANSPOSE_BUTTONS.map(({ label, by }) => (
             <button
@@ -857,6 +883,33 @@ export function PianoRoll() {
             disabled={selected.size === 0}
           >
             ばらつかせる
+          </button>
+        </div>
+        <div className="pr__tools" role="group" aria-label="ヒューマナイズ(人が弾いたような揺れ)">
+          <label className="pr__field">
+            <span>揺れ</span>
+            <select
+              value={humanizeAmount}
+              onChange={(e) => setHumanizeAmount(e.target.value as keyof typeof HUMANIZE_AMOUNTS)}
+              aria-label="ヒューマナイズの揺れの大きさ"
+            >
+              {Object.entries(HUMANIZE_AMOUNTS).map(([value, { label }]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            title="選んだ音のタイミングと強さを少しだけずらして、人が弾いたような揺れを付けます(音の高さと長さは変わりません)"
+            onClick={() => {
+              const { timingBeats, velocity } = HUMANIZE_AMOUNTS[humanizeAmount];
+              humanizeNotes(clip.id, [...selected], { timingBeats, velocity, seed: Date.now() % 2 ** 31 });
+            }}
+            disabled={selected.size === 0}
+          >
+            ヒューマナイズ
           </button>
         </div>
         <div className="pr__zoom" role="group" aria-label="横ズーム">

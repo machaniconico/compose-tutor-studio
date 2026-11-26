@@ -32,6 +32,9 @@ import {
   drumStepsPerBar,
   duplicateClip,
   findProjectSoundingLimitProblem,
+  humanize,
+  type HumanizeOptions,
+  MAX_SWING_PERCENT,
   moveClip,
   removeClip,
   quantizeClipNotes,
@@ -53,7 +56,9 @@ import {
   SECTION_EDIT_FAILURE_MESSAGES,
   soundingEvents,
   tickSpansOverlap,
+  towardGrid,
   TRANSPOSE_FAILURE_MESSAGES,
+  validHumanizeOptions,
   transposeProject,
   type MusicalKey,
   type ScaleName,
@@ -369,12 +374,140 @@ export function insertProgressionAtBeat(templateId: string, startBeat: number): 
 // Note edits (piano roll).
 // ---------------------------------------------------------------------------
 
-/** Quantize the start of the given notes (within a clip) to a grid snap (see quantizeClipNotes). */
-export function quantizeNotes(clipId: string, noteIds: readonly string[], snap: number): void {
+/**
+ * Quantize the start of the given notes (within a clip) to a grid snap, moving
+ * each `strength`% (0..100) of the way to where quantizeClipNotes (D2) puts it:
+ * 100 is that position, 50 the midpoint. A note keeps its original start if
+ * the exact target fails the first-pass or playback checks. If all attempted
+ * moves fail, show a toast. One undo step; returns whether it changed.
+ */
+export function quantizeNotes(clipId: string, noteIds: readonly string[], snap: number, strength = 100): boolean {
+  if (!Number.isFinite(snap) || !(snap > 0) || !Number.isFinite(strength) || strength < 0 || strength > 100) return false;
+  const { project } = useStore.getState();
+  const gridded = quantizeClipNotes(project, clipId, noteIds, snap);
+  if (gridded === project) return false;
+  const scope = noteEditScope(project, clipId, noteIds, false);
+  if (!scope) return false;
+  const gridStart = new Map((resolveEditTarget(gridded, clipId)?.notes ?? []).map((n) => [n.id, n.startBeat]));
+  const changed = new Map<string, NoteEvent>();
+  let attempted = false;
+  for (const n of scope.notes) {
+    const startBeat = towardGrid(n.startBeat, gridStart.get(n.id) ?? n.startBeat, strength);
+    if (startBeat === n.startBeat) continue;
+    attempted = true;
+    const result = { ...n, startBeat };
+    if (fitsFirstPass(project, scope.clips, result)) changed.set(n.id, result);
+  }
+  if (changed.size > 0) {
+    const target = { ...scope.target, notes: scope.target.notes!.map((n) => changed.get(n.id) ?? n) };
+    const candidate = mapClip(project, target.id, () => target);
+    const movedIds = new Set(changed.keys());
+    const before = notePlayback(project, scope.target, movedIds);
+    const after = notePlayback(candidate, target, movedIds);
+    for (const id of shortenedOrMissingNotes(before, after)) changed.delete(id);
+  }
+  if (changed.size === 0) return attempted && refuseSoundChange();
+  if (refuseInScope(project, scope, changed.values())) return false;
+  return commitNotes(scope, changed, { mayIncreaseEvents: true, check: keepsSoundingAndLength });
+}
+
+/**
+ * Humanize: shift the selected notes' starts by up to ±`timingBeats` and their
+ * velocities by up to ±`velocity` (1..127) from the seed-fixed PRNG, drawn in
+ * beat order (groove.humanize). Pitches, lengths and the clip never change.
+ * Each drawn start is fitted within ±`timingBeats` using first-pass ticks;
+ * when no candidate fits, the note keeps its start. The result
+ * is checked on playback like quantizeNotes; refused edits change nothing and
+ * show a toast. `timingBeats` / `velocity` must be finite numbers >= 0 and
+ * `seed` a safe integer. One undo step; returns whether it changed.
+ */
+export function humanizeNotes(clipId: string, noteIds: readonly string[], opts: HumanizeOptions): boolean {
+  if (!validHumanizeOptions(opts)) return false;
+  const { project } = useStore.getState();
+  const scope = noteEditScope(project, clipId, noteIds, opts.timingBeats > 0);
+  if (!scope) return false;
+  const sorted = byStart(scope.notes);
+  const changed = new Map<string, NoteEvent>();
+  humanize(sorted, opts).forEach((n, i) => {
+    const before = sorted[i]!;
+    const startBeat = opts.timingBeats > 0
+      ? fitFirstPass(project, scope.clips, before, n.startBeat, opts.timingBeats)
+      : before.startBeat;
+    if (startBeat !== before.startBeat || n.velocity !== before.velocity) changed.set(n.id, { ...n, startBeat });
+  });
+  if (changed.size === 0 || refuseInScope(project, scope, changed.values())) return false;
+  return commitNotes(scope, changed, { mayIncreaseEvents: true, check: keepsSoundingAndLength });
+}
+
+function insideFirstPass(ticks: ReturnType<typeof placedNoteTicks>): boolean {
+  return ticks.startTick < ticks.passEndTick && ticks.naturalEndTick <= ticks.passEndTick;
+}
+
+function fitsFirstPass(project: Project, placements: readonly Clip[], note: NoteEvent): boolean {
+  return placements.every((clip) => insideFirstPass(placedTicks(project, clip, note)));
+}
+
+/** Try the drawn start and the range boundaries, including nearby tick positions. */
+function fitFirstPass(
+  project: Project,
+  placements: readonly Clip[],
+  original: NoteEvent,
+  startBeat: number,
+  width: number,
+): number {
+  const before = placements.map((clip) => ({ clip, ticks: placedTicks(project, clip, original) }));
+  const fits = (start: number) => start >= 0 && start !== original.startBeat &&
+    Math.abs(start - original.startBeat) <= width && before.every(({ clip, ticks }) => {
+      const now = placedTicks(project, clip, { ...original, startBeat: start });
+      return insideFirstPass(now) &&
+        Math.max(1, now.endTick - now.startTick) >= Math.max(1, ticks.endTick - ticks.startTick);
+    });
+
+  const lo = Math.max(0, original.startBeat - width);
+  const hi = original.startBeat + width;
+  // Project each rounded pass end back to a candidate start before swing.
+  // This is only a search anchor. A fractional start on either side can fit.
+  const last = before.reduce((end, { clip, ticks }) => {
+    return Math.min(end, ticks.passEndTick / PPQ - clip.startBeat - original.durationBeats);
+  }, hi);
+  const anchors = [startBeat, Math.max(lo, last), lo, hi];
+  for (const anchor of anchors) {
+    if (fits(anchor)) return anchor;
+    const tick = beatTick(anchor);
+    for (const offset of [0, -1, 1, -2, 2]) {
+      const candidate = (tick + offset) / PPQ;
+      if (fits(candidate)) return candidate;
+    }
+  }
+  return original.startBeat;
+}
+
+/** Notes that lose a sounding pass or any ticks of its played length. */
+function shortenedOrMissingNotes(before: NotePlayback, after: NotePlayback): Set<string> {
+  const rejected = new Set<string>();
+  for (const [key, pass] of before) {
+    const result = after.get(key);
+    for (const [id, sound] of pass) {
+      const now = result?.get(id);
+      if (!now || now.end - now.start < sound.end - sound.start) rejected.add(id);
+    }
+  }
+  return rejected;
+}
+
+function keepsSoundingAndLength(before: NotePlayback, after: NotePlayback): boolean {
+  return shortenedOrMissingNotes(before, after).size === 0;
+}
+
+/** Project swing (0..60%), applied on playback by soundingEvents. Other values are ignored. */
+export function setSwing(percent: number): boolean {
+  if (!Number.isFinite(percent) || percent < 0 || percent > MAX_SWING_PERCENT) return false;
   const store = useStore.getState();
-  const next = quantizeClipNotes(store.project, clipId, noteIds, snap);
-  if (next === store.project) return;
-  store.applyProjectChange(() => next);
+  if ((store.project.swing ?? 0) === percent) return false;
+  return store.applyProjectChange((p) => {
+    const { swing: _previous, ...rest } = p;
+    return percent === 0 ? rest : { ...rest, swing: percent };
+  });
 }
 
 /**

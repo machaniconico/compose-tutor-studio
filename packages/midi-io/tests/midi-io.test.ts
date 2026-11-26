@@ -11,6 +11,8 @@ import { exportProjectToMidi, exportNotesToMidi } from '../src/export.js';
 import { parseMidi } from '../src/import.js';
 import { deserializeProject, expandClip, soundingEvents, serializeProject, setLengthBars, validateProject } from '@cts/project-model';
 import type { Clip, Project, NoteEvent } from '@cts/project-model';
+import { makeProject, makeTrack } from '../../project-model/tests/acceptance/helpers';
+import { edgeMismatch, FUZZ_SEEDS, FUZZ_SWINGS, grooveFuzzProject, midiFileEdges, scheduleEdges, shiftOffs } from '../../project-model/tests/grooveFuzz';
 
 // Pass-through spy: MIDI export must map the shared sounding events.
 vi.mock('@cts/project-model', async (importOriginal) => {
@@ -826,5 +828,45 @@ describe('exportProjectToMidi: many tracks (US-010)', () => {
     expect(new DataView(bytes.buffer).getUint16(10)).toBe(2);
     expect(noteOnStatusesPerTrack(bytes)).toEqual([[], [0x9f]]);
     expect(parseMidi(bytes).tracks.map((track) => track.name)).toEqual([project.title, sounding.name]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// US-018: スウィングはライブと同じ soundingEvents から書き出す
+// ---------------------------------------------------------------------------
+describe('US-018: project.swing=50 の同じクリップでライブのイベントと MIDI の tick が 1 tick 以内で一致する', () => {
+  const sixteenths: Clip = {
+    id: 'hat', trackId: 't1', type: 'midi', startBeat: 0, lengthBeats: 4, loop: true, contentLengthBeats: 2,
+    notes: Array.from({ length: 8 }, (_, i) => ({ id: `h${i}`, pitch: 42, startBeat: i * 0.25, durationBeats: 0.125, velocity: 90 })),
+  };
+  const swung: Project = makeProject([makeTrack('t1', 'instrument', [sixteenths])], { swing: 50 });
+  /** Live edges: the sounding events playback schedules, in whole ticks of `ppq`. */
+  const live = (p: Project, ppq: number) => scheduleEdges(soundingEvents(p).events.map((e) =>
+    e.kind === 'note' ? { beat: e.startBeat, pitch: e.pitch, durationBeats: e.durationBeats } : { beat: e.startBeat }), ppq);
+
+  for (const ppq of [480, 96, 960]) {
+    it(`ppq ${ppq}: 開始と終了の整数 tick が soundingEvents と 1 tick 以内`, () => {
+      const written = midiFileEdges(exportProjectToMidi(swung, { ppq }));
+      expect(written.filter((e) => e.kind === 'on')).toHaveLength(16);
+      expect(edgeMismatch(live(swung, ppq), written)).toBeNull();
+      // 裏の 16 分(奇数 index)だけが 1/16 × 50% = 0.125 拍遅れる。
+      expect(written.filter((e) => e.kind === 'on').slice(0, 4).map((e) => e.tick / ppq)).toEqual([0, 0.375, 0.5, 0.875]);
+    });
+  }
+
+  it('終了を 2 tick ずらした偽のファイルは一致しないと判定する(比較がずれを捕まえる)', () => {
+    const written = midiFileEdges(exportProjectToMidi(swung, { ppq: 480 }));
+    expect(edgeMismatch(live(swung, 480), shiftOffs(written, 2))).not.toBeNull();
+    expect(edgeMismatch(live(swung, 480), shiftOffs(written, -2))).not.toBeNull();
+    expect(edgeMismatch(live(swung, 480), shiftOffs(written, 1))).toBeNull();
+  });
+
+  it('シード固定ファズ(端数の拍・ループ・リンク・swing 0/30/50/60・3/4・6/8)でも開始と終了が 1 tick 以内', () => {
+    for (const seed of FUZZ_SEEDS) {
+      for (const swing of FUZZ_SWINGS) {
+        const p = grooveFuzzProject(seed, swing);
+        expect(edgeMismatch(live(p, 480), midiFileEdges(exportProjectToMidi(p))), `${seed}/${swing}`).toBeNull();
+      }
+    }
   });
 });

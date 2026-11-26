@@ -1,4 +1,5 @@
 import type { Clip, DrumLane, NoteEvent, TrackType } from './types';
+import { swingBeat } from './groove';
 import { beatTick, PPQ } from './time';
 
 export const DEFAULT_STEPS_PER_BAR = 16;
@@ -72,11 +73,7 @@ function passPlacement(
   const offset = repeat === 0 ? 0 : repeat * span.period;
   const start = clip.startBeat + (offset + localBeat);
   const end = Math.min(span.end, clip.startBeat + (offset + span.period));
-  const step = Math.round(start * 4);
-  const delay = swing > 0 && step % 2 === 1 && beatTick(start) === beatTick(step / 4)
-    ? swing / 400
-    : 0;
-  return { unswungStartBeat: start, startBeat: start + delay, end };
+  return { unswungStartBeat: start, startBeat: swingBeat(start, swing), end };
 }
 
 function placeOnset(

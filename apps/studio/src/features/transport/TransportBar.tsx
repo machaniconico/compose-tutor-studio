@@ -10,6 +10,7 @@ import type { MusicalKey, ScaleName } from '@cts/project-model';
 import {
   beatsPerBar as beatsPerBarOf,
   MAX_SONG_BARS as MAX_LENGTH_BARS,
+  MAX_SWING_PERCENT,
   maxSongBars,
   tapTempo,
 } from '@cts/project-model';
@@ -22,7 +23,7 @@ import { SupportMenu } from '../support/SupportMenu';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { ShortcutHelpDialog } from '../common/ShortcutHelpDialog';
 import { Dialog } from '../common/Dialog';
-import { transposeSongToKey } from '../../state/editorActions';
+import { setSwing, transposeSongToKey } from '../../state/editorActions';
 import { keyShiftSemitones } from '@cts/theory-engine';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
@@ -468,6 +469,22 @@ export function TransportBar() {
           >
             タップ
           </button>
+        </div>
+
+        <div className="field">
+          <label htmlFor="swing-input">スウィング</label>
+          <input
+            {...textUndoProps}
+            id="swing-input"
+            type="range"
+            min={0}
+            max={MAX_SWING_PERCENT}
+            step={1}
+            value={project.swing ?? 0}
+            title="裏拍を少し遅らせて、はずむ感じにします(16 分音符の裏だけが遅れます)"
+            onChange={(e) => setSwing(Number(e.target.value))}
+          />
+          <span className="swing-value" aria-hidden="true">{project.swing ?? 0}%</span>
         </div>
 
         <div className="field">

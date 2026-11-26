@@ -217,6 +217,17 @@ input[type='range'] {
   width: 64px;
 }
 
+.field input[type='range'] {
+  width: 80px;
+}
+
+.swing-value {
+  min-width: 4ch;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .save-indicator {
   margin-left: auto;
   color: var(--text-faint);

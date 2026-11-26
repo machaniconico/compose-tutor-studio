@@ -199,6 +199,25 @@ describe('ops.undo: clip operations are one undo step each', () => {
     expectOneUndoStep(() => actions.quantizeNotes(clip.id, [noteId], 1));
   });
 
+  it('quantize with strength (US-018)', () => {
+    const clip = melodyClip();
+    const noteId = clip.notes!.find((n) => n.startBeat === 1.3)!.id;
+    expectOneUndoStep(() => expect(actions.quantizeNotes(clip.id, [noteId], 1, 50)).toBe(true));
+    expect(actions.quantizeNotes(clip.id, [noteId], 1, 50)).toBe(true);
+    const moved = actions.findClip(useStore.getState().project, clip.id)!.notes!.find((n) => n.id === noteId)!;
+    expect(moved.startBeat).toBeCloseTo(1.15, 12);
+  });
+
+  it('humanize (US-018)', () => {
+    const clip = melodyClip();
+    const ids = clip.notes!.map((n) => n.id);
+    expectOneUndoStep(() => expect(actions.humanizeNotes(clip.id, ids, { timingBeats: 0.05, velocity: 10, seed: 7 })).toBe(true));
+  });
+
+  it('swing (US-018)', () => {
+    expectOneUndoStep(() => expect(actions.setSwing(50)).toBe(true));
+  });
+
   it('a refused split adds no undo step', () => {
     const clip = melodyClip();
     useStore.getState().applyProjectChange((p) => duplicateClip(p, clip.id, { mode: 'link' }));

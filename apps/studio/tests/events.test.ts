@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Clip, Project, Track } from '@cts/project-model';
 import { deserializeProject, soundingEvents, serializeProject, validateProject } from '@cts/project-model';
 import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
+import { edgeMismatch, FUZZ_SEEDS, FUZZ_SWINGS, grooveFuzzProject, midiFileEdges, scheduleEdges, shiftOffs } from '../../../packages/project-model/tests/grooveFuzz';
 import { renderScheduleEvents } from '../src/audio/wav';
 import {
   buildScheduleEvents,
   drumStepToBeat,
   type DrumScheduleEvent,
   type NoteScheduleEvent,
+  type SchedulePayload,
 } from '../src/audio/events';
 
 // Pass-through spy: Playback maps the shared sounding events.
@@ -336,6 +338,49 @@ describe('live playback and MIDI export expand the same project the same way', (
     expect(parseMidi(exportProjectToMidi(shared)).tracks.flatMap((t) =>
       t.notes.map((note) => [note.startBeat, note.pitch]),
     )).toEqual(expected);
+  });
+
+  describe('US-018: スウィング 50% でライブと MIDI の tick が 1 tick 以内で一致する', () => {
+    /** Live schedule edges (start and end, whole ticks of `ppq`): what playback sends to the synths. */
+    const live = (p: Project, ppq: number) => scheduleEdges(buildScheduleEvents(p).map(({ beat, payload }) => {
+      const event = payload as SchedulePayload;
+      return event.kind === 'note' ? { beat, pitch: event.pitch, durationBeats: event.durationBeats } : { beat };
+    }), ppq);
+    const file = (p: Project, ppq: number) => midiFileEdges(exportProjectToMidi(p, { ppq }));
+    const hats: Clip = {
+      id: 'hat', trackId: 'keys', type: 'midi', startBeat: 0, lengthBeats: 4, loop: true, contentLengthBeats: 1.5,
+      notes: Array.from({ length: 6 }, (_, i) => ({ id: `n${i}`, pitch: 60 + i, startBeat: i * 0.25, durationBeats: 0.125, velocity: 100 })),
+    };
+    const swung = { ...project([instrumentTrack('keys', 'warmPad', hats)]), swing: 50 };
+
+    it('同じクリップの 16 分音符: 開始と終了の整数 tick が 1 tick 以内(PPQ 480・96・960)', () => {
+      expect(buildScheduleEvents(swung).map((e) => e.beat).slice(0, 4)).toEqual([0, 0.375, 0.5, 0.875]);
+      for (const ppq of [480, 96, 960]) {
+        expect(file(swung, ppq).filter((e) => e.kind === 'off')).toHaveLength(16);
+        expect(edgeMismatch(live(swung, ppq), file(swung, ppq)), `ppq ${ppq}`).toBeNull();
+      }
+    });
+
+    it('終了を 2 tick ずらした偽のファイルは一致しないと判定する(比較がずれを捕まえる)', () => {
+      const real = file(swung, 480);
+      expect(edgeMismatch(live(swung, 480), shiftOffs(real, 2))).not.toBeNull();
+      expect(edgeMismatch(live(swung, 480), shiftOffs(real, 1))).toBeNull();
+      const lateStart = real.map((e, i) => (i === 1 ? { ...e, tick: e.tick + 2 } : e));
+      expect(edgeMismatch(live(swung, 480), lateStart)).not.toBeNull();
+    });
+
+    it('シード固定ファズ(端数の拍・ループ・リンク・swing 0/30/50/60・3/4・6/8)でも開始と終了が 1 tick 以内', () => {
+      let checked = 0;
+      for (const seed of FUZZ_SEEDS) {
+        for (const swing of FUZZ_SWINGS) {
+          const p = grooveFuzzProject(seed, swing);
+          expect(validateProject(p).ok).toBe(true);
+          expect(edgeMismatch(live(p, 480), file(p, 480)), `${seed}/${swing}`).toBeNull();
+          checked++;
+        }
+      }
+      expect(checked).toBe(FUZZ_SEEDS.length * FUZZ_SWINGS.length);
+    });
   });
 
   it('sounds a link placed on an audio track on neither path (instrument note at 0, link at 4)', () => {
