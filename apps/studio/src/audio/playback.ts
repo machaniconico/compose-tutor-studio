@@ -25,6 +25,7 @@ import { applyMixState, buildTrackGraphs, type TrackGraph } from './graph';
 import { applyMasterVolume } from './masterChain';
 import {
   beatToTime,
+  isValidLoop,
   Scheduler,
   secondsPerBeat,
   type DueEvent,
@@ -323,7 +324,8 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
 
   state.bpm = project.bpm;
   const loop = activeLoopRange(store);
-  state.loop = loop ? { startBeat: loop.startBeat, endBeat: loop.endBeat } : null;
+  // A region shorter than the shortest loop period plays as if loop were off.
+  state.loop = loop && isValidLoop(loop) ? { startBeat: loop.startBeat, endBeat: loop.endBeat } : null;
 
   const startBeat = transport.positionBeat;
   const now = engine.now();

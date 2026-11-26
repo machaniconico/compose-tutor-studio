@@ -10,6 +10,8 @@
 // tested without an AudioContext. The `Scheduler` class only owns the timer and
 // the "what time is it now" plumbing.
 
+import { MIN_LOOP_PERIOD_BEATS } from '@cts/project-model';
+
 /** Timer wake-up interval, milliseconds. Coarse on purpose. */
 export const TICK_MS = 25;
 
@@ -72,11 +74,13 @@ export function timeToBeat(
 }
 
 /**
- * Validate that a loop region is usable (positive length, ordered).
- * A zero/negative length region is treated as "no loop".
+ * Validate that a loop region is usable (ordered, at least the shortest clip
+ * loop period long). A shorter region is treated as "no loop": each lookahead
+ * window would otherwise list one recurrence per pass of an arbitrarily short
+ * region.
  */
 export function isValidLoop(loop: LoopRegion | null): loop is LoopRegion {
-  return loop != null && loop.endBeat > loop.startBeat;
+  return loop != null && loop.endBeat - loop.startBeat >= MIN_LOOP_PERIOD_BEATS;
 }
 
 /**

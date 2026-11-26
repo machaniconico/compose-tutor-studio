@@ -64,7 +64,8 @@ describe('project file import parsing', () => {
     const result = parseProjectFileImport(raw);
     expect(result).toMatchObject({ ok: true, project: { schemaVersion: 3 } });
     if (!result.ok) return;
-    const expected = [{ beat: 0, payload: { kind: 'note', pitch: 60, durationBeats } }];
+    // A note shorter than one tick sounds for one tick (docs/06 §4).
+    const expected = [{ beat: 0, payload: { kind: 'note', pitch: 60, durationBeats: Math.max(durationBeats, 1 / 480) } }];
     expect(buildScheduleEvents(result.project)).toMatchObject(expected);
     expect(renderScheduleEvents(result.project)).toMatchObject(expected);
   });

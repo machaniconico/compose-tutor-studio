@@ -34,14 +34,19 @@ export type MidiMessage = {
 
 /**
  * Build an MTrk chunk from a list of absolute-tick MIDI messages.
- * - Sorts by tick (stable sort).
+ * - Sorts by tick (stable sort; note-off before note-on at the same tick).
  * - Converts to delta times.
  * - Appends end-of-track meta event (FF 2F 00).
  * - Wraps with "MTrk" + 4-byte big-endian length.
  */
 export function buildTrackChunk(messages: MidiMessage[]): Uint8Array {
-  // Stable sort by tick
-  const sorted = [...messages].sort((a, b) => a.tick - b.tick);
+  // Stable sort by tick; at the same tick a note-off goes before a note-on, so
+  // a note that ends where the next one of the same pitch starts never cuts it.
+  const isNoteOff = (bytes: number[]) => {
+    const kind = (bytes[0] ?? 0) & 0xf0;
+    return kind === 0x80 || (kind === 0x90 && bytes[2] === 0);
+  };
+  const sorted = [...messages].sort((a, b) => a.tick - b.tick || Number(isNoteOff(b.bytes)) - Number(isNoteOff(a.bytes)));
 
   const trackData: number[] = [];
   let prevTick = 0;
@@ -49,7 +54,8 @@ export function buildTrackChunk(messages: MidiMessage[]): Uint8Array {
   for (const msg of sorted) {
     const delta = msg.tick - prevTick;
     trackData.push(...writeVarLen(delta));
-    trackData.push(...msg.bytes);
+    // A long text meta event would overflow the argument limit of push(...).
+    for (const byte of msg.bytes) trackData.push(byte);
     prevTick = msg.tick;
   }
 

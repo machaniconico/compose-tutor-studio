@@ -1,6 +1,6 @@
 import { clipSpan, drumSourceStep, MIN_LOOP_PERIOD_BEATS, renderClip, resolveLinkSource } from './clipExpand';
 import type { ClipOnset } from './clipExpand';
-import { beatTick, beatsPerBar } from './time';
+import { beatTick, beatsPerBar, PPQ } from './time';
 import type { Clip, Project, Track } from './types';
 
 export { PPQ } from './time';
@@ -44,20 +44,31 @@ export function soundingEvents(
   const bpb = beatsPerBar(project.timeSignature);
 
   for (const track of project.tracks) {
-    const name = track.type === 'master' ? 'マスター' : track.name.trim() || '名前のないトラック';
+    // Names only label problems. Trimming scales with name length, so it runs
+    // at most once per track, and only when the track reports a problem.
+    let name: string | undefined;
+    const label = () =>
+      (name ??= track.type === 'master' ? 'マスター' : track.name.trim() || '名前のないトラック');
     for (const clip of track.clips) {
       if (options.clipId !== undefined && clip.id !== options.clipId) continue;
       const source = resolveLinkSource(clip, clips);
       if (typeof source === 'string') {
-        problems.push(`「${name}」: ${source}`);
+        problems.push(`「${label()}」: ${source}`);
         continue;
       }
       if (options.sourceClipId !== undefined && source.id !== options.sourceClipId) continue;
       const emit = audible && !audible.has(track.id) ? undefined : (event: ClipOnset) => {
+        if (event.kind === 'note') {
+          // A note lasts at least one tick; the three outputs only map this end.
+          const startTick = beatTick(event.startBeat);
+          if (beatTick(event.startBeat + event.durationBeats) <= startTick) {
+            event.durationBeats = (startTick + 1) / PPQ - event.startBeat;
+          }
+        }
         events.push(Object.assign(event, { trackId: track.id, clipId: clip.id, sourceClipId: source.id }));
       };
       const result = renderClip(clip, source, bpb, track.type, end, project.swing, emit);
-      for (const problem of result.problems) problems.push(`「${name}」: ${problem}`);
+      for (const problem of result.problems) problems.push(`「${label()}」: ${problem}`);
     }
   }
   return { events, problems };

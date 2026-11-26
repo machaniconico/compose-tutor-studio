@@ -4,7 +4,7 @@
  */
 
 import type { Project, NoteEvent, DrumLane, Track, SoundingEvent } from '@cts/project-model';
-import { soundingEvents } from '@cts/project-model';
+import { projectLengthBeats, soundingEvents } from '@cts/project-model';
 import {
   PPQ,
   writeVarLen,
@@ -87,12 +87,37 @@ export function panToCc(pan: number): number {
 
 // --- Note / clip conversion ---
 
+/**
+ * Note-on/off pair at the export resolution. The off lands at least one tick
+ * after the on, since a coarser `ppq` can round a short note to zero length.
+ */
+function noteMessages(
+  channel: number,
+  pitch: number,
+  velocity: number,
+  startBeat: number,
+  durationBeats: number,
+  ppq: number,
+  endLimitTick = Infinity,
+): [MidiMessage, MidiMessage] | [] {
+  const startTick = Math.round(startBeat * ppq);
+  // At a coarser ppq a note just before the song end can round onto it (D3): drop it,
+  // and never let the off pass the song end.
+  if (startTick >= endLimitTick) return [];
+  const endTick = Math.min(endLimitTick, Math.max(startTick + 1, Math.round((startBeat + durationBeats) * ppq)));
+  return [
+    { tick: startTick, bytes: [0x90 | channel, pitch, velocity] },
+    { tick: endTick, bytes: [0x80 | channel, pitch, 0] },
+  ];
+}
+
 /** Build one MTrk for an instrument/drum track, including CC7/CC10 at start. */
 function buildInstrumentTrack(
   track: Track,
   events: readonly SoundingEvent[],
   channel: number,
   ppq: number,
+  endLimitTick: number,
 ): Uint8Array {
   const msgs: MidiMessage[] = [
     { tick: 0, bytes: trackNameMeta(track.name) },
@@ -100,12 +125,9 @@ function buildInstrumentTrack(
     { tick: 0, bytes: [0xb0 | channel, 10, panToCc(track.pan)] },
   ];
   for (const event of events) {
-    const startTick = Math.round(event.startBeat * ppq);
     const pitch = event.kind === 'note' ? event.pitch : DRUM_NOTE[event.lane];
     const duration = event.kind === 'note' ? event.durationBeats : DRUM_HIT_DURATION_BEATS;
-    const endTick = Math.max(startTick + 1, Math.round((event.startBeat + duration) * ppq));
-    msgs.push({ tick: startTick, bytes: [0x90 | channel, pitch, event.velocity] });
-    msgs.push({ tick: endTick, bytes: [0x80 | channel, pitch, 0] });
+    msgs.push(...noteMessages(channel, pitch, event.velocity, event.startBeat, duration, ppq, endLimitTick));
   }
   return buildTrackChunk(msgs);
 }
@@ -157,12 +179,13 @@ export function projectToMidi(project: Project, options?: { ppq?: number }): Uin
     if (events) events.push(event);
     else byTrack.set(event.trackId, [event]);
   }
+  const endLimitTick = Math.round(projectLengthBeats(project) * ppq);
   const trackChunks = [tempoTrack];
   for (const track of playableTracks) {
     const channel = track.type === 'drum' ? DRUM_CHANNEL : allocChannel();
     const events = byTrack.get(track.id);
     if (omitSilentTracks && events === undefined) continue;
-    trackChunks.push(buildInstrumentTrack(track, events ?? [], channel, ppq));
+    trackChunks.push(buildInstrumentTrack(track, events ?? [], channel, ppq, endLimitTick));
   }
 
   if (trackChunks.length > MAX_SMF_TRACKS) {
@@ -191,11 +214,8 @@ export function exportNotesToMidi(
 
   const msgs: MidiMessage[] = [{ tick: 0, bytes: tempoMeta(bpm) }];
   for (const note of notes) {
-    const startTick = Math.round(note.startBeat * ppq);
-    const endTick = Math.round((note.startBeat + note.durationBeats) * ppq);
     const vel = clamp(Math.round(note.velocity), 0, 127);
-    msgs.push({ tick: startTick, bytes: [0x90 | channel, note.pitch, vel] });
-    msgs.push({ tick: endTick, bytes: [0x80 | channel, note.pitch, 0] });
+    msgs.push(...noteMessages(channel, note.pitch, vel, note.startBeat, note.durationBeats, ppq));
   }
 
   const track = buildTrackChunk(msgs);
