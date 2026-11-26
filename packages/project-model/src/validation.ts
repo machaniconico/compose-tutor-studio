@@ -2,7 +2,7 @@
 // integrity checks (unique ids, clip.trackId references an existing track).
 
 import type { Project, TrackRole } from './types';
-import { findProjectSoundingLimitProblem, MAX_SONG_BARS, MIN_LOOP_PERIOD_BEATS } from './sounding';
+import { findProjectSoundingLimitProblem, MAX_SONG_BARS, maxSongBars, MIN_LOOP_PERIOD_BEATS } from './sounding';
 import { beatTick } from './time';
 
 export type ValidationError = {
@@ -60,8 +60,12 @@ export function validateProject(project: Project): ValidationResult {
     push('timeSignature[0]', `time signature numerator must be a positive integer (got ${project.timeSignature[0]})`);
   }
 
-  if (!Number.isInteger(project.lengthBars) || project.lengthBars <= 0 || project.lengthBars > MAX_SONG_BARS) {
-    push('lengthBars', `lengthBars must be an integer from 1 to ${MAX_SONG_BARS} (got ${project.lengthBars})`);
+  const barLimit = maxSongBars(project);
+  if (project.legacyBarLimit !== undefined && barLimit === MAX_SONG_BARS) {
+    push('legacyBarLimit', 'legacyBarLimit must be a valid converted v1 song length');
+  }
+  if (!Number.isInteger(project.lengthBars) || project.lengthBars <= 0 || project.lengthBars > barLimit) {
+    push('lengthBars', `lengthBars must be an integer from 1 to ${barLimit} (got ${project.lengthBars})`);
   }
 
   if (project.swing !== undefined && !inRange(project.swing, 0, 60)) {

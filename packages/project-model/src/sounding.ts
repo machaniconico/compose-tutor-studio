@@ -9,6 +9,14 @@ export { MIN_LOOP_PERIOD_BEATS } from './clipExpand';
 export const MAX_SONG_BARS = 64;
 export const MAX_SOUNDING_EVENTS = 100_000;
 
+export function maxSongBars({ legacyBarLimit }: Pick<Project, 'legacyBarLimit'>): number {
+  // v1 permits up to 64 bars and its largest supported denominator is 16 (4×).
+  return legacyBarLimit !== undefined && Number.isInteger(legacyBarLimit) &&
+    legacyBarLimit > MAX_SONG_BARS && legacyBarLimit <= 4 * MAX_SONG_BARS
+    ? legacyBarLimit
+    : MAX_SONG_BARS;
+}
+
 export type SoundingEvent = ClipOnset & { trackId: string; clipId: string; sourceClipId: string };
 
 export function songEndBeat(project: Pick<Project, 'lengthBars' | 'timeSignature'>): number {

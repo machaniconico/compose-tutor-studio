@@ -121,6 +121,8 @@ export type Project = {
   key: MusicalKey;
   scale: ScaleName;
   lengthBars: number;
+  /** Converted v1 song length when it exceeds the standard bar limit. */
+  legacyBarLimit?: number;
   /** Beat range repeated during playback. */
   loopRange?: { startBeat: number; endBeat: number };
   /** Swing amount, 0 to 60. Unset means 0. */

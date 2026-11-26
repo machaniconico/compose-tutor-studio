@@ -7,7 +7,7 @@ import {
 } from '../../state/store';
 import { findShortcut, type ShortcutAction } from '../../state/keymap';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
-import { beatsPerBar as beatsPerBarOf, MAX_SONG_BARS as MAX_LENGTH_BARS, tapTempo } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf, MAX_SONG_BARS as MAX_LENGTH_BARS, maxSongBars, tapTempo } from '@cts/project-model';
 import { pushToast } from '../../state/tutorialBridge';
 import { formatPosition, keyboardSeekBeat } from '../timeline';
 import { initAudioBridge, restartAt } from '../../audio/playback';
@@ -159,6 +159,7 @@ function isTapActivation(event: Event, button: HTMLButtonElement | null): boolea
 /** Top transport + project metadata bar. */
 export function TransportBar() {
   const project = useStore((s) => s.project);
+  const maxLengthBars = maxSongBars(project);
   const transport = useStore((s) => s.transport);
   const save = useStore((s) => s.save);
   const isPlaying = transport.isPlaying;
@@ -242,7 +243,7 @@ export function TransportBar() {
     setLengthDraft(null);
     const parsed = Number.parseInt(lengthDraft, 10);
     if (!Number.isFinite(parsed)) return;
-    const bars = Math.min(MAX_LENGTH_BARS, Math.max(MIN_LENGTH_BARS, parsed));
+    const bars = Math.min(maxLengthBars, Math.max(MIN_LENGTH_BARS, parsed));
     const warning = setLengthBars(bars);
     if (warning !== null && window.confirm(warning)) setLengthBars(bars, true);
   };
@@ -404,8 +405,8 @@ export function TransportBar() {
             id="length-bars-input"
             type="number"
             min={MIN_LENGTH_BARS}
-            max={MAX_LENGTH_BARS}
-            title={`曲の長さ(${MIN_LENGTH_BARS}〜${MAX_LENGTH_BARS}小節)。短くすると、はみ出した音は確認のうえ削除します`}
+            max={maxLengthBars}
+            title={`曲の長さ(${MIN_LENGTH_BARS}〜${maxLengthBars}小節)。短くすると、はみ出した音は確認のうえ削除します`}
             value={lengthDraft ?? String(project.lengthBars)}
             onChange={(e) => setLengthDraft(e.target.value)}
             onBlur={commitLengthBars}

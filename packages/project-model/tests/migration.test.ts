@@ -14,6 +14,7 @@ import type { Project, TemplateId } from '../src/index';
 import { createDefaultProject as createStudioDefaultProject } from '../../../apps/studio/src/state/defaultProject';
 import { createSampleProject } from '../../../apps/studio/src/state/sampleProject';
 import { buildScheduleEvents, type SchedulePayload } from '../../../apps/studio/src/audio/events';
+import { renderScheduleEvents, songSoundEndBeat } from '../../../apps/studio/src/audio/wav';
 
 function note(id: string, startBeat: number, durationBeats: number) {
   return { id, pitch: 60, startBeat, durationBeats, velocity: 100 };
@@ -100,6 +101,68 @@ function migratedTrack(project: Project, id: string) {
   if (!track) throw new Error(`missing track ${id}`);
   return track;
 }
+
+describe('legacy live and WAV timing', () => {
+  it.each([1, 2])('ignores stored swing in a v%i file and keeps the full note', (schemaVersion) => {
+    const raw = {
+      ...v1Project(),
+      schemaVersion,
+      swing: 60,
+      tracks: [instrumentTrack('t-keys', 'Keys', [{
+        id: 'c-swing', trackId: 't-keys', type: 'midi', startBeat: 0,
+        lengthBeats: 1, loop: false, notes: [note('n-swing', 0.75, 0.25)],
+      }])],
+    };
+    expect(validateProject(raw as unknown as Project).errors).toEqual([]);
+
+    const project = deserializeProject(JSON.stringify(raw));
+    const live = buildScheduleEvents(project);
+    expect(live).toMatchObject([{ beat: 0.75, payload: { kind: 'note', durationBeats: 0.25 } }]);
+    expect(renderScheduleEvents(project)).toEqual([{ ...live[0], time: 0.375 }]);
+
+    const saved = serializeProject(project);
+    const reloaded = deserializeProject(saved);
+    expect(serializeProject(reloaded)).toBe(saved);
+    expect(buildScheduleEvents(reloaded)).toEqual(live);
+
+    const native = deserializeProject(JSON.stringify({ ...raw, schemaVersion: 3 }));
+    expect(buildScheduleEvents(native)).toMatchObject([{ beat: 0.9, payload: { cut: true } }]);
+  });
+
+  it.each([
+    { timeSignature: [6, 8], lengthBars: 33, convertedBars: 66, end: 198, onset: 193.25 },
+    { timeSignature: [6, 16], lengthBars: 64, convertedBars: 256, end: 384, onset: 383.25 },
+  ])('keeps a v1 song and its final notes through $convertedBars converted bars', ({
+    timeSignature, lengthBars, convertedBars, end, onset,
+  }) => {
+    const raw = {
+      ...v1Project(),
+      timeSignature,
+      lengthBars,
+      sections: [{ id: 's-all', name: 'A', type: 'verse', startBar: 0, lengthBars }],
+      tracks: [instrumentTrack('t-keys', 'Keys', [{
+        id: 'c-final', trackId: 't-keys', type: 'midi', startBeat: onset,
+        lengthBeats: 0.5, loop: false, notes: [note('n-final', 0, 0.5)],
+      }])],
+    };
+    expect(validateProject(raw as unknown as Project).errors).toEqual([]);
+
+    const project = deserializeProject(JSON.stringify(raw));
+    const live = buildScheduleEvents(project);
+    expect(live).toMatchObject([{ beat: onset, payload: { kind: 'note', durationBeats: 0.5 } }]);
+    expect(renderScheduleEvents(project)).toEqual([{ ...live[0], time: onset / 2 }]);
+    expect(songSoundEndBeat(project)).toBe(end);
+    expect(project.lengthBars).toBe(convertedBars);
+    expect(project.sections[0]?.lengthBars).toBe(convertedBars);
+    expect(validateProject(project).errors).toEqual([]);
+
+    const saved = serializeProject(project);
+    const reloaded = deserializeProject(saved);
+    expect(serializeProject(reloaded)).toBe(saved);
+    expect(buildScheduleEvents(reloaded)).toEqual(live);
+    expect(songSoundEndBeat(reloaded)).toBe(end);
+  });
+});
 
 describe('migrateProject v1 -> v2', () => {
   it('upgrades a v1 project to a valid current project', () => {
@@ -496,6 +559,16 @@ describe('migrateProject v2 -> v3', () => {
     expect(linked).toMatchObject({ lengthBeats: 4, loop: false });
     expect(linked).not.toHaveProperty('aliasOf');
     expect(linked!.notes).toHaveLength(1);
+  });
+
+  it('disables playback looping when a legacy file omitted loop', () => {
+    const file = JSON.parse(v2File()) as { tracks: Array<{ clips: Array<{ loop?: boolean }> }> };
+    const plainClip = file.tracks[0]!.clips[0]!;
+    delete plainClip.loop;
+
+    const project = deserializeProject(JSON.stringify(file));
+    expect(project.tracks[0]!.clips[0]!.loop).toBe(false);
+    expect(project.tracks[0]!.clips[0]!.legacyClipSettings).toBeUndefined();
   });
 
   it('keeps the playback of a migrated linked loop through a save and reload', () => {

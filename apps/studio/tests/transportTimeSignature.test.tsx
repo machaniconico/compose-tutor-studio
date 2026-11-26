@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { deserializeProject } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 
 // Changing meter / length never starts audio, so the engine is a stub here.
@@ -63,6 +64,24 @@ describe('time signature select', () => {
 });
 
 describe('song length input', () => {
+  it('lets a converted legacy song be edited above the usual 64-bar limit', () => {
+    const project = deserializeProject(JSON.stringify({
+      ...useStore.getState().project,
+      schemaVersion: 1,
+      timeSignature: [6, 8],
+      lengthBars: 33,
+    }));
+    act(() => useStore.getState().loadProjectForPreview(project));
+    render(<TransportBar />);
+    const input = screen.getByLabelText('小節数') as HTMLInputElement;
+    expect(input.value).toBe('66');
+    expect(input.max).toBe('66');
+
+    fireEvent.change(input, { target: { value: '65' } });
+    fireEvent.blur(input);
+    expect(useStore.getState().project.lengthBars).toBe(65);
+  });
+
   it('commits on blur, clamps to 4..64, and asks before deleting content past the end', () => {
     render(<TransportBar />);
     const input = screen.getByLabelText('小節数') as HTMLInputElement;
