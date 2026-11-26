@@ -296,6 +296,8 @@ export type GenerateScaleMelodyInput = {
   /** 中心オクターブのC (MIDI)。省略時 60 (C4)。 */
   centerC?: number;
   beatsPerBar?: number;
+  /** 曲の先頭からクリップまでの拍数。コードと生成ノートの位置はクリップ相対のまま。 */
+  originBeat?: number;
 };
 
 /**
@@ -303,7 +305,7 @@ export type GenerateScaleMelodyInput = {
  * 強拍ではコードトーンへ寄せ、それ以外はスケール内音から選ぶ。
  */
 export function generateScaleMelody(input: GenerateScaleMelodyInput): GeneratedNote[] {
-  const { key, scale, chords, seed } = input;
+  const { key, scale, chords, seed, originBeat = 0 } = input;
   const centerC = input.centerC ?? 60;
   const beatsPerBar = input.beatsPerBar ?? 4;
   const rng: RandomFn = createPrng(seed);
@@ -319,7 +321,7 @@ export function generateScaleMelody(input: GenerateScaleMelodyInput): GeneratedN
   for (let i = 0; i < count; i += 1) {
     const startBeat = i; // 1拍ずつ
     const chord = chordAtBeat(chords, startBeat);
-    const strong = isStrongBeat(startBeat, beatsPerBar);
+    const strong = isStrongBeat(originBeat + startBeat, beatsPerBar);
 
     let pc: number;
     let reason: string;

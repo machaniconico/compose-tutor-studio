@@ -10,8 +10,8 @@
  * スケール外音を一律に誤りと断定せず、比率（minRatio）ベースで判定する。
  */
 
-import type { ChordEvent, Project } from '@cts/project-model';
-import { beatsPerBar, drumBeatToStep, drumStepsPerBar } from '@cts/project-model';
+import type { ChordEvent, Clip, Project } from '@cts/project-model';
+import { beatsPerBar, drumBeatToStep, drumStepsPerBar, expandClip, resolveLinkSource } from '@cts/project-model';
 import { isInScale, parseChord, pitchClassOf } from '@cts/theory-engine';
 import type { CheckCondition, EditEvent, Lesson, LessonStep } from './dsl.js';
 // NOTE: goals.ts とは相互import（goals → checker: 音楽的判定の委譲 /
@@ -157,6 +157,16 @@ function beatsPerBarOf(project: Project): number {
   return beatsPerBar(project.timeSignature);
 }
 
+/**
+ * クリップの中身(ノート・ドラム)の持ち主。リンク(aliasOf)クリップなら参照先。
+ * 参照切れや循環は再生時と同じく中身なしとして扱う。
+ */
+export function clipContentSource(project: Project, clip: Clip): Clip | undefined {
+  if (clip.aliasOf === undefined) return clip;
+  const source = resolveLinkSource(clip, project.tracks.flatMap((t) => t.clips));
+  return typeof source === 'string' ? undefined : source;
+}
+
 /** トラック名で集めた絶対拍位置つきノート */
 type AbsoluteNote = {
   pitch: number;
@@ -165,16 +175,11 @@ type AbsoluteNote = {
 };
 
 function collectTrackNotes(project: Project, trackName: string): AbsoluteNote[] {
-  const out: AbsoluteNote[] = [];
   const track = resolveTrackByPredicateName(project, trackName);
-  if (!track) return out;
-  for (const clip of track.clips) {
-    if (!clip.notes) continue;
-    for (const note of clip.notes) {
-      out.push({ pitch: note.pitch, startBeat: clip.startBeat + note.startBeat });
-    }
-  }
-  return out;
+  if (!track) return [];
+  const allClips = project.tracks.flatMap((t) => t.clips);
+  const bpb = beatsPerBarOf(project);
+  return track.clips.flatMap((clip) => expandClip(clip, allClips, bpb, track.type).notes);
 }
 
 /** 指定拍で鳴っているコードイベントを返す（区間 [start, start+duration)） */
@@ -459,8 +464,10 @@ export function analyzeDrumPattern(
 
   for (const track of project.tracks) {
     if (track.type !== 'drum') continue;
-    for (const clip of track.clips) {
-      if (!clip.drumEvents || clip.drumEvents.length === 0) continue;
+    for (const linkOrClip of track.clips) {
+      // リンク(aliasOf)クリップは参照先の中身で判定する
+      const clip = clipContentSource(project, linkOrClip);
+      if (!clip?.drumEvents?.length) continue;
       const stepsPerBar = clip.stepsPerBar ?? 16;
       const requirements = drumPatternRequirements(patternType, stepsPerBar, bpb);
       const requiredSteps = countMissingSteps(requirements);

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { BassMode, GeneratedNote, MelodyAnalysis, MelodyFinding } from '@cts/theory-engine';
 import { analyzeMelody } from '@cts/theory-engine';
+import { resolveEditTarget } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import {
   chordTrackInputs,
@@ -8,9 +9,21 @@ import {
   generateBassIntoClip,
   generateMelodyIntoClip,
   projectBeatsPerBar,
+  type ClipGenerationFailure,
 } from '../../state/editorActions';
 import type { CoachAdapter, CoachSuggestion } from '../../coach/adapter';
 import { MockCoach } from '../../coach/mockCoach';
+
+const GENERATION_NOTICE: Record<ClipGenerationFailure, string> = {
+  missingTarget: '音符を書き込むクリップを開けません。リンク元のクリップがあるか確認しましょう。',
+  noChords: 'このクリップの範囲にはコードがないため、何も生成しませんでした(今ある音符はそのままです)。' +
+    'コードトラックでクリップと同じ位置にコードを置くか、クリップをコードのある位置へ動かしましょう。',
+  noNotes: 'この範囲に収まる音符が作れませんでした。クリップやコードを長くしてみましょう。',
+  loopRange: '繰り返しの1回分に収まらない音符があるため、今ある音符を残しました。' +
+    '繰り返しの長さを伸ばすか、繰り返しを止めてから生成しましょう。',
+  eventLimit: '生成すると繰り返しで鳴る音の数が上限を超えるため、今ある音符を残しました。' +
+    '繰り返すクリップを短くするか、音の数を減らしましょう。',
+};
 
 /** デフォルトのコーチ実装 (DI差し替え可能) */
 const defaultCoach: CoachAdapter = new MockCoach();
@@ -42,13 +55,14 @@ function BassAssistant() {
   const project = useStore((s) => s.project);
   const [mode, setMode] = useState<BassMode>('rootOnly');
   const [reasons, setReasons] = useState<GeneratedNote[]>([]);
+  const [failure, setFailure] = useState<ClipGenerationFailure | null>(null);
 
   const clip = firstMidiClipOfTrack(project, 'Bass');
 
   const onGenerate = () => {
     if (!clip) return;
-    const generated = generateBassIntoClip(clip.id, mode);
-    setReasons(generated);
+    setFailure(null);
+    setReasons(generateBassIntoClip(clip.id, mode, setFailure));
   };
 
   return (
@@ -73,6 +87,11 @@ function BassAssistant() {
           <button type="button" className="assistant__generate" onClick={onGenerate}>
             生成
           </button>
+          {failure ? (
+            <p className="assistant__hint" role="status">
+              {GENERATION_NOTICE[failure]}
+            </p>
+          ) : null}
           {reasons.length > 0 ? (
             <ul className="assistant__reasons">
               {reasons.map((r, i) => (
@@ -97,6 +116,7 @@ function MelodyAssistant() {
   const project = useStore((s) => s.project);
   const [seed, setSeed] = useState(1);
   const [analysis, setAnalysis] = useState<MelodyAnalysis | null>(null);
+  const [failure, setFailure] = useState<ClipGenerationFailure | null>(null);
 
   const clip = firstMidiClipOfTrack(project, 'Melody');
 
@@ -104,23 +124,27 @@ function MelodyAssistant() {
     if (!clip) return;
     // Seed = note count + project length so repeat clicks vary deterministically.
     const nextSeed = seed + project.lengthBars;
-    generateMelodyIntoClip(clip.id, nextSeed);
+    setFailure(null);
+    const generated = generateMelodyIntoClip(clip.id, nextSeed, setFailure);
+    if (generated.length === 0) return;
     setSeed(nextSeed);
     setAnalysis(null);
   };
 
   const onReview = () => {
     if (!clip) return;
-    const liveClip = useStore
-      .getState()
-      .project.tracks.flatMap((t) => t.clips)
-      .find((c) => c.id === clip.id);
-    const notes = (liveClip?.notes ?? []).map((n) => ({
+    const current = useStore.getState().project;
+    const liveClip = current.tracks.flatMap((t) => t.clips).find((c) => c.id === clip.id);
+    // リンクのクリップは参照先の音符を自分の位置で鳴らす。ノートはクリップ相対なので、
+    // このクリップの開始拍を足してコードトラックと同じ絶対拍に直して解析する
+    const owner = resolveEditTarget(current, clip.id);
+    const clipStart = liveClip?.startBeat ?? 0;
+    const notes = (owner?.notes ?? []).map((n) => ({
       pitch: n.pitch,
-      startBeat: n.startBeat,
+      startBeat: clipStart + n.startBeat,
       durationBeats: n.durationBeats,
     }));
-    const current = useStore.getState().project;
+    setFailure(null);
     try {
       const result = analyzeMelody({
         key: current.key,
@@ -148,6 +172,11 @@ function MelodyAssistant() {
               メロディを添削
             </button>
           </div>
+          {failure ? (
+            <p className="assistant__hint" role="status">
+              {GENERATION_NOTICE[failure]}
+            </p>
+          ) : null}
 
           {analysis ? (
             <div className="assistant__review">

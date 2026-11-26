@@ -96,9 +96,13 @@ const SCALE_LABEL: Record<string, string> = {
   blues: 'ブルーススケール',
 };
 
-/** 選択中ノートを同期的に解析する。 */
-function buildNoteInspection(
+/**
+ * 選択中ノートを同期的に解析する。note.startBeat はクリップ相対なので、コードトラック
+ * (絶対拍)は clipStartBeat + note.startBeat の位置で引く。
+ */
+export function buildNoteInspection(
   note: NoteEvent,
+  clipStartBeat: number,
   key: string,
   scale: ScaleName,
   chordAtBeat: (beat: number) => ChordEvent | undefined,
@@ -119,7 +123,7 @@ function buildNoteInspection(
     keyContext = scaleContext;
   }
 
-  const chord = chordAtBeat(note.startBeat);
+  const chord = chordAtBeat(clipStartBeat + note.startBeat);
   let noteAnalysis: NoteAnalysis | null = null;
   let degreeInChord: string | null = null;
 
@@ -212,10 +216,10 @@ export function useInspection(): InspectionState {
       for (const track of project.tracks) {
         const clip = track.clips.find((c) => c.id === selectedClipId);
         const found = clip?.notes?.find((n) => n.id === id);
-        if (found) {
+        if (clip && found) {
           return {
             kind: 'note',
-            data: buildNoteInspection(found, project.key, project.scale, scaleInfo.chordAtBeat),
+            data: buildNoteInspection(found, clip.startBeat, project.key, project.scale, scaleInfo.chordAtBeat),
           };
         }
       }

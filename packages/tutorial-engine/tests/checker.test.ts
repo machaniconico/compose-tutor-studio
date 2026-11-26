@@ -18,6 +18,7 @@ import type { LessonRuntimeState } from '../src/checker.js';
 import { course0 } from '../src/courses.js';
 import {
   makeBassTrack,
+  makeBrokenLinkProject,
   makeChord,
   makeDrumEvent,
   makeDrumTrack,
@@ -807,5 +808,83 @@ describe('collectTrackNotes 相当: role 一致のトラックを数える', () 
       tracks: [makeBassTrack([makeNote(36, 0)], { name: 'ベース' })],
     });
     expect(analyzeBassRootOnDownbeat(project, 'Bass').rootBars).toBe(0);
+  });
+});
+
+// ─── リンク(aliasOf)クリップ ─────────────────────────────────────────────────
+
+describe('aliasOf だけを持つクリップ', () => {
+  it.each([
+    { lengthBeats: 1, loop: false, expected: 0 },
+    { lengthBeats: 8, loop: true, contentLengthBeats: 1, expected: 0 },
+    { lengthBeats: 8, loop: true, contentLengthBeats: 3, expected: 2 },
+  ])('counts only the notes that sound with the link’s own settings (%j)', ({ expected, ...settings }) => {
+    const source = { ...makeMelodyTrack([makeNote(60, 2)]).clips[0]!, id: 'src', trackId: 'Sketch' };
+    const link = {
+      id: 'link', trackId: 'Melody', type: 'midi' as const, startBeat: 16, aliasOf: 'src', ...settings,
+    };
+    const project = makeProject({
+      tracks: [
+        makeMelodyTrack([], { clips: [link] }),
+        makeMelodyTrack([], { id: 'Sketch', name: 'Sketch', clips: [source] }),
+      ],
+    });
+    expect(analyzeNotesWithinScale(project, 'Melody').totalNotes).toBe(expected);
+    expect(checkProjectPredicate({ type: 'hasNotesWithinScale', trackName: 'Melody', minRatio: 1 }, project))
+      .toBe(expected > 0);
+  });
+
+  it.each(['missing', 'cyclic'] as const)('ignores notes stored on a %s link', (kind) => {
+    const project = makeBrokenLinkProject(kind);
+    expect(analyzeNotesWithinScale(project, 'Melody').totalNotes).toBe(0);
+    expect(checkProjectPredicate({ type: 'hasNotesWithinScale', trackName: 'Melody', minRatio: 1 }, project)).toBe(false);
+  });
+
+  it.each(['missing', 'cyclic'] as const)('ignores drum hits stored on a %s link', (kind) => {
+    const project = makeBrokenLinkProject(kind);
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project)).toBe(false);
+  });
+
+  /** Melody には中身のないリンククリップだけがあり、中身は別トラックの元クリップにある */
+  function linkedMelodyProject() {
+    const source = { ...makeMelodyTrack([makeNote(60, 0), makeNote(66, 1)]).clips[0]!, id: 'src', trackId: 'Sketch' };
+    const link = { id: 'link', trackId: 'Melody', type: 'midi' as const, startBeat: 16, lengthBeats: 16, loop: false, aliasOf: 'src' };
+    return makeProject({
+      tracks: [
+        makeMelodyTrack([], { clips: [link] }),
+        makeMelodyTrack([], { id: 'Sketch', name: 'Sketch', clips: [source] }),
+      ],
+    });
+  }
+
+  it('参照先の中身がレッスン判定に数えられ、位置はリンククリップの開始拍から数える', () => {
+    const project = linkedMelodyProject();
+    const analysis = analyzeNotesWithinScale(project, 'Melody');
+    expect(analysis.totalNotes).toBe(2);
+    expect(analysis.inScaleNotes).toBe(1);
+    expect(analysis.firstOutsideBarNumber).toBe(5); // 16 + 1 拍 → 5 小節目
+    expect(checkProjectPredicate({ type: 'hasNotesWithinScale', trackName: 'Melody', minRatio: 0.5 }, project)).toBe(true);
+  });
+
+  it('ドラムのリンククリップも参照先のパターンで判定する', () => {
+    const source = makeDrumTrack([
+      makeDrumEvent('kick', 0),
+      makeDrumEvent('kick', 4),
+      makeDrumEvent('kick', 8),
+      makeDrumEvent('kick', 12),
+    ]).clips[0]!;
+    const project = makeProject({
+      tracks: [
+        {
+          ...makeDrumTrack([]),
+          clips: [
+            { ...source, id: 'drum-link', startBeat: 16, aliasOf: 'drum-src', drumEvents: undefined },
+          ],
+        },
+        // 参照先はドラム以外のトラックに置いて、リンク経由でしか見つからないようにする
+        makeMelodyTrack([], { id: 'Store', name: 'Store', clips: [{ ...source, id: 'drum-src' }] }),
+      ],
+    });
+    expect(checkProjectPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project)).toBe(true);
   });
 });

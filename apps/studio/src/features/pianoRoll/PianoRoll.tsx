@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { fitClipToNotes, useStore, watchDragEnd } from '../../state/store';
+import { useStore, watchDragEnd } from '../../state/store';
 import { findShortcut } from '../../state/keymap';
 import type { Clip, NoteEvent, Project, Track } from '@cts/project-model';
-import { beatsPerBar, resolveLinkSource } from '@cts/project-model';
+import { beatsPerBar, clipFirstPassEnd, resizeClip, resolveLinkSource, startsBeforeClipEnd } from '@cts/project-model';
 import { midiToNoteName } from '@cts/theory-engine';
 import { pxPerBeat } from '../timeline';
 import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
@@ -15,6 +15,7 @@ import {
   PIANO_HIGH_MIDI,
   PIANO_LOW_MIDI,
   beatToX,
+  clampNoteToClip,
   clampPitch,
   initialPitchWindow,
   notesInRows,
@@ -38,6 +39,7 @@ const ROW_HEIGHT = 16;
 const RULER_HEIGHT = 22;
 const RESIZE_HANDLE_PX = 6;
 const DEFAULT_VELOCITY = 100;
+const KEEP_CLIP_LENGTH = { extendClip: false };
 const MIN_VELOCITY = 1;
 const MAX_VELOCITY = 127;
 /** Extra rows rendered above/below the viewport (covers the sticky ruler too). */
@@ -102,7 +104,7 @@ type DragState = {
   originStart: number;
   originDuration: number;
   originPitch: number;
-  snapshot: { id: string; startBeat: number; pitch: number }[];
+  snapshot: { id: string; startBeat: number; durationBeats: number; pitch: number }[];
   shiftKey: boolean;
 };
 
@@ -153,17 +155,29 @@ export function PianoRoll() {
   );
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  // Shown after a double-click past the clip end: how long the clip would need to be.
+  const [extendHint, setExtendHint] = useState<{ clipId: string; lengthBeats: number } | null>(null);
 
   const ppb = pxPerBeat(editor.zoomX);
   const rows = useMemo(() => buildRows(), []);
   const gridHeight = rows.length * ROW_HEIGHT;
   const bpb = beatsPerBar(project.timeSignature);
-  const lengthBeats = project.lengthBars * bpb;
-  const gridWidth = lengthBeats * ppb;
-  const selected = useMemo(() => new Set(editor.selectedNoteIds), [editor.selectedNoteIds]);
+  const songEndBeat = project.lengthBars * bpb;
+  const gridLength = Math.max(0, songEndBeat - (clip?.startBeat ?? 0));
+  const gridWidth = gridLength * ppb;
   const positionBeat = useStore((s) => s.transport.positionBeat);
 
-  const notes = clip?.type === 'midi' ? clip.notes ?? [] : [];
+  const clipLength = Math.min(clip?.lengthBeats ?? 0, gridLength);
+  const firstPassEnd = clip ? Math.min(clipFirstPassEnd(clip), gridLength) : 0;
+  const storedNotes = clip?.type === 'midi' ? clip.notes : undefined;
+  const notes = useMemo(
+    () => (storedNotes ?? []).filter((note) => startsBeforeClipEnd(note.startBeat, clipLength)),
+    [storedNotes, clipLength],
+  );
+  const selected = useMemo(() => {
+    const ids = new Set(editor.selectedNoteIds);
+    return new Set(notes.filter((note) => ids.has(note.id)).map((note) => note.id));
+  }, [editor.selectedNoteIds, notes]);
 
   // Vertical scroll + simple virtualization: only rows in view are rendered.
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -262,27 +276,25 @@ export function PianoRoll() {
     if (!clip || clip.type !== 'midi' || editor.selectedNoteIds.length === 0) return;
     const ids = new Set(editor.selectedNoteIds);
     const selectedNotes = notes.filter((note) => ids.has(note.id));
-    const quantized = quantizeNoteStarts(selectedNotes, gridSnap);
+    // Quantized notes must still fit inside the first pass to sound in a loop.
+    const quantized = quantizeNoteStarts(selectedNotes, gridSnap).map((note) => ({
+      ...note,
+      ...clampNoteToClip(note, firstPassEnd, { snap: gridSnap, keep: 'length' }),
+    }));
     const changed = quantized.some(
-      (note, index) => note.startBeat !== selectedNotes[index]?.startBeat,
+      (note, index) =>
+        note.startBeat !== selectedNotes[index]?.startBeat ||
+        note.durationBeats !== selectedNotes[index]?.durationBeats,
     );
     if (!changed) return;
     const quantizedById = new Map(quantized.map((note) => [note.id, note]));
 
-    // A note quantized onto or past the end of the clip lengthens it (same undo step).
-    applyProjectChange((project) => {
-      const next = mapClipNotes(project, clip.id, (clipNotes) =>
+    applyProjectChange((project) =>
+      mapClipNotes(project, clip.id, (clipNotes) =>
         clipNotes.map((note) => quantizedById.get(note.id) ?? note),
-      );
-      return {
-        ...next,
-        tracks: next.tracks.map((track) => ({
-          ...track,
-          clips: track.clips.map((c) => (c.id === clip.id ? fitClipToNotes(c) : c)),
-        })),
-      };
-    });
-  }, [applyProjectChange, clip, editor.selectedNoteIds, gridSnap, notes]);
+      ),
+    );
+  }, [applyProjectChange, clip, editor.selectedNoteIds, firstPassEnd, gridSnap, notes]);
 
   // --- keyboard shortcuts (ignored while typing in inputs) ---
   useEffect(() => {
@@ -297,7 +309,7 @@ export function PianoRoll() {
       if (isEditableTarget(e.target)) return;
       if (isAnyDialogOpen()) return;
       if (editor.activeView !== 'pianoRoll') return;
-      const ids = editor.selectedNoteIds;
+      const ids = [...selected];
       const action = findShortcut('pianoRoll', e);
       if (action === 'deleteSelectedNotes' && clip && ids.length > 0) {
         e.preventDefault();
@@ -320,7 +332,7 @@ export function PianoRoll() {
     return () => window.removeEventListener('keydown', onKey);
   }, [
     editor.activeView,
-    editor.selectedNoteIds,
+    selected,
     clip,
     linkedClip,
     commitTransaction,
@@ -338,22 +350,48 @@ export function PianoRoll() {
 
   const commitMove = useCallback(
     (drag: DragState, dx: number, dy: number, shift: boolean) => {
-      if (!clip) return;
-      const beatDelta = xToBeat(dx, ppb);
+      if (!clip || drag.snapshot.length === 0) return;
+      const movingNotes = drag.snapshot.map((note) => ({
+        ...note,
+        durationBeats: Math.min(note.durationBeats, firstPassEnd),
+      }));
+      let earliestStart = Infinity;
+      let latestEnd = -Infinity;
+      for (const note of movingNotes) {
+        earliestStart = Math.min(earliestStart, note.startBeat);
+        latestEnd = Math.max(latestEnd, note.startBeat + note.durationBeats);
+      }
+      // Snap the grabbed note, then constrain its position so the whole selection
+      // moves by the same amount. A selection wider than the pass cannot fit.
+      const minAnchor = drag.originStart - earliestStart;
+      const maxAnchor = drag.originStart + (firstPassEnd - latestEnd);
+      const fits = minAnchor <= maxAnchor;
+      const requestedAnchor = drag.originStart + xToBeat(dx, ppb);
+      let anchor = drag.originStart;
+      if (fits) {
+        const firstGrid = Math.ceil(minAnchor / gridSnap) * gridSnap;
+        const lastGrid = Math.floor(maxAnchor / gridSnap) * gridSnap;
+        anchor = !shift && firstGrid <= lastGrid
+          ? Math.max(firstGrid, Math.min(snapBeat(requestedAnchor, gridSnap), lastGrid))
+          : Math.max(minAnchor, Math.min(requestedAnchor, maxAnchor));
+      }
+      const beatDelta = anchor - drag.originStart;
       const rowDelta = Math.round(dy / ROW_HEIGHT);
-      const patches = new Map<string, { startBeat: number; pitch: number }>();
-      for (const snap of drag.snapshot) {
-        let nextStart = snap.startBeat + beatDelta;
-        nextStart = shift ? Math.max(0, nextStart) : snapBeat(nextStart, gridSnap);
-        let nextPitch = clampPitch(snap.pitch - rowDelta);
+      const patches = new Map<string, { startBeat: number; durationBeats: number; pitch: number }>();
+      for (const note of fits ? movingNotes : drag.snapshot) {
+        let nextPitch = clampPitch(note.pitch - rowDelta);
         if (editor.scaleSnap) {
           nextPitch = clampPitch(snapPitchToPitchClasses(nextPitch, scaleInfo.scalePcs, PIANO_LOW_MIDI, PIANO_HIGH_MIDI));
         }
-        patches.set(snap.id, { startBeat: nextStart, pitch: nextPitch });
+        patches.set(note.id, {
+          startBeat: note.startBeat + beatDelta,
+          durationBeats: note.durationBeats,
+          pitch: nextPitch,
+        });
       }
-      if (patches.size > 0) updateNotes(clip.id, patches);
+      updateNotes(clip.id, patches, KEEP_CLIP_LENGTH);
     },
-    [clip, ppb, gridSnap, editor.scaleSnap, scaleInfo.scalePcs, updateNotes],
+    [clip, firstPassEnd, ppb, gridSnap, editor.scaleSnap, scaleInfo.scalePcs, updateNotes],
   );
 
   const onNotePointerDown = useCallback(
@@ -363,19 +401,19 @@ export function PianoRoll() {
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
       setHeldNoteId(note.id);
       const { x } = localPoint(e);
-      const noteRightX = beatToX(note.startBeat + note.durationBeats, ppb);
+      const noteRightX = beatToX(Math.min(note.startBeat + note.durationBeats, clipLength), ppb);
       const isResize = Math.abs(x - noteRightX) <= RESIZE_HANDLE_PX;
 
       // selection handling
       let nextSelected: string[];
       if (e.shiftKey) {
         nextSelected = selected.has(note.id)
-          ? editor.selectedNoteIds.filter((id) => id !== note.id)
-          : [...editor.selectedNoteIds, note.id];
+          ? [...selected].filter((id) => id !== note.id)
+          : [...selected, note.id];
       } else if (!selected.has(note.id)) {
         nextSelected = [note.id];
       } else {
-        nextSelected = editor.selectedNoteIds;
+        nextSelected = [...selected];
       }
       selectNotes(nextSelected);
       beginTransaction(NOTE_DRAG);
@@ -383,18 +421,19 @@ export function PianoRoll() {
 
       // Alt+drag duplicates the selection, then drags the copies.
       let dragIds = nextSelected.includes(note.id) ? nextSelected : [note.id];
+      let live = notes;
       if (e.altKey && !isResize) {
-        const created = duplicateNotes(clip.id, dragIds, 0);
+        const created = duplicateNotes(clip.id, dragIds, 0, KEEP_CLIP_LENGTH);
         if (created.length === 0) return;
         dragIds = created;
         selectNotes(created);
+        live = findClip(useStore.getState().project.tracks, clip.id)?.notes ?? [];
       }
 
-      const live = clip.notes ?? [];
       const snapshot = dragIds
         .map((id) => live.find((n) => n.id === id))
         .filter((n): n is NoteEvent => n !== undefined)
-        .map((n) => ({ id: n.id, startBeat: n.startBeat, pitch: n.pitch }));
+        .map((n) => ({ id: n.id, startBeat: n.startBeat, durationBeats: n.durationBeats, pitch: n.pitch }));
 
       dragRef.current = {
         kind: isResize ? 'resize' : 'move',
@@ -408,7 +447,7 @@ export function PianoRoll() {
         shiftKey: e.shiftKey,
       };
     },
-    [beginTransaction, clip, localPoint, ppb, selected, editor.selectedNoteIds, selectNotes],
+    [beginTransaction, clip, clipLength, localPoint, notes, ppb, selected, selectNotes],
   );
 
   const onGridPointerDown = useCallback(
@@ -455,14 +494,20 @@ export function PianoRoll() {
               gridSnap,
               snapBeat(drag.originStart + nextDuration, gridSnap) - drag.originStart,
             );
-        updateNote(clip.id, drag.noteId, { durationBeats: nextDuration });
+        // A note end dragged into the shaded range stops at the clip end.
+        const fitted = clampNoteToClip(
+          { startBeat: drag.originStart, durationBeats: nextDuration },
+          clipLength,
+          { snap: e.shiftKey ? 0 : gridSnap, keep: 'start' },
+        );
+        updateNote(clip.id, drag.noteId, { durationBeats: fitted.durationBeats }, KEEP_CLIP_LENGTH);
       } else if (drag.kind === 'marquee') {
         const { x, y } = localPoint(e);
         const rect = normalizeRect(drag.originStart, drag.originPitch, x, y);
         setMarquee(rect);
       }
     },
-    [clip, commitMove, ppb, gridSnap, updateNote, localPoint],
+    [clip, clipLength, commitMove, ppb, gridSnap, updateNote, localPoint],
   );
 
   const onPointerUp = useCallback(() => {
@@ -473,21 +518,21 @@ export function PianoRoll() {
           const noteRect = {
             x: beatToX(n.startBeat, ppb),
             y: (PIANO_HIGH_MIDI - n.pitch) * ROW_HEIGHT,
-            w: Math.max(4, n.durationBeats * ppb),
+            w: Math.min((clipLength - n.startBeat) * ppb, Math.max(4, n.durationBeats * ppb)),
             h: ROW_HEIGHT,
           };
           return rectsOverlap(noteRect, marquee);
         })
         .map((n) => n.id);
       if (hitIds.length > 0) {
-        const base = drag.shiftKey ? editor.selectedNoteIds : [];
+        const base = drag.shiftKey ? selected : [];
         selectNotes(Array.from(new Set([...base, ...hitIds])));
       }
     }
     dragRef.current = null;
     setHeldNoteId(null);
     setMarquee(null);
-  }, [marquee, notes, ppb, editor.selectedNoteIds, selectNotes]);
+  }, [marquee, notes, ppb, clipLength, selected, selectNotes]);
 
   const onPointerCancel = useCallback(() => {
     dragRef.current = null;
@@ -499,7 +544,21 @@ export function PianoRoll() {
     (e: React.MouseEvent) => {
       if (!clip || clip.type !== 'midi') return;
       const { x, y } = localPoint(e);
-      let beat = snapBeat(xToBeat(x, ppb), gridSnap);
+      const rawBeat = xToBeat(x, ppb);
+      if (rawBeat < 0 || !startsBeforeClipEnd(rawBeat, gridLength)) {
+        setExtendHint(null);
+        return;
+      }
+      // Past the clip end is outside the clip (shaded): nothing is placed there,
+      // the user is offered to lengthen the clip to the end of that song bar
+      // (the bar numbers on the ruler count from the song start) instead.
+      if (rawBeat >= clipLength) {
+        const barEnd = (Math.floor((clip.startBeat + rawBeat) / bpb) + 1) * bpb;
+        setExtendHint({ clipId: clip.id, lengthBeats: Math.min(gridLength, barEnd - clip.startBeat) });
+        return;
+      }
+      setExtendHint(null);
+      let beat = snapBeat(rawBeat, gridSnap);
       // A looping clip only sounds its first repeat's content, so a note placed
       // in a later repeat goes into the first one: it then sounds at the click
       // (and in every repeat) instead of being saved silent.
@@ -511,18 +570,22 @@ export function PianoRoll() {
       }
       let pitch = clampPitch(yToPitch(y, ROW_HEIGHT));
       if (editor.scaleSnap) pitch = clampPitch(snapPitchToPitchClasses(pitch, scaleInfo.scalePcs, PIANO_LOW_MIDI, PIANO_HIGH_MIDI));
-      const added = addNote(clip.id, {
-        pitch,
-        startBeat: beat,
-        durationBeats: gridSnap,
-        velocity: DEFAULT_VELOCITY,
+      // Snapping can round a click just before the clip end onto it: the note
+      // stays inside the clip instead of lengthening it.
+      const fitted = clampNoteToClip({ startBeat: beat, durationBeats: gridSnap }, clipLength, {
+        snap: gridSnap,
+        keep: 'start',
       });
+      const added = addNote(clip.id, { pitch, ...fitted, velocity: DEFAULT_VELOCITY }, KEEP_CLIP_LENGTH);
       if (added && editor.previewOnPlace) previewKey(pitch);
     },
     [
       clip,
+      clipLength,
+      gridLength,
       localPoint,
       ppb,
+      bpb,
       gridSnap,
       editor.scaleSnap,
       editor.previewOnPlace,
@@ -654,6 +717,21 @@ export function PianoRoll() {
 
         <div className="pr__main">
         <TimelineRuler originBeat={clip.startBeat} />
+        {extendHint && extendHint.clipId === clip.id && extendHint.lengthBeats > clipLength &&
+          extendHint.lengthBeats <= gridLength ? (
+          <div className="pr__extend-hint" role="status">
+            <span>網掛けの部分はクリップの外なので、音符を置けません。クリップを伸ばすと置けるようになります。</span>
+            <button
+              type="button"
+              onClick={() => {
+                applyProjectChange((p) => resizeClip(p, extendHint.clipId, extendHint.lengthBeats));
+                setExtendHint(null);
+              }}
+            >
+              クリップをここまで伸ばす
+            </button>
+          </div>
+        ) : null}
         <div
           ref={gridRef}
           className="pr__grid"
@@ -679,20 +757,54 @@ export function PianoRoll() {
           })}
 
           {/* bar / beat gridlines */}
-          {Array.from({ length: lengthBeats + 1 }, (_, beat) => {
-            const isBar = beat % bpb === 0;
+          {Array.from({ length: Math.floor(gridLength) + 1 }, (_, beat) => (
+            (clip.startBeat + beat) % bpb === 0 ? null : (
+              <div
+                key={`beat-${beat}`}
+                className="pr__gridline"
+                style={{ left: beat * ppb }}
+              />
+            )
+          ))}
+          {Array.from({ length: project.lengthBars + 1 }, (_, bar) => {
+            const beat = bar * bpb - clip.startBeat;
+            return beat < 0 ? null : (
+              <div key={`bar-${bar}`} className="pr__gridline is-bar" style={{ left: beat * ppb }} />
+            );
+          })}
+
+          {/* The shaded range ends at the song boundary, even on a partial beat. */}
+          {Array.from({ length: Math.ceil(gridLength) - Math.floor(clipLength) }, (_, k) => {
+            const beat = Math.floor(clipLength) + k;
+            const left = Math.max(beat, clipLength);
+            const right = Math.min(beat + 1, gridLength);
+            if (right <= left) return null;
             return (
               <div
-                key={`gl-${beat}`}
-                className={`pr__gridline${isBar ? ' is-bar' : ''}`}
-                style={{ left: beat * ppb }}
+                key={`out-${beat}`}
+                className="pr__outside"
+                aria-disabled="true"
+                title="クリップの外です。ここに音符を置くには、クリップを伸ばします。"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: left * ppb,
+                  width: (right - left) * ppb,
+                  height: gridHeight,
+                  pointerEvents: 'none',
+                  background:
+                    'repeating-linear-gradient(135deg, rgba(128,128,128,0.18) 0 4px, transparent 4px 8px)',
+                }}
               />
             );
           })}
 
-          {/* chord-tone highlight per region (when C on) */}
+          {/* chord-tone highlight per region (when C on). The chord track is
+              absolute; the grid starts at the clip start. */}
           {editor.chordToneHighlight
-            ? project.chordTrack.map((chord) =>
+            ? project.chordTrack
+                .filter((chord) => chord.startBeat < songEndBeat && chord.startBeat + chord.durationBeats > clip.startBeat)
+                .map((chord) =>
                 visibleRows.map((midi, j) => {
                   const i = firstRow + j;
                   const pc = ((midi % 12) + 12) % 12;
@@ -707,8 +819,10 @@ export function PianoRoll() {
                       style={{
                         top: i * ROW_HEIGHT,
                         height: ROW_HEIGHT,
-                        left: chord.startBeat * ppb,
-                        width: chord.durationBeats * ppb,
+                        left: Math.max(0, chord.startBeat - clip.startBeat) * ppb,
+                        width:
+                          (Math.min(chord.startBeat + chord.durationBeats, songEndBeat) -
+                            Math.max(chord.startBeat, clip.startBeat)) * ppb,
                       }}
                     />
                   );
@@ -729,7 +843,7 @@ export function PianoRoll() {
                 style={{
                   top: i * ROW_HEIGHT + 1,
                   left: note.startBeat * ppb,
-                  width: Math.max(4, note.durationBeats * ppb - 1),
+                  width: Math.min((clipLength - note.startBeat) * ppb, Math.max(4, note.durationBeats * ppb - 1)),
                   height: ROW_HEIGHT - 2,
                   opacity: 0.45 + (note.velocity / 127) * 0.55,
                 }}
@@ -764,6 +878,7 @@ export function PianoRoll() {
 
       <VelocityLane
         clipId={clip.id}
+        clipLength={clipLength}
         notes={notes}
         ppb={ppb}
         width={gridWidth}
@@ -782,13 +897,14 @@ const LANE_HEIGHT = 64;
 
 function VelocityLane(props: {
   clipId: string;
+  clipLength: number;
   notes: readonly NoteEvent[];
   ppb: number;
   width: number;
   selectedIds: ReadonlySet<string>;
   applyProjectChange: (fn: (project: Project) => Project) => void;
 }) {
-  const { clipId, notes, ppb, width, selectedIds, applyProjectChange } = props;
+  const { clipId, clipLength, notes, ppb, width, selectedIds, applyProjectChange } = props;
   const laneRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef<VelocityDragState | null>(null);
   const [previewVelocities, setPreviewVelocities] = useState<Map<string, number> | null>(null);
@@ -968,7 +1084,7 @@ function VelocityLane(props: {
             <div
               key={note.id}
               className={`pr__velbar${isSel ? ' is-selected' : ''}`}
-              style={{ left: note.startBeat * ppb, height: h, bottom: 0 }}
+              style={{ left: note.startBeat * ppb, maxWidth: (clipLength - note.startBeat) * ppb, height: h, bottom: 0 }}
               onPointerDown={(e) => onBarDown(e, note.id)}
               title={`強さ ${velocity}`}
             />

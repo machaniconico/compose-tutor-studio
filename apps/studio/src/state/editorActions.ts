@@ -23,7 +23,10 @@ import type {
 import type { ParsedMidi } from '@cts/midi-io';
 import {
   beatsPerBar as beatsPerBarOf,
+  CLIP_EDGE_TOLERANCE_BEATS,
+  clipFirstPassEnd,
   drumBeatToStep,
+  resolveEditTarget,
   resolveLinkSource,
   setLengthBars as setProjectLengthBars,
   setTimeSignature as setProjectTimeSignature,
@@ -47,7 +50,7 @@ import {
 } from '@cts/theory-engine';
 import { getScalePitchClasses } from '@cts/theory-engine';
 import { roleForTrackName } from '@cts/tutorial-engine';
-import { fitClipToNotes, useStore } from './store';
+import { fitClipToNotes, useStore, type NoteEditOptions } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { quantizeStart } from '../features/pianoRoll/gridMath';
@@ -353,6 +356,7 @@ export function duplicateNotes(
   clipId: string,
   noteIds: readonly string[],
   offsetBeats: number,
+  options?: NoteEditOptions,
 ): string[] {
   const ids = new Set(noteIds);
   const newIds: string[] = [];
@@ -372,7 +376,7 @@ export function duplicateNotes(
         };
       });
       dupesByCall.push({ project, dupes });
-      return fitClipToNotes({ ...c, notes: [...(c.notes ?? []), ...dupes] });
+      return fitClipToNotes({ ...c, notes: [...(c.notes ?? []), ...dupes] }, options);
     }),
   );
   if (!committed) return [];
@@ -430,13 +434,14 @@ export function removeNotes(clipId: string, noteIds: readonly string[]): void {
 }
 
 /**
- * Replace ALL notes of a clip with the provided ones. A non-looping clip is
- * lengthened to the last note in the same edit (one undo step), so no new note
- * lies past the clip end and goes silent.
+ * Replace all notes in one undo step. By default, a non-looping clip extends
+ * to the last note. Returns whether the store applied the replacement.
  */
-export function replaceClipNotes(clipId: string, notes: NoteEvent[]): void {
-  useStore.getState().applyProjectChange((project) =>
-    mapClip(project, clipId, (c) => fitClipToNotes({ ...c, notes })),
+export function replaceClipNotes(clipId: string, notes: NoteEvent[], options?: NoteEditOptions): boolean {
+  const store = useStore.getState();
+  if (!findClip(store.project, clipId)) return false;
+  return store.applyProjectChange((project) =>
+    mapClip(project, clipId, (c) => fitClipToNotes({ ...c, notes }, options)),
   );
 }
 
@@ -779,43 +784,106 @@ export function chordTrackInputs(project: Project): ChordEventInput[] {
 }
 
 /**
- * Generate a bass line from the chord track and write it into the given clip,
- * replacing its notes. Returns the per-note reasons for UI display.
+ * The chords that sound inside `clip`, at clip-relative beats (what generated
+ * notes for that clip are measured in). A chord crossing a clip edge keeps only
+ * the part inside the clip.
  */
-export function generateBassIntoClip(clipId: string, mode: BassMode): GeneratedNote[] {
+export function clipChordInputs(project: Project, clip: ChordNotesSpan): ChordEventInput[] {
+  const inputs: ChordEventInput[] = [];
+  for (const c of [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat)) {
+    const timing = chordNoteTiming(c, clip);
+    if (timing) inputs.push({ symbol: c.symbol, ...timing });
+  }
+  return inputs;
+}
+
+export type ClipGenerationFailure = 'missingTarget' | 'noChords' | 'noNotes' | 'loopRange' | 'eventLimit';
+
+/** Generate at the selected clip's position and write to its content owner. */
+function generateIntoClip(
+  clipId: string,
+  generate: (project: Project, chords: ChordEventInput[], clip: Clip) => GeneratedNote[],
+  onFailure?: (reason: ClipGenerationFailure) => void,
+): GeneratedNote[] {
+  const fail = (reason: ClipGenerationFailure): GeneratedNote[] => {
+    onFailure?.(reason);
+    return [];
+  };
   const project = useStore.getState().project;
-  const chords = chordTrackInputs(project);
-  const generated = generateBassLine(chords, {
-    mode,
-    key: project.key,
-    scale: project.scale,
-    beatsPerBar: projectBeatsPerBar(project),
-  });
+  const clip = findClip(project, clipId);
+  const owner = clip ? resolveEditTarget(project, clipId) : undefined;
+  if (!clip || !owner) return fail('missingTarget');
+  const chords = clipChordInputs(project, clip);
+  if (chords.length === 0) return fail('noChords');
+  const generated: GeneratedNote[] = [];
+  for (const note of generate(project, chords, clip)) {
+    if (!startsBeforeClipEnd(note.startBeat, clip.lengthBeats)) continue;
+    const durationBeats = Math.min(note.durationBeats, clip.lengthBeats - note.startBeat);
+    generated.push(durationBeats === note.durationBeats ? note : { ...note, durationBeats });
+  }
+  if (generated.length === 0) return fail('noNotes');
+  const firstPassEnd = clipFirstPassEnd(clip);
+  const firstPassTolerance = CLIP_EDGE_TOLERANCE_BEATS * Math.min(1, firstPassEnd);
+  if (
+    firstPassEnd < clip.lengthBeats &&
+    generated.some((note) =>
+      !startsBeforeClipEnd(note.startBeat, firstPassEnd) ||
+      note.startBeat + note.durationBeats > firstPassEnd + firstPassTolerance,
+    )
+  ) {
+    return fail('loopRange');
+  }
   const events = generatedToNoteEvents(generated);
-  replaceClipNotes(clipId, events);
-  emitNotesAdded(clipId, { project: useStore.getState().project, dupes: events });
+  if (!replaceClipNotes(owner.id, events, { extendClip: false })) return fail('eventLimit');
+  emitNotesAdded(owner.id, { project: useStore.getState().project, dupes: events });
   return generated;
 }
 
 /**
- * Generate a scale melody from the chord track and write it into the given
- * clip, replacing its notes. The seed makes repeat clicks vary deterministically
- * when the caller passes an incrementing seed. Returns the generated notes.
+ * Generate a bass line from the chords inside the given clip and write it into
+ * the clip (clip-relative), replacing its notes. Returns the per-note reasons
+ * for UI display. Reports failed generation through `onFailure`.
  */
-export function generateMelodyIntoClip(clipId: string, seed: number): GeneratedNote[] {
-  const project = useStore.getState().project;
-  const chords = chordTrackInputs(project);
-  const generated = generateScaleMelody({
-    key: project.key,
-    scale: project.scale,
-    chords,
-    seed,
-    beatsPerBar: projectBeatsPerBar(project),
-  });
-  const events = generatedToNoteEvents(generated);
-  replaceClipNotes(clipId, events);
-  emitNotesAdded(clipId, { project: useStore.getState().project, dupes: events });
-  return generated;
+export function generateBassIntoClip(
+  clipId: string,
+  mode: BassMode,
+  onFailure?: (reason: ClipGenerationFailure) => void,
+): GeneratedNote[] {
+  return generateIntoClip(
+    clipId,
+    (project, chords) => generateBassLine(chords, {
+      mode,
+      key: project.key,
+      scale: project.scale,
+      beatsPerBar: projectBeatsPerBar(project),
+    }),
+    onFailure,
+  );
+}
+
+/**
+ * Generate a scale melody from the chords inside the given clip and write it
+ * into the clip (clip-relative), replacing its notes. The seed makes repeat
+ * clicks vary deterministically when the caller passes an incrementing seed.
+ * Returns the generated notes. Reports failed generation through `onFailure`.
+ */
+export function generateMelodyIntoClip(
+  clipId: string,
+  seed: number,
+  onFailure?: (reason: ClipGenerationFailure) => void,
+): GeneratedNote[] {
+  return generateIntoClip(
+    clipId,
+    (project, chords, clip) => generateScaleMelody({
+      key: project.key,
+      scale: project.scale,
+      chords,
+      seed,
+      beatsPerBar: projectBeatsPerBar(project),
+      originBeat: clip.startBeat,
+    }),
+    onFailure,
+  );
 }
 
 // ---------------------------------------------------------------------------

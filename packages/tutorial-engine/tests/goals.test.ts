@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { expandClip, validateProject } from '@cts/project-model';
 import { checkGoalOnEvent, evaluateProjectPredicate } from '../src/goals.js';
 import { resolveTrack, resolveTrackByPredicateName, roleForTrackName } from '../src/trackResolve.js';
 import type { AppEvent } from '../src/types.js';
 import {
   makeDrumEvent,
   makeBassTrack,
+  makeBrokenLinkProject,
   makeDrumTrack,
   makeMelodyTrack,
   makeNote,
@@ -607,5 +609,37 @@ describe('drumLaneActive — dedup unique step indices', () => {
     expect(
       evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'snare', minSteps: 2 }, project),
     ).toBe(true);
+  });
+});
+
+describe('linked (aliasOf) clips', () => {
+  it.each(['missing', 'cyclic'] as const)('ignores notes stored on a %s link', (kind) => {
+    const project = makeBrokenLinkProject(kind);
+    const clips = project.tracks.flatMap((track) => track.clips);
+    expect(validateProject(project).valid).toBe(true);
+    expect(expandClip(clips[0]!, clips).notes).toEqual([]);
+    expect(evaluateProjectPredicate({ type: 'noteCountAtLeast', trackName: 'Melody', value: 1 }, project)).toBe(false);
+  });
+
+  it.each(['missing', 'cyclic'] as const)('ignores drum hits stored on a %s link', (kind) => {
+    const project = makeBrokenLinkProject(kind);
+    expect(evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'kick', minSteps: 1 }, project)).toBe(false);
+    expect(evaluateProjectPredicate({ type: 'drumPatternHas', lanes: [{ lane: 'kick', minSteps: 1 }] }, project)).toBe(false);
+  });
+
+  it('noteCountAtLeast and drumLaneActive count the content of the clip a link points at', () => {
+    const melodySource = { ...makeMelodyTrack([makeNote(60), makeNote(62)]).clips[0]!, id: 'src', trackId: 'Sketch' };
+    const drumSource = { ...makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('kick', 4)]).clips[0]!, id: 'drum-src' };
+    const project = makeProject({
+      tracks: [
+        makeMelodyTrack([], {
+          clips: [{ id: 'link', trackId: 'Melody', type: 'midi', startBeat: 16, lengthBeats: 16, loop: false, aliasOf: 'src' }],
+        }),
+        { ...makeDrumTrack([]), clips: [{ ...drumSource, id: 'drum-link', aliasOf: 'drum-src', drumEvents: undefined }] },
+        makeMelodyTrack([], { id: 'Sketch', name: 'Sketch', clips: [melodySource, drumSource] }),
+      ],
+    });
+    expect(evaluateProjectPredicate({ type: 'noteCountAtLeast', trackName: 'Melody', value: 2 }, project)).toBe(true);
+    expect(evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'kick', minSteps: 2 }, project)).toBe(true);
   });
 });

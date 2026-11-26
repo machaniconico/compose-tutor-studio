@@ -137,6 +137,335 @@ export function toggleDrumStep(
   return touch({ ...project, tracks }, clock);
 }
 
+// --- Clips ---
+//
+// A clip's note `startBeat` and drum `stepIndex` are relative to the clip's own
+// `startBeat`. A clip with `aliasOf` holds no content: it plays (and is edited
+// through) the clip its link chain ends at, see resolveEditTarget.
+
+const CLIP_EPSILON = 1e-9;
+
+function locateClip(project: Project, clipId: string): { track: Track; clip: Clip } | undefined {
+  for (const track of project.tracks) {
+    const clip = track.clips.find((c) => c.id === clipId);
+    if (clip) return { track, clip };
+  }
+  return undefined;
+}
+
+/**
+ * The clip whose notes / drum hits an edit of `clipId` should change: the clip
+ * itself, or for a linked clip the clip its `aliasOf` chain ends at. Undefined
+ * when the clip does not exist or its link is broken or circular.
+ */
+export function resolveEditTarget(project: Project, clipId: string): Clip | undefined {
+  const all = project.tracks.flatMap((t) => t.clips);
+  const clip = all.find((c) => c.id === clipId);
+  if (!clip) return undefined;
+  const source = resolveLinkSource(clip, all);
+  return typeof source === 'string' ? undefined : source;
+}
+
+/**
+ * The start closest to `requested` (never before 0) where a clip of `length`
+ * beats overlaps none of `others`. Ties go to the earlier start.
+ */
+function nearestFreeStart(others: readonly Clip[], length: number, requested: number): number {
+  const target = Math.max(0, requested);
+  const free = (start: number) =>
+    others.every(
+      (o) => start >= o.startBeat + o.lengthBeats - CLIP_EPSILON || start + length <= o.startBeat + CLIP_EPSILON,
+    );
+  const candidates = [target, ...others.flatMap((o) => [o.startBeat - length, o.startBeat + o.lengthBeats])];
+  let best: number | undefined;
+  for (const start of candidates) {
+    if (start < 0 || !free(start)) continue;
+    const distance = Math.abs(start - target);
+    const bestDistance = best === undefined ? Infinity : Math.abs(best - target);
+    if (distance < bestDistance - CLIP_EPSILON || (Math.abs(distance - bestDistance) <= CLIP_EPSILON && start < best!)) {
+      best = start;
+    }
+  }
+  // The end of the last clip is always free, so `best` is set whenever `others` is non-empty.
+  return best ?? target;
+}
+
+/** Add a clip to a track. Its content positions stay relative to `startBeat`. */
+export function addClip(
+  project: Project,
+  trackId: string,
+  clip: Omit<Clip, 'id' | 'trackId'> & { id?: string },
+  clock: Clock = systemClock,
+): Project {
+  if (!project.tracks.some((t) => t.id === trackId)) return project;
+  const allocateId = trackIdAllocator(project);
+  const created: Clip = { ...clip, id: allocateId('clip', clip.id), trackId };
+  if (clip.notes) created.notes = clip.notes.map((note) => ({ ...note, id: allocateId('note', note.id) }));
+  if (clip.drumEvents) {
+    created.drumEvents = clip.drumEvents.map((hit) => ({ ...hit, id: allocateId('drum', hit.id) }));
+  }
+  const tracks = mapTrack(project, trackId, (t) => ({ ...t, clips: [...t.clips, created] }));
+  return touch({ ...project, tracks }, clock);
+}
+
+/**
+ * Move a clip within its track. When `startBeat` would overlap another clip on
+ * the track, the clip goes to the nearest start that does not.
+ */
+export function moveClip(
+  project: Project,
+  clipId: string,
+  startBeat: number,
+  clock: Clock = systemClock,
+): Project {
+  if (!Number.isFinite(startBeat)) return project;
+  const found = locateClip(project, clipId);
+  if (!found) return project;
+  const { track, clip } = found;
+  const others = track.clips.filter((c) => c.id !== clipId);
+  const start = nearestFreeStart(others, clip.lengthBeats, startBeat);
+  if (start === clip.startBeat) return project;
+  return touch({ ...project, tracks: mapClip(project, clipId, (c) => ({ ...c, startBeat: start })) }, clock);
+}
+
+/**
+ * Change a clip's length. A looping clip keeps its repeat period: an unset
+ * `contentLengthBeats` (meaning "the old length") is written out first.
+ */
+export function resizeClip(
+  project: Project,
+  clipId: string,
+  lengthBeats: number,
+  clock: Clock = systemClock,
+): Project {
+  if (!Number.isFinite(lengthBeats) || lengthBeats <= 0 || !locateClip(project, clipId)) return project;
+  const tracks = mapClip(project, clipId, (clip) => {
+    const next: Clip = { ...clip, lengthBeats };
+    if (clip.loop && clip.contentLengthBeats === undefined) next.contentLengthBeats = clip.lengthBeats;
+    return next;
+  });
+  return touch({ ...project, tracks }, clock);
+}
+
+/** Steps per bar a drum clip's hits are placed on (playback uses the link source's). */
+function effectiveStepsPerBar(clip: Clip): number {
+  return clip.stepsPerBar !== undefined && clip.stepsPerBar > 0 ? clip.stepsPerBar : DEFAULT_STEPS_PER_BAR;
+}
+
+/** Give `target` the step grid of `source`: its stepsPerBar, or none when the source has none. */
+function withStepsPerBarOf(target: Clip, source: Clip): Clip {
+  const next: Clip = { ...target };
+  if (source.stepsPerBar !== undefined) next.stepsPerBar = source.stepsPerBar;
+  else delete next.stepsPerBar;
+  return next;
+}
+
+export type SplitClipFailure = 'missingClip' | 'invalidBoundary' | 'brokenLink' | 'eventLimit' | 'offGridDrumHit';
+
+export type SplitClipResult =
+  | { ok: true; project: Project }
+  | { ok: false; project: Project; reason: SplitClipFailure };
+
+/**
+ * Split a clip at the absolute song beat `atBeat` into two clips; every note
+ * and drum hit keeps sounding where it did. A note that crosses the boundary is
+ * cut in two (the total note length is unchanged). A clip with drum hits is
+ * split on the nearest step boundary, measured on the same step grid playback
+ * uses.
+ *
+ * A looping clip, a link, or the source of a link keeps its loop / link on the
+ * left part, which just ends at the cut (a link source keeps all its content,
+ * so the clips linked to it do not change). The right part gets its own copy
+ * of what sounded from the cut on and neither loops nor links. On failure,
+ * the result carries the reason and the original project.
+ */
+export function splitClip(
+  project: Project,
+  clipId: string,
+  atBeat: number,
+  clock: Clock = systemClock,
+): SplitClipResult {
+  const fail = (reason: SplitClipFailure): SplitClipResult => ({ ok: false, project, reason });
+  const found = locateClip(project, clipId);
+  if (!found) return fail('missingClip');
+  const { track, clip } = found;
+  const isInterior = (offset: number) => offset > CLIP_EPSILON && offset < clip.lengthBeats - CLIP_EPSILON;
+  let offset = atBeat - clip.startBeat;
+  if (!isInterior(offset)) return fail('invalidBoundary');
+
+  const allClips = project.tracks.flatMap((t) => t.clips);
+  const source = resolveLinkSource(clip, allClips);
+  if (typeof source === 'string') return fail('brokenLink');
+  const bpb = beatsPerBar(project.timeSignature);
+  const beatsPerStep = bpb / effectiveStepsPerBar(source);
+
+  let boundaryStep = 0;
+  if (clip.type === 'drum' || (source.drumEvents?.length ?? 0) > 0) {
+    boundaryStep = Math.round(offset / beatsPerStep);
+    offset = boundaryStep * beatsPerStep;
+    if (!isInterior(offset)) return fail('invalidBoundary');
+  }
+
+  const allocateId = trackIdAllocator(project);
+  const shared = clip.loop || clip.aliasOf !== undefined || allClips.some((c) => c.aliasOf === clipId);
+  let left: Clip;
+  let right: Clip;
+  if (shared) {
+    left = { ...clip, lengthBeats: offset };
+    if (clip.loop && clip.contentLengthBeats === undefined) left.contentLengthBeats = clip.lengthBeats;
+    const expanded = expandClip(clip, allClips, bpb);
+    if (expanded.overLimit) return fail('eventLimit');
+    right = withStepsPerBarOf(
+      {
+        ...clip,
+        id: allocateId('clip'),
+        startBeat: clip.startBeat + offset,
+        lengthBeats: clip.lengthBeats - offset,
+        loop: false,
+      },
+      source,
+    );
+    delete right.aliasOf;
+    delete right.contentLengthBeats;
+    delete right.legacyClipSettings;
+    delete right.notes;
+    delete right.drumEvents;
+    if (source.notes) {
+      right.notes = [];
+      for (const n of expanded.notes) {
+        const start = n.startBeat - clip.startBeat;
+        const end = start + n.durationBeats;
+        if (end <= offset + CLIP_EPSILON) continue;
+        const rightStart = Math.max(start, offset);
+        right.notes.push({
+          id: allocateId('note'),
+          pitch: n.pitch,
+          startBeat: rightStart - offset,
+          durationBeats: end - rightStart,
+          velocity: n.velocity,
+        });
+      }
+    }
+    if (source.drumEvents) {
+      right.drumEvents = [];
+      for (const hit of expanded.drumHits) {
+        const start = hit.beat - clip.startBeat - offset;
+        if (start < -CLIP_EPSILON) continue;
+        const step = Math.max(0, start) / beatsPerStep;
+        const stepIndex = Math.round(step);
+        if (Math.abs(step - stepIndex) > 1e-6) return fail('offGridDrumHit');
+        right.drumEvents.push({ id: allocateId('drum'), lane: hit.lane, stepIndex, velocity: hit.velocity });
+      }
+    }
+  } else {
+    left = { ...clip, lengthBeats: offset };
+    right = {
+      ...clip,
+      id: allocateId('clip'),
+      startBeat: clip.startBeat + offset,
+      lengthBeats: clip.lengthBeats - offset,
+    };
+    if (clip.notes) {
+      const leftNotes: NoteEvent[] = [];
+      const rightNotes: NoteEvent[] = [];
+      for (const n of clip.notes) {
+        const end = n.startBeat + n.durationBeats;
+        if (n.startBeat < offset - CLIP_EPSILON) {
+          leftNotes.push(end > offset + CLIP_EPSILON ? { ...n, durationBeats: offset - n.startBeat } : n);
+          if (end > offset + CLIP_EPSILON) {
+            rightNotes.push({ ...n, id: allocateId('note'), startBeat: 0, durationBeats: end - offset });
+          }
+        } else {
+          // A note within the tolerance before the cut starts the right part (never a negative beat).
+          rightNotes.push({ ...n, startBeat: Math.max(0, n.startBeat - offset) });
+        }
+      }
+      left.notes = leftNotes;
+      right.notes = rightNotes;
+    }
+    if (clip.drumEvents) {
+      left.drumEvents = clip.drumEvents.filter((e) => e.stepIndex < boundaryStep);
+      right.drumEvents = clip.drumEvents
+        .filter((e) => e.stepIndex >= boundaryStep)
+        .map((e) => ({ ...e, stepIndex: e.stepIndex - boundaryStep }));
+    }
+  }
+  const tracks = mapTrack(project, track.id, (t) => ({
+    ...t,
+    clips: t.clips.flatMap((c) => (c.id === clipId ? [left, right] : [c])),
+  }));
+  return { ok: true, project: touch({ ...project, tracks }, clock) };
+}
+
+/**
+ * Duplicate a clip on its track, by default right after it (moved to the nearest
+ * free spot). `copy` makes an independent clip with its own content; `link`
+ * makes a clip with `aliasOf` set to the clip that owns the content and no
+ * notes or drum hits of its own.
+ */
+export function duplicateClip(
+  project: Project,
+  clipId: string,
+  opts: { mode: 'copy' | 'link'; startBeat?: number },
+  clock: Clock = systemClock,
+): Project {
+  const found = locateClip(project, clipId);
+  if (!found) return project;
+  const { track, clip } = found;
+  const requestedStart = opts.startBeat ?? clip.startBeat + clip.lengthBeats;
+  if (!Number.isFinite(requestedStart)) return project;
+  const source = resolveEditTarget(project, clipId);
+  if (opts.mode === 'link' && !source) return project;
+  const allocateId = trackIdAllocator(project);
+  const startBeat = nearestFreeStart(track.clips, clip.lengthBeats, requestedStart);
+  const duplicate: Clip = { ...clip, id: allocateId('clip'), startBeat };
+  delete duplicate.legacyClipSettings;
+  if (opts.mode === 'link') {
+    duplicate.aliasOf = source!.id;
+    delete duplicate.notes;
+    delete duplicate.drumEvents;
+  } else {
+    const content = source ?? clip;
+    delete duplicate.aliasOf;
+    delete duplicate.notes;
+    delete duplicate.drumEvents;
+    if (content.notes) duplicate.notes = content.notes.map((n) => ({ ...n, id: allocateId('note') }));
+    if (content.drumEvents) duplicate.drumEvents = content.drumEvents.map((d) => ({ ...d, id: allocateId('drum') }));
+  }
+  const placed = opts.mode === 'copy' ? withStepsPerBarOf(duplicate, source ?? clip) : duplicate;
+  const tracks = mapTrack(project, track.id, (t) => ({ ...t, clips: [...t.clips, placed] }));
+  return touch({ ...project, tracks }, clock);
+}
+
+/**
+ * Remove a clip. Clips linked to it keep sounding: they follow its own link
+ * when it has one, otherwise each gets its own copy of the removed content.
+ */
+export function removeClip(project: Project, clipId: string, clock: Clock = systemClock): Project {
+  const found = locateClip(project, clipId);
+  if (!found) return project;
+  const { clip } = found;
+  const allocateId = trackIdAllocator(project);
+  const tracks = project.tracks.map((t) => ({
+    ...t,
+    clips: t.clips
+      .filter((c) => c.id !== clipId)
+      .map((c): Clip => {
+        if (c.aliasOf !== clipId) return c;
+        if (clip.aliasOf !== undefined) return { ...c, aliasOf: clip.aliasOf };
+        // The copy plays on the removed clip's step grid, as the link did.
+        const own = withStepsPerBarOf(c, clip);
+        delete own.aliasOf;
+        delete own.notes;
+        delete own.drumEvents;
+        if (clip.notes) own.notes = clip.notes.map((n) => ({ ...n, id: allocateId('note') }));
+        if (clip.drumEvents) own.drumEvents = clip.drumEvents.map((d) => ({ ...d, id: allocateId('drum') }));
+        return own;
+      }),
+  }));
+  return touch({ ...project, tracks }, clock);
+}
+
 // --- Mixer ---
 
 export function setTrackVolume(

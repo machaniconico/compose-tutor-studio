@@ -141,3 +141,18 @@ export function makeDrumTrack(drumEvents: DrumEvent[]): Track {
     clips: [makeDrumClip(drumEvents)],
   });
 }
+
+export function makeBrokenLinkProject(kind: 'missing' | 'cyclic'): Project {
+  const melody = makeMelodyTrack([makeNote(60)]);
+  const drums = makeDrumTrack([0, 4, 8, 12].map((step) => makeDrumEvent('kick', step)));
+  return makeProject({
+    tracks: [melody, drums].map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => ({
+        ...clip,
+        trackId: track.id,
+        aliasOf: kind === 'cyclic' ? clip.id : 'missing',
+      })),
+    })),
+  });
+}

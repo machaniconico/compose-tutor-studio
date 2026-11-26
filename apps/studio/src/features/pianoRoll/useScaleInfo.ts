@@ -10,11 +10,21 @@ import { getScalePitchClasses } from '@cts/theory-engine';
 export type ScaleInfo = {
   /** Pitch classes (0-11) that belong to the project key/scale. */
   scalePcs: ReadonlySet<number>;
-  /** Find the chord event sounding at a given beat. */
+  /**
+   * Find the chord event sounding at an absolute song beat. A note's startBeat
+   * is clip-relative: pass `clip.startBeat + note.startBeat`.
+   */
   chordAtBeat: (beat: number) => ChordEvent | undefined;
-  /** Pitch classes of the chord active at a beat (chord tones). */
+  /** Pitch classes of the chord active at an absolute song beat (chord tones). */
   chordTonesAtBeat: (beat: number) => ReadonlySet<number>;
 };
+
+/** Chord lookup by absolute song beat (the chord track is absolute). */
+export function chordFinder(chordTrack: readonly ChordEvent[]): (beat: number) => ChordEvent | undefined {
+  const sorted = [...chordTrack].sort((a, b) => a.startBeat - b.startBeat);
+  return (beat) =>
+    sorted.find((c) => beat >= c.startBeat - 1e-6 && beat < c.startBeat + c.durationBeats - 1e-6);
+}
 
 export function useScaleInfo(project: Project): ScaleInfo {
   return useMemo(() => {
@@ -25,12 +35,7 @@ export function useScaleInfo(project: Project): ScaleInfo {
       pcs = [];
     }
     const scalePcs = new Set(pcs);
-    const sorted = [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat);
-
-    const chordAtBeat = (beat: number): ChordEvent | undefined =>
-      sorted.find(
-        (c) => beat >= c.startBeat - 1e-6 && beat < c.startBeat + c.durationBeats - 1e-6,
-      );
+    const chordAtBeat = chordFinder(project.chordTrack);
 
     const chordTonesAtBeat = (beat: number): ReadonlySet<number> => {
       const chord = chordAtBeat(beat);

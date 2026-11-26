@@ -7,7 +7,7 @@
  */
 
 import type { Project } from '@cts/project-model';
-import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf, resolveLinkSource } from '@cts/project-model';
 import {
   suggestNextChords,
   getDiatonicChords,
@@ -24,15 +24,22 @@ function currentProgression(project: Project): string[] {
     .map((c) => c.symbol);
 }
 
-/** メロディノートをanalyzeMelody用に整形 */
-function melodyNotesFrom(project: Project): { pitch: number; startBeat: number; durationBeats: number }[] {
+/**
+ * メロディノートをanalyzeMelody用に整形。ノートの startBeat はクリップ相対なので、
+ * コードトラックと同じ絶対拍(clip.startBeat + note.startBeat)に直す。
+ * リンク(aliasOf)クリップは参照先の中身を使う。
+ */
+export function melodyNotesFrom(project: Project): { pitch: number; startBeat: number; durationBeats: number }[] {
   const track = resolveTrack(project, { role: 'melody', trackName: 'Melody' });
   if (!track) return [];
+  const allClips = project.tracks.flatMap((t) => t.clips);
   for (const clip of track.clips) {
-    if (clip.notes && clip.notes.length > 0) {
-      return clip.notes.map((n) => ({
+    const source = resolveLinkSource(clip, allClips);
+    const notes = typeof source === 'string' ? undefined : source.notes;
+    if (notes && notes.length > 0) {
+      return notes.map((n) => ({
         pitch: n.pitch,
-        startBeat: n.startBeat,
+        startBeat: clip.startBeat + n.startBeat,
         durationBeats: n.durationBeats,
       }));
     }

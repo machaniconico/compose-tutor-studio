@@ -406,7 +406,7 @@ describe('generateBassIntoClip', () => {
   });
 });
 
-describe('generation into a short clip (every generated note sounds)', () => {
+describe('generation into a short clip (only the chords inside the clip are used)', () => {
   function shortenClip(clipId: string): void {
     useStore.getState().applyProjectChange((project) => ({
       ...project,
@@ -428,14 +428,16 @@ describe('generation into a short clip (every generated note sounds)', () => {
     ['bass', bassClipId, (id: string) => actions.generateBassIntoClip(id, 'rootOnly')],
     ['melody', melodyClipId, (id: string) => actions.generateMelodyIntoClip(id, 1)],
   ] as const) {
-    it(`${label}: a 4-beat clip is lengthened so all notes sound, and one undo restores notes and length`, () => {
+    it(`${label}: a 4-beat clip gets notes only inside its 4 beats, all of them sound, and one undo restores it`, () => {
       const clipId = clipIdOf();
       shortenClip(clipId);
       const before = useStore.getState().project;
 
       const generated = generate(clipId);
 
-      expect(generated.some((n) => n.startBeat + n.durationBeats > 4)).toBe(true);
+      expect(generated.length).toBeGreaterThan(0);
+      expect(generated.every((n) => n.startBeat >= 0 && n.startBeat + n.durationBeats <= 4 + 1e-9)).toBe(true);
+      expect(actions.findClip(useStore.getState().project, clipId)?.lengthBeats).toBe(4);
       expect(soundedStarts(clipId)).toEqual(generated.map((n) => n.startBeat));
       useStore.getState().undo();
       expect(useStore.getState().project).toEqual(before);

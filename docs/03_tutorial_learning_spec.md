@@ -121,6 +121,8 @@
 - `hasMelodyChordToneOnStrongBeat(track, chordTrack, ratio)`
 - `hasExported(format)`
 
+スケールやコードに合う音を調べる判定では、再生と同じクリップ展開を使う。リンククリップは、元の音符のうちリンク自身の長さと繰り返し設定で鳴る音符を数える。
+
 トラックを指す判定(`noteCountAtLeast`、`trackVolumeInRange`、`hasBassRootOnDownbeat` など)は、`trackName`('Bass' / 'Melody' / 'Chords' / 'Drums')を対応する `Track.role`(bass / melody / chords / drums)に読み替え、role が一致するトラックを優先して探す。見つからない時だけ名前の完全一致にフォールバックするため、学習者がトラック名を「ベース」などに変えても判定は変わらない(`resolveTrack`、`packages/tutorial-engine/src/trackResolve.ts`)。同じ role のトラックが複数ある時は、並びが先頭のトラックだけを判定対象にする。イベント目標の `match.trackName` も同じ規則で、イベントの `trackId` が判定対象のトラックと一致する時だけ通す(イベントに載る表示名とは比べない)。プロジェクトに無い `trackId` の時だけイベントの `trackName` と比べる。フィードバック文には改名後の表示名を使う。
 
 ### 4.3 フィードバック設計

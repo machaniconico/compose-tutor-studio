@@ -89,6 +89,7 @@ const SAVE_FAILURE_MESSAGE =
   '保存に失敗しました。ブラウザの保存容量が不足している可能性があります。不要なプロジェクトを削除してからもう一度保存してください。';
 
 type NotePatch = Partial<Omit<NoteEvent, 'id'>>;
+export type NoteEditOptions = { extendClip?: boolean };
 
 type StoreState = {
   project: Project;
@@ -147,9 +148,13 @@ type StoreState = {
   removeChord: (id: string) => void;
 
   // note actions
-  addNote: (clipId: string, note: Omit<NoteEvent, 'id'> & { id?: string }) => boolean;
-  updateNote: (clipId: string, noteId: string, patch: NotePatch) => void;
-  updateNotes: (clipId: string, patches: ReadonlyMap<string, NotePatch>) => void;
+  addNote: (
+    clipId: string,
+    note: Omit<NoteEvent, 'id'> & { id?: string },
+    options?: NoteEditOptions,
+  ) => boolean;
+  updateNote: (clipId: string, noteId: string, patch: NotePatch, options?: NoteEditOptions) => void;
+  updateNotes: (clipId: string, patches: ReadonlyMap<string, NotePatch>, options?: NoteEditOptions) => void;
   removeNote: (clipId: string, noteId: string) => void;
 
   // drum actions
@@ -332,12 +337,11 @@ function saveDifficulty(difficulty: Difficulty): void {
 }
 
 /**
- * Clip length is part of the sound (expandClip drops notes past it), so a note
- * placed or moved past the end of a non-looping clip lengthens the clip in the
- * same edit (one undo step) instead of being saved silent.
+ * Extend a non-looping clip to fit its notes in the same undo step by default.
+ * Editors with a fixed range keep the existing length.
  */
-export function fitClipToNotes(clip: Clip): Clip {
-  if (clip.loop) return clip;
+export function fitClipToNotes(clip: Clip, { extendClip = true }: NoteEditOptions = {}): Clip {
+  if (!extendClip || clip.loop) return clip;
   const end = (clip.notes ?? []).reduce((max, n) => Math.max(max, n.startBeat + n.durationBeats), 0);
   return end > clip.lengthBeats ? { ...clip, lengthBeats: end } : clip;
 }
@@ -591,7 +595,7 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     // --- notes ---
-    addNote: (clipId, note) => {
+    addNote: (clipId, note, options) => {
       const project = get().project;
       const newNote: NoteEvent = {
         id: note.id ?? uid('note'),
@@ -604,7 +608,7 @@ export const useStore = create<StoreState>((set, get) => {
         mapTracks(project, (t) => ({
           ...t,
           clips: t.clips.map((c) =>
-            c.id === clipId ? fitClipToNotes({ ...c, notes: [...(c.notes ?? []), newNote] }) : c,
+            c.id === clipId ? fitClipToNotes({ ...c, notes: [...(c.notes ?? []), newNote] }, options) : c,
           ),
         })),
       );
@@ -623,21 +627,25 @@ export const useStore = create<StoreState>((set, get) => {
       });
       return true;
     },
-    updateNote: (clipId, noteId, patch) => get().updateNotes(clipId, new Map([[noteId, patch]])),
-    updateNotes: (clipId, patches) => {
+    updateNote: (clipId, noteId, patch, options) =>
+      get().updateNotes(clipId, new Map([[noteId, patch]]), options),
+    updateNotes: (clipId, patches, options) => {
       const project = get().project;
       const committed = commitProject(
         mapTracks(project, (t) => ({
           ...t,
           clips: t.clips.map((c) =>
             c.id === clipId
-              ? fitClipToNotes({
-                  ...c,
-                  notes: (c.notes ?? []).map((note) => {
-                    const patch = patches.get(note.id);
-                    return patch ? { ...note, ...patch } : note;
-                  }),
-                })
+              ? fitClipToNotes(
+                  {
+                    ...c,
+                    notes: (c.notes ?? []).map((note) => {
+                      const patch = patches.get(note.id);
+                      return patch ? { ...note, ...patch } : note;
+                    }),
+                  },
+                  options,
+                )
               : c,
           ),
         })),

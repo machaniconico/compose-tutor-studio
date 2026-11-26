@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '@cts/project-model';
+import { splitClip } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 
 // Real Scheduler on a hand-driven audio clock: a note that starts before the
@@ -34,7 +35,10 @@ vi.mock('../src/audio/graph', () => ({
       ]),
     ),
 }));
-vi.mock('../src/audio/masterChain', () => ({ applyMasterVolume: vi.fn() }));
+vi.mock('../src/audio/masterChain', () => ({
+  applyMasterVolume: vi.fn(),
+  createMasterChain: () => ({ input: {} }),
+}));
 vi.mock('../src/audio/synth', () => ({
   SynthVoiceManager: class {
     noteOn = vi.fn();
@@ -53,6 +57,7 @@ vi.mock('../src/audio/metronome', () => ({
 let useStore: typeof import('../src/state/store')['useStore'];
 let initAudioBridge: typeof import('../src/audio/playback')['initAudioBridge'];
 let renderLengthSeconds: typeof import('../src/audio/wav')['renderLengthSeconds'];
+let renderProjectToWav: typeof import('../src/audio/wav')['renderProjectToWav'];
 let RENDER_TAIL_SECONDS: number;
 
 /** 120 bpm: half a second per beat. */
@@ -63,7 +68,7 @@ beforeAll(async () => {
   installLocalStorage();
   ({ useStore } = await import('../src/state/store'));
   ({ initAudioBridge } = await import('../src/audio/playback'));
-  ({ renderLengthSeconds, RENDER_TAIL_SECONDS } = await import('../src/audio/wav'));
+  ({ renderLengthSeconds, renderProjectToWav, RENDER_TAIL_SECONDS } = await import('../src/audio/wav'));
 });
 
 /** 120 bpm, 1 bar of 4/4 (song end at beat 4), one instrument track with a 4-beat note at beat 3. */
@@ -185,6 +190,47 @@ describe('a note crossing the song end', () => {
     expect(disposed.count).toBe(0);
     vi.advanceTimersByTime(1);
     expect(disposed.count).toBe(1);
+  });
+
+  it('schedules the same release starts in live playback and WAV after splitting a loop', async () => {
+    const state = useStore.getState();
+    const track = state.project.tracks[0]!;
+    const clip = {
+      ...track.clips[0]!,
+      loop: true,
+      notes: [{ id: 'n', pitch: 60, startBeat: 3.5, durationBeats: 1.5, velocity: 100 }],
+    };
+    const project = {
+      ...state.project,
+      lengthBars: 2,
+      tracks: [{ ...track, instrument: { type: 'synth' as const, preset: 'warmPad' }, clips: [clip] }],
+    };
+    const split = splitClip(project, clip.id, 4);
+    expect(split.ok).toBe(true);
+    state.replaceProject(split.project);
+    await playFromStart();
+    advanceToSeconds(1.75);
+    advanceToSeconds(2);
+
+    vi.stubGlobal('OfflineAudioContext', class {
+      async startRendering() {
+        return { numberOfChannels: 2, getChannelData: () => new Float32Array(1) };
+      }
+    });
+    try {
+      await renderProjectToWav(split.project);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    for (const synth of synths) {
+      // The short left part releases at the cut (2 s). The re-attacked right
+      // part has a 0.5 s gate, longer than warmPad's 0.48 s attack and decay.
+      expect(synth.noteOn.mock.calls).toEqual([
+        [60, 1.75, 0.25, 100, { cutAtEnd: true }],
+        [60, 2, 0.5, 100, { cutAtEnd: undefined }],
+      ]);
+    }
+    expect(synths).toHaveLength(2);
   });
 
   it('a stop pressed before the end still cuts the sound at once', async () => {

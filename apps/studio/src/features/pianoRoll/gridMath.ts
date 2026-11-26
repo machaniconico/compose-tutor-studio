@@ -141,6 +141,38 @@ export function floorToGrid(beat: number, snap: number): number {
   return Math.max(0, Math.floor(beat / snap) * snap);
 }
 
+/**
+ * The piano roll's edit range: keep a note inside a clip of `clipLength` beats
+ * (beats past it are shaded and only open up when the clip is lengthened).
+ * - `keep: 'length'` (move, quantize): the note keeps its length (cut to the
+ *   clip length at most) and its start moves back to the last `snap` grid line
+ *   where it still ends inside the clip (any beat when `snap` <= 0).
+ * - `keep: 'start'` (place, resize): the start moves back only when it is at or
+ *   past the clip end, to the last grid line before it; the length is cut to
+ *   end at the clip end.
+ */
+export function clampNoteToClip(
+  note: { startBeat: number; durationBeats: number },
+  clipLength: number,
+  opts: { snap: number; keep: 'length' | 'start' },
+): { startBeat: number; durationBeats: number } {
+  const { snap } = opts;
+  if (opts.keep === 'length') {
+    const durationBeats = Math.min(note.durationBeats, clipLength);
+    const limit = clipLength - durationBeats;
+    const lastStart = snap > 0 ? Math.floor(limit / snap + 1e-9) * snap : limit;
+    return { startBeat: Math.max(0, Math.min(note.startBeat, lastStart)), durationBeats };
+  }
+  let startBeat = Math.max(0, note.startBeat);
+  if (startBeat >= clipLength - 1e-9) {
+    startBeat =
+      snap > 0
+        ? Math.max(0, Math.ceil(clipLength / snap - 1e-9) - 1) * snap
+        : Math.max(0, clipLength - note.durationBeats);
+  }
+  return { startBeat, durationBeats: Math.min(note.durationBeats, clipLength - startBeat) };
+}
+
 /** Quantize a note start to the grid; keeps non-negative. */
 export function quantizeStart(startBeat: number, snap: number): number {
   return snapBeat(startBeat, snap);

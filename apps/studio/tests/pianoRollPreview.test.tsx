@@ -215,7 +215,7 @@ describe('PianoRoll vertical view', () => {
     }
   });
 
-  function setClipNotes(pitches: number[]) {
+  function setClipNotes(pitches: number[], noteLength = 1) {
     const { clip } = selectFirstMidiClip();
     act(() =>
       useStore.getState().applyProjectChange((project) => ({
@@ -229,8 +229,8 @@ describe('PianoRoll vertical view', () => {
                   notes: pitches.map((pitch, i) => ({
                     id: `n${i}`,
                     pitch,
-                    startBeat: i,
-                    durationBeats: 1,
+                    startBeat: i * noteLength,
+                    durationBeats: noteLength,
                     velocity: 100,
                   })),
                 }
@@ -279,7 +279,7 @@ describe('PianoRoll vertical view', () => {
 
   it('mounts only notes on rendered rows, and the off-screen ones after scrolling to them', () => {
     // MIDI 60 opens at the top of a 12-row view; MIDI 21 is 39 rows below it.
-    setClipNotes([60, ...Array.from({ length: 500 }, () => 21)]);
+    setClipNotes([60, ...Array.from({ length: 500 }, () => 21)], 1 / 16);
     render(<PianoRoll />);
     expect(document.querySelectorAll('.pr__note')).toHaveLength(1);
     const scroll = document.querySelector('.pr__scroll') as HTMLElement;

@@ -4,7 +4,7 @@ import type { Project } from '@cts/project-model';
 // NOTE: checker.ts とは相互import（goals → checker: 音楽的判定の委譲 /
 // checker → goals: 従来predicateの委譲）。両モジュールとも関数宣言のみで
 // トップレベル実行が無いため、ESM の循環importとして安全。
-import { checkProjectPredicate } from './checker.js';
+import { checkProjectPredicate, clipContentSource } from './checker.js';
 import { resolveTrackByPredicateName } from './trackResolve.js';
 import type {
   AppEvent,
@@ -37,8 +37,10 @@ export function evaluateProjectPredicate(
     case 'drumLaneActive': {
       for (const track of project.tracks) {
         if (track.type !== 'drum') continue;
-        for (const clip of track.clips) {
-          if (!clip.drumEvents) continue;
+        for (const linkOrClip of track.clips) {
+          // A linked (aliasOf) clip counts its source's content.
+          const clip = clipContentSource(project, linkOrClip);
+          if (!clip?.drumEvents) continue;
           // Count unique step indices for the requested lane (dedup in case of duplicates)
           const stepIndices = new Set(
             clip.drumEvents
@@ -57,8 +59,9 @@ export function evaluateProjectPredicate(
         let satisfied = false;
         for (const track of project.tracks) {
           if (track.type !== 'drum') continue;
-          for (const clip of track.clips) {
-            if (!clip.drumEvents) continue;
+          for (const linkOrClip of track.clips) {
+            const clip = clipContentSource(project, linkOrClip);
+            if (!clip?.drumEvents) continue;
             const stepIndices = new Set(
               clip.drumEvents
                 .filter((e) => e.lane === req.lane)
@@ -81,7 +84,7 @@ export function evaluateProjectPredicate(
       if (!track) return false;
       let count = 0;
       for (const clip of track.clips) {
-        count += clip.notes?.length ?? 0;
+        count += clipContentSource(project, clip)?.notes?.length ?? 0;
       }
       return count >= predicate.value;
     }
