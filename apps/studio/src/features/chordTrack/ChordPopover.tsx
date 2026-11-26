@@ -4,6 +4,7 @@ import { parseChord, realizeProgression, suggestNextChords } from '@cts/theory-e
 import { buildChordEvent, projectBeatsPerBar, updateChordSymbol } from '../../state/editorActions';
 import { useStore } from '../../state/store';
 import {
+  auditionChord,
   borrowedPalette,
   diatonicPalette,
   dominantPalette,
@@ -102,6 +103,13 @@ export function ChordPopover(props: {
     }
   }, [project.key, project.scale, nextChord?.symbol]);
 
+  const listen = (symbol: string) => auditionChord(project, symbol);
+  /** Hover or keyboard focus on a candidate plays it. */
+  const previewProps = (symbol: string) => ({
+    onMouseEnter: () => listen(symbol),
+    onFocus: () => listen(symbol),
+  });
+
   const commit = (symbol: string) => {
     if (symbol.trim() === '') return;
     updateChordSymbol(chord.id, symbol.trim());
@@ -173,6 +181,14 @@ export function ChordPopover(props: {
         <button type="submit" className="is-active" disabled={!feedback.ok}>
           適用
         </button>
+        <button
+          type="button"
+          disabled={!feedback.ok}
+          onClick={() => listen(text)}
+          title="入力中のコードを C4 付近の和音で短く鳴らします"
+        >
+          このコードを聞く
+        </button>
       </form>
       <p className={`chord-pop__feedback${feedback.ok ? ' is-ok' : ' is-warn'}`}>{feedback.text}</p>
 
@@ -209,7 +225,11 @@ export function ChordPopover(props: {
           <ul className="chord-pop__suggestions">
             {chordCandidates.map((candidate) => (
               <li key={`${activeTab}-${candidate.degree}-${candidate.symbol}`}>
-                <button type="button" onClick={() => commit(candidate.symbol)}>
+                <button
+                  type="button"
+                  onClick={() => commit(candidate.symbol)}
+                  {...previewProps(candidate.symbol)}
+                >
                   {candidate.symbol}
                 </button>
                 <span className="chord-pop__reason">
@@ -231,7 +251,7 @@ export function ChordPopover(props: {
           <ul className="chord-pop__suggestions">
             {suggestions.map((s, i) => (
               <li key={`${s.symbol}-${i}`}>
-                <button type="button" onClick={() => commit(s.symbol)}>
+                <button type="button" onClick={() => commit(s.symbol)} {...previewProps(s.symbol)}>
                   {s.symbol}
                 </button>
                 <span className="chord-pop__reason">{s.reason}</span>

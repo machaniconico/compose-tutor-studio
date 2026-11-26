@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { ChordEvent } from '@cts/project-model';
 import { beatsPerBar } from '@cts/project-model';
 import {
@@ -13,9 +13,13 @@ import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
 import {
   addChordWithAnalysis,
   applyProgressionTemplate,
+  chordNotesTargetTrackId,
+  chordsToNotes,
+  hasChordsInNotesTarget,
   projectBeatsPerBar,
 } from '../../state/editorActions';
 import { ChordPopover } from './ChordPopover';
+import { auditionChord } from './paletteData';
 
 /** CSS class suffix per harmonic function (drives chip accent color). */
 function functionClass(fn: HarmonicFunction | undefined): string {
@@ -52,6 +56,7 @@ export function ChordLane() {
   const project = useStore((s) => s.project);
   const zoomX = useStore((s) => s.editor.zoomX);
   const selectedChordId = useStore((s) => s.editor.selectedChordId);
+  const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
   const selectChord = useStore((s) => s.selectChord);
   const updateChord = useStore((s) => s.updateChord);
   const beginTransaction = useStore((s) => s.beginTransaction);
@@ -166,6 +171,12 @@ export function ChordLane() {
     dragRef.current = null;
   }, []);
 
+  const notesTargetId = chordNotesTargetTrackId(project, selectedTrackId);
+  const notesTarget = project.tracks.find((t) => t.id === notesTargetId);
+  const overlapsTarget = notesTarget ? hasChordsInNotesTarget(project, notesTarget) : false;
+  const showOverlapHint = notesTarget !== undefined && !overlapsTarget;
+  const overlapHintId = useId();
+
   const popoverChord = popoverChordId
     ? project.chordTrack.find((c) => c.id === popoverChordId) ?? null
     : null;
@@ -176,6 +187,24 @@ export function ChordLane() {
         <strong>コードトラック</strong>
         <span className="chord-lane__count">{project.chordTrack.length} 個</span>
         <TemplatePicker />
+        <button
+          type="button"
+          disabled={!overlapsTarget}
+          aria-describedby={showOverlapHint ? overlapHintId : undefined}
+          onClick={() => {
+            if (notesTargetId) chordsToNotes(notesTargetId, { style: 'close', voiceLeading: true });
+          }}
+          title={
+            notesTarget
+              ? `コードトラックの和音を「${notesTarget.name}」のクリップにノートとして書き込みます。音のつながりが滑らかになる並び（ボイスリーディング）を選びます。書き込んだ後は普通のノートとして編集できます。`
+              : 'ノートを書き込む楽器トラックを選んでください。'
+          }
+        >
+          コードをノートにする
+        </button>
+        {showOverlapHint && (
+          <span id={overlapHintId}>書き込み先のクリップに重なるコードがありません。</span>
+        )}
       </div>
 
       {/* The ruler and grid scroll together so every bar stays reachable when zoomed in. */}
@@ -206,6 +235,7 @@ export function ChordLane() {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (movedRef.current) return;
+                  auditionChord(project, chord.symbol);
                   selectChord(chord.id);
                   setInspectorContent(`chord:${chord.id}`);
                 }}

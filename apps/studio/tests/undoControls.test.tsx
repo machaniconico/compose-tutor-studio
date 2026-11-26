@@ -617,6 +617,28 @@ describe('drag undo steps', () => {
   });
 });
 
+describe('chord lane conversion', () => {
+  it('explains why conversion is disabled until a chord overlaps the target clip', () => {
+    const project = createDefaultProject();
+    const clip = project.tracks.find((track) => track.role === 'chords')?.clips[0];
+    if (!clip) throw new Error('default project has no chord clip');
+    clip.startBeat = 4;
+    project.chordTrack = [];
+    useStore.getState().replaceProject(project);
+    useStore.getState().addChord('C', 0, 4);
+    render(<ChordLane />);
+
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: 'コードをノートにする' });
+    expect(button.disabled).toBe(true);
+    const hint = screen.getByText('書き込み先のクリップに重なるコードがありません。');
+    expect(button.getAttribute('aria-describedby')).toBe(hint.id);
+
+    act(() => useStore.getState().addChord('G', 4, 4));
+    expect(button.disabled).toBe(false);
+    expect(screen.queryByText('書き込み先のクリップに重なるコードがありません。')).toBeNull();
+  });
+});
+
 describe('shortcut help dialog', () => {
   it('opens with ? and lists every keymap entry', () => {
     render(<TransportBar />);

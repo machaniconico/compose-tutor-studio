@@ -24,8 +24,10 @@ import type { ParsedMidi } from '@cts/midi-io';
 import {
   beatsPerBar as beatsPerBarOf,
   drumBeatToStep,
+  resolveLinkSource,
   setLengthBars as setProjectLengthBars,
   setTimeSignature as setProjectTimeSignature,
+  startsBeforeClipEnd,
 } from '@cts/project-model';
 import {
   analyzeChord,
@@ -35,6 +37,9 @@ import {
   generateScaleMelody,
   getProgressionTemplate,
   realizeProgression,
+  voiceChord,
+  voiceLead,
+  type VoicingStyle,
   type BassMode,
   type GeneratedNote,
   type ChordEventInput,
@@ -439,6 +444,164 @@ export function generatedToNoteEvents(generated: readonly GeneratedNote[]): Note
     durationBeats: g.durationBeats,
     velocity: g.velocity,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Chord track -> notes.
+// ---------------------------------------------------------------------------
+
+/** Base note (C4) for chord voicings written by chordsToNotes and chord previews. */
+export const CHORD_VOICING_REGISTER = 60;
+
+const CHORD_NOTE_VELOCITY = 90;
+
+/**
+ * Default track for "コードをノートにする": the instrument track with role 'chords',
+ * else the selected track when it is an instrument track, else none.
+ */
+export function chordNotesTargetTrackId(project: Project, selectedTrackId: string | null): string | null {
+  const chords = project.tracks.find((t) => t.role === 'chords' && t.type === 'instrument');
+  if (chords) return chords.id;
+  const selected = project.tracks.find((t) => t.id === selectedTrackId);
+  return selected?.type === 'instrument' ? selected.id : null;
+}
+
+type ChordNotesSpan = Pick<Clip, 'startBeat' | 'lengthBeats'>;
+
+function chordNotesDestination(project: Project, track: Track) {
+  const existing = track.clips.find((c) => c.type === 'midi');
+  const span: ChordNotesSpan = existing ?? {
+    startBeat: 0,
+    lengthBeats: project.lengthBars * projectBeatsPerBar(project),
+  };
+  return { existing, span };
+}
+
+function chordNoteTiming(chord: ChordEvent, clip: ChordNotesSpan) {
+  const start = Math.max(chord.startBeat, clip.startBeat);
+  const startBeat = start - clip.startBeat;
+  if (!startsBeforeClipEnd(startBeat, clip.lengthBeats)) return undefined;
+
+  const end = Math.min(chord.startBeat + chord.durationBeats, clip.startBeat + clip.lengthBeats);
+  if (end <= start) return undefined;
+  return { startBeat, durationBeats: end - start };
+}
+
+export function hasChordsInNotesTarget(project: Project, track: Track): boolean {
+  const { span } = chordNotesDestination(project, track);
+  return project.chordTrack.some((chord) => chordNoteTiming(chord, span) !== undefined);
+}
+
+/**
+ * Voice the chord track into clip-relative notes for `clip`. Chords outside the
+ * clip are skipped; a chord that crosses a clip edge keeps only the part inside
+ * the clip (what actually sounds there). Unreadable symbols write nothing.
+ */
+function chordTrackNotes(
+  project: Project,
+  clip: ChordNotesSpan,
+  opts: { style: VoicingStyle; voiceLeading: boolean },
+): NoteEvent[] {
+  const notes: NoteEvent[] = [];
+  let prev: number[] = [];
+  for (const c of [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat)) {
+    const timing = chordNoteTiming(c, clip);
+    if (!timing) continue;
+    let pitches: number[];
+    try {
+      const voicing = { style: opts.style, register: CHORD_VOICING_REGISTER };
+      pitches = opts.voiceLeading ? voiceLead(prev, c.symbol, voicing) : voiceChord(c.symbol, voicing);
+    } catch {
+      continue; // An unreadable symbol has no notes to write.
+    }
+    prev = pitches;
+    for (const pitch of pitches) {
+      notes.push({
+        id: uid('note'),
+        pitch,
+        ...timing,
+        velocity: CHORD_NOTE_VELOCITY,
+      });
+    }
+  }
+  return notes;
+}
+
+/**
+ * Write the whole chord track as notes into the target track's first MIDI clip
+ * (one undo step). Without a MIDI clip, one spanning the whole song is created.
+ * Notes are clip-relative: chords outside the clip are skipped and chords that
+ * run past either clip edge are cut there. The written clip stops looping and
+ * stops being a linked copy, so the new notes are what plays and what the piano
+ * roll edits. Existing notes are replaced only after `confirm` agrees. When no
+ * chord falls inside the clip nothing changes. Returns whether the clip was written.
+ */
+export function chordsToNotes(
+  targetTrackId: string,
+  opts: { style: VoicingStyle; voiceLeading: boolean },
+  confirm: (message: string) => boolean = (message) => window.confirm(message),
+): boolean {
+  const project = useStore.getState().project;
+  const track = project.tracks.find((t) => t.id === targetTrackId);
+  if (!track || track.type !== 'instrument') return false;
+  const { existing, span } = chordNotesDestination(project, track);
+  const notes = chordTrackNotes(project, span, opts);
+  if (notes.length === 0) return false;
+
+  const source = existing?.aliasOf !== undefined
+    ? resolveLinkSource(existing, project.tracks.flatMap((t) => t.clips))
+    : undefined;
+  const localNoteCount = existing?.notes?.length ?? 0;
+  const sourceNoteCount = typeof source === 'string' ? 0 : source?.notes?.length ?? 0;
+  const changes: string[] = [];
+  if (localNoteCount > 0) {
+    changes.push(`このクリップに保存されている ${localNoteCount} 個のノートを置き換えます。`);
+  }
+  if (existing?.aliasOf !== undefined) changes.push('リンク（元のクリップとの連動）を外します。');
+  if (sourceNoteCount > 0) {
+    changes.push(`リンク元の ${sourceNoteCount} 個のノートに代えて、このクリップでコードから作ったノートを鳴らします。`);
+  }
+  if (existing?.loop) changes.push('ループを止めます。');
+  if (
+    (localNoteCount > 0 || sourceNoteCount > 0) &&
+    !confirm(
+      `「${track.name}」のクリップに、コードから作ったノートを書き込みます。${changes.join('')}よろしいですか？（「元に戻す」で戻せます）`,
+    )
+  ) {
+    return false;
+  }
+
+  return useStore.getState().applyProjectChange((current) => {
+    const target = current.tracks.find((t) => t.id === targetTrackId);
+    if (!target) return current;
+    const clip = target.clips.find((c) => c.type === 'midi');
+    const written: Clip = clip
+      ? { ...withoutLinkOrLoop(clip), notes }
+      : {
+          id: uid('clip'),
+          trackId: target.id,
+          type: 'midi',
+          startBeat: span.startBeat,
+          lengthBeats: span.lengthBeats,
+          loop: false,
+          notes,
+        };
+    return mapTracks(current, (t) =>
+      t.id !== target.id
+        ? t
+        : {
+            ...t,
+            clips: clip ? t.clips.map((c) => (c.id === clip.id ? written : c)) : [...t.clips, written],
+          },
+    );
+  });
+}
+
+/** The clip as an independent, non-looping clip (its own notes play once). */
+function withoutLinkOrLoop(clip: Clip): Clip {
+  const out: Clip = { ...clip, loop: false };
+  delete out.aliasOf;
+  return out;
 }
 
 // ---------------------------------------------------------------------------

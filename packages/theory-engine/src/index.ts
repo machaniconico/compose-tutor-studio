@@ -111,6 +111,16 @@ export {
   getProgressionTemplate,
 } from './progressions';
 
+// コードのボイシング / ボイスリーディング
+export {
+  voiceChord,
+  voiceLead,
+  voicingCost,
+  compareVoicings,
+  type VoicingStyle,
+  type VoicingOptions,
+} from './voicing';
+
 // 7. ベースライン生成
 export { generateBassLine, type BassOptions } from './bass';
 

@@ -4,8 +4,12 @@ import {
   realizeProgression,
   borrowedChords,
   dominantMotionChords,
+  voiceChord,
   type ScaleName,
 } from '@cts/theory-engine';
+import type { InstrumentConfig, Project } from '@cts/project-model';
+import { previewChord } from '../../audio/livePreview';
+import { CHORD_VOICING_REGISTER } from '../../state/editorActions';
 
 export type PaletteTab = 'diatonic' | 'progressions' | 'borrowed' | 'dominant';
 
@@ -63,4 +67,21 @@ export function dominantPalette(
     degree: chord.degree,
     reason: chord.reason,
   }));
+}
+
+/** Close voicing from C4 used to audition a chord; empty for an unreadable symbol. */
+export function chordPreviewMidis(symbol: string): number[] {
+  try {
+    return voiceChord(symbol.trim(), { style: 'close', register: CHORD_VOICING_REGISTER });
+  } catch {
+    return [];
+  }
+}
+
+/** Audition a chord symbol with the chords track's instrument (no-op when unreadable). */
+export function auditionChord(project: Project, symbol: string): void {
+  const midis = chordPreviewMidis(symbol);
+  if (midis.length === 0) return;
+  const instrument: InstrumentConfig | undefined = project.tracks.find((t) => t.role === 'chords')?.instrument;
+  void previewChord(midis, instrument).catch(() => undefined);
 }
