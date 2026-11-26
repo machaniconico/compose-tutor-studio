@@ -1036,6 +1036,16 @@ input[type='range'] {
   flex: 1 1 100%;
 }
 
+.pr__hint--scale {
+  color: var(--text-dim);
+}
+
+.pr__transpose {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .pr__scroll {
   display: flex;
   overflow: auto;

@@ -18,6 +18,14 @@ export type ShortcutAction =
   | 'quantizeSelection'
   | 'toggleScaleSnap'
   | 'toggleChordToneHighlight'
+  | 'copyNotes'
+  | 'cutNotes'
+  | 'pasteNotes'
+  | 'selectAllNotes'
+  | 'transposeUpSemitone'
+  | 'transposeDownSemitone'
+  | 'transposeUpDegree'
+  | 'transposeDownDegree'
   | 'duplicateClip'
   | 'deleteClip';
 
@@ -96,6 +104,44 @@ export const KEYMAP: readonly ShortcutEntry[] = [
     action: 'toggleChordToneHighlight',
     labelJa: 'コードの音を色で示す機能の切り替え',
   },
+  { scope: 'pianoRoll', key: 'c', modifiers: ['mod'], action: 'copyNotes', labelJa: '選んだ音をコピーする' },
+  { scope: 'pianoRoll', key: 'x', modifiers: ['mod'], action: 'cutNotes', labelJa: '選んだ音を切り取る' },
+  {
+    scope: 'pianoRoll',
+    key: 'v',
+    modifiers: ['mod'],
+    action: 'pasteNotes',
+    labelJa: 'コピーした音を再生ヘッドの位置に貼り付ける',
+  },
+  { scope: 'pianoRoll', key: 'a', modifiers: ['mod'], action: 'selectAllNotes', labelJa: 'クリップの音をすべて選ぶ' },
+  {
+    scope: 'pianoRoll',
+    key: 'arrowup',
+    modifiers: [],
+    action: 'transposeUpSemitone',
+    labelJa: '選んだ音を 1 半音上げる',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'arrowdown',
+    modifiers: [],
+    action: 'transposeDownSemitone',
+    labelJa: '選んだ音を 1 半音下げる',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'arrowup',
+    modifiers: ['alt'],
+    action: 'transposeUpDegree',
+    labelJa: '選んだ音をスケールに沿って 1 つ上げる',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'arrowdown',
+    modifiers: ['alt'],
+    action: 'transposeDownDegree',
+    labelJa: '選んだ音をスケールに沿って 1 つ下げる',
+  },
   {
     scope: 'arrange',
     key: 'd',
@@ -158,6 +204,8 @@ const KEY_LABELS: Record<string, string> = {
   home: 'Home',
   arrowleft: '←',
   arrowright: '→',
+  arrowup: '↑',
+  arrowdown: '↓',
 };
 
 /** Key combination as shown to the user, e.g. `Ctrl/Cmd+Shift+Z`. */

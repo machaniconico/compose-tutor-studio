@@ -91,6 +91,9 @@ const SAVE_FAILURE_MESSAGE =
 type NotePatch = Partial<Omit<NoteEvent, 'id'>>;
 export type NoteEditOptions = { extendClip?: boolean };
 
+/** A copied note; `startBeat` counts from the first copied note (0). */
+export type ClipboardNote = Omit<NoteEvent, 'id'>;
+
 type StoreState = {
   project: Project;
   /** Changes when a project is opened or created, even if its ID is reused. */
@@ -108,6 +111,9 @@ type StoreState = {
   rightPanelTab: RightPanelTab;
   /** Free-form inspector content state (e.g. selected chord summary). */
   inspector: { content: string | null };
+  /** Notes copied in the piano roll (in memory only; never the OS clipboard or the saved file). */
+  noteClipboard: ClipboardNote[];
+  setNoteClipboard: (notes: ClipboardNote[]) => void;
 
   // history
   past: Project[];
@@ -510,6 +516,8 @@ export const useStore = create<StoreState>((set, get) => {
     startScreenOpen: true,
     rightPanelTab: 'inspector',
     inspector: { content: null },
+    noteClipboard: [],
+    setNoteClipboard: (notes) => set({ noteClipboard: notes }),
     past: [],
     future: [],
     transactionBase: null,

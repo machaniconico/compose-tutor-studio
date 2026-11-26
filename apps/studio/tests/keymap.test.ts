@@ -46,7 +46,9 @@ describe('keymap table', () => {
     expect(findShortcut('pianoRoll', press('Delete'))).toBe('deleteSelectedNotes');
     expect(findShortcut('pianoRoll', press('Backspace'))).toBe('deleteSelectedNotes');
     expect(findShortcut('global', press('q'))).toBeNull();
-    expect(findShortcut('pianoRoll', press('c', { ctrlKey: true }))).toBeNull();
+    // Ctrl+C はコピーで、C(コードの音の色分け)としては扱わない。
+    expect(findShortcut('pianoRoll', press('c', { ctrlKey: true }))).toBe('copyNotes');
+    expect(findShortcut('pianoRoll', press('q', { ctrlKey: true }))).toBeNull();
     expect(findShortcut('global', press('z', { ctrlKey: true, altKey: true }))).toBeNull();
   });
 
@@ -90,5 +92,36 @@ describe('arrange shortcuts', () => {
     expect(findShortcut('pianoRoll', press('d', { ctrlKey: true }))).toBeNull();
     const duplicate = KEYMAP.find((entry) => entry.action === 'duplicateClip');
     expect(duplicate && shortcutKeyLabel(duplicate)).toBe('Ctrl/Cmd+D');
+  });
+});
+
+describe('piano-roll note editing shortcuts', () => {
+  it('binds Ctrl/Cmd+C/X/V/A to copy, cut, paste and select all', () => {
+    for (const init of [{ ctrlKey: true }, { metaKey: true }]) {
+      expect(findShortcut('pianoRoll', press('c', init))).toBe('copyNotes');
+      expect(findShortcut('pianoRoll', press('x', init))).toBe('cutNotes');
+      expect(findShortcut('pianoRoll', press('v', init))).toBe('pasteNotes');
+      expect(findShortcut('pianoRoll', press('a', init))).toBe('selectAllNotes');
+    }
+    expect(findShortcut('pianoRoll', press('c'))).toBe('toggleChordToneHighlight');
+    expect(findShortcut('pianoRoll', press('v'))).toBeNull();
+    expect(findShortcut('global', press('c', { ctrlKey: true }))).toBeNull();
+  });
+
+  it('binds ↑/↓ to a semitone and Alt+↑/↓ to a scale degree', () => {
+    expect(findShortcut('pianoRoll', press('ArrowUp'))).toBe('transposeUpSemitone');
+    expect(findShortcut('pianoRoll', press('ArrowDown'))).toBe('transposeDownSemitone');
+    expect(findShortcut('pianoRoll', press('ArrowUp', { altKey: true }))).toBe('transposeUpDegree');
+    expect(findShortcut('pianoRoll', press('ArrowDown', { altKey: true }))).toBe('transposeDownDegree');
+    expect(findShortcut('pianoRoll', press('ArrowUp', { ctrlKey: true }))).toBeNull();
+    const up = KEYMAP.find((entry) => entry.action === 'transposeUpDegree');
+    expect(up && shortcutKeyLabel(up)).toBe('Alt+↑');
+  });
+
+  it('keeps every piano-roll binding unique and clear of the global ones', () => {
+    const pianoRoll = KEYMAP.filter((e) => e.scope === 'pianoRoll').map(shortcutBindingId);
+    expect(new Set(pianoRoll).size).toBe(pianoRoll.length);
+    const global = new Set(KEYMAP.filter((e) => e.scope === 'global').map(shortcutBindingId));
+    for (const id of pianoRoll) expect(global.has(id), id).toBe(false);
   });
 });

@@ -7,6 +7,8 @@ import {
   noteRelationLabel,
   scalePresenceLabel,
   simplifyExplanation,
+  offScaleNoteHint,
+  OFF_SCALE_NOTE_HINT,
   effectParamExplanation,
   type Difficulty,
 } from '../src/features/inspector/difficultyText';
@@ -268,5 +270,25 @@ describe('effectParamExplanation', () => {
       }
     }
     expect(effectParamExplanation('ratio', 'standard')).toContain('レシオ');
+  });
+});
+
+describe('offScaleNoteHint(ピアノロールの説明文)', () => {
+  it('標準・上級ではそのままの文を返す', () => {
+    expect(OFF_SCALE_NOTE_HINT).toBe('スケール外の音も、経過音やブルーノートとしてわざと使うことがあります。');
+    expect(offScaleNoteHint('standard')).toBe(OFF_SCALE_NOTE_HINT);
+    expect(offScaleNoteHint('advanced')).toBe(OFF_SCALE_NOTE_HINT);
+  });
+
+  it('初心者向けは simplifyExplanation を通した簡略文で、用語を使わない', () => {
+    const text = offScaleNoteHint('beginner');
+    expect(text).toBe(simplifyExplanation(OFF_SCALE_NOTE_HINT, 'beginner'));
+    expect(text).not.toBe(OFF_SCALE_NOTE_HINT);
+    expect(text).toMatch(/^スケール外の音も、/);
+    expect(text).not.toMatch(/経過音|ブルーノート/);
+    // スケール外の音を「間違い」とは言わない。
+    for (const difficulty of ['beginner', 'standard', 'advanced'] as const) {
+      expect(offScaleNoteHint(difficulty)).not.toMatch(/間違|ミス|ダメ/);
+    }
   });
 });

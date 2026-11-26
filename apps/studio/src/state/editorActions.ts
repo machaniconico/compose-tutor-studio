@@ -40,6 +40,8 @@ import {
   moveSection,
   type SectionEditResult,
   drumBeatToStep,
+  firstPassBeatAt,
+  inClipDomain,
   resolveEditTarget,
   resolveLinkSource,
   setLengthBars as setProjectLengthBars,
@@ -62,9 +64,9 @@ import {
   type ChordEventInput,
   type HarmonicFunction,
 } from '@cts/theory-engine';
-import { getScalePitchClasses } from '@cts/theory-engine';
+import { getScalePitchClasses, nearestScalePitch, transposeByDegree } from '@cts/theory-engine';
 import { roleForTrackName } from '@cts/tutorial-engine';
-import { fitClipToNotes, useStore, type NoteEditOptions } from './store';
+import { fitClipToNotes, useStore, type ClipboardNote, type NoteEditOptions } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { upsertEffect, type SupportedEffectType } from '../audio/effects';
@@ -438,6 +440,214 @@ export function removeNotes(clipId: string, noteIds: readonly string[]): void {
       ...c,
       notes: (c.notes ?? []).filter((n) => !ids.has(n.id)),
     })),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard, transposition and fitting to the scale (piano roll, US-014).
+// Every edit writes to resolveEditTarget (a link's source), keeps note beats
+// clip-relative, never changes clip lengths, and is one undo step. A refused
+// edit leaves the project (and history) untouched.
+// ---------------------------------------------------------------------------
+
+/** Beginner-friendly reasons shown as toasts by the note edits below. */
+export const NOTE_EDIT_MESSAGES = {
+  tooHigh: 'これ以上高くできません(音の高さは MIDI 0〜127 の範囲です)。',
+  tooLow: 'これ以上低くできません(音の高さは MIDI 0〜127 の範囲です)。',
+  missingTarget: '元のクリップが見つからないため、この音は編集できません。',
+  outsideDomain: 'このクリップは長さか位置が編集できる範囲の外にあるため、貼り付けられません。',
+  emptyClipboard: 'コピーした音がありません。先に音を選んでコピーしてください。',
+  pasteNothing: 'クリップの終わりを超えるため、貼り付けられる音がありません。',
+  pastePartial: 'クリップの終わりを超える部分は貼り付けていません(クリップの長さは変わりません)。',
+  alreadyInScale: '選んだ音はすべてスケールの音です。',
+  unknownScale: 'キーとスケールを読み取れないため、スケールに沿って動かせません。',
+} as const;
+
+/** The selected notes of the clip an edit of `clipId` writes to, or null (with a toast) when it has none. */
+function selectedEditNotes(project: Project, clipId: string, noteIds: readonly string[]) {
+  if (noteIds.length === 0) return null;
+  const target = resolveEditTarget(project, clipId);
+  if (!target) {
+    pushToast(NOTE_EDIT_MESSAGES.missingTarget, 'error');
+    return null;
+  }
+  const ids = new Set(noteIds);
+  const notes = (target.notes ?? []).filter((n) => ids.has(n.id));
+  return notes.length > 0 ? { target, ids, notes } : null;
+}
+
+/**
+ * Copy the given notes (of the clip `clipId` edits) to the in-memory clipboard,
+ * with beats counted from the first one. The project does not change.
+ * Returns how many notes were copied.
+ */
+export function copyNotes(clipId: string, noteIds: readonly string[]): number {
+  const store = useStore.getState();
+  const picked = selectedEditNotes(store.project, clipId, noteIds);
+  if (!picked) return 0;
+  const origin = Math.min(...picked.notes.map((n) => n.startBeat));
+  const copied: ClipboardNote[] = [...picked.notes]
+    .sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch)
+    .map((n) => ({ pitch: n.pitch, startBeat: n.startBeat - origin, durationBeats: n.durationBeats, velocity: n.velocity }));
+  store.setNoteClipboard(copied);
+  return copied.length;
+}
+
+/** Copy the given notes, then remove them in one undo step. Returns whether anything was cut. */
+export function cutNotes(clipId: string, noteIds: readonly string[]): boolean {
+  const store = useStore.getState();
+  const picked = selectedEditNotes(store.project, clipId, noteIds);
+  if (!picked) return false;
+  copyNotes(clipId, noteIds);
+  const committed = store.applyProjectChange((project) =>
+    mapClip(project, picked.target.id, (c) => ({ ...c, notes: (c.notes ?? []).filter((n) => !picked.ids.has(n.id)) })),
+  );
+  if (committed) store.selectNotes([]);
+  return committed;
+}
+
+/**
+ * Paste the clipboard into the clip `clipId` edits. The first copied note lands
+ * on the playhead when it is inside the clip (a looping clip maps it onto the
+ * first pass), otherwise on the clip start. Notes past the editable first pass
+ * (and the song end) are not pasted and long ones are cut there; the clip never
+ * grows. Returns the new note ids (selected), or [] when nothing was pasted.
+ */
+export function pasteNotes(clipId: string): string[] {
+  const store = useStore.getState();
+  const { project, noteClipboard } = store;
+  if (noteClipboard.length === 0) {
+    pushToast(NOTE_EDIT_MESSAGES.emptyClipboard, 'info');
+    return [];
+  }
+  const placement = findClip(project, clipId);
+  const target = resolveEditTarget(project, clipId);
+  if (!placement || !target) {
+    pushToast(NOTE_EDIT_MESSAGES.missingTarget, 'error');
+    return [];
+  }
+  if (!inClipDomain(placement) || !inClipDomain(target)) {
+    pushToast(NOTE_EDIT_MESSAGES.outsideDomain, 'error');
+    return [];
+  }
+  // Inside / outside is decided on absolute ticks (each edge rounded on its own),
+  // as playback does; the pasted position itself is the exact clip-relative beat.
+  const firstEnd = (clip: Clip) => clip.startBeat + clipEditSpan(project, clip).firstPassLength;
+  const position = store.transport.positionBeat;
+  const playheadTick = beatTick(position);
+  const inside = playheadTick >= beatTick(placement.startBeat) &&
+    playheadTick < beatTick(placement.startBeat + clipEditSpan(project, placement).length);
+  // The playhead may share the clip's start tick while sitting a sub-tick before it: never go below 0.
+  const anchor = inside ? Math.max(0, firstPassBeatAt(placement, position - placement.startBeat)) : 0;
+  // A link sounds its source's notes: keep them inside both first passes.
+  const clips = placement === target ? [placement] : [placement, target];
+  const limit = Math.min(...clips.map((c) => firstEnd(c) - c.startBeat));
+  const pasted: NoteEvent[] = [];
+  let clipped = false;
+  for (const n of noteClipboard) {
+    const startBeat = anchor + n.startBeat;
+    if (clips.some((c) => beatTick(c.startBeat + startBeat) >= beatTick(firstEnd(c)))) {
+      clipped = true;
+      continue;
+    }
+    const durationBeats = Math.min(n.durationBeats, limit - startBeat);
+    if (durationBeats < n.durationBeats) clipped = true;
+    pasted.push({ id: uid('note'), pitch: n.pitch, startBeat, durationBeats, velocity: n.velocity });
+  }
+  if (pasted.length === 0) {
+    pushToast(NOTE_EDIT_MESSAGES.pasteNothing, 'info');
+    return [];
+  }
+  const committed = store.applyProjectChange((p) =>
+    mapClip(p, target.id, (c) => ({ ...c, notes: [...(c.notes ?? []), ...pasted] })),
+  );
+  if (!committed) return [];
+  if (clipped) pushToast(NOTE_EDIT_MESSAGES.pastePartial, 'info');
+  emitNotesAdded(target.id, { project, dupes: pasted });
+  const ids = pasted.map((n) => n.id);
+  store.selectNotes(ids);
+  return ids;
+}
+
+/**
+ * Write new pitches for the selected notes in one undo step. The whole edit is
+ * refused (with a toast) when any pitch would leave MIDI 0..127; nothing is
+ * written when no pitch changes.
+ */
+function applyPitches(
+  clipId: string,
+  noteIds: readonly string[],
+  pitchOf: (pitch: number, project: Project) => number,
+): boolean {
+  const store = useStore.getState();
+  const picked = selectedEditNotes(store.project, clipId, noteIds);
+  if (!picked) return false;
+  const next = new Map<string, number>();
+  try {
+    for (const n of picked.notes) next.set(n.id, pitchOf(n.pitch, store.project));
+  } catch {
+    pushToast(NOTE_EDIT_MESSAGES.unknownScale, 'error');
+    return false;
+  }
+  const pitches = [...next.values()];
+  if (pitches.some((p) => !Number.isInteger(p))) return false;
+  if (pitches.some((p) => p > 127)) {
+    pushToast(NOTE_EDIT_MESSAGES.tooHigh, 'error');
+    return false;
+  }
+  if (pitches.some((p) => p < 0)) {
+    pushToast(NOTE_EDIT_MESSAGES.tooLow, 'error');
+    return false;
+  }
+  if (picked.notes.every((n) => next.get(n.id) === n.pitch)) return false;
+  return store.applyProjectChange((project) =>
+    mapClip(project, picked.target.id, (c) => ({
+      ...c,
+      notes: (c.notes ?? []).map((n) => {
+        const pitch = next.get(n.id);
+        return pitch === undefined || pitch === n.pitch ? n : { ...n, pitch };
+      }),
+    })),
+  );
+}
+
+/**
+ * Transpose the selected notes by semitones, or by scale degrees along the
+ * project's key and scale (an off-scale note is first rounded down to the
+ * scale; see transposeByDegree). `semitones` / `degrees` must be finite
+ * integers. Returns whether the project changed.
+ */
+export function transposeSelected(
+  clipId: string,
+  noteIds: readonly string[],
+  by: { semitones: number } | { degrees: number },
+): boolean {
+  // Only finite whole amounts; anything else (NaN, Infinity, fractions) changes nothing.
+  const amount = 'semitones' in by ? by.semitones : by.degrees;
+  if (!Number.isInteger(amount)) return false;
+  if ('semitones' in by) {
+    return applyPitches(clipId, noteIds, (pitch) => pitch + by.semitones);
+  }
+  return applyPitches(clipId, noteIds, (pitch, project) =>
+    transposeByDegree(pitch, by.degrees, project.key, project.scale),
+  );
+}
+
+/**
+ * Move the selected off-scale notes to the nearest scale note (the lower one
+ * when both are as near). Notes already in the scale stay. Returns whether
+ * the project changed.
+ */
+export function fitSelectedToScale(clipId: string, noteIds: readonly string[]): boolean {
+  const store = useStore.getState();
+  const picked = selectedEditNotes(store.project, clipId, noteIds);
+  if (!picked) return false;
+  if (picked.notes.every((n) => pitchInScale(store.project, n.pitch))) {
+    pushToast(NOTE_EDIT_MESSAGES.alreadyInScale, 'info');
+    return false;
+  }
+  return applyPitches(clipId, noteIds, (pitch, project) =>
+    nearestScalePitch(pitch, project.key, project.scale, 'down'),
   );
 }
 

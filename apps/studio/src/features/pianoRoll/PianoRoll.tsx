@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore, watchDragEnd } from '../../state/store';
-import { findShortcut } from '../../state/keymap';
+import { findShortcut, type ShortcutAction } from '../../state/keymap';
 import type { Clip, NoteEvent, Project, Track } from '@cts/project-model';
 import { beatTick, beatsPerBar, clipEditSpan, firstPassBeatAt, resizeClip, resolveLinkSource, songEndBeat, soundingEvents } from '@cts/project-model';
 import { midiToNoteName } from '@cts/theory-engine';
@@ -30,7 +30,17 @@ import {
   xToBeat,
   yToPitch,
 } from './gridMath';
-import { duplicateNotes, quantizeNotes, removeNotes } from '../../state/editorActions';
+import {
+  copyNotes,
+  cutNotes,
+  duplicateNotes,
+  fitSelectedToScale,
+  pasteNotes,
+  quantizeNotes,
+  removeNotes,
+  transposeSelected,
+} from '../../state/editorActions';
+import { offScaleNoteHint } from '../inspector/difficultyText';
 import { pushToast } from '../../state/tutorialBridge';
 
 const ROW_HEIGHT = 16;
@@ -116,6 +126,22 @@ type VelocityDragState = {
   baseVelocities: Map<string, number>;
   anchorVelocity: number;
   nextVelocities: Map<string, number>;
+};
+
+/** Toolbar buttons that move the selected notes (a degree follows the project's scale). */
+const TRANSPOSE_BUTTONS: { label: string; by: { semitones: number } | { degrees: number } }[] = [
+  { label: '上へ 1 半音', by: { semitones: 1 } },
+  { label: '下へ 1 半音', by: { semitones: -1 } },
+  { label: '上へ 1 度', by: { degrees: 1 } },
+  { label: '下へ 1 度', by: { degrees: -1 } },
+];
+
+/** Keymap actions that transpose the selection. */
+const TRANSPOSE_ACTIONS: Partial<Record<ShortcutAction, { semitones: number } | { degrees: number }>> = {
+  transposeUpSemitone: { semitones: 1 },
+  transposeDownSemitone: { semitones: -1 },
+  transposeUpDegree: { degrees: 1 },
+  transposeDownDegree: { degrees: -1 },
 };
 
 /**
@@ -298,6 +324,7 @@ export function PianoRoll() {
       if (editor.activeView !== 'pianoRoll') return;
       const ids = [...selected];
       const action = findShortcut('pianoRoll', e);
+      const transpose = action ? TRANSPOSE_ACTIONS[action] : undefined;
       if (action === 'deleteSelectedNotes' && clip && ids.length > 0) {
         e.preventDefault();
         removeNotes(clip.id, ids);
@@ -307,6 +334,21 @@ export function PianoRoll() {
       } else if (action === 'quantizeSelection' && clip && ids.length > 0) {
         e.preventDefault();
         quantizeSelectedNotes();
+      } else if (action === 'selectAllNotes' && clip) {
+        e.preventDefault();
+        selectNotes(notes.map((n) => n.id));
+      } else if (action === 'copyNotes' && clip && ids.length > 0) {
+        e.preventDefault();
+        copyNotes(clip.id, ids);
+      } else if (action === 'cutNotes' && clip && ids.length > 0) {
+        e.preventDefault();
+        cutNotes(clip.id, ids);
+      } else if (action === 'pasteNotes' && clip) {
+        e.preventDefault();
+        pasteNotes(clip.id);
+      } else if (transpose && clip && ids.length > 0) {
+        e.preventDefault();
+        transposeSelected(clip.id, ids, transpose);
       } else if (action === 'toggleScaleSnap') {
         e.preventDefault();
         toggleScaleSnap();
@@ -320,6 +362,7 @@ export function PianoRoll() {
   }, [
     editor.activeView,
     selected,
+    notes,
     clip,
     linkedClip,
     commitTransaction,
@@ -633,6 +676,25 @@ export function PianoRoll() {
         >
           選択をクオンタイズ
         </button>
+        <div className="pr__transpose" role="group" aria-label="音の高さを変える">
+          {TRANSPOSE_BUTTONS.map(({ label, by }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => transposeSelected(clip.id, [...selected], by)}
+              disabled={selected.size === 0}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => fitSelectedToScale(clip.id, [...selected])}
+            disabled={selected.size === 0}
+          >
+            スケールに合わせる
+          </button>
+        </div>
         <div className="pr__zoom" role="group" aria-label="横ズーム">
           <button
             type="button"
@@ -660,8 +722,10 @@ export function PianoRoll() {
         </label>
         <p className="pr__hint">
           左の鍵盤クリックで試聴 / ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 /
-          Alt+ドラッグで複製 / Q=クオンタイズ / Delete=削除
+          Alt+ドラッグで複製 / Q=クオンタイズ / Delete=削除 / Ctrl+C・X・V=コピー・切り取り・貼り付け / ↑↓=1 半音 /
+          Alt+↑↓=1 度
         </p>
+        <p className="pr__hint pr__hint--scale">{offScaleNoteHint(editor.difficulty)}</p>
       </div>
 
       <div className="pr__scroll" ref={scrollRef} onScroll={onScroll}>

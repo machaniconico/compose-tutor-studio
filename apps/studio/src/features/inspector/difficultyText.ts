@@ -121,6 +121,8 @@ const BEGINNER_TERM_TABLE: Array<[string, string]> = [
   ['アタック', '抑え始めるまでの速さ'],
   ['リリース', '抑えるのをやめるまでの速さ'],
   ['シェルフ', '端から広い範囲'],
+  // ピアノロールのスケール外の音の説明
+  ['経過音やブルーノートとして', '音と音をつなぐ音や、味付けの音として'],
   // その他の上級用語
   ['推進力', 'ドラマティックな流れ'],
 ];
@@ -252,4 +254,12 @@ const EFFECT_PARAM_EXPLANATIONS: Record<string, string> = {
 /** EQ・コンプレッサーの各パラメータの説明文を難易度に合わせて返す。未知のキーは空文字。 */
 export function effectParamExplanation(key: string, difficulty: Difficulty): string {
   return simplifyExplanation(EFFECT_PARAM_EXPLANATIONS[key] ?? '', difficulty);
+}
+
+/** ピアノロールに出す、スケール外の音についての説明(標準の文面)。 */
+export const OFF_SCALE_NOTE_HINT = 'スケール外の音も、経過音やブルーノートとしてわざと使うことがあります。';
+
+/** スケール外の音の説明を難易度に合わせて返す(初心者向けは simplifyExplanation で言い換える)。 */
+export function offScaleNoteHint(difficulty: Difficulty): string {
+  return simplifyExplanation(OFF_SCALE_NOTE_HINT, difficulty);
 }
