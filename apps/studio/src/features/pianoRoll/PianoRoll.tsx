@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useStore, watchDragEnd } from '../../state/store';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { fitClipToNotes, useStore, watchDragEnd } from '../../state/store';
 import { findShortcut } from '../../state/keymap';
 import type { Clip, NoteEvent, Project, Track } from '@cts/project-model';
-import { beatsPerBar } from '@cts/project-model';
+import { beatsPerBar, resolveLinkSource } from '@cts/project-model';
 import { midiToNoteName } from '@cts/theory-engine';
 import { pxPerBeat } from '../timeline';
 import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { useScaleInfo } from './useScaleInfo';
+import { PREVIEW_DURATION_MS, previewNote } from '../../audio/livePreview';
 import {
   GRID_SNAP_OPTIONS,
   GRID_SNAP_LABELS,
@@ -15,21 +16,32 @@ import {
   PIANO_LOW_MIDI,
   beatToX,
   clampPitch,
+  initialPitchWindow,
+  notesInRows,
+  pitchSpan,
+  windowScrollTop,
   normalizeRect,
+  pitchToY,
   quantizeNotes as quantizeNoteStarts,
   rectsOverlap,
   snapBeat,
   snapPitchToPitchClasses,
+  visibleRowRange,
   xToBeat,
   yToPitch,
 } from './gridMath';
 import { duplicateNotes, removeNotes } from '../../state/editorActions';
+import { pushToast } from '../../state/tutorialBridge';
 
 const ROW_HEIGHT = 16;
+/** Height of the sticky ruler above the rows (styles.css: 20px + 2px margin). */
+const RULER_HEIGHT = 22;
 const RESIZE_HANDLE_PX = 6;
 const DEFAULT_VELOCITY = 100;
 const MIN_VELOCITY = 1;
 const MAX_VELOCITY = 127;
+/** Extra rows rendered above/below the viewport (covers the sticky ruler too). */
+const ROW_OVERSCAN = 8;
 
 /** Find a clip across all tracks. */
 function findClip(tracks: readonly Track[], clipId: string | null): Clip | null {
@@ -111,18 +123,28 @@ type VelocityDragState = {
  */
 export function PianoRoll() {
   const project = useStore((s) => s.project);
+  const projectOpenVersion = useStore((s) => s.projectOpenVersion);
   const editor = useStore((s) => s.editor);
+  const selectClip = useStore((s) => s.selectClip);
+  const selectTrack = useStore((s) => s.selectTrack);
   const selectNotes = useStore((s) => s.selectNotes);
   const addNote = useStore((s) => s.addNote);
   const updateNote = useStore((s) => s.updateNote);
+  const updateNotes = useStore((s) => s.updateNotes);
   const applyProjectChange = useStore((s) => s.applyProjectChange);
   const setZoomX = useStore((s) => s.setZoomX);
   const toggleScaleSnap = useStore((s) => s.toggleScaleSnap);
   const toggleChordToneHighlight = useStore((s) => s.toggleChordToneHighlight);
+  const togglePreviewOnPlace = useStore((s) => s.togglePreviewOnPlace);
   const beginTransaction = useStore((s) => s.beginTransaction);
   const commitTransaction = useStore((s) => s.commitTransaction);
 
-  const clip = findClip(project.tracks, editor.selectedClipId);
+  const selectedClip = findClip(project.tracks, editor.selectedClipId);
+  const linkedClip = selectedClip?.type === 'midi' && selectedClip.aliasOf !== undefined ? selectedClip : null;
+  const clip = linkedClip ? null : selectedClip;
+  const clipInstrument = clip
+    ? project.tracks.find((t) => t.clips.some((c) => c.id === clip.id))?.instrument
+    : undefined;
   const scaleInfo = useScaleInfo(project);
 
   const [gridSnap, setGridSnap] = useState(1);
@@ -143,6 +165,99 @@ export function PianoRoll() {
 
   const notes = clip?.type === 'midi' ? clip.notes ?? [] : [];
 
+  // Vertical scroll + simple virtualization: only rows in view are rendered.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [view, setView] = useState({ top: 0, height: 0 });
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
+  const clipId = clip?.id ?? null;
+  useLayoutEffect(() => {
+    if (!clipId) return;
+    // Open on the clip's note range plus an octave of margin (C3..C5 when empty),
+    // centred in the viewport so the notes are in view even when it is short.
+    // Notes outside the 88 keys (a saved file may hold any MIDI 0..127) have no
+    // row, so they do not pull the view; they stay stored as they are.
+    const pitches = notesRef.current
+      .map((n) => n.pitch)
+      .filter((p) => p >= PIANO_LOW_MIDI && p <= PIANO_HIGH_MIDI);
+    const win = initialPitchWindow(pitches);
+    const el = scrollRef.current;
+    const height = el?.clientHeight || (win.high - win.low + 1) * ROW_HEIGHT + RULER_HEIGHT;
+    // The sticky ruler covers the top of the scroll area, so rows get the rest.
+    const top = windowScrollTop(
+      win,
+      height - RULER_HEIGHT,
+      ROW_HEIGHT,
+      rows.length,
+      PIANO_HIGH_MIDI,
+      pitchSpan(pitches) ?? undefined,
+    );
+    if (el) el.scrollTop = top;
+    setView({ top: el ? el.scrollTop : top, height });
+  }, [clipId, projectOpenVersion, rows.length]);
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setView((prev) => ({ top: el.scrollTop, height: el.clientHeight || prev.height }));
+  }, []);
+  // A resize that does not scroll (e.g. a taller window) still changes which
+  // rows are visible, so re-measure on resize.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => onScroll());
+      observer.observe(el);
+      return () => observer.disconnect();
+    }
+    window.addEventListener('resize', onScroll);
+    return () => window.removeEventListener('resize', onScroll);
+  }, [clipId, onScroll]);
+  const { first: firstRow, last: lastRow } = visibleRowRange(
+    view.top,
+    view.height,
+    ROW_HEIGHT,
+    rows.length,
+    ROW_OVERSCAN,
+  );
+  const visibleRows = rows.slice(firstRow, lastRow + 1);
+  // Notes indexed by row, so only notes on rendered rows are mounted.
+  const notesByRow = useMemo(() => {
+    const byRow = new Map<number, NoteEvent[]>();
+    for (const note of notes) {
+      const row = PIANO_HIGH_MIDI - note.pitch;
+      if (row < 0 || row >= rows.length) continue;
+      const list = byRow.get(row);
+      if (list) list.push(note);
+      else byRow.set(row, [note]);
+    }
+    return byRow;
+  }, [notes, rows.length]);
+  // The note under an active pointer stays mounted while it is dragged, even
+  // when scrolled out of view, so it keeps its pointer capture.
+  const [heldNoteId, setHeldNoteId] = useState<string | null>(null);
+  const renderedNotes = useMemo(() => {
+    const out = notesInRows(notesByRow, firstRow, lastRow);
+    if (heldNoteId !== null && !out.some((n) => n.id === heldNoteId)) {
+      const held = notes.find((n) => n.id === heldNoteId);
+      const row = held ? PIANO_HIGH_MIDI - held.pitch : -1;
+      if (held && row >= 0 && row < rows.length) out.push(held);
+    }
+    return out;
+  }, [notesByRow, firstRow, lastRow, heldNoteId, notes, rows.length]);
+
+  const previewKey = useCallback(
+    (midi: number) => {
+      void previewNote(clipInstrument, midi, DEFAULT_VELOCITY, PREVIEW_DURATION_MS).catch(() =>
+        pushToast(
+          '試聴の音を鳴らせませんでした。もう一度鍵盤をクリックするか、OSの音声出力を確認してください。',
+          'error',
+        ),
+      );
+    },
+    [clipInstrument],
+  );
+
   const quantizeSelectedNotes = useCallback(() => {
     if (!clip || clip.type !== 'midi' || editor.selectedNoteIds.length === 0) return;
     const ids = new Set(editor.selectedNoteIds);
@@ -154,15 +269,24 @@ export function PianoRoll() {
     if (!changed) return;
     const quantizedById = new Map(quantized.map((note) => [note.id, note]));
 
-    applyProjectChange((project) =>
-      mapClipNotes(project, clip.id, (clipNotes) =>
+    // A note quantized onto or past the end of the clip lengthens it (same undo step).
+    applyProjectChange((project) => {
+      const next = mapClipNotes(project, clip.id, (clipNotes) =>
         clipNotes.map((note) => quantizedById.get(note.id) ?? note),
-      ),
-    );
+      );
+      return {
+        ...next,
+        tracks: next.tracks.map((track) => ({
+          ...track,
+          clips: track.clips.map((c) => (c.id === clip.id ? fitClipToNotes(c) : c)),
+        })),
+      };
+    });
   }, [applyProjectChange, clip, editor.selectedNoteIds, gridSnap, notes]);
 
   // --- keyboard shortcuts (ignored while typing in inputs) ---
   useEffect(() => {
+    if (linkedClip) return;
     function isEditableTarget(t: EventTarget | null): boolean {
       const el = t as HTMLElement | null;
       if (!el) return false;
@@ -198,6 +322,7 @@ export function PianoRoll() {
     editor.activeView,
     editor.selectedNoteIds,
     clip,
+    linkedClip,
     commitTransaction,
     quantizeSelectedNotes,
     selectNotes,
@@ -216,17 +341,19 @@ export function PianoRoll() {
       if (!clip) return;
       const beatDelta = xToBeat(dx, ppb);
       const rowDelta = Math.round(dy / ROW_HEIGHT);
+      const patches = new Map<string, { startBeat: number; pitch: number }>();
       for (const snap of drag.snapshot) {
         let nextStart = snap.startBeat + beatDelta;
         nextStart = shift ? Math.max(0, nextStart) : snapBeat(nextStart, gridSnap);
         let nextPitch = clampPitch(snap.pitch - rowDelta);
         if (editor.scaleSnap) {
-          nextPitch = clampPitch(snapPitchToPitchClasses(nextPitch, scaleInfo.scalePcs));
+          nextPitch = clampPitch(snapPitchToPitchClasses(nextPitch, scaleInfo.scalePcs, PIANO_LOW_MIDI, PIANO_HIGH_MIDI));
         }
-        updateNote(clip.id, snap.id, { startBeat: nextStart, pitch: nextPitch });
+        patches.set(snap.id, { startBeat: nextStart, pitch: nextPitch });
       }
+      if (patches.size > 0) updateNotes(clip.id, patches);
     },
-    [clip, ppb, gridSnap, editor.scaleSnap, scaleInfo.scalePcs, updateNote],
+    [clip, ppb, gridSnap, editor.scaleSnap, scaleInfo.scalePcs, updateNotes],
   );
 
   const onNotePointerDown = useCallback(
@@ -234,6 +361,7 @@ export function PianoRoll() {
       if (!clip) return;
       e.stopPropagation();
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      setHeldNoteId(note.id);
       const { x } = localPoint(e);
       const noteRightX = beatToX(note.startBeat + note.durationBeats, ppb);
       const isResize = Math.abs(x - noteRightX) <= RESIZE_HANDLE_PX;
@@ -257,10 +385,9 @@ export function PianoRoll() {
       let dragIds = nextSelected.includes(note.id) ? nextSelected : [note.id];
       if (e.altKey && !isResize) {
         const created = duplicateNotes(clip.id, dragIds, 0);
-        if (created.length > 0) {
-          dragIds = created;
-          selectNotes(created);
-        }
+        if (created.length === 0) return;
+        dragIds = created;
+        selectNotes(created);
       }
 
       const live = clip.notes ?? [];
@@ -358,11 +485,13 @@ export function PianoRoll() {
       }
     }
     dragRef.current = null;
+    setHeldNoteId(null);
     setMarquee(null);
   }, [marquee, notes, ppb, editor.selectedNoteIds, selectNotes]);
 
   const onPointerCancel = useCallback(() => {
     dragRef.current = null;
+    setHeldNoteId(null);
     setMarquee(null);
   }, []);
 
@@ -370,18 +499,65 @@ export function PianoRoll() {
     (e: React.MouseEvent) => {
       if (!clip || clip.type !== 'midi') return;
       const { x, y } = localPoint(e);
-      const beat = snapBeat(xToBeat(x, ppb), gridSnap);
+      let beat = snapBeat(xToBeat(x, ppb), gridSnap);
+      // A looping clip only sounds its first repeat's content, so a note placed
+      // in a later repeat goes into the first one: it then sounds at the click
+      // (and in every repeat) instead of being saved silent.
+      const period = clip.contentLengthBeats ?? clip.lengthBeats;
+      if (clip.loop && period > 0 && beat >= period) {
+        beat %= period;
+        // Float remainders a hair under the period mean "the next repeat's start".
+        if (period - beat < 1e-9) beat = 0;
+      }
       let pitch = clampPitch(yToPitch(y, ROW_HEIGHT));
-      if (editor.scaleSnap) pitch = clampPitch(snapPitchToPitchClasses(pitch, scaleInfo.scalePcs));
-      addNote(clip.id, {
+      if (editor.scaleSnap) pitch = clampPitch(snapPitchToPitchClasses(pitch, scaleInfo.scalePcs, PIANO_LOW_MIDI, PIANO_HIGH_MIDI));
+      const added = addNote(clip.id, {
         pitch,
         startBeat: beat,
         durationBeats: gridSnap,
         velocity: DEFAULT_VELOCITY,
       });
+      if (added && editor.previewOnPlace) previewKey(pitch);
     },
-    [clip, localPoint, ppb, gridSnap, editor.scaleSnap, scaleInfo.scalePcs, addNote],
+    [
+      clip,
+      localPoint,
+      ppb,
+      gridSnap,
+      editor.scaleSnap,
+      editor.previewOnPlace,
+      scaleInfo.scalePcs,
+      addNote,
+      previewKey,
+    ],
   );
+
+  if (linkedClip) {
+    const source = resolveLinkSource(linkedClip, project.tracks.flatMap((track) => track.clips));
+    return (
+      <div className="empty-hint">
+        {typeof source === 'string' ? (
+          <p>{source}</p>
+        ) : (
+          <>
+            <p>このクリップは別のクリップと中身を共有しています。音を変えるには元のクリップを編集します。</p>
+            {source.type === 'midi' && (
+              <button
+                type="button"
+                onClick={() => {
+                  selectTrack(source.trackId);
+                  selectClip(source.id);
+                  selectNotes([]);
+                }}
+              >
+                元のクリップを開く
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
 
   if (!clip || clip.type !== 'midi') {
     return (
@@ -432,23 +608,43 @@ export function PianoRoll() {
             ＋
           </button>
         </div>
+        <label className="pr__field" title="ノートを置いたとき、そのトラックの音で短く鳴らします">
+          <input
+            type="checkbox"
+            checked={editor.previewOnPlace}
+            onChange={togglePreviewOnPlace}
+          />
+          <span>置いたら試聴</span>
+        </label>
         <p className="pr__hint">
-          ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 /
+          左の鍵盤クリックで試聴 / ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 /
           Alt+ドラッグで複製 / Q=クオンタイズ / Delete=削除
         </p>
       </div>
 
-      <div className="pr__scroll">
+      <div className="pr__scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="pr__keyboard" style={{ height: gridHeight }}>
-          {rows.map((midi) => {
+          {visibleRows.map((midi, j) => {
             const pc = ((midi % 12) + 12) % 12;
             const inScale = scaleInfo.scalePcs.has(pc);
             const isC = pc === 0;
             return (
               <div
                 key={midi}
+                role="button"
+                tabIndex={0}
+                aria-label={`${midiToNoteName(midi)} を試聴`}
+                data-testid={`piano-key-${midi}`}
                 className={`pr__key${inScale ? ' is-scale' : ''}${isC ? ' is-c' : ''}`}
-                style={{ height: ROW_HEIGHT }}
+                style={{ top: (firstRow + j) * ROW_HEIGHT, height: ROW_HEIGHT }}
+                onClick={() => previewKey(midi)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                  // Keep Space/Enter from also reaching the global shortcuts.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  previewKey(midi);
+                }}
               >
                 {isC ? <span className="pr__key-label">{midiToNoteName(midi)}</span> : null}
               </div>
@@ -469,7 +665,8 @@ export function PianoRoll() {
           onDoubleClick={onGridDoubleClick}
         >
           {/* pitch-row tints */}
-          {rows.map((midi, i) => {
+          {visibleRows.map((midi, j) => {
+            const i = firstRow + j;
             const pc = ((midi % 12) + 12) % 12;
             const inScale = scaleInfo.scalePcs.has(pc);
             return (
@@ -496,7 +693,8 @@ export function PianoRoll() {
           {/* chord-tone highlight per region (when C on) */}
           {editor.chordToneHighlight
             ? project.chordTrack.map((chord) =>
-                rows.map((midi, i) => {
+                visibleRows.map((midi, j) => {
+                  const i = firstRow + j;
                   const pc = ((midi % 12) + 12) % 12;
                   const isChordTone = chord.notes
                     .map((n) => ((n % 12) + 12) % 12)
@@ -519,9 +717,8 @@ export function PianoRoll() {
             : null}
 
           {/* notes */}
-          {notes.map((note) => {
+          {renderedNotes.map((note) => {
             const i = PIANO_HIGH_MIDI - note.pitch;
-            if (i < 0 || i >= rows.length) return null;
             const pc = ((note.pitch % 12) + 12) % 12;
             const outOfScale = scaleInfo.scalePcs.size > 0 && !scaleInfo.scalePcs.has(pc);
             const isSelected = selected.has(note.id);

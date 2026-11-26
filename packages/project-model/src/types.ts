@@ -84,6 +84,8 @@ export type Clip = {
   contentLengthBeats?: number;
   loop: boolean;
   aliasOf?: string;
+  /** Original settings from files saved before playback supported loops and links. */
+  legacyClipSettings?: Pick<Clip, 'loop' | 'aliasOf' | 'contentLengthBeats'>;
   notes?: NoteEvent[];
   drumEvents?: DrumEvent[];
   /** steps per bar for drum clips (default 16) */

@@ -42,7 +42,7 @@ import {
 } from '@cts/theory-engine';
 import { getScalePitchClasses } from '@cts/theory-engine';
 import { roleForTrackName } from '@cts/tutorial-engine';
-import { useStore } from './store';
+import { fitClipToNotes, useStore } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { quantizeStart } from '../features/pianoRoll/gridMath';
@@ -324,12 +324,14 @@ export function insertProgressionAtBeat(templateId: string, startBeat: number): 
 export function quantizeNotes(clipId: string, noteIds: readonly string[], snap: number): void {
   const ids = new Set(noteIds);
   useStore.getState().applyProjectChange((project) =>
-    mapClip(project, clipId, (c) => ({
-      ...c,
-      notes: (c.notes ?? []).map((n) =>
-        ids.has(n.id) ? { ...n, startBeat: quantizeStart(n.startBeat, snap) } : n,
-      ),
-    })),
+    mapClip(project, clipId, (c) =>
+      fitClipToNotes({
+        ...c,
+        notes: (c.notes ?? []).map((n) =>
+          ids.has(n.id) ? { ...n, startBeat: quantizeStart(n.startBeat, snap) } : n,
+        ),
+      }),
+    ),
   );
 }
 
@@ -345,7 +347,7 @@ export function duplicateNotes(
   const ids = new Set(noteIds);
   const newIds: string[] = [];
   const dupesByCall: { project: Project; dupes: NoteEvent[] }[] = [];
-  useStore.getState().applyProjectChange((project) =>
+  const committed = useStore.getState().applyProjectChange((project) =>
     mapClip(project, clipId, (c) => {
       const source = (c.notes ?? []).filter((n) => ids.has(n.id));
       const dupes: NoteEvent[] = source.map((n) => {
@@ -360,9 +362,10 @@ export function duplicateNotes(
         };
       });
       dupesByCall.push({ project, dupes });
-      return { ...c, notes: [...(c.notes ?? []), ...dupes] };
+      return fitClipToNotes({ ...c, notes: [...(c.notes ?? []), ...dupes] });
     }),
   );
+  if (!committed) return [];
   emitNotesAdded(clipId, dupesByCall[0]);
   return newIds;
 }
@@ -416,10 +419,14 @@ export function removeNotes(clipId: string, noteIds: readonly string[]): void {
   );
 }
 
-/** Replace ALL notes of a clip with the provided ones. */
+/**
+ * Replace ALL notes of a clip with the provided ones. A non-looping clip is
+ * lengthened to the last note in the same edit (one undo step), so no new note
+ * lies past the clip end and goes silent.
+ */
 export function replaceClipNotes(clipId: string, notes: NoteEvent[]): void {
   useStore.getState().applyProjectChange((project) =>
-    mapClip(project, clipId, (c) => ({ ...c, notes })),
+    mapClip(project, clipId, (c) => fitClipToNotes({ ...c, notes })),
   );
 }
 
@@ -480,7 +487,7 @@ export function importMidiTracks(parsed: ParsedMidi, confirmed = false): MidiImp
         importedTrackCount: 0,
         importedNoteCount: 0,
         warnings: [],
-        confirm: `このMIDIは ${num}/${den} 拍子です。曲の拍子を ${num}/${den} にすると、ドラムの ${droppedHits} 個の音が新しいグリッドで別の音と重なるか曲の終わりにかかるため削除されます。読み込んでもよいですか？(「元に戻す」で戻せます)`,
+        confirm: `このMIDIは ${num}/${den} 拍子です。曲の拍子を ${num}/${den} にすると、ドラムの ${droppedHits} 個の音が別の音と重なるか、曲やクリップの終わり、ループの区切りにかかります。音が削除されたり、鳴らなくなる場所が出たりします。読み込んでもよいですか？(「元に戻す」で戻せます)`,
       };
     }
   }
@@ -490,7 +497,7 @@ export function importMidiTracks(parsed: ParsedMidi, confirmed = false): MidiImp
   let warnings: string[] = [];
   const importedNoteCount = sourceTracks.reduce((sum, track) => sum + track.notes.length, 0);
 
-  useStore.getState().applyProjectChange((current) => {
+  const committed = useStore.getState().applyProjectChange((current) => {
     const meterChange = sameMeter(current)
       ? { project: current, warnings: [] }
       : setProjectTimeSignature(current, parsed.timeSignature);
@@ -573,6 +580,10 @@ export function importMidiTracks(parsed: ParsedMidi, confirmed = false): MidiImp
       tracks,
     };
   });
+
+  if (!committed) {
+    return { importedTrackCount: 0, importedNoteCount: 0, warnings: [], confirm: null };
+  }
 
   const store = useStore.getState();
   store.selectTrack(firstTrackId);

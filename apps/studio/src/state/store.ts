@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 import type {
   ChordEvent,
+  Clip,
   DrumEvent,
   DrumLane,
   MusicalKey,
@@ -20,6 +21,7 @@ import type {
 import {
   beatsPerBar as beatsPerBarOf,
   contentBeyondBars,
+  findProjectLoopLimitProblem,
   setLengthBars as setProjectLengthBars,
   setLoopRange as setProjectLoopRange,
   setTimeSignature as setProjectTimeSignature,
@@ -28,6 +30,7 @@ import { getScalePitchClasses } from '@cts/theory-engine';
 import { createDefaultProject } from './defaultProject';
 import { nowIso, uid } from './ids';
 import { publishAppEvent } from './appEvents';
+import { pushToast } from './tutorialBridge';
 import {
   deleteProject as deleteStoredProject,
   listSavedProjects,
@@ -60,6 +63,8 @@ export type EditorState = {
   selectedNoteIds: string[];
   scaleSnap: boolean;
   chordToneHighlight: boolean;
+  /** ピアノロールでノートを置いたときに短く試聴する(既定オン)。 */
+  previewOnPlace: boolean;
   zoomX: number;
   /** 難易度モード。beginner=平易表示, standard=標準, advanced=詳細表示。 */
   difficulty: Difficulty;
@@ -76,8 +81,12 @@ const SAVE_DEBOUNCE_MS = 2000;
 const SAVE_FAILURE_MESSAGE =
   '保存に失敗しました。ブラウザの保存容量が不足している可能性があります。不要なプロジェクトを削除してからもう一度保存してください。';
 
+type NotePatch = Partial<Omit<NoteEvent, 'id'>>;
+
 type StoreState = {
   project: Project;
+  /** Changes when a project is opened or created, even if its ID is reused. */
+  projectOpenVersion: number;
   transport: TransportState;
   editor: EditorState;
   save: SaveState;
@@ -99,7 +108,7 @@ type StoreState = {
   transactionBase: Project | null;
 
   /** Generic escape hatch: apply an immutable project change (bumps updatedAt, pushes history, saves). */
-  applyProjectChange: (fn: (p: Project) => Project) => void;
+  applyProjectChange: (fn: (p: Project) => Project) => boolean;
 
   // project metadata actions
   setBpm: (bpm: number) => void;
@@ -131,8 +140,9 @@ type StoreState = {
   removeChord: (id: string) => void;
 
   // note actions
-  addNote: (clipId: string, note: Omit<NoteEvent, 'id'> & { id?: string }) => void;
-  updateNote: (clipId: string, noteId: string, patch: Partial<Omit<NoteEvent, 'id'>>) => void;
+  addNote: (clipId: string, note: Omit<NoteEvent, 'id'> & { id?: string }) => boolean;
+  updateNote: (clipId: string, noteId: string, patch: NotePatch) => void;
+  updateNotes: (clipId: string, patches: ReadonlyMap<string, NotePatch>) => void;
   removeNote: (clipId: string, noteId: string) => void;
 
   // drum actions
@@ -154,6 +164,7 @@ type StoreState = {
   setActiveView: (view: EditorView) => void;
   toggleScaleSnap: () => void;
   toggleChordToneHighlight: () => void;
+  togglePreviewOnPlace: () => void;
   setZoomX: (zoomX: number) => void;
   toggleTutorialPanel: () => void;
   setInspectorContent: (content: string | null) => void;
@@ -299,6 +310,17 @@ function saveDifficulty(difficulty: Difficulty): void {
   }
 }
 
+/**
+ * Clip length is part of the sound (expandClip drops notes past it), so a note
+ * placed or moved past the end of a non-looping clip lengthens the clip in the
+ * same edit (one undo step) instead of being saved silent.
+ */
+export function fitClipToNotes(clip: Clip): Clip {
+  if (clip.loop) return clip;
+  const end = (clip.notes ?? []).reduce((max, n) => Math.max(max, n.startBeat + n.durationBeats), 0);
+  return end > clip.lengthBeats ? { ...clip, lengthBeats: end } : clip;
+}
+
 function makeEditor(project: Project): EditorState {
   const firstTrack = project.tracks[0];
   const firstClip = firstTrack?.clips[0];
@@ -310,6 +332,7 @@ function makeEditor(project: Project): EditorState {
     selectedNoteIds: [],
     scaleSnap: true,
     chordToneHighlight: true,
+    previewOnPlace: true,
     zoomX: 1,
     difficulty: loadDifficulty(),
   };
@@ -383,8 +406,15 @@ export const useStore = create<StoreState>((set, get) => {
   const persistCurrentProject = (): boolean => persistProject(get().project);
 
   /** Apply an immutable project change: bump updatedAt, push history, save. */
-  const commitProject = (next: Project): void => {
+  const commitProject = (next: Project): boolean => {
     const current = get().project;
+    if (next.tracks !== current.tracks || next.timeSignature !== current.timeSignature) {
+      const problem = findProjectLoopLimitProblem(next);
+      if (problem) {
+        pushToast('変更するとループで鳴る音の数が上限を超えます。クリップを短くするか、音の数を減らしてください。', 'error');
+        return false;
+      }
+    }
     const stamped: Project = { ...next, updatedAt: nowIso() };
     const historyUpdate = get().transactionBase
       ? {}
@@ -395,6 +425,7 @@ export const useStore = create<StoreState>((set, get) => {
       save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
     });
     scheduleSave(persistCurrentProject);
+    return true;
   };
 
   let transactionOwner: unknown;
@@ -418,6 +449,7 @@ export const useStore = create<StoreState>((set, get) => {
 
   return {
     project: startingProject,
+    projectOpenVersion: 0,
     transport: makeTransport(),
     editor: makeEditor(startingProject),
     save: makeIdleSave(),
@@ -440,12 +472,12 @@ export const useStore = create<StoreState>((set, get) => {
       const { project, warnings, droppedHits } = setProjectTimeSignature(get().project, timeSignature);
       if (droppedHits > 0 && !confirmed) {
         return {
-          confirm: `拍子を ${timeSignature[0]}/${timeSignature[1]} にすると、ドラムの ${droppedHits} 個の音が新しいグリッドで別の音と重なるか曲の終わりにかかるため削除されます。変更してもよいですか？(「元に戻す」で戻せます)`,
+          confirm: `拍子を ${timeSignature[0]}/${timeSignature[1]} にすると、ドラムの ${droppedHits} 個の音が別の音と重なるか、曲やクリップの終わり、ループの区切りにかかります。音が削除されたり、鳴らなくなる場所が出たりします。変更してもよいですか？(「元に戻す」で戻せます)`,
           warnings: [],
         };
       }
-      commitProject(project);
-      return { confirm: null, warnings };
+      const committed = commitProject(project);
+      return { confirm: null, warnings: committed ? warnings : [] };
     },
     setLengthBars: (lengthBars, confirmed = false) => {
       const project = get().project;
@@ -463,9 +495,14 @@ export const useStore = create<StoreState>((set, get) => {
           count('セクション', beyond.sections),
         ].filter(isPart);
         const cut = [count('ノート', beyond.truncatedNotes), count('コード', beyond.truncatedChords)].filter(isPart);
+        const linked = beyond.linkedLosses;
+        const linkedRemoved = linked ? [count('ノート', linked.notes), count('ドラム', linked.drumHits)].filter(isPart) : [];
+        const linkedCut = linked ? count('ノート', linked.truncatedNotes) : null;
         const sentences = [
           removed.length > 0 ? `${lengthBars} 小節より後ろにある ${removed.join('・')} が削除されます。` : null,
           cut.length > 0 ? `${lengthBars} 小節の終わりをまたぐ ${cut.join('・')} は終わりで切られます。` : null,
+          linkedRemoved.length > 0 ? `残る小節でも、リンク先を切り詰めると ${linkedRemoved.join('・')} が鳴らなくなります。` : null,
+          linkedCut ? `残る小節でも、リンク先を切り詰めると ${linkedCut} が短く鳴ります。` : null,
         ].filter(isPart);
         if (sentences.length > 0) {
           return `${sentences.join('')}短くしてもよいですか？(「元に戻す」で戻せます)`;
@@ -516,14 +553,15 @@ export const useStore = create<StoreState>((set, get) => {
         durationBeats: note.durationBeats,
         velocity: note.velocity,
       };
-      commitProject(
+      const committed = commitProject(
         mapTracks(project, (t) => ({
           ...t,
           clips: t.clips.map((c) =>
-            c.id === clipId ? { ...c, notes: [...(c.notes ?? []), newNote] } : c,
+            c.id === clipId ? fitClipToNotes({ ...c, notes: [...(c.notes ?? []), newNote] }) : c,
           ),
         })),
       );
+      if (!committed) return false;
       const track = trackOfClip(project, clipId);
       publishAppEvent({
         type: 'note.added',
@@ -536,34 +574,42 @@ export const useStore = create<StoreState>((set, get) => {
           inScale: pitchInScale(project, newNote.pitch),
         },
       });
+      return true;
     },
-    updateNote: (clipId, noteId, patch) => {
+    updateNote: (clipId, noteId, patch) => get().updateNotes(clipId, new Map([[noteId, patch]])),
+    updateNotes: (clipId, patches) => {
       const project = get().project;
-      commitProject(
+      const committed = commitProject(
         mapTracks(project, (t) => ({
           ...t,
           clips: t.clips.map((c) =>
             c.id === clipId
-              ? { ...c, notes: (c.notes ?? []).map((n) => (n.id === noteId ? { ...n, ...patch } : n)) }
+              ? fitClipToNotes({
+                  ...c,
+                  notes: (c.notes ?? []).map((note) => {
+                    const patch = patches.get(note.id);
+                    return patch ? { ...note, ...patch } : note;
+                  }),
+                })
               : c,
           ),
         })),
       );
+      if (!committed) return;
       const track = trackOfClip(project, clipId);
-      const moved = track?.clips
-        .find((c) => c.id === clipId)
-        ?.notes?.find((n) => n.id === noteId);
-      const pitch = patch.pitch ?? moved?.pitch ?? 0;
-      const startBeat = patch.startBeat ?? moved?.startBeat ?? 0;
-      publishAppEvent({
-        type: 'note.moved',
-        payload: {
-          pitch,
-          startBeat,
-          trackId: track?.id ?? '',
-          trackName: track?.name ?? '',
-        },
-      });
+      const notes = track?.clips.find((c) => c.id === clipId)?.notes ?? [];
+      for (const [id, patch] of patches) {
+        const moved = notes.find((note) => note.id === id);
+        publishAppEvent({
+          type: 'note.moved',
+          payload: {
+            pitch: patch.pitch ?? moved?.pitch ?? 0,
+            startBeat: patch.startBeat ?? moved?.startBeat ?? 0,
+            trackId: track?.id ?? '',
+            trackName: track?.name ?? '',
+          },
+        });
+      }
     },
     removeNote: (clipId, noteId) => {
       const project = get().project;
@@ -583,7 +629,7 @@ export const useStore = create<StoreState>((set, get) => {
       const track = trackOfClip(project, clipId);
       const prevEvents = track?.clips.find((c) => c.id === clipId)?.drumEvents ?? [];
       const wasActive = prevEvents.some((e) => e.lane === lane && e.stepIndex === stepIndex);
-      commitProject(
+      const committed = commitProject(
         mapTracks(project, (t) => ({
           ...t,
           clips: t.clips.map((c) => {
@@ -603,6 +649,7 @@ export const useStore = create<StoreState>((set, get) => {
           }),
         })),
       );
+      if (!committed) return;
       publishAppEvent({
         type: 'drum.stepToggled',
         payload: { lane, stepIndex, active: !wasActive, trackId: track?.id ?? '' },
@@ -653,6 +700,8 @@ export const useStore = create<StoreState>((set, get) => {
     },
     toggleChordToneHighlight: () =>
       set((s) => ({ editor: { ...s.editor, chordToneHighlight: !s.editor.chordToneHighlight } })),
+    togglePreviewOnPlace: () =>
+      set((s) => ({ editor: { ...s.editor, previewOnPlace: !s.editor.previewOnPlace } })),
     setZoomX: (zoomX) => set((s) => ({ editor: { ...s.editor, zoomX } })),
     toggleTutorialPanel: () => set((s) => ({ tutorialPanelOpen: !s.tutorialPanelOpen })),
     setInspectorContent: (content) => set({ inspector: { content } }),
@@ -773,6 +822,7 @@ export const useStore = create<StoreState>((set, get) => {
       const project = createDefaultProject(title);
       set({
         project,
+        projectOpenVersion: get().projectOpenVersion + 1,
         editor: makeEditor(project),
         transport: makeTransport(),
         save: makeIdleSave(),
@@ -792,6 +842,7 @@ export const useStore = create<StoreState>((set, get) => {
       clearScheduledSave();
       set({
         project: loaded,
+        projectOpenVersion: get().projectOpenVersion + 1,
         editor: makeEditor(loaded),
         transport: makeTransport(),
         save: makeSavedState(loaded.updatedAt),
@@ -805,6 +856,7 @@ export const useStore = create<StoreState>((set, get) => {
       clearScheduledSave();
       set({
         project,
+        projectOpenVersion: get().projectOpenVersion + 1,
         editor: makeEditor(project),
         transport: makeTransport(),
         save: makeIdleSave(),
@@ -822,6 +874,7 @@ export const useStore = create<StoreState>((set, get) => {
       clearScheduledSave();
       set({
         project,
+        projectOpenVersion: get().projectOpenVersion + 1,
         editor: makeEditor(project),
         transport: makeTransport(),
         save: makeIdleSave(),
@@ -840,6 +893,7 @@ export const useStore = create<StoreState>((set, get) => {
         const fallback = savedFallback ?? createDefaultProject();
         set({
           project: fallback,
+          projectOpenVersion: get().projectOpenVersion + 1,
           editor: makeEditor(fallback),
           transport: makeTransport(),
           save: savedFallback ? makeSavedState(savedFallback.updatedAt) : makeIdleSave(),

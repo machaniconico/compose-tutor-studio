@@ -15,6 +15,7 @@ vi.mock('../src/audio/engine', () => ({
     isInitialized: true,
     now: () => clock.now,
     ensureContext: async () => ({ context: { currentTime: clock.now }, master: {} }),
+    requireMaster: () => ({}),
   }),
 }));
 vi.mock('../src/audio/graph', () => ({
@@ -158,7 +159,7 @@ describe('song length and meter changes during playback', () => {
     expect(useStore.getState().transport.positionBeat).toBeCloseTo(8.5);
     const original = firstSynths.find((s) => s.noteOn.mock.calls.length > 0);
     expect(original?.noteOn).toHaveBeenCalledTimes(1);
-    expect(original?.noteOn).toHaveBeenCalledWith(60, 0.5, 2, 100);
+    expect(original?.noteOn).toHaveBeenCalledWith(60, 0.5, 2, 100, { cutAtEnd: undefined });
 
     useStore.getState().setTimeSignature([3, 4]);
     await vi.waitFor(() => expect(vi.getTimerCount()).toBe(2));
@@ -171,7 +172,7 @@ describe('song length and meter changes during playback', () => {
     expect(rebuilt.length).toBeGreaterThan(0);
     const resumed = rebuilt.find((s) => s.noteOn.mock.calls.length > 0);
     expect(resumed?.noteOn).toHaveBeenCalledTimes(1);
-    expect(resumed?.noteOn).toHaveBeenCalledWith(60, 0.75, 1.75, 100);
+    expect(resumed?.noteOn).toHaveBeenCalledWith(60, 0.75, 1.75, 100, { cutAtEnd: undefined });
 
     // Playing on past the note's end does not start it a third time.
     advanceTo(12.5, 8.5);

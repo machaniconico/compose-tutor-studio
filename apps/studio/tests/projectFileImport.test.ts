@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { buildScheduleEvents } from '../src/audio/events';
+import { renderScheduleEvents } from '../src/audio/wav';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { parseProjectFileImport } from '../src/features/export/projectFileImport';
 
@@ -29,8 +31,42 @@ describe('project file import parsing', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.project.schemaVersion).toBe(2);
+      expect(result.project.schemaVersion).toBe(3);
     }
+  });
+
+  it.each([
+    { lengthBeats: 4, durationBeats: 1 },
+    { lengthBeats: 128, durationBeats: 1 / 1024, contentLengthBeats: 1 / 1024 },
+    { lengthBeats: 2 ** -35, durationBeats: 2 ** -35 },
+  ])('opens a saved v2 loop of $lengthBeats beats and plays its single note once', ({
+    lengthBeats, durationBeats, contentLengthBeats,
+  }) => {
+    const mix = { volume: 1, pan: 0, mute: false, solo: false, effects: [] };
+    const raw = JSON.stringify({
+      id: 'legacy-loop', schemaVersion: 2, title: '古いループ', bpm: 120,
+      key: 'C', scale: 'major', timeSignature: [4, 4], lengthBars: 32,
+      tracks: [
+        {
+          ...mix, id: 'keys', name: 'Keys', type: 'instrument',
+          instrument: { preset: 'warmPad' },
+          clips: [{
+            id: 'clip', trackId: 'keys', type: 'midi', startBeat: 0,
+            lengthBeats, loop: true, contentLengthBeats,
+            notes: [{ id: 'note', pitch: 60, startBeat: 0, durationBeats, velocity: 100 }],
+          }],
+        },
+        { ...mix, id: 'master', name: 'Master', type: 'master', clips: [] },
+      ],
+      chordTrack: [], sections: [],
+      createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z',
+    });
+    const result = parseProjectFileImport(raw);
+    expect(result).toMatchObject({ ok: true, project: { schemaVersion: 3 } });
+    if (!result.ok) return;
+    const expected = [{ beat: 0, payload: { kind: 'note', pitch: 60, durationBeats } }];
+    expect(buildScheduleEvents(result.project)).toMatchObject(expected);
+    expect(renderScheduleEvents(result.project)).toMatchObject(expected);
   });
 
   it('rejects invalid JSON with a beginner-facing message', () => {

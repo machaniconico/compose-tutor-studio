@@ -365,6 +365,7 @@ describe('projectToMidi loop unrolling', () => {
   it('repeats a looped clip across its length', () => {
     const project = tinyProject();
     // Replace the instrument clip with a 1-beat looped pattern over 4 beats.
+    // The loop period is contentLengthBeats (expandClip), not the notes' extent.
     project.tracks[0]!.clips = [
       {
         id: 'loop',
@@ -372,13 +373,14 @@ describe('projectToMidi loop unrolling', () => {
         type: 'midi',
         startBeat: 0,
         lengthBeats: 4,
+        contentLengthBeats: 1,
         loop: true,
         notes: [{ id: 'lp', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
       },
     ];
     const parsed = parseSmf(projectToMidi(project));
     const ons = parsed.tracks[1]!.events.filter((e) => e.type === 'noteOn' && e.pitch === 60);
-    // Pattern length 1 beat, clip length 4 -> 4 repetitions at ticks 0,480,960,1440
+    // Period 1 beat, clip length 4 -> 4 repetitions at ticks 0,480,960,1440
     expect(ons.map((e) => e.tick)).toEqual([0, 480, 960, 1440]);
   });
 });

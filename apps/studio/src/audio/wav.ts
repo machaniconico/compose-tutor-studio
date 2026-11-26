@@ -23,15 +23,27 @@ export const RENDER_CHANNELS = 2;
 export const RENDER_TAIL_SECONDS = 1;
 
 /**
- * Total render length in seconds: the song plus a tail long enough for the
- * first repeat of the longest enabled delay, so the export does not cut off
- * echoes that live playback lets ring past the last bar.
+ * The beat the sound of the song ends, before any release or echo: the song
+ * end, or later when a note that starts before the song end lasts past it.
+ * Such a note sounds its full length on every path (live, WAV and MIDI).
  */
-export function renderLengthSeconds(project: Project): number {
+export function songSoundEndBeat(project: Project): number {
   const bpb = beatsPerBarOf(project.timeSignature);
-  const beatsPerBar = bpb > 0 ? bpb : 4;
-  const lengthBeats = projectLengthBeats(project.lengthBars, beatsPerBar);
-  const songSeconds = lengthBeats * secondsPerBeat(project.bpm);
+  const lengthBeats = projectLengthBeats(project.lengthBars, bpb > 0 ? bpb : 4);
+  let end = lengthBeats;
+  for (const event of buildScheduleEvents(project)) {
+    const payload = event.payload as SchedulePayload;
+    if (payload.kind !== 'note' || event.beat >= lengthBeats) continue;
+    end = Math.max(end, event.beat + payload.durationBeats);
+  }
+  return end;
+}
+
+/**
+ * Seconds kept after `songSoundEndBeat` for releases and echoes: the first
+ * repeat of the longest enabled delay plus `RENDER_TAIL_SECONDS`.
+ */
+export function songTailSeconds(project: Project): number {
   let longestDelay = 0;
   for (const track of project.tracks) {
     for (const effect of enabledSupportedEffects(track.effects)) {
@@ -39,7 +51,16 @@ export function renderLengthSeconds(project: Project): number {
       longestDelay = Math.max(longestDelay, delaySettings(effect).timeSeconds);
     }
   }
-  return songSeconds + longestDelay + RENDER_TAIL_SECONDS;
+  return longestDelay + RENDER_TAIL_SECONDS;
+}
+
+/**
+ * Total render length in seconds: until the last note that starts in the song
+ * has ended (`songSoundEndBeat`), plus the tail (`songTailSeconds`), so the
+ * export does not cut off that note, its release or the echoes.
+ */
+export function renderLengthSeconds(project: Project): number {
+  return songSoundEndBeat(project) * secondsPerBeat(project.bpm) + songTailSeconds(project);
 }
 
 /**
@@ -171,7 +192,9 @@ export async function renderProjectToWav(project: Project): Promise<Blob> {
     if (payload.kind === 'note') {
       const synth = synths.get(payload.trackId);
       if (synth) {
-        synth.noteOn(payload.pitch, time, payload.durationBeats * spb, payload.velocity);
+        synth.noteOn(payload.pitch, time, payload.durationBeats * spb, payload.velocity, {
+          cutAtEnd: payload.cut,
+        });
       }
     } else {
       const drum = drums.get(payload.trackId);

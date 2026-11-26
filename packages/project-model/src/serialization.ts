@@ -4,6 +4,7 @@
 // is run through the registered migration functions in sequence until it
 // reaches CURRENT_SCHEMA_VERSION.
 
+import { CLIP_EDGE_TOLERANCE_BEATS } from './clipExpand';
 import { CURRENT_SCHEMA_VERSION } from './factories';
 import { beatsPerBar } from './time';
 import type { Project, TrackRole } from './types';
@@ -11,6 +12,8 @@ import type { Project, TrackRole } from './types';
 const UTF8_BOM = '\uFEFF';
 const DEFAULT_STEPS_PER_BAR = 16;
 const DEFAULT_DRUM_BEATS_PER_BAR = 4;
+// Even an event shorter than the clip tolerance used to sound once.
+const MIN_LEGACY_EVENT_ROOM_BEATS = 2 * CLIP_EDGE_TOLERANCE_BEATS;
 
 /** Track-name words that imply a role, matched as whole words in any case. */
 const ROLE_NAME_PATTERNS: Array<[RegExp, TrackRole]> = [
@@ -92,22 +95,41 @@ function regridLegacySection(section: Record<string, unknown>, scale: number): R
   return { ...section, startBar, lengthBars: Math.max(1, endBar - startBar) };
 }
 
-/** End of the clip's last note or drum step, in beats from the clip start. */
-function clipContentEnd(clip: Record<string, unknown>, beatsPerBar: number): number {
+/** Clip length needed to preserve every legacy note. */
+function clipNoteEnd(clip: Record<string, unknown>): number {
+  return records(clip.notes).reduce((end, note) => {
+    const noteEnd = Number(note.startBeat) + Math.max(Number(note.durationBeats), MIN_LEGACY_EVENT_ROOM_BEATS);
+    return Number.isFinite(noteEnd) ? Math.max(end, noteEnd) : end;
+  }, 0);
+}
+
+/** Keep the full content of a clip that used to play beyond its saved length. */
+function fitLegacyClipLength(clip: Record<string, unknown>, beatsPerBar: number): Record<string, unknown> {
+  if (typeof clip.lengthBeats !== 'number') return clip;
   const stepsPerBar =
     typeof clip.stepsPerBar === 'number' && clip.stepsPerBar > 0
       ? clip.stepsPerBar
       : DEFAULT_STEPS_PER_BAR;
-  const noteEnds = records(clip.notes).map(
-    (note) => Number(note.startBeat) + Number(note.durationBeats),
-  );
-  const drumEnds = records(clip.drumEvents).map(
-    (drum) => (Number(drum.stepIndex) + 1) * (beatsPerBar / stepsPerBar),
-  );
-  // reduce, not a spread: a spread of a very large clip overflows the call stack.
-  return [...noteEnds, ...drumEnds]
-    .filter(Number.isFinite)
-    .reduce((end, value) => Math.max(end, value), 0);
+  const lengthBeats = records(clip.drumEvents).reduce((end, drum) => {
+    const stepLength = beatsPerBar / stepsPerBar;
+    const stepEnd = Number(drum.stepIndex) * stepLength + Math.max(stepLength, MIN_LEGACY_EVENT_ROOM_BEATS);
+    return Number.isFinite(stepEnd) ? Math.max(end, stepEnd) : end;
+  }, Math.max(clip.lengthBeats, clipNoteEnd(clip)));
+  return { ...clip, lengthBeats };
+}
+
+/** Prioritize legacy live/WAV timing, and retain settings that playback used to ignore. */
+function preserveLegacyClipPlayback(raw: Record<string, unknown>, bpb: number): Record<string, unknown> {
+  const { aliasOf, contentLengthBeats, ...clip } = raw;
+  if (clip.loop === true || aliasOf !== undefined || contentLengthBeats !== undefined) {
+    clip.legacyClipSettings = {
+      loop: clip.loop === true,
+      ...(aliasOf !== undefined ? { aliasOf } : {}),
+      ...(contentLengthBeats !== undefined ? { contentLengthBeats } : {}),
+    };
+    clip.loop = false;
+  }
+  return fitLegacyClipLength(clip, bpb);
 }
 
 function inferTrackRole(track: Record<string, unknown>): TrackRole | undefined {
@@ -137,10 +159,7 @@ function migrateV1ToV2(project: Record<string, unknown>): Record<string, unknown
     const clips = Array.isArray(track.clips)
       ? track.clips.map((raw: unknown) => {
           if (!isRecord(raw)) return raw;
-          const clip = regridLegacyDrumClip(raw, den);
-          return typeof clip.lengthBeats === 'number'
-            ? { ...clip, lengthBeats: Math.max(clip.lengthBeats, clipContentEnd(clip, bpb)) }
-            : clip;
+          return preserveLegacyClipPlayback(regridLegacyDrumClip(raw, den), bpb);
         })
       : track.clips;
     return {
@@ -160,12 +179,36 @@ function migrateV1ToV2(project: Record<string, unknown>): Record<string, unknown
   return { ...project, tracks, sections, lengthBars: legacyBarsToV2(project.lengthBars, scale) };
 }
 
+/** v2 -> v3. Keep playing each clip's own content once, as v2 live playback and WAV did. */
+function migrateV2ToV3(project: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(project.tracks)) return { ...project };
+  const bpb = beatsPerBar(timeSignatureOf(project.timeSignature));
+  const tracks = project.tracks.map((track: unknown) => {
+    if (!isRecord(track) || !Array.isArray(track.clips)) return track;
+    // v2 synthesized notes on audio and bus tracks too. Keep their preset,
+    // routing, mixer and effects on the same track.
+    const type = (track.type === 'bus' || track.type === 'audio') &&
+      track.clips.some((clip: unknown) => isRecord(clip) && records(clip.notes).length > 0)
+      ? 'instrument'
+      : track.type;
+    const clips = track.clips.map((raw: unknown) => {
+      if (!isRecord(raw)) return raw;
+      return preserveLegacyClipPlayback(raw, bpb);
+    });
+    return { ...track, type, clips };
+  });
+  return { ...project, tracks };
+}
+
 /**
  * Registry of migrations keyed by source version. New migrations should be
  * appended here as `{ from: N, to: N + 1, migrate }` when the schema changes.
  * Optional fields can be added without a new version.
  */
-export const MIGRATIONS: Migration[] = [{ from: 1, to: 2, migrate: migrateV1ToV2 }];
+export const MIGRATIONS: Migration[] = [
+  { from: 1, to: 2, migrate: migrateV1ToV2 },
+  { from: 2, to: 3, migrate: migrateV2ToV3 },
+];
 
 /** Serialize a project to a pretty-printed JSON string. */
 export function serializeProject(project: Project): string {

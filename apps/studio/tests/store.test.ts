@@ -1,10 +1,10 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { validateProject } from '@cts/project-model';
+import { expandClip, validateProject, type Clip } from '@cts/project-model';
 import { installLocalStorage, MemoryStorage } from './localStorageStub';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { createSampleProject, SAMPLE_PROJECT_TITLE } from '../src/state/sampleProject';
 import { isInScale, PITCH_CLASS } from '../src/state/music';
-import { projectKey } from '../src/state/persistence';
+import { loadProject, projectKey, saveProject } from '../src/state/persistence';
 
 // Audio is mocked so the bridge's start beat can be observed without Web Audio.
 const schedulerStarts = vi.hoisted(() => [] as number[]);
@@ -175,6 +175,71 @@ describe('song length (setLengthBars)', () => {
   const noteStarts = () =>
     useStore.getState().project.tracks[0]?.clips[0]?.notes?.map((n) => n.startBeat) ?? [];
 
+  it('keeps the sound of a surviving link when shortening removes its relay', () => {
+    const seeded = useStore.getState().project;
+    const track = seeded.tracks[0]!;
+    const source: Clip = {
+      ...track.clips[0]!, id: 'source', startBeat: 1, lengthBeats: 1,
+      notes: [{ id: 'linked-note', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    const relay: Clip = { ...source, id: 'relay', startBeat: 8, aliasOf: source.id, notes: [] };
+    const link: Clip = { ...relay, id: 'link', startBeat: 0, aliasOf: relay.id };
+    const project = { ...seeded, chordTrack: [], sections: [], tracks: [{ ...track, clips: [link, relay, source] }] };
+    useStore.setState({ project });
+    expect(expandClip(link, [link, relay, source]).notes.map((n) => n.startBeat)).toEqual([0]);
+
+    expect(useStore.getState().setLengthBars(1)).toMatch(/ノート 1 個/);
+    expect(useStore.getState().project).toBe(project);
+    expect(useStore.getState().setLengthBars(1, true)).toBeNull();
+
+    const clips = useStore.getState().project.tracks[0]!.clips;
+    expect(clips.map((clip) => clip.id)).toEqual(['link', 'source']);
+    expect(clips[0]!.aliasOf).toBe(source.id);
+    expect(expandClip(clips[0]!, clips).notes.map((n) => n.startBeat)).toEqual([0]);
+    useStore.getState().undo();
+    expect(useStore.getState().project).toBe(project);
+  });
+
+  it('warns when trimming a retained source removes sound from a link inside the new end', () => {
+    const seeded = useStore.getState().project;
+    const track = seeded.tracks[0]!;
+    const source: Clip = {
+      ...track.clips[0]!, id: 'source', startBeat: 3, lengthBeats: 2,
+      notes: [{ id: 'linked-note', pitch: 60, startBeat: 1, durationBeats: 1, velocity: 100 }],
+    };
+    const link: Clip = { ...source, id: 'link', startBeat: 0, aliasOf: source.id, notes: [] };
+    const project = { ...seeded, chordTrack: [], sections: [], tracks: [{ ...track, clips: [link, source] }] };
+    useStore.setState({ project });
+
+    const warning = useStore.getState().setLengthBars(1);
+    expect(warning).toMatch(/リンク.*ノート 1 個/);
+    expect(useStore.getState().project).toBe(project);
+    expect(useStore.getState().setLengthBars(1, true)).toBeNull();
+    const clips = useStore.getState().project.tracks[0]!.clips;
+    expect(expandClip(clips[0]!, clips).notes).toEqual([]);
+  });
+
+  it('copies the pattern into both retained links if their source is deleted', () => {
+    const seeded = useStore.getState().project;
+    const track = seeded.tracks[0]!;
+    const source: Clip = {
+      ...track.clips[0]!, id: 'source', startBeat: 8, lengthBeats: 2,
+      notes: [{ id: 'source-note', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    const link: Clip = { ...source, id: 'link', startBeat: 0, aliasOf: source.id, notes: [] };
+    const second: Clip = { ...link, id: 'second', startBeat: 2, aliasOf: link.id };
+    const project = { ...seeded, chordTrack: [], sections: [], tracks: [{ ...track, clips: [link, second, source] }] };
+    useStore.setState({ project });
+
+    expect(useStore.getState().setLengthBars(1)).toMatch(/ノート 1 個/);
+    expect(useStore.getState().setLengthBars(1, true)).toBeNull();
+    const shortened = useStore.getState().project;
+    const clips = shortened.tracks[0]!.clips;
+    expect(clips.map((clip) => clip.id)).toEqual(['link', 'second']);
+    expect(clips.flatMap((clip) => expandClip(clip, clips).notes.map((n) => n.startBeat))).toEqual([0, 2]);
+    expect(validateProject(shortened).errors).toEqual([]);
+  });
+
   it('shortens freely when nothing lies past the new end', () => {
     expect(useStore.getState().setLengthBars(16)).toBeNull();
     expect(useStore.getState().setLengthBars(8)).toBeNull();
@@ -248,6 +313,50 @@ describe('song length (setLengthBars)', () => {
 });
 
 describe('time signature (setTimeSignature)', () => {
+  it('asks before removing a repeating drum hit rounded onto the loop boundary', () => {
+    const seeded = useStore.getState().project;
+    const track = seeded.tracks.find((t) => t.type === 'drum')!;
+    const clip: Clip = {
+      ...track.clips[0]!, lengthBeats: 4, loop: true, contentLengthBeats: 1, stepsPerBar: 32,
+      drumEvents: [{ id: 'kick', lane: 'kick', stepIndex: 7, velocity: 100 }],
+    };
+    const project = { ...seeded, tracks: [{ ...track, clips: [clip] }] };
+    useStore.setState({ project });
+    expect(expandClip(clip, [clip]).drumHits).toHaveLength(4);
+
+    const first = useStore.getState().setTimeSignature([3, 4]);
+    expect(first.confirm).toMatch(/ドラムの 1 個.*ループ/);
+    expect(useStore.getState().project).toBe(project);
+    const second = useStore.getState().setTimeSignature([3, 4], true);
+    expect(second.warnings.some((warning) => warning.includes('ループ'))).toBe(true);
+    expect(useStore.getState().project.tracks[0]!.clips[0]!.drumEvents).toEqual([]);
+    useStore.getState().undo();
+    expect(useStore.getState().project).toBe(project);
+  });
+
+  it('asks before rounding a shared hit out of the last repeat while keeping the earlier hits', () => {
+    const seeded = useStore.getState().project;
+    const track = seeded.tracks.find((t) => t.type === 'drum')!;
+    const source: Clip = {
+      ...track.clips[0]!, id: 'drum-source', lengthBeats: 2, stepsPerBar: 32,
+      drumEvents: [{ id: 'kick', lane: 'kick', stepIndex: 7, velocity: 100 }],
+    };
+    const link: Clip = {
+      ...source, id: 'drum-link', startBeat: 4, lengthBeats: 1.95,
+      aliasOf: source.id, loop: true, contentLengthBeats: 1.05, drumEvents: [],
+    };
+    const project = { ...seeded, tracks: [{ ...track, clips: [source, link] }] };
+    useStore.setState({ project });
+    expect(expandClip(link, [source, link]).drumHits).toHaveLength(2);
+
+    expect(useStore.getState().setTimeSignature([3, 4]).confirm).toMatch(/ドラムの 1 個/);
+    expect(useStore.getState().project).toBe(project);
+    expect(useStore.getState().setTimeSignature([3, 4], true).confirm).toBeNull();
+    const clips = useStore.getState().project.tracks[0]!.clips;
+    expect(expandClip(clips[0]!, clips, 3).drumHits.map((hit) => hit.beat)).toEqual([1]);
+    expect(expandClip(clips[1]!, clips, 3).drumHits.map((hit) => hit.beat)).toEqual([5]);
+  });
+
   it('switches 4/4 -> 3/4 keeping beats, rounding the length up, and undoes in one step', () => {
     const chordStarts = useStore.getState().project.chordTrack.map((c) => c.startBeat);
     const { confirm, warnings } = useStore.getState().setTimeSignature([3, 4]);
@@ -382,6 +491,51 @@ describe('chord actions', () => {
 });
 
 describe('note actions', () => {
+  it('rejects a loop edit above the sound limit and reopens the last successful edit', () => {
+    const state = useStore.getState();
+    const track = state.project.tracks.find((candidate) => candidate.type === 'instrument')!;
+    const clip = {
+      ...track.clips[0]!,
+      lengthBeats: 128,
+      loop: true,
+      contentLengthBeats: 1 / 512,
+      notes: [{ id: 'original', pitch: 60, startBeat: 0, durationBeats: 1 / 512, velocity: 100 }],
+    };
+    state.applyProjectChange((project) => ({
+      ...project,
+      lengthBars: 32,
+      tracks: project.tracks.map((candidate) =>
+        candidate.id === track.id ? { ...candidate, clips: [clip] } : candidate,
+      ),
+    }));
+    expect(state.flushPendingSave()).toBe(true);
+
+    state.updateNote(clip.id, 'original', { pitch: 64 });
+    const edited = useStore.getState();
+    state.addNote(clip.id, { id: 'extra', pitch: 67, startBeat: 0, durationBeats: 1 / 512, velocity: 100 });
+    expect(useStore.getState().project).toBe(edited.project);
+    expect(useStore.getState().past).toBe(edited.past);
+    expect(state.flushPendingSave()).toBe(true);
+    expect(loadProject(edited.project.id)).toEqual(edited.project);
+  });
+
+  it('refuses to save an oversized loop over the current saved project', () => {
+    const storage = new MemoryStorage();
+    const project = createDefaultProject('ループ');
+    expect(saveProject(project, storage)).toBe(true);
+    const clip = project.tracks.find((track) => track.type === 'instrument')!.clips[0]!;
+    clip.lengthBeats = 128;
+    clip.loop = true;
+    clip.contentLengthBeats = 1 / 512;
+    clip.notes = [
+      { id: 'a', pitch: 60, startBeat: 0, durationBeats: 1 / 512, velocity: 100 },
+      { id: 'b', pitch: 64, startBeat: 0, durationBeats: 1 / 512, velocity: 100 },
+    ];
+    const saved = storage.getItem(projectKey(project.id));
+    expect(saveProject(project, storage)).toBe(false);
+    expect(storage.getItem(projectKey(project.id))).toBe(saved);
+  });
+
   it('adds, updates, and removes notes on a clip', () => {
     const clipId = useStore.getState().project.tracks[0]?.clips[0]?.id ?? '';
     useStore.getState().addNote(clipId, { pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 });
@@ -395,6 +549,36 @@ describe('note actions', () => {
 
     useStore.getState().removeNote(clipId, noteId);
     expect(clip()?.notes?.length).toBe(0);
+  });
+
+  it('lengthens a 4-beat clip to a note placed past its end, so playback sounds it, in one undo step', async () => {
+    const { buildScheduleEvents } = await import('../src/audio/events');
+    const clipId = useStore.getState().project.tracks[0]?.clips[0]?.id ?? '';
+    useStore.getState().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t, i) =>
+        i === 0 ? { ...t, clips: t.clips.map((c) => ({ ...c, startBeat: 0, lengthBeats: 4, loop: false, notes: [] })) } : t,
+      ),
+    }));
+    const clip = () => useStore.getState().project.tracks[0]?.clips[0];
+
+    useStore.getState().addNote(clipId, { pitch: 60, startBeat: 5, durationBeats: 1, velocity: 100 });
+
+    expect(clip()?.lengthBeats).toBe(6);
+    const trackId = useStore.getState().project.tracks[0]?.id;
+    const beats = buildScheduleEvents(useStore.getState().project)
+      .filter((e) => (e.payload as { trackId: string }).trackId === trackId)
+      .map((e) => e.beat);
+    expect(beats).toEqual([5]);
+
+    const noteId = clip()?.notes?.[0]?.id ?? '';
+    useStore.getState().updateNote(clipId, noteId, { startBeat: 7 });
+    expect(clip()?.lengthBeats).toBe(8);
+
+    useStore.getState().undo();
+    useStore.getState().undo();
+    expect(clip()?.lengthBeats).toBe(4);
+    expect(clip()?.notes).toEqual([]);
   });
 });
 

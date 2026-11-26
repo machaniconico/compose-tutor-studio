@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ParsedMidi } from '@cts/midi-io';
 import { checkProjectPredicate } from '@cts/tutorial-engine';
+import { expandClip } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 
 // The store reads localStorage at module-import time, so install the stub
@@ -387,6 +388,43 @@ describe('generateBassIntoClip', () => {
       .find((c) => c.id === clipId)?.notes?.length ?? 0;
     expect(secondCount).toBe(firstCount);
   });
+});
+
+describe('generation into a short clip (every generated note sounds)', () => {
+  function shortenClip(clipId: string): void {
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => (c.id === clipId ? { ...c, lengthBeats: 4, loop: false } : c)),
+      })),
+    }));
+  }
+
+  function soundedStarts(clipId: string): number[] {
+    const project = useStore.getState().project;
+    const all = project.tracks.flatMap((t) => t.clips);
+    const clip = all.find((c) => c.id === clipId)!;
+    return expandClip(clip, all).notes.map((n) => n.startBeat - clip.startBeat);
+  }
+
+  for (const [label, clipIdOf, generate] of [
+    ['bass', bassClipId, (id: string) => actions.generateBassIntoClip(id, 'rootOnly')],
+    ['melody', melodyClipId, (id: string) => actions.generateMelodyIntoClip(id, 1)],
+  ] as const) {
+    it(`${label}: a 4-beat clip is lengthened so all notes sound, and one undo restores notes and length`, () => {
+      const clipId = clipIdOf();
+      shortenClip(clipId);
+      const before = useStore.getState().project;
+
+      const generated = generate(clipId);
+
+      expect(generated.some((n) => n.startBeat + n.durationBeats > 4)).toBe(true);
+      expect(soundedStarts(clipId)).toEqual(generated.map((n) => n.startBeat));
+      useStore.getState().undo();
+      expect(useStore.getState().project).toEqual(before);
+    });
+  }
 });
 
 describe('generateMelodyIntoClip', () => {

@@ -1,11 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Clip, Project, Track } from '@cts/project-model';
+import { deserializeProject, expandClip, serializeProject, validateProject } from '@cts/project-model';
+import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
+import { renderScheduleEvents } from '../src/audio/wav';
 import {
   buildScheduleEvents,
   drumStepToBeat,
   type DrumScheduleEvent,
   type NoteScheduleEvent,
 } from '../src/audio/events';
+
+// Pass-through spy: playback must expand clips through expandClip (US-007).
+vi.mock('@cts/project-model', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@cts/project-model')>();
+  return { ...actual, expandClip: vi.fn(actual.expandClip) };
+});
 
 describe('drumStepToBeat', () => {
   it('places step 0 at the clip start', () => {
@@ -86,6 +95,35 @@ function project(tracks: Track[]): Project {
 }
 
 describe('buildScheduleEvents', () => {
+  it.each(['bus', 'audio'] as const)('keeps notes from a v2 %s track in live playback and WAV', (type) => {
+    const clip: Clip = {
+      id: 'c-bus',
+      trackId: 'bus',
+      type: 'midi',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      notes: [{ id: 'n', pitch: 60, startBeat: 1, durationBeats: 1, velocity: 100 }],
+    };
+    const bus: Track = {
+      ...instrumentTrack('bus', 'roundBass', clip),
+      type,
+      pan: -0.4,
+      solo: true,
+      effects: [{ id: 'fx-bus', type: 'delay', enabled: true, params: { timeSeconds: 0.25 } }],
+    };
+    const legacy = { ...project([bus]), schemaVersion: 2 };
+    expect(validateProject(legacy).errors.filter((e) => e.path !== 'schemaVersion')).toEqual([]);
+    const migrated = deserializeProject(serializeProject(legacy));
+    expect(validateProject(migrated).errors).toEqual([]);
+    const expected = {
+      kind: 'note', trackId: bus.id, preset: 'roundBass', pitch: 60, durationBeats: 1, velocity: 100,
+    };
+    expect(buildScheduleEvents(migrated)).toEqual([{ beat: 1, payload: expected }]);
+    expect(renderScheduleEvents(migrated)).toMatchObject([{ time: 0.5, payload: expected }]);
+    expect(migrated.tracks[0]).toMatchObject({ ...bus, type: 'instrument' });
+  });
+
   it('emits note events at clip.startBeat + note.startBeat with the track preset', () => {
     const clip: Clip = {
       id: 'c1',
@@ -180,5 +218,119 @@ describe('buildScheduleEvents', () => {
       project([instrumentTrack('mel', 'warmPad', emptyClip), master]),
     );
     expect(events).toEqual([]);
+  });
+});
+
+describe('buildScheduleEvents uses expandClip', () => {
+  it('expands every clip through expandClip, honoring length and links', () => {
+    const source: Clip = {
+      id: 'src',
+      trackId: 'mel',
+      type: 'midi',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      notes: [
+        { id: 'n1', pitch: 60, startBeat: 3.5, durationBeats: 2, velocity: 100 },
+        { id: 'n2', pitch: 62, startBeat: 5, durationBeats: 1, velocity: 100 },
+      ],
+    };
+    const linked: Clip = { ...source, id: 'link', startBeat: 8, aliasOf: 'src', notes: [] };
+    const track = instrumentTrack('mel', 'warmPad', source);
+    track.clips.push(linked);
+    const spy = vi.mocked(expandClip);
+    spy.mockClear();
+
+    const events = buildScheduleEvents(project([track]));
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls.map(([clip]) => clip.id)).toEqual(['src', 'link']);
+    expect(events.map((e) => [e.beat, (e.payload as NoteScheduleEvent).durationBeats])).toEqual([
+      [3.5, 0.5],
+      [11.5, 0.5],
+    ]);
+  });
+});
+
+describe('live playback and MIDI export expand the same project the same way', () => {
+  it('calls expandClip for the same clips and sounds the same beats on both paths', () => {
+    // One project for both paths: a looping drum-type clip on an instrument
+    // track that holds notes, a midi-type clip linked to it, a note past the
+    // clip end, and a 0.3-beat period whose 4th repeat lands on the end only
+    // by rounding.
+    const looped: Clip = {
+      id: 'looped',
+      trackId: 'mel',
+      type: 'drum',
+      startBeat: 0,
+      lengthBeats: 4,
+      contentLengthBeats: 2,
+      loop: true,
+      notes: [
+        { id: 'a', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 },
+        { id: 'late', pitch: 62, startBeat: 5, durationBeats: 1, velocity: 100 },
+      ],
+    };
+    const linked: Clip = { id: 'linked', trackId: 'mel', type: 'midi', startBeat: 4, lengthBeats: 2, loop: false, aliasOf: 'looped' };
+    const fractional: Clip = {
+      id: 'fractional',
+      trackId: 'mel',
+      type: 'midi',
+      startBeat: 8,
+      lengthBeats: 1,
+      contentLengthBeats: 0.3,
+      loop: true,
+      notes: [{ id: 'f', pitch: 64, startBeat: 0.1, durationBeats: 0.1, velocity: 100 }],
+    };
+    const track = instrumentTrack('mel', 'warmPad', looped);
+    track.clips.push(linked, fractional);
+    const shared = project([track]);
+    const spy = vi.mocked(expandClip);
+
+    spy.mockClear();
+    const live = buildScheduleEvents(shared);
+    const liveCalls = spy.mock.calls.map(([clip]) => clip.id);
+    spy.mockClear();
+    const midi = parseMidi(exportProjectToMidi(shared));
+    const midiCalls = spy.mock.calls.map(([clip]) => clip.id);
+
+    expect(liveCalls).toEqual(['looped', 'linked', 'fractional']);
+    expect(midiCalls).toEqual(liveCalls);
+    const liveNotes = live
+      .map((e) => [e.beat, (e.payload as NoteScheduleEvent).pitch] as const)
+      .sort((x, y) => x[0] - y[0]);
+    const midiNotes = midi.tracks
+      .flatMap((t) => t.notes)
+      .map((n) => [n.startBeat, n.pitch] as const)
+      .sort((x, y) => x[0] - y[0]);
+    expect(midiNotes).toHaveLength(liveNotes.length);
+    midiNotes.forEach(([beat, pitch], i) => {
+      expect(beat).toBeCloseTo(liveNotes[i]![0], 2);
+      expect(pitch).toBe(liveNotes[i]![1]);
+    });
+    expect(liveNotes.map(([beat]) => Math.round(beat * 10) / 10)).toEqual([0, 2, 4, 8.1, 8.4, 8.7]);
+  });
+
+  it('sounds a link placed on an audio track on neither path (instrument note at 0, link at 4)', () => {
+    const source: Clip = {
+      id: 'src',
+      trackId: 'keys',
+      type: 'midi',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    const linked: Clip = { id: 'link', trackId: 'aud', type: 'midi', startBeat: 4, lengthBeats: 4, loop: false, aliasOf: 'src' };
+    const audio: Track = { ...instrumentTrack('aud', 'warmPad', linked), type: 'audio' };
+    const shared = project([instrumentTrack('keys', 'warmPad', source), audio]);
+
+    const liveStarts = buildScheduleEvents(shared).map((e) => e.beat).sort((a, b) => a - b);
+    const midiStarts = parseMidi(exportProjectToMidi(shared))
+      .tracks.flatMap((t) => t.notes)
+      .map((n) => n.startBeat)
+      .sort((a, b) => a - b);
+    expect(liveStarts).toEqual([0]);
+    expect(midiStarts).toEqual(liveStarts);
   });
 });

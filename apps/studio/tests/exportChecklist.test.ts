@@ -282,3 +282,93 @@ describe('空のトラックのチェック', () => {
     expect(itemOf(project, 'emptyTracks').level).toBe('ok');
   });
 });
+
+describe('evaluateExportChecklist: クリップのリンク', () => {
+  it('リンクが正しければ ok', () => {
+    expect(itemOf(makeProject(), 'clipLinks').level).toBe('ok');
+  });
+
+  it('リンク切れのクリップがあると日本語の警告が 1 件出る', () => {
+    const track = makeTrack({ name: 'メロディ' });
+    const broken: Clip = { ...makeEmptyClip(track.id), aliasOf: 'deleted-clip' };
+    track.clips.push(broken);
+    const items = evaluateExportChecklist(makeProject({ tracks: [makeMaster(), track] }));
+
+    const warnings = items.filter((item) => item.level === 'warning');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.id).toBe('clipLinks');
+    expect(warnings[0]!.advice).toContain('「メロディ」');
+    expect(warnings[0]!.advice).toMatch(/リンク.*見つからない/);
+  });
+
+  it('ループで鳴らす音が上限を超えると、鳴らない範囲を伝える警告が出る', () => {
+    // 2048 拍 / (1/64 拍) = 131,072 回 > 上限 100,000 音 → 先頭 1562.5 拍まで鳴る。
+    const track = makeTrack({ name: 'ハイハット' });
+    track.clips = [
+      {
+        ...makeNoteClip(track.id),
+        lengthBeats: 2048,
+        contentLengthBeats: 1 / 64,
+        loop: true,
+        notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 1 / 128, velocity: 100 }],
+      },
+    ];
+    const item = itemOf(makeProject({ tracks: [makeMaster(), track] }), 'clipLinks');
+
+    expect(item.level).toBe('warning');
+    expect(item.advice).toContain('「ハイハット」');
+    expect(item.advice).toContain('先頭から 1562.5 拍までは鳴ります');
+    expect(item.advice).not.toContain('無音');
+  });
+  for (const [type, label, shown] of [
+    ['bus', 'まとめ用のトラック(バス)', '「置き場-bus」'],
+    ['master', 'マスタートラック', '「マスター」'],
+  ] as const) {
+    it(`${label}にリンク切れのクリップがあっても警告が 1 件出る`, () => {
+      const track = makeTrack({ name: `置き場-${type}`, type, clips: [] });
+      track.clips = [{ ...makeEmptyClip(track.id), aliasOf: 'deleted-clip' }];
+      const tracks = type === 'master' ? [track, makeTrack()] : [makeMaster(), makeTrack(), track];
+      const item = itemOf(makeProject({ tracks }), 'clipLinks');
+
+      expect(item.level).toBe('warning');
+      expect(item.advice).toContain(shown);
+      expect(item.advice).toMatch(/リンク.*見つからない/);
+    });
+  }
+});
+
+describe('evaluateExportChecklist: トラックで鳴らない種類の音', () => {
+  it('ドラムのトラックにリンクした音符のクリップがあると、鳴らない理由の警告が 1 件出る', () => {
+    const keys = makeTrack({ name: 'ピアノ' });
+    const source = {
+      ...makeNoteClip(keys.id),
+      id: 'src',
+      notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    keys.clips = [source];
+    const drums = makeTrack({ name: 'ドラム', type: 'drum' });
+    drums.clips = [{ ...makeNoteClip(drums.id), id: 'link', startBeat: 4, aliasOf: 'src', notes: [] }];
+    const item = itemOf(makeProject({ tracks: [makeMaster(), keys, drums] }), 'clipLinks');
+
+    expect(item.level).toBe('warning');
+    expect(item.advice).toContain('「ドラム」');
+    expect(item.advice).toContain('ドラムのトラックでは音符は鳴らない');
+  });
+});
+
+describe('evaluateExportChecklist: クリップの長さで鳴らない音', () => {
+  it('クリップの長さより後ろにしかノートが無いトラックは「空のトラック」になる', () => {
+    const track = makeTrack({ name: 'ベース' });
+    track.clips = [
+      {
+        ...makeNoteClip(track.id),
+        lengthBeats: 4,
+        notes: [{ id: 'late', pitch: 40, startBeat: 5, durationBeats: 1, velocity: 100 }],
+      },
+    ];
+    const item = itemOf(makeProject({ tracks: [makeMaster(), track] }), 'emptyTracks');
+
+    expect(item.level).toBe('warning');
+    expect(item.advice).toContain('「ベース」');
+  });
+});

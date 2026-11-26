@@ -4,9 +4,11 @@ import {
   createDefaultProject,
   createEmptyProject,
   setTimeSignature,
+  type Clip,
   type Project,
   type Track,
 } from '@cts/project-model';
+import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
 import { buildScheduleEvents, type SchedulePayload } from '../src/audio/events';
 import { nextEventsInWindow, projectLengthBeats } from '../src/audio/scheduler';
 import {
@@ -194,5 +196,101 @@ describe('renderScheduleEvents (WAV) matches live playback', () => {
     expect(droppedHits).toBe(1);
     expect(liveDrumHits(project)).toBe(1);
     expect(drumHits(renderScheduleEvents(project))).toBe(liveDrumHits(project));
+  });
+});
+
+describe('live playback, WAV and MIDI sound the same events', () => {
+  const sounding = (type: Track['type'], id: string, clips: Clip[]): Track => ({
+    id,
+    name: id,
+    type,
+    clips,
+    volume: 0.8,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: [],
+  });
+  const noteClip = (id: string, trackId: string, startBeat: number, extra: Partial<Clip> = {}): Clip => ({
+    id,
+    trackId,
+    type: 'midi',
+    startBeat,
+    lengthBeats: 4,
+    loop: false,
+    notes: [{ id: `${id}-n`, pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    ...extra,
+  });
+  const songOf = (lengthBars: number, tracks: Track[]): Project => ({
+    ...createEmptyProject({ lengthBars }),
+    tracks,
+  });
+  /** [beat, kind] of everything each path sounds, in beat order. */
+  const live = (project: Project) =>
+    nextEventsInWindow(buildScheduleEvents(project), 0, projectLengthBeats(project.lengthBars, 4), project.bpm, 0, 0, null)
+      .map((e) => [e.beat, (e.payload as SchedulePayload).kind])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+  const wav = (project: Project) =>
+    renderScheduleEvents(project)
+      .map((e) => [e.beat, (e.payload as SchedulePayload).kind])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+  const midi = (project: Project) =>
+    parseMidi(exportProjectToMidi(project))
+      .tracks.flatMap((t) => t.notes)
+      .map((n) => [n.startBeat, n.channel === 9 ? 'drum' : 'note'])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+
+  it('a link to a note clip placed on a drum track sounds on no path', () => {
+    const project = songOf(2, [
+      sounding('instrument', 'keys', [noteClip('src', 'keys', 0)]),
+      sounding('drum', 'drums', [noteClip('link', 'drums', 4, { aliasOf: 'src', notes: [] })]),
+    ]);
+    const expected = [[0, 'note']];
+    expect(live(project)).toEqual(expected);
+    expect(wav(project)).toEqual(expected);
+    expect(midi(project)).toEqual(expected);
+  });
+
+  it('a drum clip on an instrument track sounds on no path', () => {
+    const drumClip: Clip = {
+      id: 'beat',
+      trackId: 'keys',
+      type: 'drum',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      stepsPerBar: 16,
+      drumEvents: [{ id: 'k', lane: 'kick', stepIndex: 0, velocity: 100 }],
+    };
+    const project = songOf(1, [sounding('instrument', 'keys', [drumClip])]);
+    expect(live(project)).toEqual([]);
+    expect(wav(project)).toEqual([]);
+    expect(midi(project)).toEqual([]);
+  });
+
+  it('a note starting on the song end (beat 4 of a 1-bar 4/4 song) sounds on no path', () => {
+    const project = songOf(1, [sounding('instrument', 'keys', [noteClip('end', 'keys', 4)])]);
+    expect(live(project)).toEqual([]);
+    expect(wav(project)).toEqual([]);
+    expect(midi(project)).toEqual([]);
+  });
+
+  it('a note starting inside the song and ending past it sounds its full length on every path, and the WAV lasts until it ends', () => {
+    // 1 bar of 4/4: song end at beat 4. The 4-beat note at beat 3 ends at beat 7.
+    const project = songOf(1, [
+      sounding('instrument', 'keys', [
+        noteClip('cross', 'keys', 0, {
+          lengthBeats: 8,
+          notes: [{ id: 'x', pitch: 60, startBeat: 3, durationBeats: 4, velocity: 100 }],
+        }),
+      ]),
+    ]);
+    const durations = (events: ReadonlyArray<{ payload: unknown }>) =>
+      events.map((e) => (e.payload as Extract<SchedulePayload, { kind: 'note' }>).durationBeats);
+    const spb = 60 / project.bpm;
+
+    expect(durations(renderScheduleEvents(project))).toEqual([4]);
+    expect(parseMidi(exportProjectToMidi(project)).tracks.flatMap((t) => t.notes).map((n) => n.durationBeats)).toEqual([4]);
+    expect(renderLengthSeconds(project)).toBeCloseTo(7 * spb + RENDER_TAIL_SECONDS, 9);
   });
 });

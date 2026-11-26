@@ -8,6 +8,7 @@
 // This module is the only place that constructs a (live, non-offline)
 // AudioContext, which keeps the singleton invariant simple.
 
+import type { Track } from '@cts/project-model';
 import { createMasterChain } from './masterChain';
 import { syncSpectrumTap } from './metering';
 
@@ -49,12 +50,17 @@ export class AudioEngine {
    * Create the AudioContext on first use (must be called from a user gesture),
    * resume it if the browser auto-suspended it, and return the context plus the
    * master input node that per-track chains should connect to.
+   *
+   * `tracks` sets the master gain when the context is created here (so a first
+   * preview before any play already follows the master fader); afterwards the
+   * playback controller keeps the gain in step with the project.
    */
-  async ensureContext(): Promise<{ context: AudioContext; master: GainNode }> {
+  async ensureContext(
+    tracks: readonly Track[] = [],
+  ): Promise<{ context: AudioContext; master: GainNode }> {
     if (!this.context) {
       this.context = new AudioContext();
-      // Gain follows the master track volume once playback applies the project.
-      const chain = createMasterChain(this.context, []);
+      const chain = createMasterChain(this.context, tracks);
 
       this.masterBus = chain.input;
       this.masterAnalyser = chain.analyser;

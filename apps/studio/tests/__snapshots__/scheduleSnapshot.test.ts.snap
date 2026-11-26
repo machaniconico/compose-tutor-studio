@@ -1,0 +1,10616 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`schedule event snapshots (existing projects keep their sound) > default project 1`] = `[]`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > sample song 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 64,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 67,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 72,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 62,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 67,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 71,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 60,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 64,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 69,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 60,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 65,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 69,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 64,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 67,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 72,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 62,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 67,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 71,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 60,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 64,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 69,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 60,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 65,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "durationBeats": 4,
+      "kind": "note",
+      "pitch": 69,
+      "preset": "warmPad",
+      "trackId": "0:Chords",
+      "velocity": 72,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 36,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 36,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 43,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 43,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 45,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 45,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 41,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 41,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 36,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 36,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 43,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 43,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 45,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 45,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 41,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 41,
+      "preset": "subBass",
+      "trackId": "1:Bass",
+      "velocity": 96,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 60,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 64,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 67,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 67,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 62,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 59,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 57,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 60,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 64,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 65,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 69,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 65,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 64,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 67,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 72,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 71,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 67,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 62,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 64,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 62,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 60,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 65,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "durationBeats": 1,
+      "kind": "note",
+      "pitch": 62,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "durationBeats": 2,
+      "kind": "note",
+      "pitch": 60,
+      "preset": "leadSine",
+      "trackId": "2:Melody",
+      "velocity": 100,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 105,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 0.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 3.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 105,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 4.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 7.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 105,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 8.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 11.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 105,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 12.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 15.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 105,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 16.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 18.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 19.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 105,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 20.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 22.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 23.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 105,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 24.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 26.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 27.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 105,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 108,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 28.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 30.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 88,
+    },
+  },
+  {
+    "beat": 31.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 80,
+    },
+  },
+]
+`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > template 8bar-pop 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 0.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+]
+`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > template 16bar-pop 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 0.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 32,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 34,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 33,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 35,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 32,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 32.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 33,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 33.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 34,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 34.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 35,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 35.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 36,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 38,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 37,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 39,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 36,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 36.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 37,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 37.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 38,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 38.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 39,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 39.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 40,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 42,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 41,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 43,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 40,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 40.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 41,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 41.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 42,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 42.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 43,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 43.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 44,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 46,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 45,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 47,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 44,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 44.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 45,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 45.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 46,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 46.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 47,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 47.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 48,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 50,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 49,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 51,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 48,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 48.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 49,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 49.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 50,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 50.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 51,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 51.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 52,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 54,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 53,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 55,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 52,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 52.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 53,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 53.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 54,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 54.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 55,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 55.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 56,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 58,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 57,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 59,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 56,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 56.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 57,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 57.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 58,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 58.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 59,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 59.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 60,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 62,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 61,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 63,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 60,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 60.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 61,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 61.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 62,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 62.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 63,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 63.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+]
+`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > template bgm-loop 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 0.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+]
+`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > template game-loop 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 0.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+]
+`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > template jingle-15s 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 0.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 4.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 8.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 12.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+]
+`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > template jingle-30s 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 0.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 4.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 8.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 12.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 16.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 20.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 24.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 28.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+]
+`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > template jingle-60s 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 0.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 4.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 8.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 12.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 16.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 20.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 24.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 28.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 32,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 33,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 34,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 35,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 33,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 35,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 32.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 33.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 34.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 35.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 36,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 37,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 38,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 39,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 37,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 39,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 36.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 37.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 38.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 39.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 40,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 41,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 42,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 43,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 41,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 43,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 40.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 41.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 42.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 43.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 44,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 45,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 46,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 47,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 45,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 47,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 44.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 45.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 46.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 47.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 48,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 49,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 50,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 51,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 49,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 51,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 48.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 49.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 50.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 51.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 52,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 53,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 54,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 55,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 53,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 55,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 52.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 53.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 54.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 55.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 56,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 57,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 58,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 59,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 57,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 59,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 56.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 57.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 58.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 59.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 60,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 61,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 62,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 63,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 61,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 63,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 60.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 61.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 62.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 63.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 64,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 65,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 66,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 67,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 65,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 67,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 64.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 65.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 66.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 67.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 68,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 69,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 70,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 71,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 69,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 71,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 68.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 69.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 70.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 71.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 72,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 73,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 74,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 75,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 73,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 75,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 72.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 73.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 74.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 75.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 76,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 77,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 78,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 79,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 77,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 79,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 76.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 77.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 78.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 79.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 80,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 81,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 82,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 83,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 81,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 83,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 80.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 81.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 82.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 83.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 84,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 85,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 86,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 87,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 85,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 87,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 84.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 85.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 86.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 87.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 88,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 89,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 90,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 91,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 89,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 91,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 88.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 89.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 90.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 91.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 92,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 93,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 94,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 95,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 93,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 95,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 92.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 93.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 94.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 95.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 96,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 97,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 98,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 99,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 97,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 99,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 96.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 97.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 98.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 99.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 100,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 101,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 102,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 103,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 101,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 103,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 100.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 101.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 102.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 103.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 104,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 105,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 106,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 107,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 105,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 107,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 104.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 105.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 106.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 107.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 108,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 109,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 110,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 111,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 109,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 111,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 108.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 109.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 110.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 111.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 112,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 113,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 114,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 115,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 113,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 115,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 112.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 113.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 114.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 115.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 116,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 117,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 118,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 119,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 117,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 119,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 116.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 117.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 118.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 119.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 120,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 121,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 122,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 123,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 121,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 123,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 120.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 121.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 122.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 123.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 124,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 125,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 126,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 127,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 125,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 127,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 124.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 125.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 126.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 127.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+]
+`;
+
+exports[`schedule event snapshots (existing projects keep their sound) > template lofi-chill 1`] = `
+[
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 2.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 0,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 2,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 3,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 1.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "perc",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 6.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 4,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 6,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 7,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 5.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "perc",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 10.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 8,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 10,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 11,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 9.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "perc",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 14.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 12,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 14,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 15,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 13.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "perc",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 18.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 16,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 18,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 19,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 17.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "perc",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 22.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 20,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 22,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 23,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 21.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "perc",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 26.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 24,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 26,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 27,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 25.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "perc",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 30.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "kick",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "snare",
+      "trackId": "3:Drums",
+      "velocity": 110,
+    },
+  },
+  {
+    "beat": 28,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 30,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 31,
+    "payload": {
+      "kind": "drum",
+      "lane": "closedHat",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+  {
+    "beat": 29.5,
+    "payload": {
+      "kind": "drum",
+      "lane": "perc",
+      "trackId": "3:Drums",
+      "velocity": 90,
+    },
+  },
+]
+`;

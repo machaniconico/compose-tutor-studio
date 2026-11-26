@@ -3,6 +3,7 @@
 // (メーター連動のクリッピング検出など) は US-303 側の担当で、ここでは扱わない。
 
 import type { Clip, EffectConfig, Project, Track } from '@cts/project-model';
+import { beatsPerBar, expandClip } from '@cts/project-model';
 
 export type ExportChecklistLevel = 'ok' | 'warning';
 
@@ -11,7 +12,8 @@ export type ExportChecklistItemId =
   | 'volume'
   | 'mutedTracks'
   | 'sections'
-  | 'emptyTracks';
+  | 'emptyTracks'
+  | 'clipLinks';
 
 export type ExportChecklistItem = {
   id: ExportChecklistItemId;
@@ -27,6 +29,7 @@ export const EXPORT_CHECKLIST_ITEM_IDS: readonly ExportChecklistItemId[] = [
   'mutedTracks',
   'sections',
   'emptyTracks',
+  'clipLinks',
 ];
 
 /** reverb の mix がこの値を超えたら「リバーブ過多」warning にする。 */
@@ -59,6 +62,7 @@ export function evaluateExportChecklist(project: Project): ExportChecklistItem[]
     checkMutedTracks(project),
     checkSections(project),
     checkEmptyTracks(project),
+    checkClipLinks(project),
   ];
 }
 
@@ -142,7 +146,7 @@ function checkVolumeBalance(project: Project): ExportChecklistItem {
 function checkMutedTracks(project: Project): ExportChecklistItem {
   const title = 'ミュート中のトラック';
   const mutedWithContent = soundTracks(project).filter(
-    (track) => track.mute && trackHasContent(track),
+    (track) => track.mute && trackHasContent(track, project),
   );
 
   if (mutedWithContent.length === 0) {
@@ -206,7 +210,7 @@ function checkSections(project: Project): ExportChecklistItem {
 function checkEmptyTracks(project: Project): ExportChecklistItem {
   const title = '空のトラック';
   const emptyTracks = soundTracks(project).filter(
-    (track) => !trackHasContent(track),
+    (track) => !trackHasContent(track, project),
   );
 
   if (emptyTracks.length === 0) {
@@ -229,6 +233,43 @@ function checkEmptyTracks(project: Project): ExportChecklistItem {
   };
 }
 
+/**
+ * 再生や書き出しと同じ expandClip で各クリップを展開し、鳴らせない理由
+ * (リンク切れ・リンクの循環など)をまとめて 1 件の warning にする。
+ */
+function checkClipLinks(project: Project): ExportChecklistItem {
+  const title = 'クリップのリンクとループ';
+  const allClips = project.tracks.flatMap((track) => track.clips);
+  // Every track, buses and master too: a clip there that cannot sound is
+  // reported, not hidden behind "all clips OK".
+  const problems = project.tracks.flatMap((track) =>
+    track.clips.flatMap((clip) =>
+      expandClip(clip, allClips, beatsPerBar(project.timeSignature), track.type).problems.map(
+        (problem) => `${joinTrackNames([track])}: ${problem}`,
+      ),
+    ),
+  );
+
+  if (problems.length === 0) {
+    return {
+      id: 'clipLinks',
+      level: 'ok',
+      title,
+      advice: 'すべてのクリップが正しく鳴らせる状態です。',
+    };
+  }
+
+  return {
+    id: 'clipLinks',
+    level: 'warning',
+    title,
+    advice:
+      `${problems.join(' ')}` +
+      '書き出したファイルでも、再生と同じようにその部分は鳴りません。' +
+      'リンクやループの設定を見直しましょう。',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 補助関数
 // ---------------------------------------------------------------------------
@@ -244,15 +285,26 @@ function soundTracks(project: Project): Track[] {
   return project.tracks.filter((track) => SOUND_TRACK_TYPES.has(track.type));
 }
 
-function trackHasContent(track: Track): boolean {
-  return track.clips.some(clipHasContent);
+function trackHasContent(track: Track, project: Project): boolean {
+  const allClips = project.tracks.flatMap((candidate) => candidate.clips);
+  const bpb = beatsPerBar(project.timeSignature);
+  return track.clips.some((clip) => clipHasContent(clip, track.type, allClips, bpb));
 }
 
-function clipHasContent(clip: Clip): boolean {
-  if (typeof clip.aliasOf === 'string' && clip.aliasOf.length > 0) return true;
-  if ((clip.notes?.length ?? 0) > 0) return true;
-  if ((clip.drumEvents?.length ?? 0) > 0) return true;
-  return clip.type === 'audio' && typeof clip.audioAssetId === 'string';
+/**
+ * 再生と同じ expandClip で、実際に鳴る音があるかを見る。クリップの長さより
+ * 後ろにしかノートが無いクリップは鳴らないので「空」と数える。リンク切れ・
+ * 循環は「クリップのリンクとループ」で警告するので、ここでは二重に数えない。
+ */
+function clipHasContent(
+  clip: Clip,
+  trackType: Track['type'],
+  allClips: readonly Clip[],
+  bpb: number,
+): boolean {
+  if (clip.type === 'audio' && typeof clip.audioAssetId === 'string') return true;
+  const { notes, drumHits, problems } = expandClip(clip, allClips, bpb, trackType);
+  return notes.length > 0 || drumHits.length > 0 || problems.length > 0;
 }
 
 function joinTrackNames(tracks: readonly Track[]): string {

@@ -35,6 +35,7 @@ import {
 import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
 import { metronomeBeatEvents, scheduleMetronomeClick } from './metronome';
+import { songSoundEndBeat, songTailSeconds } from './wav';
 
 /** Position update rate while playing (ms ~= 30fps). */
 const POSITION_TICK_MS = 33;
@@ -56,6 +57,14 @@ type BridgeState = {
   positionTimer: ReturnType<typeof setInterval> | null;
   /** Bumped by every play and stop; a start that no longer matches is abandoned. */
   playGeneration: number;
+  /**
+   * Set by the scheduler's end handling just before the store stop: the
+   * AudioContext time the notes started before the song end finish ringing.
+   * The stop that follows keeps the graphs until then instead of cutting them.
+   */
+  ringUntil: number | null;
+  /** Graphs left ringing after the song end, disposed when the timer fires. */
+  ringing: { graphs: Map<string, TrackGraph>; timer: ReturnType<typeof setTimeout> } | null;
   /** Unsubscribe handles. */
   unsub: Array<() => void>;
   installed: boolean;
@@ -75,6 +84,8 @@ const state: BridgeState = {
   loop: null,
   positionTimer: null,
   playGeneration: 0,
+  ringUntil: null,
+  ringing: null,
   unsub: [],
   installed: false,
 };
@@ -104,18 +115,25 @@ export function initAudioBridge(): () => void {
     }
   });
 
-  // React to project / mixer changes while playing: the mix is updated live;
+  // React to project / mixer changes. The master volume follows the project
+  // even while stopped, so piano-roll previews (which go through the master
+  // bus) hear the current master fader. While playing, the mix is updated live;
   // a new tempo, meter or song length (also via undo/redo) changes event timing, the end
   // position and the metronome accent, so the schedule is rebuilt from the
   // current playhead.
   const unsubProject = useStore.subscribe((s, prev) => {
     if (s.project === prev.project) return;
-    if (!state.scheduler?.isRunning) return;
+    const engine = getAudioEngine();
+    if (!state.scheduler?.isRunning) {
+      if (engine.isInitialized) {
+        applyMasterVolume(engine.requireMaster(), s.project.tracks, engine.now());
+      }
+      return;
+    }
     if (timingChanged(s.project, prev.project)) {
       restartPlayback();
       return;
     }
-    const engine = getAudioEngine();
     applyMixState(state.graphs, s.project.tracks, engine.now());
     if (engine.isInitialized) {
       applyMasterVolume(engine.requireMaster(), s.project.tracks, engine.now());
@@ -139,6 +157,7 @@ export function initAudioBridge(): () => void {
     state.unsub = [];
     state.installed = false;
     stopAudio();
+    silenceRinging();
   };
 }
 
@@ -201,7 +220,7 @@ function resumeSoundingNotes(events: readonly ScheduledEvent[], beat: number, no
     if (remainingBeats <= 0) continue;
     state.synths
       .get(payload.trackId)
-      ?.noteOn(payload.pitch, now, remainingBeats * spb, payload.velocity);
+      ?.noteOn(payload.pitch, now, remainingBeats * spb, payload.velocity, { cutAtEnd: payload.cut });
   }
 }
 
@@ -293,21 +312,28 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
   state.anchorTime = now;
   state.metronomeBeatFrontier = startBeat;
 
+  silenceRinging();
   buildVoices(context, master, project.tracks, now);
 
   const events: ScheduledEvent[] = buildScheduleEvents(project);
   const endBeat = state.loop ? Infinity : lengthBeats;
   if (resumeSounding && startBeat < endBeat) resumeSoundingNotes(events, startBeat, now);
 
+  const soundEndBeat = songSoundEndBeat(project);
+  const tailSeconds = songTailSeconds(project);
   const scheduler = new Scheduler({
     clock: () => engine.now(),
     fire: (due) => fireEvents(due, context, master),
     onEnd: () => {
-      // Stop at project end: pause then reset the store transport to the start.
+      // Stop at project end and reset the store transport to the start.
+      // No new note starts, but notes started before the end ring out in full
+      // (with their release and echoes), as in the WAV render and MIDI.
       const s = useStore.getState();
       if (s.transport.isPlaying) {
-        s.stop(); // pause: keeps position
-        s.stop(); // second stop resets position to 0 (store semantics)
+        if (startBeat < lengthBeats) {
+          state.ringUntil = beatToTime(soundEndBeat, state.bpm, state.anchorBeat, state.anchorTime) + tailSeconds;
+        }
+        s.stop(true);
       }
     },
   });
@@ -329,7 +355,9 @@ function fireEvents(due: DueEvent[], ctx: AudioContext, master: GainNode): void 
     if (payload.kind === 'note') {
       const synth = state.synths.get(payload.trackId);
       if (synth) {
-        synth.noteOn(payload.pitch, ev.time, payload.durationBeats * spb, payload.velocity);
+        synth.noteOn(payload.pitch, ev.time, payload.durationBeats * spb, payload.velocity, {
+          cutAtEnd: payload.cut,
+        });
       }
     } else {
       const drum = state.drums.get(payload.trackId);
@@ -384,7 +412,11 @@ function stopPositionLoop(): void {
   }
 }
 
-/** Stop the audio: scheduler + voices + position loop. Does not touch store. */
+/**
+ * Stop the audio: scheduler + voices + position loop. Does not touch store.
+ * At the song end (`ringUntil` set) the sounding notes keep their scheduled
+ * ends and the graphs stay connected until they have rung out.
+ */
 function stopAudio(): void {
   state.playGeneration += 1;
   state.scheduler?.stop();
@@ -393,10 +425,29 @@ function stopAudio(): void {
 
   const engine = getAudioEngine();
   const when = engine.now();
-  for (const synth of state.synths.values()) synth.releaseAll(when);
+  const ringUntil = state.ringUntil;
+  state.ringUntil = null;
+  if (ringUntil !== null && ringUntil > when) {
+    silenceRinging();
+    const graphs = state.graphs;
+    const timer = setTimeout(silenceRinging, (ringUntil - when) * 1000);
+    state.ringing = { graphs, timer };
+    state.graphs = new Map();
+  } else {
+    for (const synth of state.synths.values()) synth.releaseAll(when);
+    for (const g of state.graphs.values()) g.dispose();
+    state.graphs.clear();
+  }
   state.synths.clear();
   state.drums.clear();
-  for (const g of state.graphs.values()) g.dispose();
-  state.graphs.clear();
   state.metronomeBeatFrontier = 0;
+}
+
+/** Disconnect the graphs still ringing after the song end, if any. */
+function silenceRinging(): void {
+  const ringing = state.ringing;
+  if (ringing === null) return;
+  state.ringing = null;
+  clearTimeout(ringing.timer);
+  for (const g of ringing.graphs.values()) g.dispose();
 }

@@ -2,6 +2,8 @@
 // integrity checks (unique ids, clip.trackId references an existing track).
 
 import type { Project, TrackRole } from './types';
+import { clipLoopLimitProblem, MAX_LOOP_EVENTS } from './clipExpand';
+import { beatsPerBar } from './time';
 
 export type ValidationError = {
   /** Dot/bracket path to the offending value, e.g. `tracks[0].clips[1].startBeat`. */
@@ -116,6 +118,8 @@ export function validateProject(project: Project): ValidationResult {
   });
 
   // --- Clips + nested events ---
+  const allClips = project.tracks.flatMap((track) => track.clips);
+  const bpb = beatsPerBar(project.timeSignature);
   project.tracks.forEach((track, ti) => {
     track.clips.forEach((clip, ci) => {
       const clipPath = `tracks[${ti}].clips[${ci}]`;
@@ -134,6 +138,12 @@ export function validateProject(project: Project): ValidationResult {
         push(
           `${clipPath}.contentLengthBeats`,
           `clip content length must be > 0 (got ${clip.contentLengthBeats})`,
+        );
+      }
+      if (clipLoopLimitProblem(clip, allClips, bpb, track.type)) {
+        push(
+          `${clipPath}.contentLengthBeats`,
+          `the looping clip would sound more than ${MAX_LOOP_EVENTS} notes and drum hits`,
         );
       }
       if (clip.trackId !== track.id) {

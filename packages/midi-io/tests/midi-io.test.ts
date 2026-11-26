@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   writeVarLen,
   buildHeaderChunk,
@@ -9,8 +9,14 @@ import {
 import type { MidiMessage } from '../src/smf.js';
 import { exportProjectToMidi, exportNotesToMidi } from '../src/export.js';
 import { parseMidi } from '../src/import.js';
-import { setLengthBars } from '@cts/project-model';
-import type { Project, NoteEvent } from '@cts/project-model';
+import { deserializeProject, expandClip, serializeProject, setLengthBars, validateProject } from '@cts/project-model';
+import type { Clip, Project, NoteEvent } from '@cts/project-model';
+
+// Pass-through spy: MIDI export must expand clips through expandClip (US-007).
+vi.mock('@cts/project-model', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@cts/project-model')>();
+  return { ...actual, expandClip: vi.fn(actual.expandClip) };
+});
 
 // ---------------------------------------------------------------------------
 // writeVarLen
@@ -339,7 +345,7 @@ describe('exportProjectToMidi', () => {
               trackId: 'track-drums',
               type: 'drum',
               startBeat: 0,
-              lengthBeats: 3,
+              lengthBeats: 6, // two 3/4 bars, so step 12 is inside the clip
               loop: false,
               stepsPerBar: 12,
               drumEvents: [
@@ -389,5 +395,291 @@ describe('exportProjectToMidi', () => {
     expect(crossing?.durationBeats).toBe(1);
     const lastEnd = Math.max(...(piano?.notes.map((n) => n.startBeat + n.durationBeats) ?? [0]));
     expect(lastEnd).toBe(16);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Clip expansion is shared with live playback (US-007)
+// ---------------------------------------------------------------------------
+describe('exportProjectToMidi uses expandClip', () => {
+  const loopClip: Clip = {
+    id: 'loop',
+    trackId: 'track-1',
+    type: 'midi',
+    startBeat: 4,
+    lengthBeats: 8,
+    contentLengthBeats: 2,
+    loop: true,
+    notes: [
+      { id: 'a', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 },
+      { id: 'b', pitch: 67, startBeat: 1.5, durationBeats: 1, velocity: 80 },
+    ],
+  };
+  const loopProject: Project = {
+    id: 'loop-project',
+    schemaVersion: 2,
+    title: 'Loop',
+    bpm: 120,
+    timeSignature: [4, 4],
+    key: 'C',
+    scale: 'major',
+    lengthBars: 4,
+    tracks: [
+      {
+        id: 'track-1',
+        name: 'Keys',
+        type: 'instrument',
+        clips: [loopClip],
+        volume: 1,
+        pan: 0,
+        mute: false,
+        solo: false,
+        effects: [],
+      },
+    ],
+    chordTrack: [],
+    sections: [],
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  };
+
+  it('expands every clip through expandClip', () => {
+    const spy = vi.mocked(expandClip);
+    spy.mockClear();
+    exportProjectToMidi(loopProject);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]![0].id).toBe('loop');
+  });
+
+  it('writes the same notes for a loop clip as expandClip returns', () => {
+    const expected = expandClip(loopClip, [loopClip]).notes.map((n) => ({
+      pitch: n.pitch,
+      startBeat: n.startBeat,
+      durationBeats: n.durationBeats,
+      velocity: n.velocity,
+    }));
+    const parsed = parseMidi(exportProjectToMidi(loopProject));
+    const written = parsed.tracks
+      .flatMap((track) => track.notes)
+      .map(({ pitch, startBeat, durationBeats, velocity }) => ({ pitch, startBeat, durationBeats, velocity }))
+      .sort((x, y) => x.startBeat - y.startBeat || x.pitch - y.pitch);
+    expect(expected).toHaveLength(8);
+    expect(written).toEqual(expected);
+  });
+
+  it('has no loop unrolling of its own (no repeat by the notes\' extent)', () => {
+    // The removed export-only rule repeated a loop every max(note end) beats,
+    // which would write 4 notes here. expandClip's period is lengthBeats: 1 note.
+    const shortPattern: Clip = { ...loopClip, contentLengthBeats: undefined, lengthBeats: 4 };
+    shortPattern.notes = [{ id: 'a', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }];
+    const parsed = parseMidi(
+      exportProjectToMidi({ ...loopProject, tracks: [{ ...loopProject.tracks[0]!, clips: [shortPattern] }] }),
+    );
+    const written = parsed.tracks.flatMap((track) => track.notes).map((n) => n.startBeat);
+    expect(written).toEqual(expandClip(shortPattern, [shortPattern]).notes.map((n) => n.startBeat));
+    expect(written).toEqual([4]);
+  });
+
+  it('exports migrated v2 clips with the same single pass as legacy playback', () => {
+    const clip: Clip = {
+      ...loopClip,
+      startBeat: 0,
+      lengthBeats: 4,
+      contentLengthBeats: undefined,
+      notes: [{ id: 'a', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    const legacy = { ...loopProject, tracks: [{ ...loopProject.tracks[0]!, clips: [clip] }] };
+    const migrated = deserializeProject(serializeProject(legacy));
+    const reloaded = deserializeProject(serializeProject(migrated));
+    for (const project of [migrated, reloaded]) {
+      const written = parseMidi(exportProjectToMidi(project)).tracks.flatMap((track) => track.notes);
+      expect(written.map((note) => note.startBeat)).toEqual([0]);
+      expect(project.tracks[0]!.clips[0]).toMatchObject({ lengthBeats: 4, loop: false });
+      expect(project.tracks[0]!.clips[0]).not.toHaveProperty('contentLengthBeats');
+      expect(validateProject(project).errors).toEqual([]);
+    }
+  });
+
+  it('keeps the v3 explicit loop period and the link after save and reload', () => {
+    const linked: Clip = { ...loopClip, id: 'linked', startBeat: 0, aliasOf: loopClip.id, notes: [] };
+    const project = { ...loopProject, schemaVersion: 3, tracks: [{ ...loopProject.tracks[0]!, clips: [loopClip, linked] }] };
+    const reloaded = deserializeProject(serializeProject(project));
+    expect(reloaded.tracks[0]!.clips).toEqual([loopClip, linked]);
+  });
+
+  it.each([1, 2])('recovers authored v%i clip settings after saving and uses legacy live timing in MIDI', (schemaVersion) => {
+    const clip: Clip = {
+      ...loopClip,
+      startBeat: 0,
+      aliasOf: 'source',
+      notes: [{ id: 'own', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    const source: Clip = { ...loopClip, id: 'source', startBeat: 8, loop: false, notes: [] };
+    const legacy = { ...loopProject, schemaVersion, tracks: [{ ...loopProject.tracks[0]!, clips: [clip, source] }] };
+    const migrated = deserializeProject(serializeProject(legacy));
+    const reloaded = deserializeProject(serializeProject(migrated));
+    for (const project of [migrated, reloaded]) {
+      expect(validateProject(project).errors).toEqual([]);
+      const written = parseMidi(exportProjectToMidi(project)).tracks.flatMap((track) => track.notes);
+      // Legacy MIDI repeated every beat. Legacy live playback sounded the clip's own note once.
+      expect(written.map(({ pitch, startBeat }) => [pitch, startBeat])).toEqual([[60, 0]]);
+      expect(project.tracks[0]!.clips[0]?.legacyClipSettings).toEqual({
+        loop: true, aliasOf: 'source', contentLengthBeats: 2,
+      });
+    }
+  });
+});
+
+describe('exportProjectToMidi: long loops and mixed clip types (US-007)', () => {
+  const baseTrack = {
+    name: 'Part',
+    volume: 1,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: [],
+  };
+  const projectWith = (tracks: Project['tracks']): Project => ({
+    id: 'p',
+    schemaVersion: 2,
+    title: 'Long',
+    bpm: 120,
+    timeSignature: [4, 4],
+    key: 'C',
+    scale: 'major',
+    lengthBars: 32,
+    tracks,
+    chordTrack: [],
+    sections: [],
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  });
+
+  it('exports a drum loop of 81,920 hits without overflowing the call stack', () => {
+    // 128 beats / (1/32 beat) = 4096 repeats x 20 hits = 81,920 hits.
+    const drumEvents = Array.from({ length: 20 }, (_, i) => ({
+      id: `h${i}`,
+      lane: 'closedHat' as const,
+      stepIndex: i,
+      velocity: 90,
+    }));
+    const clip: Clip = {
+      id: 'dense',
+      trackId: 'drums',
+      type: 'drum',
+      startBeat: 0,
+      lengthBeats: 128,
+      contentLengthBeats: 1 / 32,
+      loop: true,
+      stepsPerBar: 4096,
+      drumEvents,
+    };
+    const expanded = expandClip(clip, [clip], 4);
+    expect(expanded.drumHits).toHaveLength(81_920);
+
+    const bytes = exportProjectToMidi(
+      projectWith([{ ...baseTrack, id: 'drums', type: 'drum', clips: [clip] }]),
+    );
+    const written = parseMidi(bytes).tracks.flatMap((track) => track.notes);
+    expect(written).toHaveLength(81_920);
+  });
+
+  it('writes notes linked into a drum-type clip, the same as live playback', () => {
+    // A midi clip at beat 0 and a drum-type clip at beat 4 that links to it, on
+    // one instrument track. Playback sounds the linked notes at 0 and 4.
+    const source: Clip = {
+      id: 'src',
+      trackId: 'keys',
+      type: 'midi',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    const linked: Clip = {
+      id: 'link',
+      trackId: 'keys',
+      type: 'drum',
+      startBeat: 4,
+      lengthBeats: 4,
+      loop: false,
+      aliasOf: 'src',
+    };
+    const bytes = exportProjectToMidi(
+      projectWith([{ ...baseTrack, id: 'keys', type: 'instrument', clips: [source, linked] }]),
+    );
+    const starts = parseMidi(bytes).tracks.flatMap((track) => track.notes).map((n) => n.startBeat);
+    expect(starts.sort((a, b) => a - b)).toEqual([0, 4]);
+  });
+
+  it('writes no notes on a drum track and no drum hits on an instrument track, like playback', () => {
+    const notesClip: Clip = {
+      id: 'notes',
+      trackId: 'drums',
+      type: 'midi',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    const hitsClip: Clip = {
+      id: 'hits',
+      trackId: 'keys',
+      type: 'drum',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      stepsPerBar: 16,
+      drumEvents: [{ id: 'k', lane: 'kick', stepIndex: 0, velocity: 100 }],
+    };
+    const bytes = exportProjectToMidi(
+      projectWith([
+        { ...baseTrack, id: 'drums', type: 'drum', clips: [notesClip] },
+        { ...baseTrack, id: 'keys', type: 'instrument', clips: [hitsClip] },
+      ]),
+    );
+    expect(parseMidi(bytes).tracks.flatMap((track) => track.notes)).toEqual([]);
+  });
+
+  it('keeps a note cut at the clip end to less than one tick (3.9999 beats + 1 in a 4-beat clip)', () => {
+    const clip: Clip = {
+      id: 'cut',
+      trackId: 'keys',
+      type: 'midi',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      notes: [{ id: 'tail', pitch: 64, startBeat: 3.9999, durationBeats: 1, velocity: 100 }],
+    };
+    // expandClip cuts it to 0.0001 beats; start and end round to the same tick.
+    expect(expandClip(clip, [clip]).notes).toHaveLength(1);
+    const bytes = exportProjectToMidi(
+      projectWith([{ ...baseTrack, id: 'keys', type: 'instrument', clips: [clip] }]),
+    );
+    const notes = parseMidi(bytes).tracks.flatMap((track) => track.notes);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.pitch).toBe(64);
+    expect(notes[0]!.durationBeats).toBeGreaterThan(0);
+  });
+
+  it('writes nothing that starts at or after the song end, like playback', () => {
+    const clip: Clip = {
+      id: 'late',
+      trackId: 'keys',
+      type: 'midi',
+      startBeat: 124,
+      lengthBeats: 8,
+      loop: false,
+      notes: [
+        { id: 'in', pitch: 60, startBeat: 3, durationBeats: 1, velocity: 100 },
+        { id: 'end', pitch: 62, startBeat: 4, durationBeats: 1, velocity: 100 },
+      ],
+    };
+    // 32 bars of 4/4 end at beat 128: the note at 127 is written, the one at 128 is not.
+    const bytes = exportProjectToMidi(
+      projectWith([{ ...baseTrack, id: 'keys', type: 'instrument', clips: [clip] }]),
+    );
+    const starts = parseMidi(bytes).tracks.flatMap((track) => track.notes).map((n) => n.startBeat);
+    expect(starts).toEqual([127]);
   });
 });

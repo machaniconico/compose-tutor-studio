@@ -130,8 +130,18 @@ export class SynthVoiceManager {
    * @param startTime AudioContext time to start
    * @param duration  sounding duration in seconds (release happens after)
    * @param velocity  0..127 MIDI velocity
+   * @param options.env       envelope override (defaults to the preset's envelope)
+   * @param options.cutAtEnd  the note was cut short (e.g. at the clip end): release
+   *                          exactly at `duration` even if attack+decay is longer
    */
-  noteOn(midi: number, startTime: number, duration: number, velocity: number): void {
+  noteOn(
+    midi: number,
+    startTime: number,
+    duration: number,
+    velocity: number,
+    options: { env?: Envelope; cutAtEnd?: boolean } = {},
+  ): void {
+    const env = options.env ?? this.preset.env;
     this.reap(startTime);
     this.steal(startTime);
 
@@ -155,14 +165,28 @@ export class SynthVoiceManager {
     filter.Q.setValueAtTime(p.resonance, startTime);
 
     const gain = this.ctx.createGain();
-    const { attack, decay, sustain, release } = p.env;
+    const { attack, decay, sustain, release } = env;
 
-    // ADSR. Sustain runs until releaseStart, then a release ramp to 0.
-    const releaseStart = startTime + Math.max(duration, attack + decay);
+    // ADSR. Sustain runs until releaseStart, then a release ramp to 0. A normal
+    // note always plays its full attack+decay before releasing. A note cut short
+    // (`cutAtEnd`, e.g. at the clip end) releases at its duration, matching the
+    // MIDI note-off: the envelope is cut where it is.
+    const gate = options.cutAtEnd ? Math.max(0, duration) : Math.max(duration, attack + decay);
+    const releaseStart = startTime + gate;
     gain.gain.setValueAtTime(0, startTime);
-    gain.gain.linearRampToValueAtTime(peak, startTime + attack);
-    gain.gain.linearRampToValueAtTime(peak * sustain, startTime + attack + decay);
-    gain.gain.setValueAtTime(peak * sustain, releaseStart);
+    let level = peak * sustain;
+    if (gate >= attack + decay) {
+      gain.gain.linearRampToValueAtTime(peak, startTime + attack);
+      gain.gain.linearRampToValueAtTime(level, startTime + attack + decay);
+    } else if (gate >= attack) {
+      level = peak - (peak - peak * sustain) * ((gate - attack) / decay);
+      gain.gain.linearRampToValueAtTime(peak, startTime + attack);
+      gain.gain.linearRampToValueAtTime(level, releaseStart);
+    } else {
+      level = peak * (gate / attack);
+      gain.gain.linearRampToValueAtTime(level, releaseStart);
+    }
+    gain.gain.setValueAtTime(level, releaseStart);
     gain.gain.linearRampToValueAtTime(0, releaseStart + release);
 
     oscA.connect(filter);
@@ -179,15 +203,18 @@ export class SynthVoiceManager {
     this.voices.push({ oscA, oscB, gain, endTime: stopAt });
   }
 
-  /** Immediately release every voice (used on stop). */
-  releaseAll(when: number): void {
+  /**
+   * Immediately release every voice (used on stop): fade to silence over
+   * `fadeSeconds`, then stop the oscillators `stopPadSeconds` later.
+   */
+  releaseAll(when: number, fadeSeconds = 0.03, stopPadSeconds = 0.02): void {
     for (const v of this.voices) {
       try {
         v.gain.gain.cancelScheduledValues(when);
         v.gain.gain.setValueAtTime(Math.max(0.0001, v.gain.gain.value), when);
-        v.gain.gain.linearRampToValueAtTime(0, when + 0.03);
-        v.oscA.stop(when + 0.05);
-        v.oscB.stop(when + 0.05);
+        v.gain.gain.linearRampToValueAtTime(0, when + fadeSeconds);
+        v.oscA.stop(when + fadeSeconds + stopPadSeconds);
+        v.oscB.stop(when + fadeSeconds + stopPadSeconds);
       } catch {
         // Node may already be stopped; ignore.
       }

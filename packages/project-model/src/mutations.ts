@@ -3,6 +3,7 @@
 
 import type { Clock } from './clock';
 import { systemClock, nowIso } from './clock';
+import { clipFirstPassEnd, drumHitRepeatCount, expandClip, resolveLinkSource } from './clipExpand';
 import { makeId } from './ids';
 import { beatsPerBar, drumStepsPerBar } from './time';
 import type {
@@ -226,11 +227,9 @@ export type TimeSignatureChange = {
   /** Beginner-facing notes (Japanese) about content that could not be kept exactly. */
   warnings: string[];
   /**
-   * Drum hits removed because two hits of the same lane landed on one step of the
-   * new grid, or because rounding moved a hit onto (or past) the end of its clip
-   * or the song, where playback and export never sound it. This is the only
-   * lossy part of the change, so callers should ask before applying when it is
-   * above zero.
+   * Source drum hits removed by a collision or losing one or more audible
+   * occurrences at a clip, loop or song boundary. Callers should confirm
+   * before applying a change with a nonzero count.
    */
   droppedHits: number;
 };
@@ -345,15 +344,27 @@ export function setTimeSignature(
 
   const newStepsPerBar = drumStepsPerBar(timeSignature);
   let shiftedHits = 0;
-  let droppedHits = 0;
-  let pastEndHits = 0;
+  const collidedHits = new Set<string>();
+  const pastEndHits = new Set<string>();
+  const allClips = project.tracks.flatMap((track) => track.clips);
+  const drumUses = new Map<string, Clip[]>();
+  for (const track of project.tracks) {
+    if (track.type !== 'drum') continue;
+    for (const clip of track.clips) {
+      const source = resolveLinkSource(clip, allClips);
+      if (typeof source === 'string') continue;
+      const uses = drumUses.get(source.id);
+      if (uses) uses.push(clip);
+      else drumUses.set(source.id, [clip]);
+    }
+  }
   const tracks = project.tracks.map((track) => {
-    if (track.type !== 'drum') return { ...track, clips: track.clips.map(followSongEnd) };
     const clips = track.clips.map((oldClip) => {
       const clip = followSongEnd(oldClip);
+      const uses = drumUses.get(clip.id);
+      if (track.type !== 'drum' && uses === undefined) return clip;
       const oldStepsPerBar = clip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR;
-      const oldEnd = Math.min(oldClip.lengthBeats, totalBeats - oldClip.startBeat);
-      const newEnd = Math.min(clip.lengthBeats, newEndBeat - clip.startBeat);
+      const clipUses = (uses ?? [oldClip]).map((use) => ({ old: use, next: followSongEnd(use) }));
       // One hit per lane and step: when the new grid is coarser, hits can collide
       // and only one can be kept (see `outranks`). Nothing is dropped silently.
       const survivors = new Map<string, RegriddedHit>();
@@ -367,12 +378,13 @@ export function setTimeSignature(
           beat,
         };
         // Rounding up can put a hit that sounded before the end exactly on (or
-        // past) the end of its clip or song, where playback never reaches it.
+        // past) the end of a linked clip, a loop pass, or the song.
         const newBeat = drumStepBeat(candidate.stepIndex, newStepsPerBar, newBpb);
-        if (beat < oldEnd - BEAT_EPSILON && newBeat >= newEnd - BEAT_EPSILON) {
-          droppedHits += 1;
-          pastEndHits += 1;
-          continue;
+        const nextCount = (use: Clip): number => drumHitRepeatCount(use, newBeat, newEndBeat - use.startBeat);
+        if (clipUses.some((use) => drumHitRepeatCount(use.old, beat, totalBeats - use.old.startBeat) > nextCount(use.next))) {
+          pastEndHits.add(event.id);
+          // Keep the hit if it can still sound in any pass of the pattern.
+          if (!clipUses.some((use) => nextCount(use.next) > 0)) continue;
         }
         const key = `${event.lane}:${candidate.stepIndex}`;
         const current = survivors.get(key);
@@ -380,8 +392,12 @@ export function setTimeSignature(
           survivors.set(key, candidate);
           continue;
         }
-        droppedHits += 1;
-        if (outranks(candidate, current)) survivors.set(key, candidate);
+        if (outranks(candidate, current)) {
+          collidedHits.add(current.event.id);
+          survivors.set(key, candidate);
+        } else {
+          collidedHits.add(event.id);
+        }
       }
       const drumEvents: DrumEvent[] = [];
       for (const hit of survivors.values()) {
@@ -397,22 +413,21 @@ export function setTimeSignature(
       `ドラムの ${shiftedHits} 個の音が新しいグリッドに乗らないため、いちばん近いステップに動かしました。`,
     );
   }
-  const collidedHits = droppedHits - pastEndHits;
-  if (collidedHits > 0) {
+  if (collidedHits.size > 0) {
     warnings.push(
-      `ドラムの ${collidedHits} 個の音が新しいグリッドで別の音と同じステップに重なるため、拍に合っていた音(同じなら強い音)を残して削除しました。`,
+      `ドラムの ${collidedHits.size} 個の音が新しいグリッドで別の音と同じステップに重なるため、拍に合っていた音(同じなら強い音)を残して削除しました。`,
     );
   }
-  if (pastEndHits > 0) {
+  if (pastEndHits.size > 0) {
     warnings.push(
-      `ドラムの ${pastEndHits} 個の音が新しいグリッドでは曲の終わり(またはクリップの終わり)に重なって鳴らなくなるため、削除しました。`,
+      `ドラムの ${pastEndHits.size} 個の音が新しいグリッドで曲の終わり、クリップの終わり、またはループの区切りに重なり、鳴らなくなる場所がありました。`,
     );
   }
 
   return {
     project: touch({ ...project, timeSignature, lengthBars, sections, tracks }, clock),
     warnings,
-    droppedHits,
+    droppedHits: new Set([...collidedHits, ...pastEndHits]).size,
   };
 }
 
@@ -427,6 +442,8 @@ export type ContentBeyondBars = {
   truncatedNotes: number;
   /** Chords that start before the new end but last past it (cut at the end). */
   truncatedChords: number;
+  /** Audible changes within the kept bars caused by trimming shared content. */
+  linkedLosses?: { notes: number; drumHits: number; truncatedNotes: number };
 };
 
 /**
@@ -437,6 +454,7 @@ export type ContentBeyondBars = {
 export function contentBeyondBars(project: Project, lengthBars: number): ContentBeyondBars {
   const bpb = beatsPerBar(project.timeSignature);
   const endBeat = lengthBars * bpb;
+  const oldEndBeat = project.lengthBars * bpb;
   const beyond = (beat: number): boolean => beat >= endBeat - BEAT_EPSILON;
   const crosses = (start: number, duration: number): boolean =>
     !beyond(start) && start + duration > endBeat + BEAT_EPSILON;
@@ -444,6 +462,13 @@ export function contentBeyondBars(project: Project, lengthBars: number): Content
   let notes = 0;
   let truncatedNotes = 0;
   let drumHits = 0;
+  const linkedLosses = { notes: 0, drumHits: 0, truncatedNotes: 0 };
+  const allClips = project.tracks.flatMap((track) => track.clips);
+  const shortening = lengthBars < project.lengthBars;
+  const resizedClips = shortening && allClips.some((clip) => clip.aliasOf !== undefined)
+    ? resizeClipTracks(project, lengthBars).flatMap((track) => track.clips)
+    : [];
+  const resizedById = new Map(resizedClips.map((clip) => [clip.id, clip]));
   for (const track of project.tracks) {
     for (const clip of track.clips) {
       for (const note of clip.notes ?? []) {
@@ -455,39 +480,112 @@ export function contentBeyondBars(project: Project, lengthBars: number): Content
       for (const hit of clip.drumEvents ?? []) {
         if (beyond(clip.startBeat + drumStepBeat(hit.stepIndex, stepsPerBar, bpb))) drumHits += 1;
       }
+      if (!shortening || (!clip.loop && clip.aliasOf === undefined)) continue;
+
+      // Raw content is counted above. Add linked sounds and the later passes of
+      // loops, which have no separate stored event to count.
+      const expanded = expandClip(clip, allClips, bpb, track.type);
+      const repeatStart = clip.startBeat + clipFirstPassEnd(clip);
+      const isAdditional = (beat: number): boolean =>
+        beat < oldEndBeat && (clip.aliasOf !== undefined || beat >= repeatStart);
+      for (const note of expanded.notes) {
+        if (!isAdditional(note.startBeat)) continue;
+        if (beyond(note.startBeat)) notes += 1;
+        else if (crosses(note.startBeat, Math.min(note.durationBeats, oldEndBeat - note.startBeat))) truncatedNotes += 1;
+      }
+      drumHits += expanded.drumHits.filter((hit) => isAdditional(hit.beat) && beyond(hit.beat)).length;
+
+      const resized = resizedById.get(clip.id);
+      if (clip.aliasOf === undefined || resized === undefined) continue;
+      const after = expandClip(resized, resizedClips, bpb, track.type);
+      linkedLosses.drumHits += Math.max(0, expanded.drumHits.filter((hit) => !beyond(hit.beat)).length - after.drumHits.length);
+
+      // Source trimming keeps event order and removes all notes at a removed
+      // onset. Group by onset so overlapping notes at the same beat count too.
+      const remainingAtBeat = new Map<number, number[]>();
+      for (const note of after.notes) {
+        const durations = remainingAtBeat.get(note.startBeat);
+        if (durations) durations.push(note.durationBeats);
+        else remainingAtBeat.set(note.startBeat, [note.durationBeats]);
+      }
+      for (let i = expanded.notes.length - 1; i >= 0; i--) {
+        const note = expanded.notes[i]!;
+        if (beyond(note.startBeat)) continue;
+        const remaining = remainingAtBeat.get(note.startBeat)?.pop();
+        if (remaining === undefined) linkedLosses.notes += 1;
+        else if (Math.min(note.durationBeats, endBeat - note.startBeat) > remaining + BEAT_EPSILON) {
+          linkedLosses.truncatedNotes += 1;
+        }
+      }
     }
   }
   const chords = project.chordTrack.filter((c) => beyond(c.startBeat)).length;
   const truncatedChords = project.chordTrack.filter((c) => crosses(c.startBeat, c.durationBeats)).length;
   const sections = project.sections.filter((s) => s.startBar >= lengthBars).length;
-  return { notes, chords, drumHits, sections, truncatedNotes, truncatedChords };
+  const hasLinkedLosses = linkedLosses.notes + linkedLosses.drumHits + linkedLosses.truncatedNotes > 0;
+  return {
+    notes, chords, drumHits, sections, truncatedNotes, truncatedChords,
+    ...(hasLinkedLosses ? { linkedLosses } : {}),
+  };
+}
+
+function cutAtSongEnd<T extends { durationBeats: number }>(item: T, start: number, end: number): T {
+  return start + item.durationBeats > end + BEAT_EPSILON
+    ? { ...item, durationBeats: end - start }
+    : item;
 }
 
 /**
- * Set the song length in bars. Content that starts at or after the new end is
- * removed, and notes and chords that run past it are cut at the new end (see
- * `contentBeyondBars` to warn first). Clips are cut at the new end, and clips
- * that ended exactly with the song grow with it; sections are trimmed.
+ * Repair links using the original clip list before trimming. If the entire
+ * source is going away, give each affected link its own copy of the pattern.
  */
-export function setLengthBars(
-  project: Project,
-  lengthBars: number,
-  clock: Clock = systemClock,
-): Project {
+function resizeClipTracks(project: Project, lengthBars: number): Track[] {
   const bpb = beatsPerBar(project.timeSignature);
   const oldEndBeat = project.lengthBars * bpb;
   const endBeat = lengthBars * bpb;
   const beyond = (beat: number): boolean => beat >= endBeat - BEAT_EPSILON;
-  /** Cut `durationBeats` so that `start + duration` does not pass the new end. */
-  const cutAtEnd = <T extends { durationBeats: number }>(item: T, start: number): T =>
-    start + item.durationBeats > endBeat + BEAT_EPSILON
-      ? { ...item, durationBeats: endBeat - start }
-      : item;
+  const allClips = project.tracks.flatMap((track) => track.clips);
+  const keptClips = allClips.filter((clip) => !beyond(clip.startBeat));
+  const keptIds = new Set(keptClips.map((clip) => clip.id));
+  let ids: Set<string> | undefined;
+  const copyEvent = <T extends { id: string }>(event: T, clipId: string): T => {
+    ids ??= new Set([
+      project.id,
+      ...project.tracks.map((track) => track.id),
+      ...project.chordTrack.map((chord) => chord.id),
+      ...project.sections.map((section) => section.id),
+      ...allClips.flatMap((clip) => [
+        clip.id,
+        ...(clip.notes ?? []).map((note) => note.id),
+        ...(clip.drumEvents ?? []).map((hit) => hit.id),
+      ]),
+    ]);
+    const base = `${clipId}-${event.id}`;
+    let id = base;
+    for (let suffix = 1; ids.has(id); suffix++) id = `${base}-${suffix}`;
+    ids.add(id);
+    return { ...event, id };
+  };
 
-  const tracks = project.tracks.map((track) => {
+  return project.tracks.map((track) => {
     const clips: Clip[] = [];
-    for (const clip of track.clips) {
-      if (beyond(clip.startBeat)) continue;
+    for (const original of track.clips) {
+      if (!keptIds.has(original.id)) continue;
+      let clip = original;
+      if (clip.aliasOf !== undefined && typeof resolveLinkSource(clip, keptClips) === 'string') {
+        const source = resolveLinkSource(clip, allClips);
+        if (typeof source !== 'string') {
+          clip = keptIds.has(source.id)
+            ? { ...clip, aliasOf: source.id }
+            : {
+                ...clip,
+                aliasOf: undefined,
+                notes: source.notes?.map((note) => copyEvent(note, clip.id)),
+                drumEvents: source.drumEvents?.map((hit) => copyEvent(hit, clip.id)),
+                stepsPerBar: source.stepsPerBar,
+              };
+        }
+      }
       const clipEnd = clip.startBeat + clip.lengthBeats;
       const endsWithSong = Math.abs(clipEnd - oldEndBeat) < BEAT_EPSILON;
       const lengthBeats = clipEnd > endBeat || endsWithSong ? endBeat - clip.startBeat : clip.lengthBeats;
@@ -496,7 +594,7 @@ export function setLengthBars(
       if (clip.notes) {
         next.notes = clip.notes
           .filter((n) => !beyond(clip.startBeat + n.startBeat))
-          .map((n) => cutAtEnd(n, clip.startBeat + n.startBeat));
+          .map((n) => cutAtSongEnd(n, clip.startBeat + n.startBeat, endBeat));
       }
       if (clip.drumEvents) {
         next.drumEvents = clip.drumEvents.filter(
@@ -507,10 +605,24 @@ export function setLengthBars(
     }
     return { ...track, clips };
   });
+}
 
+/**
+ * Set the song length in bars. Content beyond the new end is removed and
+ * crossing notes, chords and sections are cut. Clips ending with the song
+ * follow its end (see `contentBeyondBars` to warn first).
+ */
+export function setLengthBars(
+  project: Project,
+  lengthBars: number,
+  clock: Clock = systemClock,
+): Project {
+  const endBeat = lengthBars * beatsPerBar(project.timeSignature);
+  const beyond = (beat: number): boolean => beat >= endBeat - BEAT_EPSILON;
+  const tracks = resizeClipTracks(project, lengthBars);
   const chordTrack = project.chordTrack
     .filter((c) => !beyond(c.startBeat))
-    .map((c) => cutAtEnd(c, c.startBeat));
+    .map((c) => cutAtSongEnd(c, c.startBeat, endBeat));
   const sections = project.sections
     .filter((s) => s.startBar < lengthBars)
     .map((s) => ({ ...s, lengthBars: Math.min(s.lengthBars, lengthBars - s.startBar) }));

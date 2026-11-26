@@ -75,12 +75,23 @@ export type Clip = {
   contentLengthBeats?: number; // ループ周期。未設定は lengthBeats
   loop: boolean;
   aliasOf?: string;
+  legacyClipSettings?: { loop: boolean; aliasOf?: string; contentLengthBeats?: number };
   notes?: NoteEvent[];
   drumEvents?: DrumEvent[];
   stepsPerBar?: number; // ドラムクリップの 1 小節のステップ数(未設定は 16)。新規クリップは拍子に合わせて beatsPerBar × 4(4/4=16、3/4=12)。ステップ i の拍位置は i × beatsPerBar / stepsPerBar。拍子を変えると beatsPerBar × 4 に揃え、各打点の拍位置を保つ(同じレーン・同じステップに重なった打点は 1 つだけ残し、消える数は変更前に確認する)
   audioAssetId?: string;
 };
+```
 
+Clip の意味(再生・WAV・MIDI 共通、`expandClip` が唯一の実装。docs/02 §3.5):
+
+- `lengthBeats`: クリップが鳴る長さ。これ以降に始まるノート・打点は鳴らず、終わりをまたぐノートは終わりで切る。
+- `loop` / `contentLengthBeats`: `loop` が true のとき、中身を `contentLengthBeats ?? lengthBeats` 拍ごとに繰り返す。周期をまたぐノートは周期の終わりで切る。周期 0 以下は繰り返さない。1 クリップのループで鳴らす音は最大 100,000 個(`MAX_LOOP_EVENTS`)で、収まる回数だけ鳴らす。1 回分の途中では切らず、最初の 1 回分が上限を超える場合は無音になる。クリップの終わりで途中までになる最後の 1 回は実際に鳴る音だけを数え、残りの範囲は `problems` に鳴らない拍数を返す。上限を超えるループのクリップは `validateProject` が `contentLengthBeats` のエラーとして弾く。編集と保存にも同じ上限を適用するため、保存・読み込みが通ったプロジェクトでは打ち切りは起きない(打ち切りは検証前の値に対する安全策)。周期の中に音が無ければ繰り返さない。丸め誤差を吸収するため、終わりとの差が許容幅以内で始まる音は終わりに来たものとして扱う。許容幅は最大 1e-9 拍で、1 拍未満の範囲では長さに比例して小さくする。
+- `aliasOf`: リンク先クリップの `notes` / `drumEvents` / `stepsPerBar` を、自分の `startBeat`・`lengthBeats`・`loop`・`contentLengthBeats` で鳴らす。リンクのリンクはたどる。参照切れ・循環は例外にせず無音にし、理由を `problems` に日本語で返す。クリップの `type` は問わない。
+- トラックの種類: `expandClip` にトラックの `type` を渡すと、`drum` は打点だけを返し、`instrument` はノートだけを返す。`audio`・`bus`・`master` のクリップの打点・ノートは無音。外した個数は `problems` に日本語で返す。再生・WAV・MIDI・書き出し前チェックリストはどれもトラックの `type` を渡す。
+- 曲の終わり(`lengthBars × beatsPerBar` 拍)以降に始まる音は、再生・WAV・MIDI のどれでも鳴らさない。
+
+```ts
 export type NoteEvent = {
   id: string;
   pitch: number;
@@ -223,7 +234,7 @@ CREATE TABLE assets (
 - 破壊的変更は migration を書く
 - Lesson DSL も `lesson_schema_version` を持つ
 - Export時に `app_version` と `created_with` を記録する
-- 現行の `schemaVersion` は 2。値は `CURRENT_SCHEMA_VERSION` だけで定義し、生成コードに数値を直書きしない
+- 現行の `schemaVersion` は 3。値は `CURRENT_SCHEMA_VERSION` だけで定義し、生成コードに数値を直書きしない
 - 新しいバージョンのファイルは読み込みを拒否する
 - オプションフィールドの追加だけならバージョンを上げない
 
@@ -232,10 +243,20 @@ CREATE TABLE assets (
 `migrateProject` は冪等で、既存の曲の音を変えない。
 
 - **lengthBeats 切り上げ**: 各クリップの `lengthBeats` を、内部の最後のノート終端(`startBeat + durationBeats`)と最後のドラムステップ終端以上に切り上げる。v1 の再生は `lengthBeats` を無視して全ノートを鳴らしていたため、はみ出した音を残す。ドラムステップ終端は再生と同じく 1 小節の拍数(`beatsPerBar`。6/8 なら 3 拍)を stepsPerBar で割って求める
+- **v1 のループとリンク**: v1 の再生どおり各クリップ自身の音を 1 回ずつ鳴らす。元の `loop`、`contentLengthBeats`、`aliasOf` は `legacyClipSettings` に記録する
 - **x/4 以外の拍子の小節換算**: v1 は 1 小節を分子の拍数(6/8 なら 6 拍)として再生していた。v2 の `beatsPerBar`(6/8 なら 3 拍)で同じ音になるよう、`lengthBars` を `ceil(旧小節数 × 分母 / 4)` に、セクションの `startBar` / `lengthBars` を同じ倍率で換算する。ドラムクリップは `stepsPerBar` を `旧 stepsPerBar × 4 / 分母` にし(16 ステップの 6/8 なら 8)、ステップ番号はそのまま。割り切れないときは `stepsPerBar` を 4 倍にしてステップ番号に分母を掛ける。どちらも各打点の拍位置は厳密に変わらない。x/4 の曲は何も変えない
 - **master volume 正規化**: `type: 'master'` のトラックの `volume` を 1 にする。v1 ではこの値にかかわらず実効ゲインが常に 1 だったため
 - **role 推定**: `type: 'drum'` は `drums`。それ以外はトラック名を大文字小文字を区別せず単語単位で照合し、chords / chord → `chords`、bass → `bass`、melody / lead → `melody`。master と、どれにも当たらないトラックは未設定のまま
 - **移行前バックアップ**: localStorage から読んだ JSON の `schemaVersion` が現行より古いと、移行前の生 JSON を `cts.project.backup.v<旧バージョン>` に保存してから移行する。キーはバージョンごとに 1 つで、複数の曲を移行すると最後に読んだ曲で上書きされる。容量超過で保存できなくても移行は続ける。このキーはプロジェクト一覧の対象にしない
+
+### v2 → v3 の移行規則
+
+v2 までのライブ再生と WAV は `lengthBeats` を無視し、各クリップ自身のノート・打点をクリップの長さを超えても 1 回ずつ鳴らしていた。v3 はクリップの長さ・ループ・リンクを音に反映する(docs/02 §3.5)ので、v2 のファイルを読み込むと各クリップを次のように扱う。v1 のファイルは v1 → v2 → v3 の順に移行する。
+
+- 各クリップの `lengthBeats` を、最後のノート終端・ドラムステップ終端以上に切り上げ、はみ出していた音も残す
+- 移行後のライブ再生・WAV・MIDI は v2 のライブ再生にそろえ、各クリップ自身の音を 1 回ずつ鳴らす。旧 MIDI はループをノートの終端から求めた長さで繰り返していたため、その出力は移行後に変わる。再生用の `loop` をオフにし、`contentLengthBeats` と `aliasOf` を外す。元の値は復元用の `legacyClipSettings` に記録し、v3 の JSON を保存して読み直しても保持する
+- 自分のクリップにノートを持つ v2 の `bus` と `audio` は、同じ ID・音色・音量・パン・ミュート・ソロ・エフェクトを持つ `instrument` に変換する。v2 でそのトラックから鳴っていたノートを再生と WAV で引き続き鳴らせる
+- v3 のファイル(`schemaVersion: 3`)は長さ・ループ・リンクを書かれたとおりに鳴らし、読み込み時に変更しない
 
 ## 5. Validationルール
 

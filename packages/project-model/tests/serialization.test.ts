@@ -45,7 +45,7 @@ describe('serialization', () => {
     const project = createEmptyProject({ clock });
     const raw = JSON.parse(serializeProject(project)) as Record<string, unknown>;
     const migrated = migrateProject(raw);
-    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.schemaVersion).toBe(3);
   });
 
   it('throws when no migration path exists for an old version', () => {

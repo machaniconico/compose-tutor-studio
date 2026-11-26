@@ -6,7 +6,7 @@
 // conversion lives here and is unit tested.
 
 import type { DrumLane, Project } from '@cts/project-model';
-import { beatsPerBar as beatsPerBarOf } from '@cts/project-model';
+import { beatsPerBar as beatsPerBarOf, expandClip } from '@cts/project-model';
 import type { ScheduledEvent } from './scheduler';
 
 /** Default steps per bar for a drum clip when not specified. */
@@ -20,6 +20,8 @@ export type NoteScheduleEvent = {
   pitch: number;
   durationBeats: number;
   velocity: number;
+  /** Set when the clip end cut the note short (the synth then releases at its end). */
+  cut?: true;
 };
 
 /** A drum hit to be played on a drum track. */
@@ -55,15 +57,17 @@ export function drumStepToBeat(
 /**
  * Flatten a project into beat-stamped scheduled events.
  *
- * Instrument tracks: every note of every clip becomes a note event at
- * `clip.startBeat + note.startBeat`, tagged with the track preset.
- * Drum tracks: every drum event becomes a hit at the step's beat.
+ * Every clip goes through `expandClip`, so clip length, loop and links sound
+ * the same here, in the WAV render (which reads these events) and in MIDI
+ * export. Instrument notes are tagged with the track preset; drum hits keep
+ * their lane.
  *
  * The result is unsorted; the scheduler sorts by resolved time. Pure.
  */
 export function buildScheduleEvents(project: Project): ScheduledEvent[] {
   const bpb = beatsPerBarOf(project.timeSignature);
   const beatsPerBar = bpb > 0 ? bpb : 4;
+  const allClips = project.tracks.flatMap((track) => track.clips);
   const events: ScheduledEvent[] = [];
 
   for (const track of project.tracks) {
@@ -72,37 +76,33 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
     const preset = track.instrument?.preset ?? 'warmPad';
 
     for (const clip of track.clips) {
-      // Instrument note clips.
-      if (clip.notes && clip.notes.length > 0) {
-        for (const note of clip.notes) {
-          events.push({
-            beat: clip.startBeat + note.startBeat,
-            payload: {
-              kind: 'note',
-              trackId: track.id,
-              preset,
-              pitch: note.pitch,
-              durationBeats: note.durationBeats,
-              velocity: note.velocity,
-            } satisfies NoteScheduleEvent,
-          });
-        }
+      const { notes, drumHits } = expandClip(clip, allClips, beatsPerBar, track.type);
+
+      for (const note of notes) {
+        events.push({
+          beat: note.startBeat,
+          payload: {
+            kind: 'note',
+            trackId: track.id,
+            preset,
+            pitch: note.pitch,
+            durationBeats: note.durationBeats,
+            velocity: note.velocity,
+            ...(note.cut ? { cut: true as const } : {}),
+          } satisfies NoteScheduleEvent,
+        });
       }
 
-      // Drum clips.
-      if (clip.drumEvents && clip.drumEvents.length > 0) {
-        const stepsPerBar = clip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR;
-        for (const drum of clip.drumEvents) {
-          events.push({
-            beat: drumStepToBeat(drum.stepIndex, stepsPerBar, beatsPerBar, clip.startBeat),
-            payload: {
-              kind: 'drum',
-              trackId: track.id,
-              lane: drum.lane,
-              velocity: drum.velocity,
-            } satisfies DrumScheduleEvent,
-          });
-        }
+      for (const hit of drumHits) {
+        events.push({
+          beat: hit.beat,
+          payload: {
+            kind: 'drum',
+            trackId: track.id,
+            lane: hit.lane,
+            velocity: hit.velocity,
+          } satisfies DrumScheduleEvent,
+        });
       }
     }
   }

@@ -61,7 +61,7 @@ describe('createDefaultProject', () => {
     expect(p.scale).toBe('major');
     expect(p.timeSignature).toEqual([4, 4]);
     expect(p.lengthBars).toBe(8);
-    expect(p.schemaVersion).toBe(2);
+    expect(p.schemaVersion).toBe(3);
   });
 
   it('sizes the drum grid to the meter (16 steps in 4/4, 12 in 3/4)', () => {

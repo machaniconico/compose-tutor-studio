@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useStore } from '../../state/store';
 import type { Clip, DrumEvent, DrumLane, Track } from '@cts/project-model';
-import { beatsPerBar } from '@cts/project-model';
+import { beatsPerBar, CLIP_EDGE_TOLERANCE_BEATS, resolveLinkSource, startsBeforeClipEnd } from '@cts/project-model';
+import { DEFAULT_STEPS_PER_BAR } from '../../audio/events';
 import { stepGridPxPerBeat } from '../timeline';
 import { Playhead } from '../transport/TimelineRuler';
 import { DRUM_PATTERNS, applyDrumPattern, setDrumStepVelocity } from '../../state/editorActions';
@@ -41,14 +42,10 @@ function velocityClass(velocity: number): string {
 
 /** Find the drum clip (selected one, else first). */
 function findDrumClip(tracks: readonly Track[], selectedClipId: string | null): Clip | null {
-  for (const track of tracks) {
-    if (track.type !== 'drum') continue;
-    const selected = track.clips.find((c) => c.id === selectedClipId && c.type === 'drum');
-    if (selected) return selected;
-    const first = track.clips.find((c) => c.type === 'drum');
-    if (first) return first;
-  }
-  return null;
+  const drumClips = tracks
+    .filter((track) => track.type === 'drum')
+    .flatMap((track) => track.clips.filter((clip) => clip.type === 'drum'));
+  return drumClips.find((clip) => clip.id === selectedClipId) ?? drumClips[0] ?? null;
 }
 
 /**
@@ -70,7 +67,15 @@ export function DrumGrid() {
     return <div className="empty-hint">ドラムクリップがありません。</div>;
   }
 
-  const stepsPerBar = clip.stepsPerBar ?? 16;
+  const linked = clip.aliasOf !== undefined;
+  const source = linked ? resolveLinkSource(clip, tracks.flatMap((track) => track.clips)) : clip;
+  if (typeof source === 'string') {
+    return <div className="empty-hint">{source}</div>;
+  }
+
+  const stepsPerBar = source.stepsPerBar !== undefined && source.stepsPerBar > 0
+    ? source.stepsPerBar
+    : DEFAULT_STEPS_PER_BAR;
   const bpb = beatsPerBar(timeSignature);
   // A clip may end part-way through a bar (after a meter change): show that
   // bar too, with the steps past the clip end switched off.
@@ -84,7 +89,23 @@ export function DrumGrid() {
   const labelOffsetBeats = (LANE_LABEL_PX + STEP_GAP_PX) / stepAreaPpb;
   const barStartBeat = clip.startBeat + activeBar * bpb;
 
-  const events = clip.drumEvents ?? [];
+  // A looping clip only sounds its first repeat's steps, so a cell in a later
+  // repeat shows and edits the step that sounds there (as in the piano roll).
+  const period = clip.contentLengthBeats ?? clip.lengthBeats;
+  const looping = clip.loop && period > 0;
+  /** The saved step that sounds at this cell, or null when no step can. */
+  const soundingStep = (stepIndex: number): number | null => {
+    const beat = stepIndex * beatsPerStep;
+    if (!startsBeforeClipEnd(beat, clip.lengthBeats)) return null;
+    if (!looping || startsBeforeClipEnd(beat, period)) return stepIndex;
+    let local = beat % period;
+    // Float remainders a hair under the period mean "the next repeat's start".
+    if (!startsBeforeClipEnd(local, period)) local = 0;
+    const step = Math.round(local / beatsPerStep);
+    return Math.abs(step * beatsPerStep - local) < CLIP_EDGE_TOLERANCE_BEATS ? step : null;
+  };
+
+  const events = source.drumEvents ?? [];
   const byKey = new Map<string, DrumEvent>();
   for (const e of events) byKey.set(`${e.lane}:${e.stepIndex}`, e);
 
@@ -102,7 +123,7 @@ export function DrumGrid() {
                   `「${p.name}」のパターンでドラムを置き換えます。よろしいですか？`,
                 );
                 if (!ok) return;
-                applyDrumPattern(clip.id, p.id);
+                applyDrumPattern(source.id, p.id);
               }}
             >
               {p.name}
@@ -135,11 +156,16 @@ export function DrumGrid() {
           <div className="drum-grid__row" key={lane}>
             <span className="drum-grid__lane-label">{label}</span>
             {Array.from({ length: stepsPerBar }, (_, stepInBar) => {
-              const stepIndex = barOffset + stepInBar;
-              const event = byKey.get(`${lane}:${stepIndex}`);
+              const sounding = soundingStep(barOffset + stepInBar);
+              const stepIndex = sounding ?? barOffset + stepInBar;
+              const event = sounding === null ? undefined : byKey.get(`${lane}:${stepIndex}`);
               const isOn = event !== undefined;
               const isBeatStart = stepInBar % 4 === 0;
-              const isOutside = stepIndex * beatsPerStep >= clip.lengthBeats - 1e-9;
+              const isOutside = sounding === null;
+              const outsideLabel =
+                !startsBeforeClipEnd((barOffset + stepInBar) * beatsPerStep, clip.lengthBeats)
+                  ? '(クリップの外)'
+                  : '(ループで鳴らない位置)';
               const shade = isOn ? velocityClass(event.velocity) : '';
               return (
                 <button
@@ -147,10 +173,10 @@ export function DrumGrid() {
                   key={stepInBar}
                   className={`drum-cell${isOn ? ' is-on' : ''}${shade}${isBeatStart ? ' is-beat-start' : ''}${isOutside ? ' is-outside' : ''}`}
                   aria-pressed={isOn}
-                  aria-label={`${label} ステップ ${stepInBar + 1}${isOn ? ` 強さ ${event.velocity}` : ''}${isOutside ? '(クリップの外)' : ''}`}
+                  aria-label={`${label} ステップ ${stepInBar + 1}${isOn ? ` 強さ ${event.velocity}` : ''}${isOutside ? outsideLabel : ''}`}
                   disabled={isOutside}
                   onClick={() =>
-                    setDrumStepVelocity(clip.id, lane, stepIndex, nextVelocity(event?.velocity ?? null))
+                    setDrumStepVelocity(source.id, lane, stepIndex, nextVelocity(event?.velocity ?? null))
                   }
                 />
               );
@@ -163,6 +189,9 @@ export function DrumGrid() {
           hidden={positionBeat < barStartBeat || positionBeat >= barStartBeat + bpb}
         />
       </div>
+      {linked && (
+        <p className="drums__hint">このクリップは中身を共有しています。セルやパターンを変えると、元のクリップと他の共有先にも反映されます。</p>
+      )}
       <p className="drums__hint">セルを繰り返しクリックすると 強 → 中 → 弱 → オフ と切り替わります。</p>
     </div>
   );

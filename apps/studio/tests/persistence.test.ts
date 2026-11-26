@@ -242,14 +242,14 @@ describe('persistence', () => {
       return { id: project.id, raw: JSON.stringify(project) };
     }
 
-    it('keeps the untouched v1 JSON and returns a v2 project', () => {
+    it('keeps the untouched v1 JSON and returns a current project', () => {
       const storage = new MemoryStorage();
       const { id, raw } = storedV1('古い曲');
       storage.setItem(projectKey(id), raw);
 
       const loaded = loadProject(id, storage);
 
-      expect(loaded?.schemaVersion).toBe(2);
+      expect(loaded?.schemaVersion).toBe(3);
       expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBe(raw);
     });
 
@@ -258,7 +258,7 @@ describe('persistence', () => {
       const { id, raw } = storedV1('BOM付き');
       storage.setItem(projectKey(id), `﻿${raw}`);
 
-      expect(loadProject(id, storage)?.schemaVersion).toBe(2);
+      expect(loadProject(id, storage)?.schemaVersion).toBe(3);
       expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBe(`﻿${raw}`);
     });
 
@@ -267,7 +267,7 @@ describe('persistence', () => {
       const { id, raw } = storedV1('容量いっぱい');
       storage.setItem(projectKey(id), raw);
 
-      expect(loadProject(id, storage)?.schemaVersion).toBe(2);
+      expect(loadProject(id, storage)?.schemaVersion).toBe(3);
       expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBeNull();
     });
 
@@ -277,7 +277,7 @@ describe('persistence', () => {
       storage.setItem(projectKey(id), '{ not json');
       storage.setItem(projectBackupKey(id), raw);
 
-      expect(loadProject(id, storage)?.schemaVersion).toBe(2);
+      expect(loadProject(id, storage)?.schemaVersion).toBe(3);
       expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBe(raw);
     });
 
@@ -287,7 +287,7 @@ describe('persistence', () => {
       storage.setItem(projectKey(id), '{ not json');
       storage.setItem(projectBackupKey(id), raw);
 
-      expect(loadProject(id, storage)?.schemaVersion).toBe(2);
+      expect(loadProject(id, storage)?.schemaVersion).toBe(3);
       expect(storage.getItem(MIGRATION_BACKUP_KEY)).toBeNull();
     });
 

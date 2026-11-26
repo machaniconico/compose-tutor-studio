@@ -21,3 +21,4 @@ export {
   createChordEvent,
 } from './factory';
 export type { CreateDefaultProjectOpts } from './factory';
+export * from './clipExpand';

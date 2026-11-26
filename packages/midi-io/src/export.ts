@@ -4,7 +4,7 @@
  */
 
 import type { Project, NoteEvent, DrumLane, Track, Clip } from '@cts/project-model';
-import { beatsPerBar } from '@cts/project-model';
+import { beatsPerBar, expandClip } from '@cts/project-model';
 import {
   PPQ,
   writeVarLen,
@@ -88,81 +88,55 @@ export function panToCc(pan: number): number {
 // --- Note / clip conversion ---
 
 /**
- * Convert a single clip's notes into absolute-tick MIDI messages.
- * Honors `clip.loop`: when true, the clip's notes are unrolled across the clip
- * length (`clip.lengthBeats`) using the note pattern's natural length.
+ * Append a clip's absolute-tick MIDI messages to `msgs`. The clip goes through
+ * `expandClip`, so its length, loop and link rules match live playback and the
+ * WAV render: a drum track sounds only drum hits (channel 9), any other track
+ * only notes (the track channel), and nothing starting at or after the song
+ * end (`songEndBeat`) sounds. Messages are appended one by one; a spread of a
+ * long loop overflows the call stack.
  */
-function clipNotesToMessages(clip: Clip, channel: number, ppq: number): MidiMessage[] {
-  const notes = clip.notes ?? [];
-  if (notes.length === 0) return [];
+function appendClipMessages(
+  msgs: MidiMessage[],
+  clip: Clip,
+  allClips: readonly Clip[],
+  channel: number,
+  ppq: number,
+  bpb: number,
+  trackType: Track['type'],
+  songEndBeat: number,
+): void {
+  const { notes, drumHits } = expandClip(clip, allClips, bpb, trackType);
 
-  const msgs: MidiMessage[] = [];
-  const emit = (note: NoteEvent, offsetBeats: number): void => {
-    const startBeat = clip.startBeat + offsetBeats + note.startBeat;
-    const endBeat = startBeat + note.durationBeats;
-    const startTick = Math.round(startBeat * ppq);
-    const endTick = Math.round(endBeat * ppq);
+  for (const note of notes) {
+    if (note.startBeat >= songEndBeat) continue;
+    const startTick = Math.round(note.startBeat * ppq);
+    // A note cut at the clip end can be shorter than a tick; keep it 1 tick
+    // long so it is still written, as it still sounds live and in the WAV.
+    const endTick = Math.max(startTick + 1, Math.round((note.startBeat + note.durationBeats) * ppq));
     const vel = clamp(Math.round(note.velocity), 0, 127);
     msgs.push({ tick: startTick, bytes: [0x90 | channel, note.pitch, vel] });
     msgs.push({ tick: endTick, bytes: [0x80 | channel, note.pitch, 0] });
-  };
-
-  if (clip.loop) {
-    // Determine the pattern length, then unroll across clip.lengthBeats.
-    const patternLength = notePatternLength(notes);
-    if (patternLength <= 0) {
-      for (const note of notes) emit(note, 0);
-      return msgs;
-    }
-    for (let offset = 0; offset < clip.lengthBeats; offset += patternLength) {
-      for (const note of notes) {
-        if (offset + note.startBeat >= clip.lengthBeats) continue;
-        emit(note, offset);
-      }
-    }
-  } else {
-    for (const note of notes) emit(note, 0);
   }
-  return msgs;
-}
 
-/** Natural pattern length of a set of notes (max start+duration), in beats. */
-function notePatternLength(notes: NoteEvent[]): number {
-  let end = 0;
-  for (const note of notes) {
-    end = Math.max(end, note.startBeat + note.durationBeats);
-  }
-  return end;
-}
-
-/** Convert a drum clip's events into absolute-tick MIDI messages on channel 9. */
-function clipDrumsToMessages(clip: Clip, ppq: number, bpb: number): MidiMessage[] {
-  const events = clip.drumEvents ?? [];
-  if (events.length === 0) return [];
-
-  const stepsPerBar = clip.stepsPerBar ?? 16;
-  // A bar of `bpb` quarter-note beats is divided into stepsPerBar steps.
-  const beatsPerStep = bpb / stepsPerBar;
-
-  const msgs: MidiMessage[] = [];
-  for (const evt of events) {
-    const pitch = DRUM_NOTE[evt.lane];
-    const startBeat = clip.startBeat + evt.stepIndex * beatsPerStep;
-    const startTick = Math.round(startBeat * ppq);
-    const endTick = Math.round((startBeat + DRUM_HIT_DURATION_BEATS) * ppq);
-    const vel = clamp(Math.round(evt.velocity), 0, 127);
+  for (const hit of drumHits) {
+    if (hit.beat >= songEndBeat) continue;
+    const pitch = DRUM_NOTE[hit.lane];
+    const startTick = Math.round(hit.beat * ppq);
+    const endTick = Math.round((hit.beat + DRUM_HIT_DURATION_BEATS) * ppq);
+    const vel = clamp(Math.round(hit.velocity), 0, 127);
     msgs.push({ tick: startTick, bytes: [0x90 | DRUM_CHANNEL, pitch, vel] });
     msgs.push({ tick: endTick, bytes: [0x80 | DRUM_CHANNEL, pitch, 0] });
   }
-  return msgs;
 }
 
 /** Build one MTrk for an instrument/drum track, including CC7/CC10 at start. */
 function buildInstrumentTrack(
   track: Track,
+  allClips: readonly Clip[],
   channel: number,
   ppq: number,
   bpb: number,
+  songEndBeat: number,
 ): Uint8Array {
   const msgs: MidiMessage[] = [
     { tick: 0, bytes: trackNameMeta(track.name) },
@@ -171,11 +145,7 @@ function buildInstrumentTrack(
   ];
 
   for (const clip of track.clips) {
-    if (clip.type === 'drum') {
-      msgs.push(...clipDrumsToMessages(clip, ppq, bpb));
-    } else {
-      msgs.push(...clipNotesToMessages(clip, channel, ppq));
-    }
+    appendClipMessages(msgs, clip, allClips, channel, ppq, bpb, track.type, songEndBeat);
   }
   return buildTrackChunk(msgs);
 }
@@ -217,10 +187,13 @@ export function projectToMidi(project: Project, options?: { ppq?: number }): Uin
   };
 
   const bpb = beatsPerBar(project.timeSignature);
+  // Same song end as live playback and the WAV render (scheduler projectLengthBeats).
+  const songEndBeat = (project.lengthBars > 0 ? project.lengthBars : 0) * (bpb > 0 ? bpb : 4);
+  const allClips = project.tracks.flatMap((track) => track.clips);
   for (const track of project.tracks) {
     if (track.type !== 'instrument' && track.type !== 'drum') continue;
     const channel = track.type === 'drum' ? DRUM_CHANNEL : allocChannel();
-    trackChunks.push(buildInstrumentTrack(track, channel, ppq, bpb));
+    trackChunks.push(buildInstrumentTrack(track, allClips, channel, ppq, bpb, songEndBeat));
   }
 
   const allTracks = [tempoTrack, ...trackChunks];

@@ -12,7 +12,7 @@ describe('createEmptyProject', () => {
     expect(project.scale).toBe('major');
     expect(project.timeSignature).toEqual([4, 4]);
     expect(project.lengthBars).toBe(8);
-    expect(project.schemaVersion).toBe(2);
+    expect(project.schemaVersion).toBe(3);
     expect(project.createdAt).toBe('2026-06-11T00:00:00.000Z');
     expect(project.updatedAt).toBe('2026-06-11T00:00:00.000Z');
   });

@@ -141,6 +141,7 @@ function NewProjectGallery({ onDone }: { onDone: () => void }) {
         if (!window.confirm(result.confirm)) return;
         result = importMidiTracks(parsed, true);
       }
+      if (result.importedTrackCount === 0) return;
       onDone();
       pushToast(
         `MIDIを読み込みました。${result.importedTrackCount}トラック、${result.importedNoteCount}音を追加しました。`,
