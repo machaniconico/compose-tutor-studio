@@ -31,6 +31,7 @@ import {
   createMidiClip,
   drumStepsPerBar,
   duplicateClip,
+  findProjectSoundingLimitProblem,
   moveClip,
   removeClip,
   quantizeClipNotes,
@@ -42,10 +43,15 @@ import {
   drumBeatToStep,
   firstPassBeatAt,
   inClipDomain,
+  placedNoteTicks,
+  PPQ,
   resolveEditTarget,
+  songEndBeat,
   resolveLinkSource,
   setLengthBars as setProjectLengthBars,
   setTimeSignature as setProjectTimeSignature,
+  SECTION_EDIT_FAILURE_MESSAGES,
+  soundingEvents,
   tickSpansOverlap,
 } from '@cts/project-model';
 import {
@@ -64,7 +70,7 @@ import {
   type ChordEventInput,
   type HarmonicFunction,
 } from '@cts/theory-engine';
-import { getScalePitchClasses, nearestScalePitch, transposeByDegree } from '@cts/theory-engine';
+import { createPrng, getScalePitchClasses, nearestScalePitch, transposeByDegree } from '@cts/theory-engine';
 import { roleForTrackName } from '@cts/tutorial-engine';
 import { fitClipToNotes, useStore, type ClipboardNote, type NoteEditOptions } from './store';
 import { uid } from './ids';
@@ -72,6 +78,7 @@ import { publishAppEvent } from './appEvents';
 import { upsertEffect, type SupportedEffectType } from '../audio/effects';
 import { findChannelPreset } from '../features/mixer/channelPresets';
 import { withSongLength } from '../features/arranger/arrangeMath';
+import { addGridSteps } from '../features/pianoRoll/gridMath';
 import { pushToast } from './tutorialBridge';
 
 /** Bar index (0-based) for a beat offset under the project's time signature. */
@@ -461,6 +468,13 @@ export const NOTE_EDIT_MESSAGES = {
   pastePartial: 'クリップの終わりを超える部分は貼り付けていません(クリップの長さは変わりません)。',
   alreadyInScale: '選んだ音はすべてスケールの音です。',
   unknownScale: 'キーとスケールを読み取れないため、スケールに沿って動かせません。',
+  outsideFirstPass: 'クリップの範囲(ループするクリップは繰り返しの 1 回分)の外には動かせません。',
+  outsideDomainEdit: 'このクリップは長さか位置が編集できる範囲の外にあるため、音の位置や長さを変えられません。',
+  tooShort: 'これ以上短くできません(短すぎて鳴らなくなる音があります)。',
+  nothingToJoin: 'つなげられる音がありません。同じ高さで隣り合う音を 2 つ以上選んでください。',
+  splitNothing: '再生ヘッドの位置にかかる選んだ音がありません。再生ヘッドを音の途中に置いてください。',
+  velocityRange: 'ベロシティ(音の強さ)は 1〜127 の範囲になるように指定してください。',
+  soundChanged: SECTION_EDIT_FAILURE_MESSAGES.soundChanged,
 } as const;
 
 /** The selected notes of the clip an edit of `clipId` writes to, or null (with a toast) when it has none. */
@@ -474,6 +488,70 @@ function selectedEditNotes(project: Project, clipId: string, noteIds: readonly s
   const ids = new Set(noteIds);
   const notes = (target.notes ?? []).filter((n) => ids.has(n.id));
   return notes.length > 0 ? { target, ids, notes } : null;
+}
+
+/** Every placement that sounds `target`'s notes: the target and each link that resolves to it. */
+function sharingPlacements(project: Project, target: Clip): Clip[] {
+  return project.tracks
+    .flatMap((t) => t.clips)
+    .filter((c) => c === target || (c.aliasOf !== undefined && resolveEditTarget(project, c.id) === target));
+}
+
+/**
+ * Raw ticks of a note in the first pass of a placement, exactly as playback
+ * places it (placedNoteTicks, before the one-tick minimum). Editors never add
+ * clip and note beats themselves: the order of the sums changes the rounding.
+ */
+function placedTicks(project: Project, clip: Clip, n: Pick<NoteEvent, 'startBeat' | 'durationBeats'>) {
+  return placedNoteTicks(clip, n, { swing: project.swing, songEnd: songEndBeat(project) });
+}
+
+/** Tick a note starting at clip-relative `localBeat` starts on in a placement. */
+function startTickAt(project: Project, clip: Clip, localBeat: number): number {
+  return placedTicks(project, clip, { startBeat: localBeat, durationBeats: 0 }).startTick;
+}
+
+function firstPassEndTick(project: Project, clip: Clip): number {
+  return placedTicks(project, clip, { startBeat: 0, durationBeats: 0 }).passEndTick;
+}
+
+type NoteFields = Pick<NoteEvent, 'pitch' | 'startBeat' | 'durationBeats' | 'velocity'>;
+
+/**
+ * Why edited notes cannot be written (the toast message), or null. Every note
+ * needs an integer pitch 0..127, an integer velocity 1..127, a finite start >= 0
+ * and a finite length > 0. `ticks` also asks for at least one tick and
+ * `firstPass` for an end inside the first pass, both on the absolute ticks of
+ * every placement that sounds the notes (see sharingPlacements).
+ */
+function noteResultProblem(
+  project: Project,
+  placements: readonly Clip[],
+  notes: Iterable<NoteFields>,
+  checks: { ticks?: boolean; firstPass?: boolean } = {},
+): string | null {
+  for (const n of notes) {
+    if (!Number.isInteger(n.pitch) || n.pitch < 0 || n.pitch > 127) {
+      return n.pitch > 127 ? NOTE_EDIT_MESSAGES.tooHigh : NOTE_EDIT_MESSAGES.tooLow;
+    }
+    if (!Number.isInteger(n.velocity) || n.velocity < 1 || n.velocity > 127) return NOTE_EDIT_MESSAGES.velocityRange;
+    if (!Number.isFinite(n.startBeat) || n.startBeat < 0) return NOTE_EDIT_MESSAGES.outsideFirstPass;
+    if (!Number.isFinite(n.durationBeats) || !(n.durationBeats > 0)) return NOTE_EDIT_MESSAGES.tooShort;
+    for (const c of placements) {
+      const t = placedTicks(project, c, n);
+      // A note starting at or past this pass's end does not sound here, so it has no length here.
+      if (checks.ticks && t.startTick < t.passEndTick && !(t.endTick - t.startTick >= 1)) return NOTE_EDIT_MESSAGES.tooShort;
+      if (checks.firstPass && !(t.naturalEndTick <= t.passEndTick)) return NOTE_EDIT_MESSAGES.outsideFirstPass;
+    }
+  }
+  return null;
+}
+
+/** noteResultProblem, shown as an error toast; true when the edit must be refused. */
+function refuseNoteResults(...args: Parameters<typeof noteResultProblem>): boolean {
+  const problem = noteResultProblem(...args);
+  if (problem) pushToast(problem, 'error');
+  return problem !== null;
 }
 
 /**
@@ -526,7 +604,9 @@ export function pasteNotes(clipId: string): string[] {
     pushToast(NOTE_EDIT_MESSAGES.missingTarget, 'error');
     return [];
   }
-  if (!inClipDomain(placement) || !inClipDomain(target)) {
+  // A link sounds its source's notes: keep them inside every sharing placement's first pass.
+  const clips = sharingPlacements(project, target);
+  if (!clips.every(inClipDomain)) {
     pushToast(NOTE_EDIT_MESSAGES.outsideDomain, 'error');
     return [];
   }
@@ -539,25 +619,31 @@ export function pasteNotes(clipId: string): string[] {
     playheadTick < beatTick(placement.startBeat + clipEditSpan(project, placement).length);
   // The playhead may share the clip's start tick while sitting a sub-tick before it: never go below 0.
   const anchor = inside ? Math.max(0, firstPassBeatAt(placement, position - placement.startBeat)) : 0;
-  // A link sounds its source's notes: keep them inside both first passes.
-  const clips = placement === target ? [placement] : [placement, target];
   const limit = Math.min(...clips.map((c) => firstEnd(c) - c.startBeat));
   const pasted: NoteEvent[] = [];
   let clipped = false;
   for (const n of noteClipboard) {
     const startBeat = anchor + n.startBeat;
-    if (clips.some((c) => beatTick(c.startBeat + startBeat) >= beatTick(firstEnd(c)))) {
+    if (clips.some((c) => startTickAt(project, c, startBeat) >= firstPassEndTick(project, c))) {
       clipped = true;
       continue;
     }
     const durationBeats = Math.min(n.durationBeats, limit - startBeat);
     if (durationBeats < n.durationBeats) clipped = true;
-    pasted.push({ id: uid('note'), pitch: n.pitch, startBeat, durationBeats, velocity: n.velocity });
+    const piece = { id: uid('note'), pitch: n.pitch, startBeat, durationBeats, velocity: n.velocity };
+    // A piece cut under one tick, or ending a sub-tick past some placement's first pass: leave it out.
+    const problem = noteResultProblem(project, clips, [piece], { ticks: true, firstPass: true });
+    if (problem === NOTE_EDIT_MESSAGES.tooShort || problem === NOTE_EDIT_MESSAGES.outsideFirstPass) {
+      clipped = true;
+      continue;
+    }
+    pasted.push(piece);
   }
   if (pasted.length === 0) {
     pushToast(NOTE_EDIT_MESSAGES.pasteNothing, 'info');
     return [];
   }
+  if (refuseNoteResults(project, clips, pasted, { ticks: true, firstPass: true })) return [];
   const committed = store.applyProjectChange((p) =>
     mapClip(p, target.id, (c) => ({ ...c, notes: [...(c.notes ?? []), ...pasted] })),
   );
@@ -589,26 +675,10 @@ function applyPitches(
     pushToast(NOTE_EDIT_MESSAGES.unknownScale, 'error');
     return false;
   }
-  const pitches = [...next.values()];
-  if (pitches.some((p) => !Number.isInteger(p))) return false;
-  if (pitches.some((p) => p > 127)) {
-    pushToast(NOTE_EDIT_MESSAGES.tooHigh, 'error');
-    return false;
-  }
-  if (pitches.some((p) => p < 0)) {
-    pushToast(NOTE_EDIT_MESSAGES.tooLow, 'error');
-    return false;
-  }
-  if (picked.notes.every((n) => next.get(n.id) === n.pitch)) return false;
-  return store.applyProjectChange((project) =>
-    mapClip(project, picked.target.id, (c) => ({
-      ...c,
-      notes: (c.notes ?? []).map((n) => {
-        const pitch = next.get(n.id);
-        return pitch === undefined || pitch === n.pitch ? n : { ...n, pitch };
-      }),
-    })),
-  );
+  const results = picked.notes.map((n) => ({ ...n, pitch: next.get(n.id)! }));
+  if (refuseNoteResults(store.project, sharingPlacements(store.project, picked.target), results)) return false;
+  const changed = results.filter((n, i) => n.pitch !== picked.notes[i]!.pitch);
+  return changed.length > 0 && commitNotes(picked, new Map(changed.map((n) => [n.id, n])));
 }
 
 /**
@@ -649,6 +719,434 @@ export function fitSelectedToScale(clipId: string, noteIds: readonly string[]): 
   return applyPitches(clipId, noteIds, (pitch, project) =>
     nearestScalePitch(pitch, project.key, project.scale, 'down'),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Note tools (piano roll, US-015): legato, staccato, join, split at the playhead,
+// arrow-key nudges and velocity ramps / randomization. Same rules as above:
+// edits go to resolveEditTarget, beats stay clip-relative, clip lengths never
+// change, one undo step, and a refused edit leaves the project untouched.
+// Edges are compared on absolute ticks of every clip the notes sound in (the
+// placement and, for a link, its source), as playback rounds each on its own.
+// ---------------------------------------------------------------------------
+
+type NoteEditScope = NonNullable<ReturnType<typeof selectedEditNotes>> & { placement: Clip; clips: Clip[] };
+
+/**
+ * Selected notes plus every placement that sounds them (sharingPlacements), or
+ * null. `timing` edits also need all of those placements in the edit domain.
+ */
+function noteEditScope(project: Project, clipId: string, noteIds: readonly string[], timing: boolean): NoteEditScope | null {
+  const picked = selectedEditNotes(project, clipId, noteIds);
+  const placement = picked && findClip(project, clipId);
+  if (!picked || !placement) return null;
+  const clips = sharingPlacements(project, picked.target);
+  if (timing && !clips.every(inClipDomain)) {
+    pushToast(NOTE_EDIT_MESSAGES.outsideDomainEdit, 'error');
+    return null;
+  }
+  return { ...picked, placement, clips };
+}
+
+/** Refuse (with a toast) edited notes that fail noteResultProblem in the scope's placements. */
+function refuseInScope(project: Project, scope: NoteEditScope, notes: Iterable<NoteFields>, checks: { ticks?: boolean; firstPass?: boolean } = {}): boolean {
+  return refuseNoteResults(project, scope.clips, notes, checks);
+}
+
+type NoteSound = { id: string; startBeat: number; start: number; end: number };
+type SoundingPass = ReadonlyMap<string, NoteSound>;
+type NotePlayback = ReadonlyMap<string, SoundingPass>;
+type CheckPlayback = (before: NotePlayback, after: NotePlayback) => boolean;
+
+/** Index actual playback by placement, repeat and stored note id. */
+function notePlayback(project: Project, target: Clip, ids: ReadonlySet<string>): NotePlayback {
+  const passes = new Map<string, Map<string, NoteSound>>();
+  for (const event of soundingEvents(project, { sourceClipId: target.id, includeMuted: true }).events) {
+    if (event.kind !== 'note') continue;
+    const id = target.notes![event.sourceIndex]!.id;
+    if (!ids.has(id)) continue;
+    const key = `${event.clipId}:${event.repeat}`;
+    const pass = passes.get(key) ?? new Map<string, NoteSound>();
+    pass.set(id, {
+      id,
+      startBeat: event.startBeat,
+      start: beatTick(event.startBeat),
+      end: beatTick(event.startBeat + event.durationBeats),
+    });
+    passes.set(key, pass);
+  }
+  return passes;
+}
+
+function keepsSounding(before: NotePlayback, after: NotePlayback): boolean {
+  for (const [key, pass] of before) {
+    const result = after.get(key);
+    for (const id of pass.keys()) {
+      if (!result?.has(id)) return false;
+    }
+  }
+  return true;
+}
+
+function refuseSoundChange(): false {
+  pushToast(NOTE_EDIT_MESSAGES.soundChanged, 'error');
+  return false;
+}
+
+/** Write changed / removed / added notes into the scope's target in one undo step. */
+function commitNotes(
+  scope: Pick<NoteEditScope, 'target' | 'ids'>,
+  changed: ReadonlyMap<string, NoteEvent>,
+  options: {
+    removed?: ReadonlySet<string>;
+    added?: readonly NoteEvent[];
+    before?: NotePlayback;
+    check?: CheckPlayback;
+    mayIncreaseEvents?: boolean;
+  } = {},
+): boolean {
+  const store = useStore.getState();
+  const { removed, added = [], check = keepsSounding } = options;
+  const target = {
+    ...scope.target,
+    notes: [
+      ...(scope.target.notes ?? []).flatMap((n) => (removed?.has(n.id) ? [] : [changed.get(n.id) ?? n])),
+      ...added,
+    ],
+  };
+  const candidate = mapClip(store.project, target.id, () => target);
+  if (added.length > 0 || options.mayIncreaseEvents) {
+    const problem = findProjectSoundingLimitProblem(candidate);
+    if (problem) {
+      pushToast(problem, 'error');
+      return false;
+    }
+  }
+  const before = options.before ?? notePlayback(store.project, scope.target, scope.ids);
+  const after = notePlayback(candidate, target, new Set([...scope.ids, ...added.map((n) => n.id)]));
+  if (!check(before, after)) return refuseSoundChange();
+  return store.applyProjectChange(() => candidate);
+}
+
+/** Notes sorted by start (then pitch, then id), independent of their stored order. */
+function byStart(notes: readonly NoteEvent[]): NoteEvent[] {
+  return [...notes].sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** For each note in a pass, find the next strictly later onset (chords share it). */
+function* legatoEnds(pass: SoundingPass): Iterable<[NoteSound, NoteSound]> {
+  const sorted = [...pass.values()].sort((a, b) => b.start - a.start);
+  let previous: NoteSound | undefined;
+  let next: NoteSound | undefined;
+  for (const note of sorted) {
+    if (previous && note.start < previous.start) next = previous;
+    if (next) yield [note, next];
+    previous = note;
+  }
+}
+
+/**
+ * Legato: end each selected note where the next selected note (one starting on
+ * a later tick) starts, longer or shorter. The last one keeps its length.
+ * Refused (with a toast) when a note would end past the first pass.
+ */
+export function legato(clipId: string, noteIds: readonly string[]): boolean {
+  const { project } = useStore.getState();
+  const scope = noteEditScope(project, clipId, noteIds, true);
+  if (!scope) return false;
+  // Preserve the first-pass boundary when the selection extends past it.
+  for (const clip of scope.clips) {
+    const end = firstPassEndTick(project, clip);
+    const starts = scope.notes.map((n) => startTickAt(project, clip, n.startBeat));
+    if (starts.some((start) => start < end) && starts.some((start) => start > end)) {
+      pushToast(NOTE_EDIT_MESSAGES.outsideFirstPass, 'error');
+      return false;
+    }
+  }
+  const before = notePlayback(project, scope.target, scope.ids);
+  const ends = new Map<string, {
+    preferred: number;
+    min: number;
+    max: number;
+    aligned: boolean;
+    preferredFits: boolean;
+  }>();
+  const byId = new Map(scope.notes.map((n) => [n.id, n]));
+  for (const pass of before.values()) {
+    for (const [note, next] of legatoEnds(pass)) {
+      const limits = ends.get(note.id) ?? {
+        preferred: byId.get(next.id)!.startBeat - byId.get(note.id)!.startBeat,
+        min: 0, max: Infinity, aligned: true, preferredFits: true,
+      };
+      // Intersect the durations that round to the next onset in each pass.
+      const center = (next.start - note.start) / PPQ + (note.start / PPQ - note.startBeat);
+      limits.min = Math.max(limits.min, center - 0.5 / PPQ);
+      limits.max = Math.min(limits.max, center + 0.5 / PPQ);
+      limits.aligned &&= note.end === next.start;
+      limits.preferredFits &&= beatTick(note.startBeat + limits.preferred) === next.start;
+      ends.set(note.id, limits);
+    }
+  }
+  const changed = new Map<string, NoteEvent>();
+  for (const n of scope.notes) {
+    const limits = ends.get(n.id);
+    if (!limits || limits.aligned) continue;
+    if (!limits.preferredFits && limits.min > limits.max) return refuseSoundChange();
+    const durationBeats = limits.preferredFits ? limits.preferred : (limits.min + limits.max) / 2;
+    changed.set(n.id, { ...n, durationBeats });
+  }
+  if (changed.size === 0) return false;
+  if (refuseInScope(project, scope, changed.values(), { ticks: true, firstPass: true })) return false;
+  return commitNotes(scope, changed, {
+    before,
+    check: (previous, after) => {
+      if (!keepsSounding(previous, after)) return false;
+      for (const pass of after.values()) {
+        for (const [note, next] of legatoEnds(pass)) {
+          if (note.end !== next.start) return false;
+        }
+      }
+      return true;
+    },
+  });
+}
+
+/** Staccato: halve the selected notes' lengths. Refused (with a toast) when one would last under a tick. */
+export function staccato(clipId: string, noteIds: readonly string[]): boolean {
+  const { project } = useStore.getState();
+  const scope = noteEditScope(project, clipId, noteIds, false);
+  if (!scope) return false;
+  const changed = new Map(scope.notes.map((n) => [n.id, { ...n, durationBeats: n.durationBeats / 2 }]));
+  if (refuseInScope(project, scope, changed.values(), { ticks: true })) return false;
+  return commitNotes(scope, changed, {
+    check: (before, after) => {
+      for (const [key, pass] of before) {
+        const result = after.get(key);
+        for (const [id, original] of pass) {
+          const note = result?.get(id);
+          if (!note || note.end - note.start < 1 || note.end - note.start >= original.end - original.start) return false;
+        }
+      }
+      return true;
+    },
+  });
+}
+
+/** Each merged note must cover exactly the old intervals, including any overlaps. */
+function keepsJoinedIntervals(before: NotePlayback, after: NotePlayback, heads: ReadonlyMap<string, string>): boolean {
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    const result = after.get(key);
+    const groups = new Map<string, NoteSound[]>();
+    for (const [id, note] of before.get(key) ?? []) {
+      const head = heads.get(id);
+      if (head === undefined) {
+        if (!result?.has(id)) return false;
+        continue;
+      }
+      const intervals = groups.get(head) ?? [];
+      intervals.push(note);
+      groups.set(head, intervals);
+    }
+    for (const [head, intervals] of groups) {
+      intervals.sort((a, b) => a.start - b.start);
+      const start = intervals[0]!.start;
+      let end = start;
+      for (const interval of intervals) {
+        if (interval.start > end) return false;
+        end = Math.max(end, interval.end);
+      }
+      const joined = result?.get(head);
+      if (joined?.start !== start || joined.end !== end) return false;
+    }
+    for (const id of result?.keys() ?? []) {
+      if (heads.has(id) && !groups.has(id)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Join selected notes of the same pitch that touch or overlap (the next one
+ * starts on or before the tick the previous one ends) into one note from the
+ * first start to the latest end. The first note keeps its id and velocity.
+ */
+export function joinNotes(clipId: string, noteIds: readonly string[]): boolean {
+  const store = useStore.getState();
+  const scope = noteEditScope(store.project, clipId, noteIds, true);
+  if (!scope) return false;
+  const sorted = byStart(scope.notes).sort((a, b) => a.pitch - b.pitch);
+  const changed = new Map<string, NoteEvent>();
+  const removed = new Set<string>();
+  const heads = new Map<string, string>();
+  let head: NoteEvent | null = null;
+  let end = 0;
+  const flush = () => {
+    if (head && end - head.startBeat !== head.durationBeats) changed.set(head.id, { ...head, durationBeats: end - head.startBeat });
+  };
+  for (const n of sorted) {
+    const touches = head !== null && head.pitch === n.pitch &&
+      scope.clips.every((c) =>
+        startTickAt(store.project, c, n.startBeat) <=
+          placedTicks(store.project, c, { startBeat: head!.startBeat, durationBeats: end - head!.startBeat }).naturalEndTick);
+    if (touches) {
+      removed.add(n.id);
+      heads.set(head!.id, head!.id);
+      heads.set(n.id, head!.id);
+      end = Math.max(end, n.startBeat + n.durationBeats);
+      continue;
+    }
+    flush();
+    head = n;
+    end = n.startBeat + n.durationBeats;
+  }
+  flush();
+  if (removed.size === 0) {
+    pushToast(NOTE_EDIT_MESSAGES.nothingToJoin, 'info');
+    return false;
+  }
+  if (refuseInScope(store.project, scope, changed.values(), { ticks: true, firstPass: true })) return false;
+  const committed = commitNotes(scope, changed, {
+    removed,
+    check: (before, after) => keepsJoinedIntervals(before, after, heads),
+  });
+  if (committed) store.selectNotes(noteIds.filter((id) => !removed.has(id)));
+  return committed;
+}
+
+/**
+ * Split each selected note the playhead crosses into two at the playhead (a
+ * looping clip maps a later pass onto the first one). A playhead on a note's
+ * start or end tick, or outside the clip, splits nothing. Both halves are selected.
+ */
+export function splitNoteAtPlayhead(clipId: string, noteIds: readonly string[]): boolean {
+  const store = useStore.getState();
+  const { project } = store;
+  const scope = noteEditScope(project, clipId, noteIds, true);
+  if (!scope) return false;
+  const { placement } = scope;
+  const position = store.transport.positionBeat;
+  const playheadTick = beatTick(position);
+  const inside = Number.isFinite(position) && playheadTick >= beatTick(placement.startBeat) &&
+    playheadTick < beatTick(placement.startBeat + clipEditSpan(project, placement).length);
+  const at = inside ? Math.max(0, firstPassBeatAt(placement, position - placement.startBeat)) : 0;
+  const changed = new Map<string, NoteEvent>();
+  const added: NoteEvent[] = [];
+  const secondIds = new Map<string, string>();
+  for (const n of inside ? scope.notes : []) {
+    const crosses = scope.clips.every((c) => {
+      const t = placedTicks(project, c, n);
+      const atTick = startTickAt(project, c, at);
+      return t.startTick < atTick && atTick < t.naturalEndTick && atTick < t.passEndTick;
+    });
+    if (!crosses) continue;
+    changed.set(n.id, { ...n, durationBeats: at - n.startBeat });
+    const secondId = uid('note');
+    added.push({ ...n, id: secondId, startBeat: at, durationBeats: n.startBeat + n.durationBeats - at });
+    secondIds.set(n.id, secondId);
+  }
+  if (added.length === 0) {
+    pushToast(NOTE_EDIT_MESSAGES.splitNothing, 'info');
+    return false;
+  }
+  if (refuseInScope(project, scope, [...changed.values(), ...added], { ticks: true })) return false;
+  const committed = commitNotes(scope, changed, {
+    added,
+    check: (before, after) => {
+      if (!keepsSounding(before, after)) return false;
+      for (const [key, pass] of before) {
+        for (const id of pass.keys()) {
+          const second = secondIds.get(id);
+          if (second !== undefined && !after.get(key)?.has(second)) return false;
+        }
+      }
+      return true;
+    },
+  });
+  if (committed) store.selectNotes([...noteIds, ...added.map((n) => n.id)]);
+  return committed;
+}
+
+/**
+ * Arrow-key nudge. `semitones` moves pitch (the same edit as transposeSelected:
+ * ↑/↓ one semitone, Shift+↑/↓ an octave). `gridSteps` moves start by that many
+ * grid lines of `snap` beats (←/→), without float drift on triplet grids; refused
+ * (with a toast) when a note would leave the first pass. `gridSteps` must be a
+ * non-zero finite integer and `snap` a finite positive number.
+ */
+export function nudge(
+  clipId: string,
+  noteIds: readonly string[],
+  by: { semitones: number } | { gridSteps: number; snap: number },
+): boolean {
+  if ('semitones' in by) return transposeSelected(clipId, noteIds, { semitones: by.semitones });
+  const { gridSteps, snap } = by;
+  if (!Number.isInteger(gridSteps) || gridSteps === 0 || !Number.isFinite(snap) || !(snap > 0)) return false;
+  const { project } = useStore.getState();
+  const scope = noteEditScope(project, clipId, noteIds, true);
+  if (!scope) return false;
+  const changed = new Map(scope.notes.map((n) => [n.id, { ...n, startBeat: addGridSteps(n.startBeat, snap, gridSteps) }]));
+  if (refuseInScope(project, scope, changed.values(), { ticks: true, firstPass: true })) return false;
+  return commitNotes(scope, changed, { mayIncreaseEvents: true });
+}
+
+/**
+ * Write velocities computed per note; nothing is written when none changes.
+ * Every result is checked first (a finite integer 1..127, see noteResultProblem).
+ */
+function applyVelocities(scope: NoteEditScope, velocityOf: Map<string, number>): boolean {
+  const results = scope.notes.map((n) => ({ ...n, velocity: velocityOf.get(n.id) ?? n.velocity }));
+  if (refuseInScope(useStore.getState().project, scope, results)) return false;
+  const changed = new Map(results.filter((n, i) => n.velocity !== scope.notes[i]!.velocity).map((n) => [n.id, n]));
+  return changed.size > 0 && commitNotes(scope, changed);
+}
+
+/**
+ * Velocity ramp: from `from` at the earliest selected note to `to` at the
+ * latest, linear in the notes' beat positions (notes on one beat get the same
+ * value). Both ends must be integers; outside 1..127 is refused with a toast.
+ */
+export function rampVelocity(clipId: string, noteIds: readonly string[], from: number, to: number): boolean {
+  if (!Number.isInteger(from) || !Number.isInteger(to)) return false;
+  if ([from, to].some((v) => v < 1 || v > 127)) {
+    pushToast(NOTE_EDIT_MESSAGES.velocityRange, 'error');
+    return false;
+  }
+  const scope = noteEditScope(useStore.getState().project, clipId, noteIds, false);
+  if (!scope) return false;
+  const sorted = byStart(scope.notes);
+  const first = sorted[0]!.startBeat;
+  const span = sorted.at(-1)!.startBeat - first;
+  return applyVelocities(scope, new Map(sorted.map((n) => [
+    n.id,
+    // The fraction first, so huge beats (1e307) cannot overflow the product.
+    span > 0 ? Math.round(from + (to - from) * ((n.startBeat - first) / span)) : from,
+  ])));
+}
+
+/**
+ * Random velocities `center` ± `width` from the seed-fixed PRNG, drawn in beat
+ * order (the same seed and selection give the same result). `center` and
+ * `seed` must be integers and `width` a finite number >= 0; a range reaching
+ * outside 1..127 is refused with a toast.
+ */
+export function randomizeVelocity(
+  clipId: string,
+  noteIds: readonly string[],
+  opts: { center: number; width: number; seed: number },
+): boolean {
+  const { center, width, seed } = opts;
+  if (!Number.isInteger(center) || !Number.isFinite(width) || width < 0 || !Number.isInteger(seed)) return false;
+  if (center - width < 1 || center + width > 127) {
+    pushToast(NOTE_EDIT_MESSAGES.velocityRange, 'error');
+    return false;
+  }
+  const scope = noteEditScope(useStore.getState().project, clipId, noteIds, false);
+  if (!scope) return false;
+  const rng = createPrng(seed);
+  return applyVelocities(scope, new Map(byStart(scope.notes).map((n) => [
+    n.id,
+    Math.round(center + (rng() * 2 - 1) * width),
+  ])));
 }
 
 /**

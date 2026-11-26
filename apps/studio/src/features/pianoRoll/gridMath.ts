@@ -1,12 +1,17 @@
 // Pure grid-geometry + quantization helpers for the piano roll and other
 // beat-based editors. No React, no store — easy to unit test.
 
-/** Available snap resolutions, in beats. 1 = quarter note in 4/4. */
-export const GRID_SNAP_OPTIONS: readonly number[] = [0.25, 0.5, 1, 2];
+/**
+ * Available snap resolutions, in beats. 1 = quarter note in 4/4; 1/3 and 1/6
+ * are the eighth- and sixteenth-note triplet grids.
+ */
+export const GRID_SNAP_OPTIONS: readonly number[] = [1 / 6, 0.25, 1 / 3, 0.5, 1, 2];
 
 /** Labels (Japanese) for each snap resolution. */
 export const GRID_SNAP_LABELS: Record<number, string> = {
+  [1 / 6]: '1/16 3連',
   0.25: '1/16',
+  [1 / 3]: '1/8 3連',
   0.5: '1/8',
   1: '1/4',
   2: '1/2小節',
@@ -129,10 +134,35 @@ export function visibleRowRange(
   return { first: Math.max(0, first), last: Math.min(rowCount - 1, Math.max(0, last)) };
 }
 
+/**
+ * Grid lines per beat when `snap` divides one beat evenly (1/3 → 3, 0.25 → 4,
+ * 1 → 1), else null. Snapping and moving on such a grid count whole lines and
+ * divide once (round(beat * 3) / 3), so triplet steps never pile up float error.
+ */
+function linesPerBeat(snap: number): number | null {
+  if (!(snap > 0) || !Number.isFinite(snap) || snap > 1) return null;
+  const lines = Math.round(1 / snap);
+  return Math.abs(1 / snap - lines) < 1e-9 ? lines : null;
+}
+
 /** Snap a beat value to the nearest grid line of `snap` beats. */
 export function snapBeat(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);
-  return Math.max(0, Math.round(beat / snap) * snap);
+  const lines = linesPerBeat(snap);
+  return Math.max(0, lines === null ? Math.round(beat / snap) * snap : Math.round(beat * lines) / lines);
+}
+
+/**
+ * `beat` moved by `steps` grid lines of `snap` beats. A result within 1e-9 beats
+ * of a grid line lands exactly on it (three 1/3-beat steps from 0 give exactly
+ * 1); an off-grid beat keeps its offset (1/1200 + 1/3 stays as it is).
+ */
+export function addGridSteps(beat: number, snap: number, steps: number): number {
+  const moved = beat + steps * snap;
+  const lines = linesPerBeat(snap);
+  if (lines === null) return moved;
+  const line = Math.round(moved * lines);
+  return Math.abs(moved * lines - line) < 1e-9 ? line / lines : moved;
 }
 
 /** Snap a beat value DOWN to the grid line at or before it (for placement). */

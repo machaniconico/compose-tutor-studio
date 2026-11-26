@@ -26,6 +26,14 @@ export type ShortcutAction =
   | 'transposeDownSemitone'
   | 'transposeUpDegree'
   | 'transposeDownDegree'
+  | 'transposeUpOctave'
+  | 'transposeDownOctave'
+  | 'nudgeLeft'
+  | 'nudgeRight'
+  | 'legatoNotes'
+  | 'staccatoNotes'
+  | 'joinNotes'
+  | 'splitNotesAtPlayhead'
   | 'duplicateClip'
   | 'deleteClip';
 
@@ -141,6 +149,62 @@ export const KEYMAP: readonly ShortcutEntry[] = [
     modifiers: ['alt'],
     action: 'transposeDownDegree',
     labelJa: '選んだ音をスケールに沿って 1 つ下げる',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'arrowup',
+    modifiers: ['shift'],
+    action: 'transposeUpOctave',
+    labelJa: '選んだ音を 1 オクターブ上げる',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'arrowdown',
+    modifiers: ['shift'],
+    action: 'transposeDownOctave',
+    labelJa: '選んだ音を 1 オクターブ下げる',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'arrowleft',
+    modifiers: [],
+    action: 'nudgeLeft',
+    labelJa: '選んだ音をマス目 1 つ分前へ動かす',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'arrowright',
+    modifiers: [],
+    action: 'nudgeRight',
+    labelJa: '選んだ音をマス目 1 つ分後ろへ動かす',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'l',
+    modifiers: [],
+    action: 'legatoNotes',
+    labelJa: '選んだ音を次の音の始まりまで伸ばす(レガート)',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 't',
+    modifiers: [],
+    action: 'staccatoNotes',
+    labelJa: '選んだ音の長さを半分にする(スタッカート)',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'j',
+    modifiers: [],
+    action: 'joinNotes',
+    labelJa: '同じ高さで隣り合う選んだ音を 1 つにつなぐ',
+  },
+  {
+    scope: 'pianoRoll',
+    key: 'k',
+    modifiers: [],
+    action: 'splitNotesAtPlayhead',
+    labelJa: '選んだ音を再生ヘッドの位置で 2 つに分ける',
   },
   {
     scope: 'arrange',

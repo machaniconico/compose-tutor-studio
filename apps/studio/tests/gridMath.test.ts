@@ -22,6 +22,9 @@ import {
   windowScrollTop,
   visibleRowRange,
   notesInRows,
+  addGridSteps,
+  GRID_SNAP_OPTIONS,
+  GRID_SNAP_LABELS,
 } from '../src/features/pianoRoll/gridMath';
 
 describe('notesInRows', () => {
@@ -56,6 +59,53 @@ describe('snapBeat / quantizeStart', () => {
 
   it('passes through when snap is non-positive', () => {
     expect(snapBeat(3.7, 0)).toBe(3.7);
+  });
+});
+
+describe('3 連符グリッド(US-015)', () => {
+  it('1/3 拍と 1/6 拍のスナップを選べ、ラベルが付いている', () => {
+    expect(GRID_SNAP_OPTIONS).toContain(1 / 3);
+    expect(GRID_SNAP_OPTIONS).toContain(1 / 6);
+    expect(GRID_SNAP_LABELS[1 / 3]).toMatch(/3連/);
+    expect(GRID_SNAP_LABELS[1 / 6]).toMatch(/3連/);
+    expect([...GRID_SNAP_OPTIONS]).toEqual([...GRID_SNAP_OPTIONS].sort((a, b) => a - b));
+  });
+
+  it('snap 1/3 で 0.3333 を 99 回足した値(32.9967)が round(beat*3)/3 で正確に 33 拍に戻る', () => {
+    let beat = 0;
+    for (let i = 0; i < 99; i += 1) beat += 0.3333;
+    expect(beat).toBeCloseTo(32.9967, 10);
+    expect(beat).not.toBe(33);
+    expect(Math.round(beat * 3) / 3).toBe(33);
+    expect(snapBeat(beat, 1 / 3)).toBe(33);
+    expect(quantizeStart(beat, 1 / 3)).toBe(33);
+  });
+
+  it('1/3・1/6 のグリッドに沿った移動は誤差を積み残さない(3 歩で 1 拍、6 歩で 1 拍ちょうど)', () => {
+    let third = 0;
+    for (let i = 0; i < 99; i += 1) third = addGridSteps(third, 1 / 3, 1);
+    expect(third).toBe(33);
+    let sixth = 0;
+    for (let i = 0; i < 6; i += 1) sixth = addGridSteps(sixth, 1 / 6, 1);
+    expect(sixth).toBe(1);
+    for (let i = 0; i < 6; i += 1) sixth = addGridSteps(sixth, 1 / 6, -1);
+    expect(sixth).toBe(0);
+    expect(addGridSteps(2 / 3, 1 / 3, 1)).toBe(1);
+    expect(addGridSteps(1, 1 / 3, -3)).toBe(0);
+  });
+
+  it('グリッドから外れた音は外れたまま動く(1/1200 拍の端数を丸めない)', () => {
+    expect(addGridSteps(1 / 1200, 1 / 3, 1)).toBe(1 / 1200 + 1 / 3);
+    expect(addGridSteps(1 + 1 / 1200, 0.25, -1)).toBe(1 + 1 / 1200 - 0.25);
+  });
+
+  it('1/6 拍のスナップは最も近い 1/6 拍の線に寄せる(16 分 3 連)', () => {
+    expect(snapBeat(0.17, 1 / 6)).toBe(1 / 6);
+    expect(snapBeat(0.9, 1 / 6)).toBe(5 / 6);
+    expect(snapBeat(3.3333, 1 / 3)).toBe(10 / 3);
+    // 2 拍(半小節)など 1 拍より大きいスナップは従来どおり。
+    expect(snapBeat(2.9, 2)).toBe(2);
+    expect(snapBeat(3.1, 2)).toBe(4);
   });
 });
 

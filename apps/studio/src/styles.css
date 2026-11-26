@@ -1046,6 +1046,17 @@ input[type='range'] {
   gap: 4px;
 }
 
+.pr__tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.pr__tools input[type='number'] {
+  width: 4.5em;
+}
+
 .pr__scroll {
   display: flex;
   overflow: auto;

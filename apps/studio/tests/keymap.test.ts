@@ -118,6 +118,33 @@ describe('piano-roll note editing shortcuts', () => {
     expect(up && shortcutKeyLabel(up)).toBe('Alt+↑');
   });
 
+  it('US-015: ↑/↓ は半音、Shift+↑/↓ はオクターブ、←/→ は時間方向、加工は L/T/J/K に重複なく割り当てる', () => {
+    // ↑/↓ の半音移動は US-014 の半音移調と同じ操作(1 つのアクション)。
+    expect(findShortcut('pianoRoll', press('ArrowUp'))).toBe('transposeUpSemitone');
+    expect(findShortcut('pianoRoll', press('ArrowDown'))).toBe('transposeDownSemitone');
+    expect(findShortcut('pianoRoll', press('ArrowUp', { shiftKey: true }))).toBe('transposeUpOctave');
+    expect(findShortcut('pianoRoll', press('ArrowDown', { shiftKey: true }))).toBe('transposeDownOctave');
+    expect(findShortcut('pianoRoll', press('ArrowLeft'))).toBe('nudgeLeft');
+    expect(findShortcut('pianoRoll', press('ArrowRight'))).toBe('nudgeRight');
+    expect(findShortcut('pianoRoll', press('l'))).toBe('legatoNotes');
+    expect(findShortcut('pianoRoll', press('t'))).toBe('staccatoNotes');
+    expect(findShortcut('pianoRoll', press('j'))).toBe('joinNotes');
+    expect(findShortcut('pianoRoll', press('k'))).toBe('splitNotesAtPlayhead');
+    // Ctrl/Cmd+←/→ は従来どおりどの画面でも小節移動で、ピアノロールの ←/→ とは別。
+    expect(findShortcut('pianoRoll', press('ArrowLeft', { ctrlKey: true }))).toBeNull();
+    expect(findShortcut('global', press('ArrowLeft', { ctrlKey: true }))).toBe('seekBarBack');
+    expect(findShortcut('global', press('ArrowLeft'))).toBeNull();
+    // 加工コマンドは 1 つのキーにだけ割り当て、↑/↓ に別名の移動アクションを作らない。
+    const pianoRoll = KEYMAP.filter((e) => e.scope === 'pianoRoll');
+    for (const action of ['transposeUpOctave', 'transposeDownOctave', 'nudgeLeft', 'nudgeRight', 'legatoNotes', 'staccatoNotes', 'joinNotes', 'splitNotesAtPlayhead', 'transposeUpSemitone', 'transposeDownSemitone']) {
+      expect(pianoRoll.filter((e) => e.action === action), action).toHaveLength(1);
+    }
+    const arrowActions = pianoRoll.filter((e) => e.key.startsWith('arrow')).map((e) => e.action);
+    expect(new Set(arrowActions).size).toBe(arrowActions.length);
+    const octave = KEYMAP.find((entry) => entry.action === 'transposeUpOctave');
+    expect(octave && shortcutKeyLabel(octave)).toBe('Shift+↑');
+  });
+
   it('keeps every piano-roll binding unique and clear of the global ones', () => {
     const pianoRoll = KEYMAP.filter((e) => e.scope === 'pianoRoll').map(shortcutBindingId);
     expect(new Set(pianoRoll).size).toBe(pianoRoll.length);

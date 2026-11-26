@@ -35,9 +35,16 @@ import {
   cutNotes,
   duplicateNotes,
   fitSelectedToScale,
+  joinNotes,
+  legato,
+  nudge,
   pasteNotes,
   quantizeNotes,
+  rampVelocity,
+  randomizeVelocity,
   removeNotes,
+  splitNoteAtPlayhead,
+  staccato,
   transposeSelected,
 } from '../../state/editorActions';
 import { offScaleNoteHint } from '../inspector/difficultyText';
@@ -142,7 +149,28 @@ const TRANSPOSE_ACTIONS: Partial<Record<ShortcutAction, { semitones: number } | 
   transposeDownSemitone: { semitones: -1 },
   transposeUpDegree: { degrees: 1 },
   transposeDownDegree: { degrees: -1 },
+  transposeUpOctave: { semitones: 12 },
+  transposeDownOctave: { semitones: -12 },
 };
+
+/** Keymap actions that move the selection along time by one grid line. */
+const NUDGE_ACTIONS: Partial<Record<ShortcutAction, number>> = { nudgeLeft: -1, nudgeRight: 1 };
+
+/** Keymap actions that reshape the selected notes. */
+const NOTE_TOOL_ACTIONS: Partial<Record<ShortcutAction, (clipId: string, ids: string[]) => boolean>> = {
+  legatoNotes: legato,
+  staccatoNotes: staccato,
+  joinNotes,
+  splitNotesAtPlayhead: splitNoteAtPlayhead,
+};
+
+/** Toolbar buttons for the note tools, in the order shown. */
+const NOTE_TOOL_BUTTONS: { label: string; title: string; run: (clipId: string, ids: string[]) => boolean }[] = [
+  { label: 'レガート', title: '選んだ音を次の音の始まりまで伸ばします(L)', run: legato },
+  { label: 'スタッカート', title: '選んだ音の長さを半分にします(T)', run: staccato },
+  { label: 'つなぐ', title: '同じ高さで隣り合う選んだ音を 1 つにします(J)', run: joinNotes },
+  { label: '再生位置で分ける', title: '選んだ音を再生ヘッドの位置で 2 つに分けます(K)', run: splitNoteAtPlayhead },
+];
 
 /**
  * Interactive piano roll for the selected MIDI clip.
@@ -179,6 +207,10 @@ export function PianoRoll() {
   const scaleInfo = useScaleInfo(project);
 
   const [gridSnap, setGridSnap] = useState(1);
+  const [velocityFrom, setVelocityFrom] = useState(40);
+  const [velocityTo, setVelocityTo] = useState(100);
+  const [velocityCenter, setVelocityCenter] = useState(80);
+  const [velocityWidth, setVelocityWidth] = useState(10);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(
     null,
   );
@@ -325,6 +357,8 @@ export function PianoRoll() {
       const ids = [...selected];
       const action = findShortcut('pianoRoll', e);
       const transpose = action ? TRANSPOSE_ACTIONS[action] : undefined;
+      const nudgeSteps = action ? NUDGE_ACTIONS[action] : undefined;
+      const noteTool = action ? NOTE_TOOL_ACTIONS[action] : undefined;
       if (action === 'deleteSelectedNotes' && clip && ids.length > 0) {
         e.preventDefault();
         removeNotes(clip.id, ids);
@@ -349,6 +383,12 @@ export function PianoRoll() {
       } else if (transpose && clip && ids.length > 0) {
         e.preventDefault();
         transposeSelected(clip.id, ids, transpose);
+      } else if (nudgeSteps !== undefined && clip && ids.length > 0) {
+        e.preventDefault();
+        nudge(clip.id, ids, { gridSteps: nudgeSteps, snap: gridSnap });
+      } else if (noteTool && clip && ids.length > 0) {
+        e.preventDefault();
+        noteTool(clip.id, ids);
       } else if (action === 'toggleScaleSnap') {
         e.preventDefault();
         toggleScaleSnap();
@@ -365,6 +405,7 @@ export function PianoRoll() {
     notes,
     clip,
     linkedClip,
+    gridSnap,
     commitTransaction,
     quantizeSelectedNotes,
     selectNotes,
@@ -693,6 +734,83 @@ export function PianoRoll() {
             disabled={selected.size === 0}
           >
             スケールに合わせる
+          </button>
+        </div>
+        <div className="pr__tools" role="group" aria-label="音の加工">
+          {NOTE_TOOL_BUTTONS.map(({ label, title, run }) => (
+            <button
+              key={label}
+              type="button"
+              title={title}
+              onClick={() => run(clip.id, [...selected])}
+              disabled={selected.size === 0}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="pr__tools" role="group" aria-label="ベロシティ(音の強さ)">
+          <label className="pr__field">
+            <span>強さ</span>
+            <input
+              type="number"
+              min={MIN_VELOCITY}
+              max={MAX_VELOCITY}
+              value={velocityFrom}
+              onChange={(e) => setVelocityFrom(Number(e.target.value))}
+              aria-label="ランプの始めの強さ"
+            />
+            <span>→</span>
+            <input
+              type="number"
+              min={MIN_VELOCITY}
+              max={MAX_VELOCITY}
+              value={velocityTo}
+              onChange={(e) => setVelocityTo(Number(e.target.value))}
+              aria-label="ランプの終わりの強さ"
+            />
+          </label>
+          <button
+            type="button"
+            title="選んだ音の強さを、最初の音から最後の音へ少しずつ変えます"
+            onClick={() => rampVelocity(clip.id, [...selected], velocityFrom, velocityTo)}
+            disabled={selected.size === 0}
+          >
+            だんだん変える
+          </button>
+          <label className="pr__field">
+            <span>中心</span>
+            <input
+              type="number"
+              min={MIN_VELOCITY}
+              max={MAX_VELOCITY}
+              value={velocityCenter}
+              onChange={(e) => setVelocityCenter(Number(e.target.value))}
+              aria-label="ばらつきの中心の強さ"
+            />
+            <span>±</span>
+            <input
+              type="number"
+              min={0}
+              max={63}
+              value={velocityWidth}
+              onChange={(e) => setVelocityWidth(Number(e.target.value))}
+              aria-label="ばらつきの幅"
+            />
+          </label>
+          <button
+            type="button"
+            title="選んだ音の強さを、中心の値から ± の幅でばらつかせます(人が弾いたような揺れ)"
+            onClick={() =>
+              randomizeVelocity(clip.id, [...selected], {
+                center: velocityCenter,
+                width: velocityWidth,
+                seed: Date.now() % 2 ** 31,
+              })
+            }
+            disabled={selected.size === 0}
+          >
+            ばらつかせる
           </button>
         </div>
         <div className="pr__zoom" role="group" aria-label="横ズーム">

@@ -1,4 +1,4 @@
-import { clipSpan, drumSourceStep, MIN_LOOP_PERIOD_BEATS, renderClip, resolveLinkSource } from './clipExpand';
+import { clipSpan, drumSourceStep, MIN_LOOP_PERIOD_BEATS, placedNoteTicks, renderClip, resolveLinkSource } from './clipExpand';
 import type { ClipOnset } from './clipExpand';
 import { beatTick, beatsPerBar, PPQ } from './time';
 import type { Clip, Project, Track } from './types';
@@ -60,8 +60,10 @@ export function soundingEvents(
       const emit = audible && !audible.has(track.id) ? undefined : (event: ClipOnset) => {
         if (event.kind === 'note') {
           // A note lasts at least one tick; the three outputs only map this end.
-          const startTick = beatTick(event.startBeat);
-          if (beatTick(event.startBeat + event.durationBeats) <= startTick) {
+          // The raw ticks come from placedNoteTicks, as the editors check them.
+          const note = source.notes![event.sourceIndex]!;
+          const { startTick, endTick } = placedNoteTicks(clip, note, { repeat: event.repeat, swing: project.swing, songEnd: end });
+          if (endTick <= startTick) {
             event.durationBeats = (startTick + 1) / PPQ - event.startBeat;
           }
         }

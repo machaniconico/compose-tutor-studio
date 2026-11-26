@@ -1,4 +1,4 @@
-import type { Clip, DrumLane, TrackType } from './types';
+import type { Clip, DrumLane, NoteEvent, TrackType } from './types';
 import { beatTick, PPQ } from './time';
 
 export const DEFAULT_STEPS_PER_BAR = 16;
@@ -61,8 +61,9 @@ function startsBeforeClipEnd(start: number, end: number): boolean {
   return beatTick(start) < beatTick(end);
 }
 
-function placeOnset(
-  clip: Clip,
+/** Absolute beats of an onset at `localBeat` in pass `repeat`: before and after swing, and where the pass ends. */
+function passPlacement(
+  clip: Pick<Clip, 'startBeat'>,
   span: ReturnType<typeof clipSpan>,
   localBeat: number,
   repeat: number,
@@ -70,15 +71,62 @@ function placeOnset(
 ) {
   const offset = repeat === 0 ? 0 : repeat * span.period;
   const start = clip.startBeat + (offset + localBeat);
-  const repeatEnd = Math.min(span.end, clip.startBeat + (offset + span.period));
-  if (!startsBeforeClipEnd(start, repeatEnd)) return undefined;
+  const end = Math.min(span.end, clip.startBeat + (offset + span.period));
   const step = Math.round(start * 4);
   const delay = swing > 0 && step % 2 === 1 && beatTick(start) === beatTick(step / 4)
     ? swing / 400
     : 0;
-  const startBeat = start + delay;
-  if (!startsBeforeClipEnd(startBeat, repeatEnd)) return undefined;
-  return { startBeat, unswungStartBeat: start, end: repeatEnd };
+  return { unswungStartBeat: start, startBeat: start + delay, end };
+}
+
+function placeOnset(
+  clip: Clip,
+  span: ReturnType<typeof clipSpan>,
+  localBeat: number,
+  repeat: number,
+  swing: number,
+) {
+  const placed = passPlacement(clip, span, localBeat, repeat, swing);
+  if (!startsBeforeClipEnd(placed.unswungStartBeat, placed.end)) return undefined;
+  if (!startsBeforeClipEnd(placed.startBeat, placed.end)) return undefined;
+  return placed;
+}
+
+/**
+ * Where a note of `clip` lands in pass `repeat` (the first pass by default), as
+ * playback places it: absolute beats and ticks before the one-tick minimum is
+ * applied. soundingEvents and the editors read note edges only from here, so
+ * both round the very same sums (`(clip start + local start) + length`).
+ * - `startBeat` / `startTick`: the (swung) start.
+ * - `naturalEndTick`: the note's own end; `cut`: whether it is cut at the pass end;
+ *   `durationBeats` / `endTick`: the length and end as played (after the cut).
+ * - `passEndBeat` / `passEndTick`: where this pass ends (clip end, loop period or song end).
+ * `swing` and `songEnd` are the project's (`Project.swing`, songEndBeat).
+ */
+export function placedNoteTicks(
+  clip: Clip,
+  note: Pick<NoteEvent, 'startBeat' | 'durationBeats'>,
+  opts: { repeat?: number; swing?: number; songEnd?: number } = {},
+) {
+  const songEnd = opts.songEnd ?? Infinity;
+  const placed = passPlacement(clip, clipSpan(clip, songEnd), note.startBeat, opts.repeat ?? 0, opts.swing ?? 0);
+  const { startBeat, unswungStartBeat, end } = placed;
+  const naturalEnd = startBeat + note.durationBeats;
+  const passEndTick = beatTick(end);
+  const naturalEndTick = beatTick(naturalEnd);
+  const cut = naturalEndTick > passEndTick || (end === songEnd && naturalEnd > end);
+  const durationBeats = cut ? end - startBeat : note.durationBeats;
+  return {
+    startBeat,
+    unswungStartBeat,
+    startTick: beatTick(startBeat),
+    naturalEndTick,
+    endTick: beatTick(startBeat + durationBeats),
+    durationBeats,
+    cut,
+    passEndBeat: end,
+    passEndTick,
+  };
 }
 
 /** How many passes can contain an onset, before swing is applied. */
@@ -125,12 +173,8 @@ export function renderClip(
       return;
     }
     prepare(repeats, (repeat) => {
-      const timing = placeOnset(clip, span, note.startBeat, repeat, swing);
-      if (!timing) return;
-      const { startBeat, unswungStartBeat, end } = timing;
-      const naturalEnd = startBeat + note.durationBeats;
-      const cut = beatTick(naturalEnd) > beatTick(end) || (end === songEnd && naturalEnd > end);
-      const durationBeats = cut ? end - startBeat : note.durationBeats;
+      if (!placeOnset(clip, span, note.startBeat, repeat, swing)) return;
+      const { startBeat, unswungStartBeat, durationBeats, cut } = placedNoteTicks(clip, note, { repeat, swing, songEnd });
       emit?.({
         kind: 'note', sourceIndex, repeat, startBeat, unswungStartBeat, durationBeats,
         pitch: note.pitch, velocity: note.velocity, ...(cut ? { cut: true } : {}),
