@@ -3,14 +3,16 @@ import type { EditorView } from '../../state/store';
 import { PianoRoll } from '../pianoRoll/PianoRoll';
 import { DrumGrid } from '../drums/DrumGrid';
 import { Arranger } from '../arranger/Arranger';
+import { ArrangeView } from '../arranger/ArrangeView';
 
 const TABS: { view: EditorView; label: string }[] = [
   { view: 'pianoRoll', label: 'ピアノロール' },
   { view: 'drums', label: 'ドラム' },
   { view: 'arranger', label: 'アレンジ' },
+  { view: 'arrange', label: '曲全体' },
 ];
 
-/** Tabbed editor host switching between the three editors. */
+/** Tabbed editor host switching between the editors. */
 export function EditorArea() {
   const activeView = useStore((s) => s.editor.activeView);
   const setActiveView = useStore((s) => s.setActiveView);
@@ -62,6 +64,7 @@ export function EditorArea() {
         {activeView === 'pianoRoll' ? <PianoRoll /> : null}
         {activeView === 'drums' ? <DrumGrid /> : null}
         {activeView === 'arranger' ? <Arranger /> : null}
+        {activeView === 'arrange' ? <ArrangeView /> : null}
       </div>
     </div>
   );

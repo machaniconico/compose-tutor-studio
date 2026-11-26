@@ -47,7 +47,7 @@ import {
   type ProjectSummary,
 } from './persistence';
 
-export type EditorView = 'pianoRoll' | 'drums' | 'arranger';
+export type EditorView = 'pianoRoll' | 'drums' | 'arranger' | 'arrange';
 
 export type Difficulty = 'beginner' | 'standard' | 'advanced';
 

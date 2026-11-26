@@ -8,7 +8,7 @@
 //   transport.isPlaying  false->true  => startPlayback()
 //                        true ->false  => stopAudio()
 //   project / mixer changes            => live volume/pan/mute/solo update
-//   tempo / time signature / length    => schedule rebuilt from the playhead
+//   timing / clip changes              => schedule rebuilt from the playhead
 //
 // The bridge writes transport.positionBeat back to the store ~30fps while
 // playing so the playhead UI tracks the audio clock. The store owns play/stop
@@ -128,13 +128,16 @@ export function initAudioBridge(): () => void {
   // React to project / mixer changes. The master volume follows the project
   // even while stopped, so piano-roll previews (which go through the master
   // bus) hear the current master fader. While playing, the mix is updated live;
-  // a new tempo, meter or song length (also via undo/redo) changes event timing, the end
-  // position and the metronome accent, so the schedule is rebuilt from the
+  // timing and clip edits (including undo/redo) rebuild the schedule from the
   // current playhead.
   const unsubProject = useStore.subscribe((s, prev) => {
     if (s.project === prev.project) return;
+    let clipsChanged = false;
     for (const track of s.project.tracks) {
-      if (state.playbackTracks.has(track.id)) state.playbackTracks.set(track.id, track);
+      const playingTrack = state.playbackTracks.get(track.id);
+      if (!playingTrack || playingTrack === track) continue;
+      clipsChanged ||= track.clips !== playingTrack.clips;
+      state.playbackTracks.set(track.id, track);
     }
     const engine = getAudioEngine();
     if (!state.scheduler?.isRunning) {
@@ -143,7 +146,7 @@ export function initAudioBridge(): () => void {
       }
       return;
     }
-    if (timingChanged(s.project, prev.project)) {
+    if (clipsChanged || timingChanged(s.project, prev.project)) {
       restartPlayback();
       return;
     }
@@ -203,7 +206,7 @@ function timingChanged(next: Project, prev: Project): boolean {
 /**
  * Tear the running audio down and start again from the audio clock's current
  * playhead. Notes that were sounding across the playhead are started again
- * for their remaining length at the new tempo, so timing edits keep them sounding.
+ * for their remaining length according to the updated schedule.
  * Play intent is untouched; a start past the new end stops through the
  * scheduler's own end handling, as usual.
  */

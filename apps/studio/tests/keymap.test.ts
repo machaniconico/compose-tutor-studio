@@ -79,3 +79,16 @@ describe('seek shortcuts', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe('arrange shortcuts', () => {
+  it('binds Ctrl/Cmd+D to duplicate and Delete to delete only in the arrange scope', () => {
+    expect(findShortcut('arrange', press('d', { ctrlKey: true }))).toBe('duplicateClip');
+    expect(findShortcut('arrange', press('D', { metaKey: true }))).toBe('duplicateClip');
+    expect(findShortcut('arrange', press('Delete'))).toBe('deleteClip');
+    expect(findShortcut('arrange', press('d'))).toBeNull();
+    expect(findShortcut('global', press('d', { ctrlKey: true }))).toBeNull();
+    expect(findShortcut('pianoRoll', press('d', { ctrlKey: true }))).toBeNull();
+    const duplicate = KEYMAP.find((entry) => entry.action === 'duplicateClip');
+    expect(duplicate && shortcutKeyLabel(duplicate)).toBe('Ctrl/Cmd+D');
+  });
+});

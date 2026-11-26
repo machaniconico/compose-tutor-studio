@@ -1,4 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDrumClip } from '@cts/project-model';
+import type { SchedulePayload } from '../src/audio/events';
+import { renderScheduleEvents } from '../src/audio/wav';
 import { installLocalStorage } from './localStorageStub';
 
 // Real Scheduler on a hand-driven audio clock: changing the song length or the
@@ -9,6 +12,7 @@ const clock = vi.hoisted(() => ({ now: 0 }));
 const synths = vi.hoisted(
   () => [] as Array<{ noteOn: ReturnType<typeof vi.fn>; releaseAll: ReturnType<typeof vi.fn> }>,
 );
+const drumTrigger = vi.hoisted(() => vi.fn());
 
 vi.mock('../src/audio/engine', () => ({
   getAudioEngine: () => ({
@@ -34,7 +38,11 @@ vi.mock('../src/audio/synth', () => ({
     }
   },
 }));
-vi.mock('../src/audio/drums', () => ({ DrumVoiceManager: class {} }));
+vi.mock('../src/audio/drums', () => ({
+  DrumVoiceManager: class {
+    trigger = drumTrigger;
+  },
+}));
 vi.mock('../src/audio/metronome', () => ({
   metronomeBeatEvents: vi.fn(() => []),
   scheduleMetronomeClick: vi.fn(),
@@ -43,6 +51,7 @@ vi.mock('../src/audio/metronome', () => ({
 let useStore: typeof import('../src/state/store')['useStore'];
 let initAudioBridge: typeof import('../src/audio/playback')['initAudioBridge'];
 let metronomeBeatEvents: typeof import('../src/audio/metronome')['metronomeBeatEvents'];
+let removeClipFromSong: typeof import('../src/state/editorActions')['removeClipFromSong'];
 
 /** 120 bpm: half a second per beat. */
 const SECONDS_PER_BEAT = 0.5;
@@ -54,14 +63,16 @@ beforeAll(async () => {
   ({ useStore } = await import('../src/state/store'));
   ({ initAudioBridge } = await import('../src/audio/playback'));
   ({ metronomeBeatEvents } = await import('../src/audio/metronome'));
+  ({ removeClipFromSong } = await import('../src/state/editorActions'));
 });
 
-describe('song length and meter changes during playback', () => {
+describe('project changes during playback', () => {
   let teardown: () => void;
 
   beforeEach(() => {
     clock.now = 0;
     synths.length = 0;
+    drumTrigger.mockClear();
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     useStore.getState().createNewProject('テスト');
     teardown = initAudioBridge();
@@ -86,6 +97,44 @@ describe('song length and meter changes during playback', () => {
     clock.now = (beat - startBeat) * SECONDS_PER_BEAT;
     vi.advanceTimersByTime(TICK_MS);
   }
+
+  it('matches the WAV drum hits after deleting a clip without changing the song length', async () => {
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.type !== 'drum' ? track : {
+        ...track,
+        clips: [
+          {
+            ...createDrumClip(track.id, 8, 4),
+            id: 'removed-clip',
+            drumEvents: [{ id: 'removed-kick', lane: 'kick', stepIndex: 0, velocity: 100 }],
+          },
+          {
+            ...createDrumClip(track.id, 12, 4),
+            id: 'kept-clip',
+            drumEvents: [{ id: 'kept-snare', lane: 'snare', stepIndex: 0, velocity: 90 }],
+          },
+        ],
+      }),
+    }));
+    await playFrom(0);
+    // Edit at beat 3, while the position in the store still reads 0.
+    clock.now = 3 * SECONDS_PER_BEAT;
+    removeClipFromSong('removed-clip');
+    expect(useStore.getState().project.lengthBars).toBe(8);
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(2));
+
+    const wavHits = renderScheduleEvents(useStore.getState().project)
+      .flatMap(({ payload, time }) => {
+        const event = payload as SchedulePayload;
+        return event.kind === 'drum' ? [[event.lane, time, event.velocity]] : [];
+      });
+    expect(wavHits).toEqual([['snare', 6, 90]]);
+    advanceTo(8, 0);
+    advanceTo(12, 0);
+    expect(drumTrigger.mock.calls).toEqual(wavHits);
+    expect(useStore.getState().transport.positionBeat).toBeCloseTo(12);
+  });
 
   it('stops at the new end after the song is cut from 8 to 4 bars', async () => {
     await playFrom(8);

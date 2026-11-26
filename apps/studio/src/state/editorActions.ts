@@ -22,9 +22,18 @@ import type {
 } from '@cts/project-model';
 import type { ParsedMidi } from '@cts/midi-io';
 import {
+  addClip,
   beatsPerBar as beatsPerBarOf,
   CLIP_EDGE_TOLERANCE_BEATS,
   clipFirstPassEnd,
+  createDrumClip,
+  createMidiClip,
+  drumStepsPerBar,
+  duplicateClip,
+  moveClip,
+  removeClip,
+  splitClip,
+  type SplitClipFailure,
   drumBeatToStep,
   resolveEditTarget,
   resolveLinkSource,
@@ -56,6 +65,8 @@ import { publishAppEvent } from './appEvents';
 import { quantizeStart } from '../features/pianoRoll/gridMath';
 import { upsertEffect, type SupportedEffectType } from '../audio/effects';
 import { findChannelPreset } from '../features/mixer/channelPresets';
+import { withSongLength } from '../features/arranger/arrangeMath';
+import { pushToast } from './tutorialBridge';
 
 /** Bar index (0-based) for a beat offset under the project's time signature. */
 function barOf(project: Project, startBeat: number): number {
@@ -1064,4 +1075,129 @@ export function applyChannelPreset(trackId: string, presetId: string): void {
       return { ...track, effects };
     }),
   }));
+}
+
+// --- Song overview (ArrangeView) clip operations ---
+// Each one is a single undo step; selecting a clip is UI state and adds none.
+// Each first closes an open transaction (a clip drag), so a key pressed during
+// a drag is its own undo step.
+
+function clipIds(project: Project): Set<string> {
+  return new Set(project.tracks.flatMap((t) => t.clips.map((c) => c.id)));
+}
+
+/** The first clip of `after` whose id is not in `before`. */
+function createdClip(before: Project, after: Project): Clip | null {
+  const known = clipIds(before);
+  return after.tracks.flatMap((t) => t.clips).find((c) => !known.has(c.id)) ?? null;
+}
+
+function selectTrackClip(clip: Clip): void {
+  const store = useStore.getState();
+  store.selectTrack(clip.trackId);
+  store.selectClip(clip.id);
+  store.selectNotes([]);
+}
+
+/** Toast shown when a clip would end past the longest song length. */
+function songLimitMessage(maxBars: number): string {
+  return `曲の長さは ${maxBars} 小節までなので、その先にはクリップを置けません。`;
+}
+
+/**
+ * Duplicate a clip right after itself (or the nearest free spot), as a copy
+ * with its own content or as a link that plays the same content. The song
+ * grows to cover the new clip (never shrinks); a duplicate that would end past
+ * `maxBars` and the current length is refused. Selects and returns the new
+ * clip's id, or null when nothing changed.
+ */
+export function duplicateClipInSong(clipId: string, mode: 'copy' | 'link', maxBars: number): string | null {
+  const store = useStore.getState();
+  store.commitTransaction();
+  const before = store.project;
+  const duplicated = duplicateClip(before, clipId, { mode });
+  const created = createdClip(before, duplicated);
+  if (!created) return null;
+  const next = withSongLength(duplicated, created.startBeat + created.lengthBeats, maxBars);
+  if (!next) {
+    pushToast(songLimitMessage(maxBars), 'error');
+    return null;
+  }
+  if (!store.applyProjectChange(() => next)) return null;
+  selectTrackClip(created);
+  return created.id;
+}
+
+/** Remove a clip; clips linked to it keep sounding (see removeClip). */
+export function removeClipFromSong(clipId: string): void {
+  const store = useStore.getState();
+  store.commitTransaction();
+  if (!findClip(store.project, clipId)) return;
+  if (!store.applyProjectChange((project) => removeClip(project, clipId))) return;
+  if (useStore.getState().editor.selectedClipId === clipId) {
+    store.selectClip(null);
+    store.selectNotes([]);
+  }
+}
+
+const SPLIT_FAILURE_MESSAGES: Record<SplitClipFailure, string> = {
+  missingClip: 'クリップが見つからないため分けられません。',
+  invalidBoundary: '再生ヘッドをクリップの内側(端ではない場所)に置くと分けられます。',
+  brokenLink: 'リンク元のクリップが見つからないため、このクリップは分けられません。',
+  eventLimit: 'ループで鳴る音が多すぎるため分けられません。クリップを短くしてから試してください。',
+  offGridDrumHit: 'ドラムの音がマス目からずれているため分けられません。',
+};
+
+/** Split a clip at the song beat `atBeat` into two clips. Returns whether it split. */
+export function splitClipAtBeat(clipId: string, atBeat: number): boolean {
+  const store = useStore.getState();
+  store.commitTransaction();
+  const result = splitClip(store.project, clipId, atBeat);
+  if (!result.ok) {
+    pushToast(SPLIT_FAILURE_MESSAGES[result.reason], 'error');
+    return false;
+  }
+  return store.applyProjectChange(() => result.project);
+}
+
+/**
+ * Add an empty 1-bar clip on a track at `startBeat` (moved to the nearest free
+ * spot), a drum clip on a drum track and a MIDI clip otherwise. The song grows
+ * to cover it as duplicateClipInSong does. Selects and returns the new clip's
+ * id; null for tracks that hold no notes (audio, bus) or past the limit.
+ */
+export function addEmptyClipAt(trackId: string, startBeat: number, maxBars: number): string | null {
+  const store = useStore.getState();
+  store.commitTransaction();
+  const before = store.project;
+  const track = before.tracks.find((t) => t.id === trackId);
+  if (!track || (track.type !== 'drum' && track.type !== 'instrument')) return null;
+  const bpb = beatsPerBarOf(before.timeSignature);
+  const clip =
+    track.type === 'drum'
+      ? createDrumClip(trackId, startBeat, bpb, drumStepsPerBar(before.timeSignature))
+      : createMidiClip(trackId, startBeat, bpb);
+  const added = addClip(before, trackId, clip);
+  const created = createdClip(before, added);
+  if (!created) return null;
+  const moved = moveClip(added, created.id, startBeat);
+  const placedClip = findClip(moved, created.id);
+  if (!placedClip) return null;
+  const placed = withSongLength(moved, placedClip.startBeat + placedClip.lengthBeats, maxBars);
+  if (!placed) {
+    pushToast(songLimitMessage(maxBars), 'error');
+    return null;
+  }
+  if (!store.applyProjectChange(() => placed)) return null;
+  selectTrackClip(placedClip);
+  return created.id;
+}
+
+/** Open a clip in the editor for its kind (drum grid or piano roll) and select it. */
+export function openClipInEditor(clipId: string): void {
+  const clip = findClip(useStore.getState().project, clipId);
+  if (!clip) return;
+  selectTrackClip(clip);
+  if (clip.type === 'drum') useStore.getState().setActiveView('drums');
+  else if (clip.type === 'midi') useStore.getState().setActiveView('pianoRoll');
 }

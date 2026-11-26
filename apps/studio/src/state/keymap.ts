@@ -3,7 +3,7 @@
 // step. Whether a shortcut may fire at all (typing in an input, open dialog) is
 // each listener's check.
 
-export type ShortcutScope = 'global' | 'pianoRoll' | 'liveInput';
+export type ShortcutScope = 'global' | 'pianoRoll' | 'arrange' | 'liveInput';
 
 export type ShortcutAction =
   | 'save'
@@ -17,7 +17,9 @@ export type ShortcutAction =
   | 'deleteSelectedNotes'
   | 'quantizeSelection'
   | 'toggleScaleSnap'
-  | 'toggleChordToneHighlight';
+  | 'toggleChordToneHighlight'
+  | 'duplicateClip'
+  | 'deleteClip';
 
 /** `mod` is Ctrl on Windows/Linux and Cmd on macOS; either one matches. */
 export type ShortcutModifier = 'mod' | 'shift' | 'alt';
@@ -94,11 +96,20 @@ export const KEYMAP: readonly ShortcutEntry[] = [
     action: 'toggleChordToneHighlight',
     labelJa: 'コードの音を色で示す機能の切り替え',
   },
+  {
+    scope: 'arrange',
+    key: 'd',
+    modifiers: ['mod'],
+    action: 'duplicateClip',
+    labelJa: '選んだクリップをすぐ後ろに複製する',
+  },
+  { scope: 'arrange', key: 'delete', modifiers: [], action: 'deleteClip', labelJa: '選んだクリップを消す' },
 ];
 
 const SCOPE_TITLES_JA: Record<ShortcutScope, string> = {
   global: 'どの画面でも',
   pianoRoll: 'ピアノロールを開いているとき',
+  arrange: '曲全体ビューを開いているとき',
   liveInput: 'キーボードで演奏しているとき',
 };
 
