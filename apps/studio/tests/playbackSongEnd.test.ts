@@ -255,7 +255,7 @@ describe('a note crossing the song end', () => {
       tracks: [{ ...track, instrument: { type: 'synth' as const, preset: 'warmPad' }, clips: [clip] }],
     };
     const split = splitClip(project, clip.id, 4);
-    expect(split).toMatchObject({ ok: false, reason: 'loopingClip' });
+    expect(split).toMatchObject({ ok: false, code: 'loopingClip' });
     expect(split.project).toBe(project);
     state.replaceProject(split.project);
     await playFromStart();

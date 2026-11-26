@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ParsedMidi } from '@cts/midi-io';
 import { checkProjectPredicate } from '@cts/tutorial-engine';
-import { expandClip } from '@cts/project-model';
+import { duplicateClip, expandClip, MAX_CLIP_END_BEATS, moveClip, resizeClip } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 
 // The store reads localStorage at module-import time, so install the stub
@@ -128,6 +128,84 @@ describe('quantizeNotes', () => {
       .flatMap((t) => t.clips)
       .find((c) => c.id === clipId)?.notes?.[0];
     expect(note?.startBeat).toBe(1);
+  });
+});
+
+describe('ops.undo: clip operations are one undo step each', () => {
+  function melodyClip() {
+    const clip = actions.firstMidiClipOfTrack(useStore.getState().project, 'Melody');
+    if (!clip) throw new Error('no Melody clip');
+    return clip;
+  }
+
+  function expectOneUndoStep(run: () => void): void {
+    const before = useStore.getState().project;
+    const pastLength = useStore.getState().past.length;
+    run();
+    expect(useStore.getState().project).not.toBe(before);
+    expect(useStore.getState().past.length).toBe(pastLength + 1);
+    useStore.getState().undo();
+    expect(useStore.getState().project).toEqual(before);
+  }
+
+  beforeEach(() => {
+    const clip = melodyClip();
+    useStore.getState().addNote(clip.id, { pitch: 60, startBeat: 1.3, durationBeats: 1, velocity: 100 });
+    useStore.getState().commitTransaction();
+  });
+
+  it('add', () => {
+    expectOneUndoStep(() => {
+      expect(actions.addEmptyClipAt(melodyClip().trackId, 0, 64)).not.toBeNull();
+    });
+  });
+
+  it('move', () => {
+    const clip = melodyClip();
+    expectOneUndoStep(() => {
+      useStore.getState().applyProjectChange((p) => moveClip(p, clip.id, clip.startBeat + clip.lengthBeats));
+    });
+  });
+
+  it('resize', () => {
+    const clip = melodyClip();
+    expectOneUndoStep(() => {
+      useStore.getState().applyProjectChange((p) => resizeClip(p, clip.id, clip.lengthBeats / 2));
+    });
+  });
+
+  it('split', () => {
+    const clip = melodyClip();
+    expectOneUndoStep(() => {
+      expect(actions.splitClipAtBeat(clip.id, clip.startBeat + 1)).toBe(true);
+    });
+  });
+
+  it('duplicate copy / link', () => {
+    for (const mode of ['copy', 'link'] as const) {
+      expectOneUndoStep(() => {
+        expect(actions.duplicateClipInSong(melodyClip().id, mode, 64)).not.toBeNull();
+      });
+    }
+  });
+
+  it('remove', () => {
+    expectOneUndoStep(() => actions.removeClipFromSong(melodyClip().id));
+  });
+
+  it('quantize', () => {
+    const clip = melodyClip();
+    const noteId = clip.notes!.find((n) => n.startBeat === 1.3)!.id;
+    expectOneUndoStep(() => actions.quantizeNotes(clip.id, [noteId], 1));
+  });
+
+  it('a refused split adds no undo step', () => {
+    const clip = melodyClip();
+    useStore.getState().applyProjectChange((p) => duplicateClip(p, clip.id, { mode: 'link' }));
+    const link = useStore.getState().project.tracks.flatMap((t) => t.clips).find((c) => c.aliasOf === clip.id)!;
+    const pastLength = useStore.getState().past.length;
+    expect(actions.splitClipAtBeat(link.id, link.startBeat + 1)).toBe(false);
+    expect(useStore.getState().past.length).toBe(pastLength);
   });
 });
 
@@ -609,5 +687,26 @@ describe('setDrumStepVelocity', () => {
     expect(drumEvents().find((e) => e.lane === 'kick' && e.stepIndex === 0)?.velocity).toBe(40);
     actions.setDrumStepVelocity(clipId, 'kick', 0, 0);
     expect(drumEvents().find((e) => e.lane === 'kick' && e.stepIndex === 0)).toBeUndefined();
+  });
+});
+
+describe('addEmptyClipAt on a full track', () => {
+  it('adds nothing and explains why when moveClip finds no free spot', async () => {
+    const { getBridgeSnapshot } = await import('../src/state/tutorialBridge');
+    const track = useStore.getState().project.tracks.find((t) => t.name === 'Melody')!;
+    useStore.getState().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => t.id === track.id
+        ? { ...t, clips: [{ id: 'full', trackId: t.id, type: 'midi' as const, startBeat: 0, lengthBeats: MAX_CLIP_END_BEATS, loop: false, notes: [] }] }
+        : t),
+    }));
+    useStore.getState().commitTransaction();
+    const before = useStore.getState().project;
+    const toastsBefore = getBridgeSnapshot().toasts.length;
+    expect(actions.addEmptyClipAt(track.id, 8, 64)).toBeNull();
+    expect(useStore.getState().project).toBe(before);
+    const toasts = getBridgeSnapshot().toasts;
+    expect(toasts).toHaveLength(toastsBefore + 1);
+    expect(toasts.at(-1)?.message).toBe(actions.NO_ROOM_FOR_CLIP_MESSAGE);
   });
 });

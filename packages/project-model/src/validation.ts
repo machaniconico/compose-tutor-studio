@@ -3,7 +3,7 @@
 
 import type { Project, TrackRole } from './types';
 import { findProjectSoundingLimitProblem, MAX_SONG_BARS, maxSongBars, MIN_LOOP_PERIOD_BEATS } from './sounding';
-import { beatTick } from './time';
+import { clipTickSpan, tickSpansOverlap } from './time';
 
 export type ValidationError = {
   /** Dot/bracket path to the offending value, e.g. `tracks[0].clips[1].startBeat`. */
@@ -161,12 +161,12 @@ export function validateProject(project: Project): ValidationResult {
           push(`${clipPath}.aliasOf`, 'a linked clip cannot own content');
         }
       }
-      const startTick = beatTick(clip.startBeat);
-      const endTick = beatTick(clip.startBeat + clip.lengthBeats);
-      if (startTick < previousEndTick && endTick > startTick) {
+      const span = clipTickSpan(clip.startBeat, clip.lengthBeats);
+      // The earlier clips (sorted by start) cover at most (-Infinity, previousEndTick).
+      if (tickSpansOverlap(span, [-Infinity, previousEndTick])) {
         push(`${clipPath}.startBeat`, 'clips on the same track cannot overlap');
       }
-      previousEndTick = Math.max(previousEndTick, endTick);
+      previousEndTick = Math.max(previousEndTick, span[1]);
       if (clip.trackId !== track.id) {
         push(`${clipPath}.trackId`, `clip.trackId "${clip.trackId}" does not match containing track "${track.id}"`);
       } else if (!trackIds.has(clip.trackId)) {

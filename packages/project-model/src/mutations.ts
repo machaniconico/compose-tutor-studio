@@ -6,8 +6,8 @@ import { systemClock, nowIso } from './clock';
 import { drumHitRepeatCount, expandClip, resolveLinkSource } from './clipExpand';
 import { createDrumClip, createMidiClip, createTrack } from './factories';
 import { makeId } from './ids';
-import { beatTick, beatsPerBar, drumStepsPerBar } from './time';
-import { songEndBeat, soundingEvents } from './sounding';
+import { PPQ, beatTick, beatsPerBar, clipTickSpan, drumStepsPerBar, tickSpansOverlap } from './time';
+import { clipEditSpan, MAX_SONG_BARS, MIN_LOOP_PERIOD_BEATS, songEndBeat, soundingEvents } from './sounding';
 import type {
   ChordEvent,
   Clip,
@@ -168,27 +168,81 @@ export function resolveEditTarget(project: Project, clipId: string): Clip | unde
 }
 
 /**
- * The start closest to `requested` (never before 0) where a clip of `length`
- * beats overlaps none of `others`. Ties go to the earlier start.
+ * Latest beat a clip may end at for move / duplicate / resize / split: the
+ * longest song (4 * MAX_SONG_BARS bars, the legacyBarLimit ceiling) of the
+ * longest bars (510 beats: a MIDI numerator is at most 255, the smallest
+ * denominator 2). Keeps every clip edge a safe-integer tick.
  */
-function nearestFreeStart(others: readonly Clip[], length: number, requested: number): number {
-  const target = Math.max(0, requested);
+export const MAX_CLIP_END_BEATS = 4 * MAX_SONG_BARS * 510;
+
+/**
+ * Whether a clip is inside the domain clip operations work on: at least
+ * MIN_LOOP_PERIOD_BEATS long (so never empty in ticks) and ending by
+ * MAX_CLIP_END_BEATS. Saved files may hold other clips; the operations leave
+ * a track with any of them unchanged.
+ */
+function inClipDomain(clip: Pick<Clip, 'startBeat' | 'lengthBeats'>): boolean {
+  return clip.startBeat >= 0 && clip.lengthBeats >= MIN_LOOP_PERIOD_BEATS &&
+    clip.startBeat + clip.lengthBeats <= MAX_CLIP_END_BEATS;
+}
+
+const trackInClipDomain = (track: Track) => track.clips.every(inClipDomain);
+
+/**
+ * The start closest to `requested` (never before 0) where a clip of `length`
+ * beats overlaps none of `others` under validateProject's rule
+ * (tickSpansOverlap) and ends by MAX_CLIP_END_BEATS.
+ * A free `requested` is returned as is. Otherwise every candidate is a whole
+ * tick `t`, returned as `t / PPQ`; distance is |t / PPQ - requested| in beats,
+ * and ties go to the earlier start. Undefined when no start fits.
+ *
+ * Inside the clip domain (inClipDomain) a placed clip is never empty in ticks, so the free starts
+ * are runs between the other clips and a finite set of candidates suffices.
+ */
+function nearestFreeStart(others: readonly Clip[], clip: Clip, requested: number): number | undefined {
+  const length = clip.lengthBeats;
+  const lastStart = MAX_CLIP_END_BEATS - length;
+  if (Number.isNaN(requested) || lastStart < 0) return undefined;
+  // Every candidate lies in [0, lastStart], so clamping the request keeps the
+  // nearest one nearest and keeps far requests (1e300) from flattening distances.
+  const target = Math.min(Math.max(0, requested), lastStart);
+  const spans = others
+    .map((o) => clipTickSpan(o.startBeat, o.lengthBeats))
+    .filter(([s, e]) => e > s)
+    .sort((x, y) => x[0] - y[0]);
   const free = (start: number) =>
-    others.every(
-      (o) => start >= o.startBeat + o.lengthBeats - CLIP_EPSILON || start + length <= o.startBeat + CLIP_EPSILON,
-    );
-  const candidates = [target, ...others.flatMap((o) => [o.startBeat - length, o.startBeat + o.lengthBeats])];
+    start <= lastStart && spans.every((span) => !tickSpansOverlap(clipTickSpan(start, length), span));
+  // A request clamped down to lastStart may sit between ticks: pick a tick candidate then.
+  if (target === Math.max(0, requested) && free(target)) return target;
+
   let best: number | undefined;
-  for (const start of candidates) {
-    if (start < 0 || !free(start)) continue;
+  const consider = (tick: number) => {
+    const start = tick / PPQ;
+    if (tick < 0 || !free(start)) return;
     const distance = Math.abs(start - target);
     const bestDistance = best === undefined ? Infinity : Math.abs(best - target);
-    if (distance < bestDistance - CLIP_EPSILON || (Math.abs(distance - bestDistance) <= CLIP_EPSILON && start < best!)) {
-      best = start;
-    }
+    if (distance < bestDistance || (distance === bestDistance && start < best!)) best = start;
+  };
+  // Both ends round separately, so each candidate tick is probed two ticks either way.
+  const near = (tick: number) => {
+    for (let d = -2; d <= 2; d += 1) consider(tick + d);
+  };
+  const lengthTick = beatTick(length);
+  const targetTick = Math.floor(target * PPQ);
+  const lastTick = Number.isFinite(lastStart) ? Math.floor(lastStart * PPQ) : Infinity;
+  near(targetTick);
+  near(targetTick + 1);
+  if (Number.isFinite(lastTick)) near(lastTick);
+  // Each gap between spans: its edges and its tick closest to the request.
+  let gapStart = 0;
+  for (let i = 0; i <= spans.length; i += 1) {
+    const gapEnd = Math.min(i < spans.length ? spans[i]![0] - lengthTick : Infinity, lastTick);
+    near(gapStart);
+    if (Number.isFinite(gapEnd)) near(gapEnd);
+    near(Math.min(Math.max(targetTick, gapStart), gapEnd));
+    if (i < spans.length) gapStart = Math.max(gapStart, spans[i]![1]);
   }
-  // The end of the last clip is always free, so `best` is set whenever `others` is non-empty.
-  return best ?? target;
+  return best;
 }
 
 /** Add a clip to a track. Its content positions stay relative to `startBeat`. */
@@ -223,9 +277,10 @@ export function moveClip(
   const found = locateClip(project, clipId);
   if (!found) return project;
   const { track, clip } = found;
+  if (!trackInClipDomain(track)) return project;
   const others = track.clips.filter((c) => c.id !== clipId);
-  const start = nearestFreeStart(others, clip.lengthBeats, startBeat);
-  if (start === clip.startBeat) return project;
+  const start = nearestFreeStart(others, clip, startBeat);
+  if (start === undefined || start === clip.startBeat) return project;
   return touch({ ...project, tracks: mapClip(project, clipId, (c) => ({ ...c, startBeat: start })) }, clock);
 }
 
@@ -242,6 +297,7 @@ export function resizeClip(
   if (!Number.isFinite(lengthBeats) || lengthBeats <= 0) return project;
   const found = locateClip(project, clipId);
   if (!found || lengthBeats === found.clip.lengthBeats) return project;
+  if (!trackInClipDomain(found.track) || !inClipDomain({ startBeat: found.clip.startBeat, lengthBeats })) return project;
   const start = beatTick(found.clip.startBeat);
   const end = beatTick(found.clip.startBeat + lengthBeats);
   if (end > start && found.track.clips.some((other) => other.id !== clipId &&
@@ -253,6 +309,68 @@ export function resizeClip(
     return next;
   });
   return touch({ ...project, tracks }, clock);
+}
+
+/**
+ * Quantize the starts of the given notes of a MIDI clip to a `snap`-beat grid
+ * (D2). Each note rounds to the nearest grid line and stays inside the clip's
+ * first pass (the loop period, or the clip up to the song end): one that would
+ * end past it goes back to the last grid line where it still ends inside
+ * (a note longer than the first pass is placed as if cut to it). The stored
+ * length never changes and the clip never grows. A note whose move would sound
+ * fewer times in any one placement (a partial repeat at the clip end, or a
+ * link) keeps its place. Notes that do not sound in the first pass are left as
+ * they are. A linked clip edits the clip its link resolves to.
+ */
+export function quantizeClipNotes(
+  project: Project,
+  requestedClipId: string,
+  noteIds: readonly string[],
+  snap: number,
+  clock: Clock = systemClock,
+): Project {
+  if (!Number.isFinite(snap) || snap <= 0) return project;
+  const clip = resolveEditTarget(project, requestedClipId);
+  if (!clip?.notes) return project;
+  const clipId = clip.id;
+  const ids = new Set(noteIds);
+  const { firstPassLength } = clipEditSpan(project, clip);
+  const sounding = (candidate: Project) =>
+    soundingEvents(candidate, { sourceClipId: clipId, includeMuted: true }).events;
+  const before = sounding(project);
+  const visible = new Set(before.filter((event) => event.clipId === clipId && event.kind === 'note' && event.repeat === 0)
+    .map((event) => event.sourceIndex));
+  const proposed = clip.notes.map((note, index) => {
+    if (!ids.has(note.id) || !visible.has(index)) return note;
+    // Only the placement uses the length cut to the first pass; the stored length stays.
+    const placedLength = Math.min(note.durationBeats, firstPassLength);
+    const lastStart = Math.floor((firstPassLength - placedLength) / snap + 1e-9) * snap;
+    const startBeat = Math.max(0, Math.min(Math.max(0, Math.round(note.startBeat / snap) * snap), lastStart));
+    if (startBeat === note.startBeat) return note;
+    return { ...note, startBeat };
+  });
+  if (proposed.every((note, index) => note === clip.notes?.[index])) return project;
+
+  // Count sounds per placement (clip) and note, so a gain in one placement (e.g. a
+  // muted link) cannot hide a loss in another.
+  const remaining = new Map<string, number>();
+  const tally = (events: typeof before, delta: number) => {
+    for (const event of events) {
+      if (event.kind !== 'note') continue;
+      const key = `${event.clipId}\u0000${event.sourceIndex}`;
+      remaining.set(key, (remaining.get(key) ?? 0) + delta);
+    }
+  };
+  tally(sounding({ ...project, tracks: mapClip(project, clipId, (c) => ({ ...c, notes: proposed })) }), 1);
+  tally(before, -1);
+  const losing = new Set<number>();
+  for (const [key, count] of remaining) {
+    if (count < 0) losing.add(Number(key.slice(key.lastIndexOf('\u0000') + 1)));
+  }
+  // Rounding a note forward can also hide its placement in a partial repeat.
+  const notes = clip.notes.map((note, index) => losing.has(index) ? note : proposed[index]!);
+  if (notes.every((note, index) => note === clip.notes?.[index])) return project;
+  return touch({ ...project, tracks: mapClip(project, clipId, (c) => ({ ...c, notes })) }, clock);
 }
 
 /** Steps per bar a drum clip's hits are placed on (playback uses the link source's). */
@@ -270,9 +388,17 @@ function withStepsPerBarOf(target: Clip, source: Clip): Clip {
 
 export type SplitClipFailure = 'missingClip' | 'invalidBoundary' | 'loopingClip' | 'linkedClip';
 
+/** Beginner-friendly Japanese text for each reason a split is refused. */
+export const SPLIT_FAILURE_MESSAGES: Record<SplitClipFailure, string> = {
+  missingClip: 'クリップが見つからないため分けられません。',
+  invalidBoundary: '再生ヘッドをクリップの内側(端ではない場所)に置くと分けられます。',
+  loopingClip: 'ループを使っているクリップは分けられません。',
+  linkedClip: 'ほかのクリップと中身を共有しているため分けられません。',
+};
+
 export type SplitClipResult =
   | { ok: true; project: Project }
-  | { ok: false; project: Project; reason: SplitClipFailure };
+  | { ok: false; project: Project; code: SplitClipFailure; reason: string };
 
 /**
  * Split a clip at the absolute song beat `atBeat` into two clips; every note
@@ -290,14 +416,18 @@ export function splitClip(
   atBeat: number,
   clock: Clock = systemClock,
 ): SplitClipResult {
-  const fail = (reason: SplitClipFailure): SplitClipResult => ({ ok: false, project, reason });
+  const fail = (code: SplitClipFailure): SplitClipResult =>
+    ({ ok: false, project, code, reason: SPLIT_FAILURE_MESSAGES[code] });
   const found = locateClip(project, clipId);
   if (!found) return fail('missingClip');
   const { track, clip } = found;
   if (clip.loop) return fail('loopingClip');
   if (clip.aliasOf !== undefined) return fail('linkedClip');
+  if (!trackInClipDomain(track)) return fail('invalidBoundary');
+  // Both parts must also keep the minimum clip length (they get `offset` and `lengthBeats - offset`).
   const isInterior = (offset: number) =>
-    beatTick(offset) > 0 && beatTick(clip.startBeat + offset) < beatTick(clip.startBeat + clip.lengthBeats);
+    beatTick(offset) > 0 && beatTick(clip.startBeat + offset) < beatTick(clip.startBeat + clip.lengthBeats) &&
+    offset >= MIN_LOOP_PERIOD_BEATS && clip.lengthBeats - offset >= MIN_LOOP_PERIOD_BEATS;
   let offset = atBeat - clip.startBeat;
   if (!isInterior(offset)) return fail('invalidBoundary');
 
@@ -416,12 +546,14 @@ export function duplicateClip(
   const found = locateClip(project, clipId);
   if (!found) return project;
   const { track, clip } = found;
+  if (!trackInClipDomain(track)) return project;
   const requestedStart = opts.startBeat ?? clip.startBeat + clip.lengthBeats;
   if (!Number.isFinite(requestedStart)) return project;
   const source = resolveEditTarget(project, clipId);
   if (opts.mode === 'link' && !source) return project;
   const allocateId = trackIdAllocator(project);
-  const startBeat = nearestFreeStart(track.clips, clip.lengthBeats, requestedStart);
+  const startBeat = nearestFreeStart(track.clips, clip, requestedStart);
+  if (startBeat === undefined) return project;
   const duplicate: Clip = { ...clip, id: allocateId('clip'), startBeat };
   delete duplicate.legacyClipSettings;
   if (opts.mode === 'link') {

@@ -26,20 +26,21 @@ import {
   beatsPerBar as beatsPerBarOf,
   beatTick,
   clipEditSpan,
-  soundingEvents,
+  clipTickSpan,
   createDrumClip,
   createMidiClip,
   drumStepsPerBar,
   duplicateClip,
   moveClip,
   removeClip,
+  quantizeClipNotes,
   splitClip,
-  type SplitClipFailure,
   drumBeatToStep,
   resolveEditTarget,
   resolveLinkSource,
   setLengthBars as setProjectLengthBars,
   setTimeSignature as setProjectTimeSignature,
+  tickSpansOverlap,
 } from '@cts/project-model';
 import {
   analyzeChord,
@@ -62,7 +63,6 @@ import { roleForTrackName } from '@cts/tutorial-engine';
 import { fitClipToNotes, useStore, type NoteEditOptions } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
-import { clampNoteToClip, quantizeStart } from '../features/pianoRoll/gridMath';
 import { upsertEffect, type SupportedEffectType } from '../audio/effects';
 import { findChannelPreset } from '../features/mixer/channelPresets';
 import { withSongLength } from '../features/arranger/arrangeMath';
@@ -344,41 +344,12 @@ export function insertProgressionAtBeat(templateId: string, startBeat: number): 
 // Note edits (piano roll).
 // ---------------------------------------------------------------------------
 
-/** Quantize the start of the given notes (within a clip) to a grid snap. */
+/** Quantize the start of the given notes (within a clip) to a grid snap (see quantizeClipNotes). */
 export function quantizeNotes(clipId: string, noteIds: readonly string[], snap: number): void {
-  const ids = new Set(noteIds);
-  if (!Number.isFinite(snap) || snap <= 0) return;
   const store = useStore.getState();
-  const { project } = store;
-  const clip = findClip(project, clipId);
-  if (!clip?.notes) return;
-  const { firstPassLength } = clipEditSpan(project, clip);
-  const sounding = (candidate: Project) =>
-    soundingEvents(candidate, { sourceClipId: clipId, includeMuted: true }).events;
-  const before = sounding(project);
-  const visible = new Set(before.filter((event) => event.clipId === clipId && event.kind === 'note' && event.repeat === 0)
-    .map((event) => event.sourceIndex));
-  const proposed = clip.notes.map((note, index) => {
-    if (!ids.has(note.id) || !visible.has(index)) return note;
-    const startBeat = quantizeStart(note.startBeat, snap);
-    const fitted = clampNoteToClip({ ...note, startBeat }, firstPassLength, { snap, keep: 'length' });
-    if (fitted.startBeat === note.startBeat && fitted.durationBeats === note.durationBeats) return note;
-    return { ...note, ...fitted };
-  });
-  if (proposed.every((note, index) => note === clip.notes?.[index])) return;
-
-  const remaining = new Map<number, number>();
-  const after = sounding(mapClip(project, clipId, (c) => ({ ...c, notes: proposed })));
-  for (const event of after) {
-    if (event.kind === 'note') remaining.set(event.sourceIndex, (remaining.get(event.sourceIndex) ?? 0) + 1);
-  }
-  for (const event of before) {
-    if (event.kind === 'note') remaining.set(event.sourceIndex, (remaining.get(event.sourceIndex) ?? 0) - 1);
-  }
-  // Rounding a note forward can also hide its placement in a partial repeat.
-  const notes = clip.notes.map((note, index) => (remaining.get(index) ?? 0) < 0 ? note : proposed[index]!);
-  if (notes.every((note, index) => note === clip.notes?.[index])) return;
-  store.applyProjectChange(() => mapClip(project, clipId, (c) => ({ ...c, notes })));
+  const next = quantizeClipNotes(store.project, clipId, noteIds, snap);
+  if (next === store.project) return;
+  store.applyProjectChange(() => next);
 }
 
 /**
@@ -1161,20 +1132,13 @@ export function removeClipFromSong(clipId: string): void {
   }
 }
 
-const SPLIT_FAILURE_MESSAGES: Record<SplitClipFailure, string> = {
-  missingClip: 'クリップが見つからないため分けられません。',
-  invalidBoundary: '再生ヘッドをクリップの内側(端ではない場所)に置くと分けられます。',
-  loopingClip: 'ループを使っているクリップは分けられません。',
-  linkedClip: 'ほかのクリップと中身を共有しているため分けられません。',
-};
-
 /** Split a clip at the song beat `atBeat` into two clips. Returns whether it split. */
 export function splitClipAtBeat(clipId: string, atBeat: number): boolean {
   const store = useStore.getState();
   store.commitTransaction();
   const result = splitClip(store.project, clipId, atBeat);
   if (!result.ok) {
-    pushToast(SPLIT_FAILURE_MESSAGES[result.reason], 'error');
+    pushToast(result.reason, 'error');
     return false;
   }
   return store.applyProjectChange(() => result.project);
@@ -1203,6 +1167,14 @@ export function addEmptyClipAt(trackId: string, startBeat: number, maxBars: numb
   const moved = moveClip(added, created.id, startBeat);
   const placedClip = findClip(moved, created.id);
   if (!placedClip) return null;
+  // moveClip leaves the clip where it was added when the track has no free spot for it.
+  const placedSpan = clipTickSpan(placedClip.startBeat, placedClip.lengthBeats);
+  const blocked = moved.tracks.find((t) => t.id === trackId)?.clips.some((c) =>
+    c.id !== placedClip.id && tickSpansOverlap(placedSpan, clipTickSpan(c.startBeat, c.lengthBeats)));
+  if (blocked) {
+    pushToast(NO_ROOM_FOR_CLIP_MESSAGE, 'error');
+    return null;
+  }
   const placed = withSongLength(moved, placedClip.startBeat + placedClip.lengthBeats, maxBars);
   if (!placed) {
     pushToast(songLimitMessage(maxBars), 'error');
@@ -1212,6 +1184,9 @@ export function addEmptyClipAt(trackId: string, startBeat: number, maxBars: numb
   selectTrackClip(placedClip);
   return created.id;
 }
+
+/** Shown when a new clip has nowhere to go on its track. */
+export const NO_ROOM_FOR_CLIP_MESSAGE = 'ここには置ける場所がありません。';
 
 /** Open a clip in the editor for its kind (drum grid or piano roll) and select it. */
 export function openClipInEditor(clipId: string): void {
