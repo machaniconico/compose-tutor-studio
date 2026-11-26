@@ -285,6 +285,7 @@ v2 までのライブ再生と WAV は `lengthBeats` を無視し、各クリッ
 ライブ・WAV・MIDI は、次の 3 つだけを発音の正とする(`packages/project-model/src/sounding.ts`。`.omc/plans/clip-convergence-2026-11-26.md`)。3 経路は結果を書き換えず、形式に合わせて写すだけにする。
 
 - `soundingEvents(project)`: 実際に鳴る音の一覧と `problems`。ループ、リンク、スウィング、曲末の切り方を含む。各音は絶対拍、トラックとクリップの ID、共有元のクリップ ID、保存配列内の位置、0 始まりの繰り返し番号を持つ。スウィングは 16 分音符グリッドの偶数番目を指定割合だけ遅らせる(`groove.ts` の `swingBeat`。3 経路で再適用しない)。
+- ドラムの発音イベントは長さ `durationBeats` を持ち得る(US-019 のハイハットのチョーク)。同じドラムトラックで後ろ(tick で比べ、同時は含まない)の最も近いクローズドハットがあるオープンハットだけに、その発音 tick で終わる長さが付き(`groove.ts` の `applyHiHatChoke`、スウィング後の位置で判定)、ライブ・WAV・MIDI はそれぞれの音の長さをこの長さまで短くする。その他の打点は長さを持たない。
 - `storedEventAt(project, clipId, localBeat)`: その位置で始まる音が、どの保存済みのノート・打点(`sourceClipId` と `sourceIndex`)から来たかを返す。クリップの開始拍に `localBeat` を加えて曲全体での tick に変換し、同じ tick に始まる音を探す。同時に始まる音は保存順の先頭を返し、なければ `null`。編集 UI は境界の規則を自分で計算せず、これを使う。
 - `songEndBeat(project)`: 曲の終わりの拍。小節数に `beatsPerBar` を掛ける。
 

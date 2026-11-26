@@ -18,7 +18,8 @@ export type ExpandedDrumHit = { lane: DrumLane; beat: number; velocity: number }
 type SourcePosition = { sourceIndex: number; repeat: number; unswungStartBeat: number };
 export type ClipOnset = SourcePosition & (
   | (ExpandedNote & { kind: 'note' })
-  | { kind: 'drum'; lane: DrumLane; startBeat: number; velocity: number }
+  // durationBeats: only on an open hi-hat that a later closed hi-hat on the same track chokes (soundingEvents).
+  | { kind: 'drum'; lane: DrumLane; startBeat: number; velocity: number; durationBeats?: number }
 );
 
 const SILENT_TRACK_LABEL: Record<Exclude<TrackType, 'instrument' | 'drum'>, string> = {

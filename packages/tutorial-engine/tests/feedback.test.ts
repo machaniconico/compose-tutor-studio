@@ -724,6 +724,16 @@ describe('explainPredicate — hasDrumPattern', () => {
     expect(result.reason).not.toContain('4拍目');
   });
 
+  it('4/4 の stepsPerBar 12: ステップ 3 を「2拍目」、ステップ 6 を「3拍目」と表示する', () => {
+    const drumTrack = makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('kick', 9)]);
+    drumTrack.clips[0]!.stepsPerBar = 12;
+    const project = makeProject({ timeSignature: [4, 4], tracks: [drumTrack] });
+    const result = explainPredicate({ type: 'hasDrumPattern', patternType: 'fourOnFloor' }, project);
+    expect(result.satisfied).toBe(false);
+    expect(result.reason).toContain('キックが2拍目・3拍目に入っていません');
+    expect(result.reason).not.toContain('ステップ');
+  });
+
   it('3/4 に 16 ステップの旧クリップ: 判定と同じ丸めで、ステップ 5 を「2拍目」と表示する', () => {
     const drumTrack = makeDrumTrack([makeDrumEvent('kick', 0), makeDrumEvent('kick', 11)]);
     const project = makeProject({ timeSignature: [3, 4], tracks: [drumTrack] });

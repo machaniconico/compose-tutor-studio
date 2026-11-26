@@ -126,7 +126,10 @@ function buildInstrumentTrack(
   ];
   for (const event of events) {
     const pitch = event.kind === 'note' ? event.pitch : DRUM_NOTE[event.lane];
-    const duration = event.kind === 'note' ? event.durationBeats : DRUM_HIT_DURATION_BEATS;
+    // A choked open hat (soundingEvents) ends at its closed hat when that comes first.
+    const duration = event.kind === 'note'
+      ? event.durationBeats
+      : Math.min(DRUM_HIT_DURATION_BEATS, event.durationBeats ?? Infinity);
     msgs.push(...noteMessages(channel, pitch, event.velocity, event.startBeat, duration, ppq, endLimitTick));
   }
   return buildTrackChunk(msgs);

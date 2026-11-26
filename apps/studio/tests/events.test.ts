@@ -406,3 +406,63 @@ describe('live playback and MIDI export expand the same project the same way', (
     expect(midiStarts).toEqual(liveStarts);
   });
 });
+
+describe('hi-hat choke (US-019) on every path', () => {
+  const hatClip = (hits: Array<[number, 'openHat' | 'closedHat' | 'kick']>, stepsPerBar = 16): Clip => ({
+    id: 'hats', trackId: 'd', type: 'drum', startBeat: 0, lengthBeats: 4, loop: false, stepsPerBar,
+    drumEvents: hits.map(([stepIndex, lane], i) => ({ id: `h${i}`, lane, stepIndex, velocity: 100 })),
+  });
+  const openPayloads = (events: ReadonlyArray<{ beat: number; payload: unknown }>) =>
+    events.map((e) => e.payload as SchedulePayload).filter((p): p is DrumScheduleEvent => p.kind === 'drum' && p.lane === 'openHat');
+
+  it('live events and WAV events carry the same choked length (open at beat 0, closed at 0.5 → 0.5)', () => {
+    const song = project([drumTrack('d', hatClip([[0, 'openHat'], [2, 'closedHat']]))]);
+    const live = openPayloads(buildScheduleEvents(song));
+    const wav = openPayloads(renderScheduleEvents(song));
+    expect(live).toEqual([{ kind: 'drum', trackId: 'd', lane: 'openHat', velocity: 100, durationBeats: 0.5 }]);
+    expect(wav).toEqual(live);
+    // The closed hat itself carries no length.
+    expect(buildScheduleEvents(song).find((e) => (e.payload as DrumScheduleEvent).lane === 'closedHat')?.payload)
+      .not.toHaveProperty('durationBeats');
+  });
+
+  it('an unchoked open hat has no length on either path', () => {
+    const song = project([drumTrack('d', hatClip([[0, 'openHat'], [2, 'kick']]))]);
+    expect(openPayloads(buildScheduleEvents(song))[0]).not.toHaveProperty('durationBeats');
+    expect(openPayloads(renderScheduleEvents(song))[0]).not.toHaveProperty('durationBeats');
+  });
+
+  it('MIDI ends a choked open hat at the closed hat when that comes before its usual note-off', () => {
+    const song = project([drumTrack('d', hatClip([[0, 'openHat'], [1, 'closedHat']], 32))]);
+    const notes = parseMidi(exportProjectToMidi(song)).tracks.flatMap((t) => t.notes);
+    expect(notes.find((n) => n.pitch === 46)).toMatchObject({ startBeat: 0, durationBeats: 0.125 });
+    expect(openPayloads(buildScheduleEvents(song))[0]!.durationBeats).toBe(0.125);
+  });
+
+  it('a choke changes the live identity, so a live edit re-schedules a not-yet-started open hat', () => {
+    const keys = new WeakMap<object, string>();
+    const open = (song: Project) => {
+      const ev = buildScheduleEvents(song, keys).find((e) => (e.payload as DrumScheduleEvent).lane === 'openHat')!;
+      return keys.get(ev.payload as object);
+    };
+    const plain = open(project([drumTrack('d', hatClip([[0, 'openHat']]))]));
+    const choked = open(project([drumTrack('d', hatClip([[0, 'openHat'], [2, 'closedHat']]))]));
+    expect(plain).toBe('d|0|openHat|100');
+    expect(choked).not.toBe(plain);
+  });
+});
+
+describe('docs/12 §8 の手動 QA(FEAT-MAN-005)', () => {
+  it('§8 の表に FEAT-MAN-005 があり、オープンハットがクローズドハットで止まることを聞く手順になっている', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const log = readFileSync(fileURLToPath(new URL('../../../docs/12_release_qa_log.md', import.meta.url)), 'utf8');
+    const section = log.slice(log.indexOf('## 8. 機能追加の聴感・手動QA'));
+    expect(section.startsWith('## 8.')).toBe(true);
+    const row = section.split('\n').find((line) => line.startsWith('| FEAT-MAN-005 |'));
+    expect(row).toBeDefined();
+    expect(row).toContain('ハイハット(開)');
+    expect(row).toContain('止まる');
+    expect(row?.split('|').length).toBe(6);
+  });
+});

@@ -12,6 +12,9 @@ import type { DrumLane } from '@cts/project-model';
 /** Seconds of white noise in the shared buffer. Long enough for any one hit. */
 const NOISE_SECONDS = 1;
 
+/** Fade before a choked hat stops, so the cut does not click. */
+const CHOKE_FADE_SECONDS = 0.003;
+
 /**
  * Build a mono white-noise buffer for the given context. Reused by every
  * noise-based drum voice via {@link DrumVoiceManager}.
@@ -44,9 +47,15 @@ export class DrumVoiceManager {
   /**
    * Trigger a drum lane at an absolute audio time. The returned handle
    * cancels a hit that has not started yet (live edits); a hit already
-   * playing is short and rings out.
+   * playing is short and rings out. `chokeSeconds` cuts an open hat that
+   * long after its start (the hi-hat choke from soundingEvents).
    */
-  trigger(lane: DrumLane, time: number, velocity: number): { release: (when: number) => void } {
+  trigger(
+    lane: DrumLane,
+    time: number,
+    velocity: number,
+    chokeSeconds = Infinity,
+  ): { release: (when: number) => void } {
     const vel = Math.min(1, Math.max(0, velocity / 127));
     const out = this.ctx.createGain();
     out.connect(this.output);
@@ -61,7 +70,7 @@ export class DrumVoiceManager {
         this.hat(time, vel, 0.045, out);
         break;
       case 'openHat':
-        this.hat(time, vel, 0.32, out);
+        this.hat(time, vel, 0.32, out, chokeSeconds);
         break;
       case 'clap':
         this.clap(time, vel, out);
@@ -150,18 +159,32 @@ export class DrumVoiceManager {
     tone.stop(time + 0.15);
   }
 
-  /** Highpassed noise; decay length distinguishes closed vs open. */
-  private hat(time: number, vel: number, decay: number, out: AudioNode): void {
+  /**
+   * Highpassed noise; decay length distinguishes closed vs open. A choke that
+   * comes before the decay ends follows the same curve, fades to 0 over a few
+   * ms and stops the noise exactly at `time + chokeSeconds`.
+   */
+  private hat(time: number, vel: number, decay: number, out: AudioNode, chokeSeconds = Infinity): void {
     const noise = this.noiseSource(time);
     const hp = this.ctx.createBiquadFilter();
     hp.type = 'highpass';
     hp.frequency.setValueAtTime(7000, time);
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.32 * vel, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + decay);
+    const peak = 0.32 * vel;
+    gain.gain.setValueAtTime(peak, time);
     noise.connect(hp);
     hp.connect(gain);
     gain.connect(out);
+    if (chokeSeconds < decay + 0.05) {
+      const fade = Math.min(CHOKE_FADE_SECONDS, chokeSeconds / 2);
+      const fadeFrom = chokeSeconds - fade;
+      const reached = fadeFrom < decay ? peak * (0.001 / peak) ** (fadeFrom / decay) : 0.001;
+      gain.gain.exponentialRampToValueAtTime(reached, time + fadeFrom);
+      gain.gain.linearRampToValueAtTime(0, time + chokeSeconds);
+      noise.stop(time + chokeSeconds);
+      return;
+    }
+    gain.gain.exponentialRampToValueAtTime(0.001, time + decay);
     noise.stop(time + decay + 0.05);
   }
 

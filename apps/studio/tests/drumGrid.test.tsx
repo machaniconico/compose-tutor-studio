@@ -179,3 +179,146 @@ it('shows linked drum hits and edits the source for cells and patterns in one un
     confirm.mockRestore();
   }
 });
+
+describe('DrumGrid の 12/16 ステップ切替 (US-019)', () => {
+  const setHits = (hits: Array<[number, 'kick' | 'closedHat']>, timeSignature: [number, number] = [4, 4]) => {
+    act(() => {
+      useStore.getState().applyProjectChange((project) => ({
+        ...project,
+        timeSignature,
+        tracks: project.tracks.map((t) => t.type === 'drum'
+          ? {
+              ...t,
+              clips: t.clips.map((c, ci) => ci === 0
+                ? {
+                    ...c, lengthBeats: timeSignature[0], stepsPerBar: 4 * timeSignature[0],
+                    drumEvents: hits.map(([stepIndex, lane], i) => ({ id: `x${i}`, lane, stepIndex, velocity: 100 })),
+                  }
+                : c),
+            }
+          : t),
+      }));
+    });
+  };
+  const drumClip0 = () => useStore.getState().project.tracks.find((t) => t.type === 'drum')!.clips[0]!;
+  const stepsGroup = () => within(screen.getByRole('group', { name: '1 小節のマスの数' }));
+
+  it('切替時に件数入りの日本語の確認文言を出し、確認後に動かす。Undo 1 段で戻る', () => {
+    setHits([[0, 'kick'], [1, 'closedHat'], [2, 'closedHat']]);
+    const before = drumClip0();
+    const depth = useStore.getState().past.length;
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      render(<DrumGrid />);
+      expect(stepsGroup().getByRole('button', { name: '16 マス' }).getAttribute('aria-pressed')).toBe('true');
+      fireEvent.click(stepsGroup().getByRole('button', { name: '12 マス' }));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(confirm.mock.calls[0]![0]).toBe(
+        '12 マスのグリッドに合わない音が 2 個あります。最も近い位置へ動かします。よろしいですか？',
+      );
+      expect(drumClip0().stepsPerBar).toBe(12);
+      expect(drumClip0().drumEvents!.map((e) => e.stepIndex)).toEqual([0, 1, 2]);
+      expect(useStore.getState().past.length).toBe(depth + 1);
+      expect(screen.getAllByLabelText(/^キック ステップ \d+/)).toHaveLength(12);
+      act(() => useStore.getState().undo());
+      expect(drumClip0()).toEqual(before);
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it('重なってまとめる音があるときはその数も示す', () => {
+    setHits([[2, 'closedHat'], [3, 'closedHat']]);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      render(<DrumGrid />);
+      fireEvent.click(stepsGroup().getByRole('button', { name: '12 マス' }));
+      expect(confirm.mock.calls[0]![0]).toBe(
+        '12 マスのグリッドに合わない音が 1 個あります。最も近い位置へ動かします。同じ位置に重なる 1 個の音は 1 つにまとめます。よろしいですか？',
+      );
+      expect(drumClip0().drumEvents).toHaveLength(1);
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it('確認でキャンセルしたら何も変えない', () => {
+    setHits([[1, 'closedHat']]);
+    const before = useStore.getState().project;
+    const depth = useStore.getState().past.length;
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    try {
+      render(<DrumGrid />);
+      fireEvent.click(stepsGroup().getByRole('button', { name: '12 マス' }));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(useStore.getState().project).toBe(before);
+      expect(useStore.getState().past.length).toBe(depth);
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it('ずれる音が無ければ確認を出さずに切り替える(3/4 の 12→16、3 の倍数のステップだけ)', () => {
+    setHits([[0, 'kick'], [3, 'kick'], [9, 'closedHat']], [3, 4]);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    try {
+      render(<DrumGrid />);
+      expect(stepsGroup().getByRole('button', { name: '12 マス' }).getAttribute('aria-pressed')).toBe('true');
+      fireEvent.click(stepsGroup().getByRole('button', { name: '16 マス' }));
+      expect(confirm).not.toHaveBeenCalled();
+      expect(drumClip0().stepsPerBar).toBe(16);
+      expect(drumClip0().drumEvents!.map((e) => e.stepIndex)).toEqual([0, 4, 12]);
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it('切り替えられないときは確認を出さず、何も変えず、理由をトーストで出す', async () => {
+    const { getBridgeSnapshot } = await import('../src/state/tutorialBridge');
+    act(() => {
+      useStore.getState().applyProjectChange((project) => ({
+        ...project,
+        tracks: project.tracks.map((t) => t.type === 'drum'
+          ? {
+              ...t,
+              clips: t.clips.map((c, ci) => ci === 0
+                ? { ...c, stepsPerBar: 12, drumEvents: [{ id: 'far', lane: 'kick' as const, stepIndex: 1.7e308, velocity: 100 }] }
+                : c),
+            }
+          : t),
+      }));
+    });
+    const before = useStore.getState().project;
+    const toasts = getBridgeSnapshot().toasts.length;
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      render(<DrumGrid />);
+      fireEvent.click(stepsGroup().getByRole('button', { name: '16 マス' }));
+      expect(confirm).not.toHaveBeenCalled();
+      expect(useStore.getState().project).toBe(before);
+      expect(getBridgeSnapshot().toasts).toHaveLength(toasts + 1);
+      expect(getBridgeSnapshot().toasts.at(-1)?.message).toBe('このクリップは細かさの設定が特殊なため、マス数を切り替えられません。');
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it('4/4 の 12 マスでは 3 マスごとに拍の区切りを示す', () => {
+    setHits([]);
+    act(() => { setDrumSteps12(); });
+    render(<DrumGrid />);
+    const cells = screen.getAllByLabelText(/^キック ステップ \d+$/);
+    expect(cells.map((c) => c.classList.contains('is-beat-start'))).toEqual(
+      Array.from({ length: 12 }, (_, i) => i % 3 === 0),
+    );
+  });
+
+  function setDrumSteps12() {
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((t) => t.type === 'drum'
+        ? { ...t, clips: t.clips.map((c, ci) => (ci === 0 ? { ...c, stepsPerBar: 12 } : c)) }
+        : t),
+    }));
+  }
+});

@@ -116,6 +116,19 @@ export function advanceBeat(
 }
 
 /**
+ * How an event at song beat `beat` plays while `loop` is on (beats, unrounded;
+ * the scheduler and the loop choke both use this):
+ * - `once`: before the region, reached once on the way in;
+ * - `everyPass`: inside `[startBeat, endBeat)`, at `beat + k × length` for k ≥ 0;
+ * - `never`: at or after the region end, which the playhead never reaches.
+ */
+export function loopPlacement(beat: number, loop: LoopRegion): 'once' | 'everyPass' | 'never' {
+  if (beat < loop.startBeat) return 'once';
+  if (beat >= loop.endBeat) return 'never';
+  return 'everyPass';
+}
+
+/**
  * Select the events whose beat falls inside the half-open window
  * `[windowStartBeat, windowEndBeat)` and resolve them to absolute audio times.
  *
@@ -162,7 +175,8 @@ export function nextEventsInWindow(
   for (const ev of events) {
     // Events before the region play once, on the way in: playhead beats before
     // `startBeat` are only ever reached before the first wrap.
-    if (ev.beat < region.startBeat) {
+    const placement = loopPlacement(ev.beat, region);
+    if (placement === 'once') {
       if (ev.beat >= windowStartBeat && ev.beat < windowEndBeat) {
         due.push({
           time: beatToTime(ev.beat, bpm, anchorBeat, anchorTime),
@@ -174,7 +188,7 @@ export function nextEventsInWindow(
     }
     // Events at or after the region end are unreachable once looping: the
     // playhead wraps at endBeat and never advances to them.
-    if (ev.beat >= region.endBeat) continue;
+    if (placement === 'never') continue;
 
     // The event recurs at ev.beat + k*length for every integer k >= 0 such that
     // the recurrence lands in the window.

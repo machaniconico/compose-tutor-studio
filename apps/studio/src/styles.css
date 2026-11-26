@@ -1522,6 +1522,7 @@ input[type='range'] {
 }
 
 .drums__patterns,
+.drums__steps,
 .drums__bars {
   display: flex;
   align-items: center;
@@ -1530,12 +1531,14 @@ input[type='range'] {
 }
 
 .drums__patterns-label,
+.drums__steps-label,
 .drums__bars-label {
   font-size: 11px;
   color: var(--text-faint);
 }
 
 .drums__patterns button,
+.drums__steps button,
 .drums__bars button {
   font-size: 11px;
   padding: var(--sp-1) var(--sp-2);

@@ -292,7 +292,10 @@ function startVoice(key: string, payload: SchedulePayload, startBeat: number, fr
       { cutAtEnd: payload.cut },
     );
   } else {
-    handle = state.drums.get(payload.trackId)?.trigger(payload.lane, time, payload.velocity);
+    const drums = state.drums.get(payload.trackId);
+    handle = payload.durationBeats === undefined
+      ? drums?.trigger(payload.lane, time, payload.velocity)
+      : drums?.trigger(payload.lane, time, payload.velocity, payload.durationBeats * secondsPerBeat(state.bpm));
   }
   const endBeat = payload.kind === 'note' ? startBeat + payload.durationBeats : startBeat;
   state.voices.push({
@@ -376,7 +379,7 @@ function applyLiveEdit(project: Project): boolean {
   const songEnd = songEndBeat(project);
   const playhead = scheduler.playheadBeat();
   if (!state.loop && playhead >= songEnd) return false;
-  const events = buildScheduleEvents(project, eventKeys);
+  const events = buildScheduleEvents(project, eventKeys, state.loop);
   scheduler.update(events, state.loop ? Infinity : songEnd);
   state.songEnd = songEnd;
 
@@ -515,7 +518,7 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
   silenceRinging();
   buildVoices(context, master, project.tracks, now);
 
-  const events = buildScheduleEvents(project, eventKeys);
+  const events = buildScheduleEvents(project, eventKeys, state.loop);
   const endBeat = state.loop ? Infinity : state.songEnd;
   if (resume && startBeat < endBeat) {
     const byKey = payloadsByKey(events);

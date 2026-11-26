@@ -55,6 +55,8 @@ import {
   setTimeSignature as setProjectTimeSignature,
   SECTION_EDIT_FAILURE_MESSAGES,
   soundingEvents,
+  resampleDrumSteps,
+  DEFAULT_STEPS_PER_BAR,
   tickSpansOverlap,
   towardGrid,
   TRANSPOSE_FAILURE_MESSAGES,
@@ -1972,6 +1974,150 @@ export function setDrumStepVelocity(
       return { ...clip, drumEvents: [...events, created] };
     }),
   );
+}
+
+/**
+ * Where a step-count switch is offered (US-019, like the clip-operation domain of
+ * US-011a): both grids are finite and within 1〜192 steps per bar, and every hit's
+ * stepIndex is an integer in 0 ≤ stepIndex < 2^31. Outside it nothing changes.
+ */
+export const DRUM_STEPS_DOMAIN = { minStepsPerBar: 1, maxStepsPerBar: 192, stepIndexLimit: 2 ** 31 } as const;
+
+export const DRUM_STEPS_FAILURE_MESSAGES = {
+  outsideDomain: 'このクリップは細かさの設定が特殊なため、マス数を切り替えられません。',
+  outOfRange: 'とても遠い位置にある打点があり、新しいマスの位置を計算できないため、マスの数を切り替えませんでした。その打点を消してから、もう一度切り替えてください。',
+  noPosition: 'マスの数を切り替えると鳴らなくなる打点があり、手前のマスにも移せないため、切り替えませんでした。',
+} as const;
+
+export type DrumStepsPlan =
+  | { ok: true; project: Project; moved: number; merged: number }
+  | { ok: false; reason: string };
+
+/**
+ * Switch the step grid of a drum clip's pattern (US-019): the link source's
+ * `stepsPerBar` and hits, so every clip sharing it follows. Each hit goes to the
+ * nearest step of the new grid (`resampleDrumSteps`). A hit that would sound
+ * fewer times there in some placement (past the clip end or a loop period, also
+ * after swing, at any clip that shares it) goes to the nearest earlier step where
+ * it sounds no fewer times. Hits that land on one lane and step are merged.
+ * `moved` counts hits whose step position (the unswung tick at the source clip)
+ * changed, `merged` the hits removed. Hits are matched to their sounds by array
+ * index, never by joined id strings.
+ * Refused (`ok: false`, nothing applied) outside {@link DRUM_STEPS_DOMAIN}, when a new step is not a finite
+ * non-negative integer, when a hit has no earlier step that keeps it sounding,
+ * or when the result exceeds the sounding limit. Null when the clip is missing,
+ * not a drum clip, has a broken link, or already uses `to`.
+ */
+export function planDrumStepsChange(project: Project, clipId: string, to: number): DrumStepsPlan | null {
+  const allClips = project.tracks.flatMap((track) => track.clips);
+  const clip = allClips.find((candidate) => candidate.id === clipId);
+  if (!clip || clip.type !== 'drum') return null;
+  const source = resolveLinkSource(clip, allClips);
+  if (typeof source === 'string') return null;
+  const from = source.stepsPerBar !== undefined && source.stepsPerBar > 0 ? source.stepsPerBar : DEFAULT_STEPS_PER_BAR;
+  if (from === to) return null;
+  const saved = source.drumEvents ?? [];
+  const { minStepsPerBar, maxStepsPerBar, stepIndexLimit } = DRUM_STEPS_DOMAIN;
+  const inGrid = (steps: number) => Number.isFinite(steps) && steps >= minStepsPerBar && steps <= maxStepsPerBar;
+  if (
+    !inGrid(from) || !inGrid(to) || !Number.isInteger(to) ||
+    saved.some((event) => !Number.isInteger(event.stepIndex) || event.stepIndex < 0 || event.stepIndex >= stepIndexLimit)
+  ) {
+    return { ok: false, reason: DRUM_STEPS_FAILURE_MESSAGES.outsideDomain };
+  }
+  const grid = { beatsPerBar: beatsPerBarOf(project.timeSignature), clipStartBeat: source.startBeat };
+  if (resampleDrumSteps(saved, from, to, grid).outOfRange > 0) {
+    return { ok: false, reason: DRUM_STEPS_FAILURE_MESSAGES.outOfRange };
+  }
+  // Hits already on one lane and step sound as one: merge them first (the
+  // louder, then the earlier stored one stays), so trials never expand them.
+  const firstAt = new Map<DrumLane, Map<number, number>>();
+  const keep: number[] = [];
+  saved.forEach((event, index) => {
+    const lane = firstAt.get(event.lane) ?? new Map<number, number>();
+    firstAt.set(event.lane, lane);
+    const at = lane.get(event.stepIndex);
+    if (at === undefined) {
+      lane.set(event.stepIndex, keep.length);
+      keep.push(index);
+    } else if (event.velocity > saved[keep[at]!]!.velocity) {
+      keep[at] = index;
+    }
+  });
+  const events = keep.sort((a, b) => a - b).map((index) => saved[index]!);
+  const premerged = saved.length - events.length;
+  const withSteps = (drumEvents: DrumEvent[], stepsPerBar: number) =>
+    mapClip(project, source.id, (c) => ({ ...c, stepsPerBar, drumEvents }));
+  const withGrid = (drumEvents: DrumEvent[]) => withSteps(drumEvents, to);
+  // soundingEvents materializes every repeat: estimate first (counts only), refuse past the limit.
+  const overLimit = (candidate: Project) => findProjectSoundingLimitProblem(candidate);
+  // Per clip, how often each saved hit (by index) sounds; muted clips too, notes never.
+  const placements = (candidate: Project) => {
+    const counts = new Map<string, Map<number, number>>();
+    for (const event of soundingEvents(candidate, { sourceClipId: source.id, includeMuted: true }).events) {
+      if (event.kind !== 'drum') continue;
+      const perClip = counts.get(event.clipId) ?? new Map<number, number>();
+      perClip.set(event.sourceIndex, (perClip.get(event.sourceIndex) ?? 0) + 1);
+      counts.set(event.clipId, perClip);
+    }
+    return counts;
+  };
+  const merged0 = withSteps(events, from);
+  const limitBefore = overLimit(merged0);
+  if (limitBefore) return { ok: false, reason: limitBefore };
+  const before = placements(merged0);
+  const beforeEntries = [...before];
+  const loses = (counts: Map<string, Map<number, number>>, index: number) =>
+    beforeEntries.some(([id, perClip]) => (counts.get(id)?.get(index) ?? 0) < (perClip.get(index) ?? 0));
+  // stepsBack per hit: 0 = nearest, k ≥ 1 = k - 1 steps before the step at or before it.
+  const back = events.map(() => 0);
+  const placeOne = (index: number, k: number) =>
+    resampleDrumSteps([events[index]!], from, to, { ...grid, stepsBack: () => k }).events[0];
+  let pending = new Set(events.map((_, index) => index).filter((index) => beforeEntries.some(([, m]) => m.has(index))));
+  for (let k = 0; pending.size > 0; k++) {
+    // Each hit on its own (no merging), so a trial position never changes another hit's sounds.
+    const trial: DrumEvent[] = [];
+    let missing = false;
+    events.forEach((_, index) => {
+      const event = placeOne(index, pending.has(index) ? k : back[index]!);
+      if (event === undefined) missing = true;
+      else trial.push(event);
+    });
+    if (missing || k > to + 1) return { ok: false, reason: DRUM_STEPS_FAILURE_MESSAGES.noPosition };
+    const trialProject = withGrid(trial);
+    const limit = overLimit(trialProject);
+    if (limit) return { ok: false, reason: limit };
+    const counts = placements(trialProject);
+    pending = new Set([...pending].filter((index) => {
+      if (!loses(counts, index)) {
+        back[index] = k;
+        return false;
+      }
+      return true;
+    }));
+  }
+  const result = resampleDrumSteps(events, from, to, { ...grid, stepsBack: (_, index) => back[index]! });
+  const next = withGrid(result.events);
+  const limit = overLimit(next);
+  if (limit) return { ok: false, reason: limit };
+  return { ok: true, project: next, moved: result.moved, merged: premerged + result.merged };
+}
+
+/**
+ * Apply {@link planDrumStepsChange} as one undo step. Returns the counts, or
+ * null when nothing was applied (a refusal shows its reason as a toast).
+ */
+export function setDrumStepsPerBar(clipId: string, to: number): { moved: number; merged: number } | null {
+  const state = useStore.getState();
+  const plan = planDrumStepsChange(state.project, clipId, to);
+  if (!plan) return null;
+  if (!plan.ok) {
+    pushToast(plan.reason, 'error');
+    return null;
+  }
+  state.commitTransaction();
+  if (!state.applyProjectChange(() => plan.project)) return null;
+  return { moved: plan.moved, merged: plan.merged };
 }
 
 /**

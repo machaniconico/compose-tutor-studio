@@ -176,7 +176,8 @@ export async function renderProjectToWav(project: Project): Promise<Blob> {
     } else {
       const drum = drums.get(payload.trackId);
       if (drum) {
-        drum.trigger(payload.lane, time, payload.velocity);
+        if (payload.durationBeats === undefined) drum.trigger(payload.lane, time, payload.velocity);
+        else drum.trigger(payload.lane, time, payload.velocity, payload.durationBeats * spb);
       }
     }
   }

@@ -1,7 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ParsedMidi } from '@cts/midi-io';
 import { checkProjectPredicate } from '@cts/tutorial-engine';
-import { duplicateClip, expandClip, MAX_CLIP_END_BEATS, moveClip, resizeClip } from '@cts/project-model';
+import type { Clip, DrumEvent, DrumLane, Project, Track } from '@cts/project-model';
+import { beatTick, findProjectSoundingLimitProblem, resampleDrumSteps, duplicateClip, expandClip, MAX_CLIP_END_BEATS, moveClip, resizeClip, soundingEvents, swingBeat, validateProject } from '@cts/project-model';
+import { mulberry32 } from '../../../packages/project-model/tests/acceptance/helpers';
 import { installLocalStorage } from './localStorageStub';
 
 // The store reads localStorage at module-import time, so install the stub
@@ -727,5 +729,466 @@ describe('addEmptyClipAt on a full track', () => {
     const toasts = getBridgeSnapshot().toasts;
     expect(toasts).toHaveLength(toastsBefore + 1);
     expect(toasts.at(-1)?.message).toBe(actions.NO_ROOM_FOR_CLIP_MESSAGE);
+  });
+});
+
+// ---- US-019 ドラムの 12/16 ステップ切替 ----
+
+type OkPlan = Extract<NonNullable<ReturnType<typeof import('../src/state/editorActions')['planDrumStepsChange']>>, { ok: true }>;
+/** planDrumStepsChange that must succeed. */
+function okPlan(project: Project, clipId: string, to: number): OkPlan {
+  const plan = actions.planDrumStepsChange(project, clipId, to);
+  expect(plan, 'plan').not.toBeNull();
+  expect(plan!.ok ? '' : plan!.reason).toBe('');
+  return plan as OkPlan;
+}
+
+describe('planDrumStepsChange / setDrumStepsPerBar (US-019)', () => {
+  type Hit = [number, DrumLane];
+  const drum = (id: string, trackId: string, startBeat: number, lengthBeats: number, hits: Hit[], extra: Partial<Clip> = {}): Clip => ({
+    id, trackId, type: 'drum', startBeat, lengthBeats, loop: false, stepsPerBar: 16,
+    drumEvents: hits.map(([stepIndex, lane], i) => ({ id: `${id}-d${i}`, lane, stepIndex, velocity: 100 })),
+    ...extra,
+  });
+  const drumTrack = (id: string, clips: Clip[]): Track => ({
+    id, name: id, type: 'drum', clips, volume: 0.8, pan: 0, mute: false, solo: false, effects: [],
+  });
+  const song = (tracks: Track[], over: Partial<Project> = {}): Project => ({
+    id: 'p', schemaVersion: 3, title: 't', bpm: 120, timeSignature: [4, 4], key: 'C', scale: 'major',
+    lengthBars: 8, tracks, chordTrack: [], sections: [], createdAt: 'now', updatedAt: 'now', ...over,
+  });
+  const clipOf = (project: Project, id: string) => project.tracks.flatMap((t) => t.clips).find((c) => c.id === id)!;
+
+  it('4/4 の 16→12: ステップ 1 は 12 のステップ 1 へ移り、ずれた個数 1 を返す。拍の打点は動かない', () => {
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 4, [[0, 'kick'], [1, 'closedHat'], [4, 'snare']])])]);
+    const plan = okPlan(p, 'a', 12)!;
+    expect(plan).toMatchObject({ moved: 1, merged: 0 });
+    expect(clipOf(plan.project, 'a').stepsPerBar).toBe(12);
+    expect(clipOf(plan.project, 'a').drumEvents!.map((e) => e.stepIndex)).toEqual([0, 1, 3]);
+  });
+
+  it('3/4 の 12→16: 3 の倍数のステップだけ無損失(ステップ 3 は 4 へ、個数 0)', () => {
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 3, [[0, 'kick'], [3, 'kick'], [9, 'kick']], { stepsPerBar: 12 })])], { timeSignature: [3, 4] });
+    const plan = okPlan(p, 'a', 16)!;
+    expect(plan).toMatchObject({ moved: 0, merged: 0 });
+    expect(clipOf(plan.project, 'a').drumEvents!.map((e) => e.stepIndex)).toEqual([0, 4, 12]);
+    const odd = okPlan(song([drumTrack('d', [drum('a', 'd', 0, 3, [[1, 'kick']], { stepsPerBar: 12 })])], { timeSignature: [3, 4] }), 'a', 16)!;
+    expect(odd.moved).toBe(1);
+  });
+
+  it('最も近いステップがクリップの外になる打点は、鳴り続けるよう手前のステップへ移す', () => {
+    // 1.3 拍のクリップ: 16 の 5(1.25 拍)は 12 の 4(1.333 拍)では鳴らないので 3(1 拍)へ。
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 1.3, [[5, 'kick']])])]);
+    const plan = okPlan(p, 'a', 12)!;
+    expect(clipOf(plan.project, 'a').drumEvents!.map((e) => e.stepIndex)).toEqual([3]);
+    expect(plan.moved).toBe(1);
+    expect(soundingEvents(plan.project).events).toHaveLength(1);
+  });
+
+  it('同じ細かさ・ドラム以外・見つからないクリップでは null', () => {
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 4, [[1, 'kick']])])]);
+    expect(actions.planDrumStepsChange(p, 'a', 16)).toBeNull();
+    expect(actions.planDrumStepsChange(p, 'nope', 12)).toBeNull();
+  });
+
+  it('共有元を切り替えると共有先すべてで同じ細かさで鳴り、Undo 1 段で元に戻る', () => {
+    const start = song([drumTrack('d', [
+      drum('a', 'd', 0, 4, [[0, 'kick'], [2, 'snare']]),
+      { id: 'l', trackId: 'd', type: 'drum', startBeat: 4, lengthBeats: 4, loop: false, aliasOf: 'a' },
+    ])]);
+    useStore.getState().applyProjectChange(() => start);
+    const before = useStore.getState().project;
+    const depth = useStore.getState().past.length;
+    expect(actions.setDrumStepsPerBar('a', 12)).toMatchObject({ moved: 1, merged: 0 });
+    const after = useStore.getState().project;
+    expect(useStore.getState().past.length).toBe(depth + 1);
+    expect(clipOf(after, 'a').stepsPerBar).toBe(12);
+    const linkBeats = soundingEvents(after).events.filter((e) => e.clipId === 'l').map((e) => beatTick(e.startBeat));
+    expect(linkBeats).toEqual([beatTick(4), beatTick(4 + 2 / 3)]);
+    useStore.getState().undo();
+    expect(useStore.getState().project.tracks).toEqual(before.tracks);
+  });
+
+  // ---- レビュー差し戻し(Codex FAIL)の回帰 ----
+
+  it('swing 50% で移動先が遅れてクリップの外に出るなら、手前のマスへ回して鳴り続けさせる', () => {
+    // 長さ 0.36 拍: 12 の 1(1/3 拍)は鳴る。16 の 1 は 0.25 → スウィングで 0.375 拍になり外に出る。
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 0.36, [[1, 'kick']], { stepsPerBar: 12 })])], { swing: 50 });
+    expect(soundingEvents(p).events).toHaveLength(1);
+    const plan = okPlan(p, 'a', 16);
+    expect(soundingEvents(plan.project).events).toHaveLength(1);
+    expect(clipOf(plan.project, 'a').drumEvents!.map((e) => e.stepIndex)).toEqual([0]);
+    expect(plan.moved).toBe(1);
+  });
+
+  it('ID に区切り文字を含んでも打点を取り違えない(z・a のキックと x|a のスネア)', () => {
+    const p = song([drumTrack('d', [{
+      ...drum('a', 'd', 0, 1.3, []),
+      drumEvents: [
+        { id: 'z', lane: 'kick', stepIndex: 0, velocity: 100 },
+        { id: 'a', lane: 'kick', stepIndex: 1, velocity: 100 },
+        { id: 'x|a', lane: 'snare', stepIndex: 5, velocity: 100 },
+      ],
+    }])]);
+    const plan = okPlan(p, 'a', 12);
+    expect(clipOf(plan.project, 'a').drumEvents!.map((e) => [e.id, e.lane, e.stepIndex])).toEqual([
+      ['z', 'kick', 0], ['a', 'kick', 1], ['x|a', 'snare', 3],
+    ]);
+    expect(soundingEvents(plan.project).events).toHaveLength(3);
+  });
+
+  it('音符を持つドラムクリップのリンクが楽器トラックにあっても落ちない(打点の発音だけを数える)', () => {
+    const source: Clip = {
+      ...drum('a', 'd', 0, 4, []),
+      notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+    };
+    const link: Clip = { id: 'l', trackId: 'i', type: 'drum', startBeat: 0, lengthBeats: 4, loop: false, aliasOf: 'a' };
+    const keys: Track = {
+      id: 'i', name: 'i', type: 'instrument', clips: [link], volume: 0.8, pan: 0, mute: false, solo: false, effects: [],
+      instrument: { type: 'synth', preset: 'warmPad' },
+    };
+    const p = song([drumTrack('d', [source]), keys]);
+    expect(soundingEvents(p, { sourceClipId: 'a' }).events.some((e) => e.kind === 'note')).toBe(true);
+    const plan = okPlan(p, 'a', 12);
+    expect(clipOf(plan.project, 'a').stepsPerBar).toBe(12);
+    expect(clipOf(plan.project, 'a').notes).toEqual(source.notes);
+  });
+
+  /** 他のトラックで発音数が 100,000 ちょうど(1/64 拍の周期で 256 拍 = 16,384 回 × 6 音 + 1,696 回)。 */
+  const atSoundingLimit = (spare = 0): Track[] => {
+    const loopClip = (id: string, trackId: string, lengthBeats: number, pitches: number[]): Clip => ({
+      id, trackId, type: 'midi', startBeat: 0, lengthBeats, loop: true, contentLengthBeats: 1 / 64,
+      notes: pitches.map((pitch, i) => ({ id: `${id}-${i}`, pitch, startBeat: 0, durationBeats: 1 / 128, velocity: 100 })),
+    });
+    const keys = (id: string, clip: Clip): Track => ({
+      id, name: id, type: 'instrument', clips: [clip], volume: 0.8, pan: 0, mute: false, solo: false, effects: [],
+      instrument: { type: 'synth', preset: 'warmPad' },
+    });
+    return [keys('f1', loopClip('f1c', 'f1', 256, [60, 61, 62, 63, 64, 65])), keys('f2', loopClip('f2c', 'f2', 26.5 - spare / 64, [66]))];
+  };
+
+  it('発音数の上限で拒否する切替は moved を返さず、何も変えず、理由をトーストで出す', async () => {
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 0.3, [[1, 'kick']], { stepsPerBar: 12 })]), ...atSoundingLimit()], { lengthBars: 64 });
+    expect(soundingEvents(p).events).toHaveLength(100_000);
+    const plan = actions.planDrumStepsChange(p, 'a', 16);
+    expect(plan).toMatchObject({ ok: false });
+    expect(plan && !plan.ok ? plan.reason : '').toContain('100000');
+    useStore.getState().applyProjectChange(() => p);
+    const before = useStore.getState().project;
+    const depth = useStore.getState().past.length;
+    const { getBridgeSnapshot } = await import('../src/state/tutorialBridge');
+    const toasts = getBridgeSnapshot().toasts.length;
+    expect(actions.setDrumStepsPerBar('a', 16)).toBeNull();
+    expect(useStore.getState().project).toBe(before);
+    expect(useStore.getState().past.length).toBe(depth);
+    expect(getBridgeSnapshot().toasts).toHaveLength(toasts + 1);
+    expect(getBridgeSnapshot().toasts.at(-1)?.message).toContain('100000');
+  });
+
+  it('極端な stepIndex(1.7e308 の 12→16、1e308 の 16→12)は対象範囲外として理由付きで拒否する', () => {
+    const huge = song([drumTrack('d', [drum('a', 'd', 0, 4, [[1.7e308, 'kick'], [3, 'snare']], { stepsPerBar: 12 })])]);
+    expect(validateProject(huge).errors).toEqual([]);
+    refusedOutside(huge, 16);
+    refusedOutside(song([drumTrack('d', [drum('a', 'd', 0, 4, [[1e308, 'kick']])])]), 12);
+  });
+
+  // ---- レビュー 2 回目の回帰 ----
+
+  it('stepsPerBar 12.5 のクリップを 16 マスにすると、154 tick から 120 tick へ動いた打点を 1 個と数える', () => {
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 4, [[1, 'kick']], { stepsPerBar: 12.5 })])]);
+    const before = soundingEvents(p).events.map((e) => beatTick(e.startBeat));
+    expect(before).toEqual([154]);
+    const plan = okPlan(p, 'a', 16);
+    expect(plan.moved).toBe(1);
+    expect(soundingEvents(plan.project).events.map((e) => beatTick(e.startBeat))).toEqual([120]);
+  });
+
+  it('stepsPerBar 14.4 のステップ 9(1200 tick、1120 と 1280 の中間)は後ろへ移り、ステップ 8 とまとめない。3/4 でも曲の拍子で計算する', () => {
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 4, [[8, 'kick'], [9, 'kick']], { stepsPerBar: 14.4 })])]);
+    const plan = okPlan(p, 'a', 12);
+    expect(soundingEvents(plan.project).events.map((e) => beatTick(e.startBeat))).toEqual([1120, 1280]);
+    expect(plan).toMatchObject({ merged: 0, moved: 2 });
+    const hits: Hit[] = Array.from({ length: 40 }, (_, i) => [i, 'kick']);
+    const waltz = song([drumTrack('d', [drum('a', 'd', 0, 9, hits, { stepsPerBar: 14.4 })])], { timeSignature: [3, 4] });
+    const expected = resampleDrumSteps(clipOf(waltz, 'a').drumEvents!, 14.4, 16, { beatsPerBar: 3 }).events.map((e) => e.stepIndex);
+    expect(clipOf(okPlan(waltz, 'a', 16).project, 'a').drumEvents!.map((e) => e.stepIndex)).toEqual(expected);
+  });
+
+  // ---- 対象範囲(レビュー 5 回目、ルートの判断): 細かさ 1〜192、stepIndex 0 以上 2^31 未満の整数 ----
+
+  const refusedOutside = (p: Project, to: number) => {
+    const plan = actions.planDrumStepsChange(p, 'a', to);
+    expect(plan).toEqual({ ok: false, reason: actions.DRUM_STEPS_FAILURE_MESSAGES.outsideDomain });
+  };
+
+  it('stepsPerBar 2^53 で stepIndex 2^48 − 1 と 2^48 の 2 打は、16 マスへの切替を理由付きで拒否する(何も変えない)', () => {
+    const p = song([drumTrack('d', [drum('a', 'd', 0, 4, [[2 ** 48 - 1, 'kick'], [2 ** 48, 'kick']], { stepsPerBar: 2 ** 53 })])]);
+    expect(validateProject(p).errors).toEqual([]);
+    refusedOutside(p, 16);
+    expect(actions.DRUM_STEPS_FAILURE_MESSAGES.outsideDomain).toBe('このクリップは細かさの設定が特殊なため、マス数を切り替えられません。');
+  });
+
+  it('対象範囲の境界: 細かさ 1 と 192、stepIndex 2^31 − 1 は切り替え、193・0.5・2^31・1000000000000012 は拒否する', () => {
+    const clipWith = (stepsPerBar: number, step: number) => song([drumTrack('d', [drum('a', 'd', 0, 4, [[step, 'kick']], { stepsPerBar })])]);
+    expect(okPlan(clipWith(1, 0), 'a', 16).moved).toBe(0);
+    expect(okPlan(clipWith(192, 2 ** 31 - 1), 'a', 12).ok).toBe(true);
+    expect(okPlan(clipWith(16, 2 ** 31 - 1), 'a', 12).ok).toBe(true);
+    refusedOutside(clipWith(193, 0), 16);
+    refusedOutside(clipWith(0.5, 0), 16);
+    refusedOutside(clipWith(16, 2 ** 31), 12);
+    refusedOutside(clipWith(14.4, 1000000000000012), 12);
+    refusedOutside(clipWith(16, 1), 193);
+    refusedOutside(clipWith(16, 1), 12.5);
+  });
+
+  it('シード固定ファズ: 対象範囲内では BigInt の式どおりのマスへ移り、範囲外では必ず拒否する', () => {
+    const r = mulberry32(31);
+    /** from = fn / fd を 10 進の有理数として、tick への丸め(整数でないとき)と最も近いマスを BigInt で求める。 */
+    const oracle = (step: number, [fn, fd]: [bigint, bigint], to: number, bpb: number): number => {
+      const s = BigInt(step);
+      const t = BigInt(to);
+      if (fd === 1n) return Number((2n * s * t + fn) / (2n * fn));
+      const bar = BigInt(bpb * 480);
+      const tick = (2n * s * bar * fd + fn) / (2n * fn);
+      return Number((2n * tick * t + bar) / (2n * bar));
+    };
+    const froms: Array<[number, [bigint, bigint]]> = [
+      [16, [16n, 1n]], [12, [12n, 1n]], [1, [1n, 1n]], [192, [192n, 1n]], [7, [7n, 1n]],
+      [14.4, [144n, 10n]], [12.5, [125n, 10n]], [191.5, [1915n, 10n]], [1.5, [15n, 10n]],
+    ];
+    const outsideFroms = [0.5, 193, 2 ** 53, 1e-3, 1e308];
+    let inside = 0;
+    let outside = 0;
+    for (let trial = 0; trial < 400; trial++) {
+      const bpb = trial % 2 === 0 ? 4 : 3;
+      const to = trial % 3 === 0 ? 12 : 16;
+      const fromOutside = trial % 5 === 0;
+      const stepOutside = trial % 7 === 0;
+      const [from, rational] = fromOutside ? [pick(outsideFroms), null] : froms[trial % froms.length]!;
+      if (from === to) continue;
+      const lanes: DrumLane[] = ['kick', 'snare', 'closedHat', 'openHat', 'clap', 'perc'];
+      const hits: Hit[] = lanes.map((lane) => [
+        Math.floor(r() < 0.5 ? r() * 64 : r() * 2 ** 31),
+        lane,
+      ]);
+      if (stepOutside) hits[0]![0] = pick([2 ** 31, 2 ** 31 + 1, 2 ** 48, 2 ** 53 - 1, 1e15]);
+      const p = song([drumTrack('d', [drum('a', 'd', 0, 1000, hits, { stepsPerBar: from })])], {
+        timeSignature: bpb === 4 ? [4, 4] : [3, 4], lengthBars: 250,
+      });
+      const plan = actions.planDrumStepsChange(p, 'a', to);
+      if (fromOutside || stepOutside) {
+        outside++;
+        expect(plan, `trial ${trial}`).toEqual({ ok: false, reason: actions.DRUM_STEPS_FAILURE_MESSAGES.outsideDomain });
+        continue;
+      }
+      inside++;
+      const ok = okPlan(p, 'a', to);
+      const steps = clipOf(ok.project, 'a').drumEvents!.map((e) => [e.lane, e.stepIndex]);
+      // 鳴る打点(先頭付近)は鳴り続けるよう手前へ回ることがあるので、鳴らない位置の打点だけ式と比べる。
+      for (const [step, lane] of hits) {
+        const expected = oracle(step, rational!, to, bpb);
+        const after = steps.find(([l]) => l === lane)![1] as number;
+        if (step * (bpb / from) >= 1000) expect(after, `trial ${trial} ${lane} ${step} ${from}→${to}`).toBe(expected);
+        else expect(Math.abs(after - expected)).toBeLessThanOrEqual(to);
+      }
+    }
+    expect(inside).toBeGreaterThan(150);
+    expect(outside).toBeGreaterThan(80);
+
+    function pick<T>(items: readonly T[]): T {
+      return items[Math.floor(r() * items.length)]!;
+    }
+  });
+
+  it('同じマスに 80,000 個重なった打点の 12→16(周期 0.3 拍のループ 256 拍)は、展開せずに数秒以内に例外なしで終わる', () => {
+    const hits: DrumEvent[] = [
+      { id: 'k0', lane: 'kick', stepIndex: 0, velocity: 100 },
+      ...Array.from({ length: 80_000 }, (_, i): DrumEvent => ({ id: `k1-${i}`, lane: 'kick', stepIndex: 1, velocity: 100 })),
+    ];
+    const p = song([drumTrack('d', [{
+      ...drum('a', 'd', 0, 256, [], { stepsPerBar: 12, loop: true, contentLengthBeats: 0.3 }),
+      drumEvents: hits,
+    }])], { lengthBars: 64 });
+    expect(findProjectSoundingLimitProblem(p)).toBeUndefined();
+    expect(soundingEvents(p).events).toHaveLength(854);
+    const started = performance.now();
+    const plan = actions.planDrumStepsChange(p, 'a', 16)!;
+    expect(performance.now() - started).toBeLessThan(5000);
+    // 重複を先にまとめるので、残るのは 2 打点(ステップ 0 と 1)。その発音は上限よりずっと少ない。
+    expect(plan).toMatchObject({ ok: true, merged: 79_999, moved: 1 });
+    if (plan.ok) {
+      expect(clipOf(plan.project, 'a').drumEvents!.map((e) => [e.id, e.stepIndex])).toEqual([['k0', 0], ['k1-0', 1]]);
+      expect(findProjectSoundingLimitProblem(plan.project)).toBeUndefined();
+    }
+  });
+
+  it('まとめた後でも発音数が上限を超える切替は、展開する前に理由付きで拒否する(リンク 120 個 × 7 打点 × 853 周)', () => {
+    const lanes: DrumLane[] = ['kick', 'snare', 'closedHat', 'openHat', 'clap', 'perc'];
+    const source: Clip = {
+      ...drum('a', 'd', 0, 256, [], { stepsPerBar: 12, loop: true, contentLengthBeats: 0.3 }),
+      drumEvents: [
+        { id: 'k0', lane: 'kick', stepIndex: 0, velocity: 100 },
+        ...lanes.map((lane, i): DrumEvent => ({ id: `s${i}`, lane, stepIndex: 1, velocity: 100 })),
+      ],
+    };
+    // 切り替え前: 1 打点 × 854 周 × 121 クリップ ≒ 10 万弱。切り替え後: 7 打点ぶんで上限を大きく超える。
+    const links = Array.from({ length: 116 }, (_, i): Clip => ({
+      id: `l${i}`, trackId: `t${i}`, type: 'drum', startBeat: 0, lengthBeats: 256, loop: true, contentLengthBeats: 0.3, aliasOf: 'a',
+    }));
+    const p = song([drumTrack('d', [source]), ...links.map((l) => drumTrack(l.trackId, [l]))], { lengthBars: 64 });
+    expect(findProjectSoundingLimitProblem(p)).toBeUndefined();
+    const started = performance.now();
+    const plan = actions.planDrumStepsChange(p, 'a', 16);
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(plan).toMatchObject({ ok: false });
+    expect(plan && !plan.ok ? plan.reason : '').toContain('100000');
+  });
+
+  it('シード固定ファズ: ループ・リンク・3/4 と 4/4・swing 0/50・区切り文字入りの ID・音符入りのドラムクリップ・極端な stepIndex・発音数の上限付近・整数でない stepsPerBar で 16→12→16 の往復を確かめる', () => {
+    const r = mulberry32(19019);
+    const int = (lo: number, hi: number) => lo + Math.floor(r() * (hi - lo + 1));
+    const pick = <T,>(items: readonly T[]): T => items[Math.floor(r() * items.length)]!;
+    const lanes: DrumLane[] = ['kick', 'snare', 'closedHat', 'openHat', 'clap', 'perc'];
+    const idStyles = [(i: number) => `e${i}`, (i: number) => `x|${i}`, (i: number) => `${i}|e`, (i: number) => (i % 2 ? 'a' : 'x|a') + '|'.repeat(i)];
+    const seen = { fractional: 0, moves: 0, links: 0, loops: 0, pipes: 0, notes: 0, extreme: 0, limit: 0, rejected: 0 };
+    for (let trial = 0; trial < 140; trial++) {
+      const timeSignature = pick([[4, 4], [3, 4]] as Array<[number, number]>);
+      const bpb = timeSignature[0];
+      const swing = pick([0, 50]);
+      const nearLimit = trial % 35 === 0;
+      const lengthBars = nearLimit ? 64 : int(2, 4);
+      const songBeats = lengthBars * bpb;
+      const srcLength = pick([bpb, 2 * bpb, 1.3, bpb + 0.3, 2.75, 0.36, 0.3]);
+      const srcLoop = r() < 0.4;
+      const idOf = pick(idStyles);
+      const steps = Array.from({ length: int(1, 14) }, () => int(0, Math.ceil((16 * srcLength) / bpb)));
+      const extreme = r() < 0.1;
+      if (extreme) steps.push(pick([2 ** 53 - 1, 1e15 + 1, 1e308, 123456789012]));
+      const src: Clip = {
+        ...drum('s', 'd1', pick([0, 0.5, 1 / 3, 0.25]), srcLength, [],
+          srcLoop ? { loop: true, contentLengthBeats: pick([1, 1.5, 0.75, bpb, 1.3]), lengthBeats: srcLength + bpb } : {}),
+        drumEvents: steps.map((stepIndex, i) => ({ id: idOf(i), lane: pick(lanes), stepIndex, velocity: 1 + ((i * 41 + trial) % 127) })),
+      };
+      // 元の細かさは整数でないこともある(stepsPerBar は正の数なら何でも保存できる)。
+      const fromSteps = pick([16, 16, 16, 12.5, 13.7, 15.999]);
+      src.stepsPerBar = fromSteps;
+      seen.fractional += Number(!Number.isInteger(fromSteps));
+      // 同じレーン・同じステップの重複と同じ ID は保存データに無い前提なので除く。
+      src.drumEvents = src.drumEvents!.filter((e, i, all) =>
+        all.findIndex((o) => (o.lane === e.lane && o.stepIndex === e.stepIndex) || o.id === e.id) === i);
+      const withNotes = r() < 0.25;
+      if (withNotes) src.notes = [{ id: 'n|0', pitch: 60, startBeat: 0, durationBeats: 0.5, velocity: 90 }];
+      const srcEnd = src.startBeat + src.lengthBeats;
+      const links: Clip[] = Array.from({ length: int(0, 2) }, (_, i) => {
+        const loop = r() < 0.4;
+        return {
+          id: `l|${i}`, trackId: i === 0 ? 'd1' : pick(['d2', 'k']), type: 'drum', aliasOf: 's', loop,
+          startBeat: i === 0 ? srcEnd + pick([0, 0.5, 1 / 3]) : pick([0, 0.25, 0.5, 1]),
+          lengthBeats: pick([bpb, 1.3, 2.75, 1, 0.36]),
+          ...(loop ? { contentLengthBeats: pick([1, 0.75, 1.3]) } : {}),
+        } as Clip;
+      }).filter((c) => c.startBeat + c.lengthBeats <= songBeats);
+      const instrument: Track = {
+        id: 'k', name: 'k', type: 'instrument', clips: links.filter((c) => c.trackId === 'k'),
+        volume: 0.8, pan: 0, mute: false, solo: false, effects: [], instrument: { type: 'synth', preset: 'warmPad' },
+      };
+      const build = (spare: number) => song([
+        drumTrack('d1', [src, ...links.filter((c) => c.trackId === 'd1')]),
+        drumTrack('d2', links.filter((c) => c.trackId === 'd2')),
+        instrument,
+        ...(nearLimit ? atSoundingLimit(spare) : []),
+      ], { timeSignature, lengthBars, ...(swing > 0 ? { swing } : {}) });
+      if (srcEnd > songBeats) continue;
+      // 上限付近: 曲全体がちょうど上限に収まる最小の余りにする。
+      let spare = 0;
+      while (nearLimit && findProjectSoundingLimitProblem(build(spare))) spare++;
+      const p = build(spare);
+      expect(validateProject(p).errors, `trial ${trial}`).toEqual([]);
+      seen.links += links.length;
+      seen.loops += Number(srcLoop || links.some((c) => c.loop));
+      seen.pipes += Number(src.drumEvents.some((e) => e.id.includes('|')));
+      seen.notes += Number(withNotes && links.some((c) => c.trackId === 'k'));
+      seen.extreme += Number(extreme);
+      seen.limit += Number(nearLimit);
+
+      /** Per clip, how often each saved hit (by index) sounds. */
+      const counts = (project: Project) => {
+        const map = new Map<string, Map<number, number>>();
+        for (const e of soundingEvents(project, { sourceClipId: 's', includeMuted: true }).events) {
+          if (e.kind !== 'drum') continue;
+          const perClip = map.get(e.clipId) ?? new Map<number, number>();
+          perClip.set(e.sourceIndex, (perClip.get(e.sourceIndex) ?? 0) + 1);
+          map.set(e.clipId, perClip);
+        }
+        return map;
+      };
+      const check = (before: Project, to: number): Project | null => {
+        const from = clipOf(before, 's').stepsPerBar!;
+        const plan = actions.planDrumStepsChange(before, 's', to);
+        expect(plan, `trial ${trial} ${from}→${to}`).not.toBeNull();
+        if (!plan!.ok) {
+          // 拒否してよいのは、あふれる打点か発音数の上限だけ。
+          seen.rejected += 1;
+          expect(extreme || nearLimit, `trial ${trial}: ${plan!.reason}`).toBe(true);
+          return null;
+        }
+        const old = clipOf(before, 's');
+        const next = clipOf(plan!.project, 's');
+        expect(next.stepsPerBar).toBe(to);
+        expect(next.notes).toEqual(old.notes);
+        const oldIndexOf = new Map(old.drumEvents!.map((e, i) => [e, i]));
+        // 残った打点の元の添字(同じレーンの中で ID は一意)
+        const origin = next.drumEvents!.map((e) => old.drumEvents!.findIndex((o) => o.id === e.id && o.lane === e.lane));
+        expect(origin.every((i) => i >= 0)).toBe(true);
+        expect(new Set(origin).size).toBe(origin.length);
+        // ずれた個数 = 残った打点のうち、共有元での発音 tick(スウィング前)が変わった数
+        const moved = next.drumEvents!.filter((e, k) =>
+          beatTick(old.startBeat + old.drumEvents![origin[k]!]!.stepIndex * (bpb / from)) !== beatTick(old.startBeat + e.stepIndex * (bpb / to))).length;
+        expect(plan!.moved, `trial ${trial} moved`).toBe(moved);
+        expect(plan!.merged).toBe(old.drumEvents!.length - next.drumEvents!.length);
+        seen.moves += moved;
+        for (const e of next.drumEvents!) expect(Number.isInteger(e.stepIndex) && e.stepIndex >= 0).toBe(true);
+        // 発音 tick は移動先ステップの tick(各配置・各周)。スウィングはその後に掛かる。
+        for (const e of soundingEvents(plan!.project, { sourceClipId: 's', includeMuted: true }).events) {
+          if (e.kind !== 'drum') continue;
+          const clip = clipOf(plan!.project, e.clipId);
+          const period = clip.loop ? clip.contentLengthBeats ?? clip.lengthBeats : 0;
+          const local = next.drumEvents![e.sourceIndex]!.stepIndex * (bpb / to);
+          const expected = clip.startBeat + ((e.repeat === 0 ? 0 : e.repeat * period) + local);
+          expect(beatTick(e.unswungStartBeat), `trial ${trial}`).toBe(beatTick(expected));
+          expect(e.startBeat).toBe(swingBeat(e.unswungStartBeat, swing));
+        }
+        // 残った打点は、どの配置でも鳴る回数が減らない。
+        const a = counts(before);
+        const b = counts(plan!.project);
+        for (const [clipId, perClip] of a) {
+          for (const [index, n] of perClip) {
+            const k = origin.indexOf(index);
+            if (k < 0) continue;
+            expect(b.get(clipId)?.get(k) ?? 0, `trial ${trial} ${clipId} #${index}`).toBeGreaterThanOrEqual(n);
+          }
+        }
+        expect(oldIndexOf.size).toBe(old.drumEvents!.length);
+        expect(validateProject(plan!.project).errors).toEqual([]);
+        return plan!.project;
+      };
+      const there = check(p, 12);
+      if (!there) continue;
+      const back = check(there, 16);
+      if (!back || fromSteps !== 16) continue;
+      // 16 の 4 の倍数(拍と 8 分の位置)は往復で元のステップに戻る(安全な整数の範囲)。
+      for (const e of clipOf(back, 's').drumEvents!) {
+        const original = src.drumEvents.find((o) => o.id === e.id && o.lane === e.lane)!.stepIndex;
+        if (Number.isSafeInteger(original) && original % 4 === 0) expect(e.stepIndex, `trial ${trial}`).toBe(original);
+      }
+    }
+    expect(seen.moves).toBeGreaterThan(100);
+    expect(seen.links).toBeGreaterThan(30);
+    expect(seen.loops).toBeGreaterThan(30);
+    expect(seen.pipes).toBeGreaterThan(30);
+    expect(seen.notes).toBeGreaterThanOrEqual(3);
+    expect(seen.extreme).toBeGreaterThan(5);
+    expect(seen.limit).toBeGreaterThanOrEqual(3);
+    expect(seen.fractional).toBeGreaterThan(20);
   });
 });

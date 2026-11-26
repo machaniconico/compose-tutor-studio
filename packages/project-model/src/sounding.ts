@@ -1,5 +1,6 @@
 import { clipSpan, drumSourceStep, MIN_LOOP_PERIOD_BEATS, placedNoteTicks, renderClip, resolveLinkSource } from './clipExpand';
 import type { ClipOnset } from './clipExpand';
+import { applyHiHatChoke } from './groove';
 import { beatTick, beatsPerBar, PPQ } from './time';
 import type { Clip, Project, Track } from './types';
 
@@ -47,6 +48,7 @@ export function soundingEvents(
     // Names only label problems. Trimming scales with name length, so it runs
     // at most once per track, and only when the track reports a problem.
     let name: string | undefined;
+    const first = events.length;
     const label = () =>
       (name ??= track.type === 'master' ? 'マスター' : track.name.trim() || '名前のないトラック');
     for (const clip of track.clips) {
@@ -71,6 +73,10 @@ export function soundingEvents(
       };
       const result = renderClip(clip, source, bpb, track.type, end, project.swing, emit);
       for (const problem of result.problems) problems.push(`「${label()}」: ${problem}`);
+    }
+    // One hi-hat per drum track: its closed hits choke its open hits (US-019).
+    if (track.type === 'drum' && events.length > first) {
+      applyHiHatChoke(events.slice(first)).forEach((event, i) => { events[first + i] = event; });
     }
   }
   return { events, problems };
