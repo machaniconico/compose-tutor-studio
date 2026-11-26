@@ -98,7 +98,35 @@ type ActiveVoice = {
   gain: GainNode;
   /** AudioContext time the voice fully finishes (after release). */
   endTime: number;
+  /** AudioContext time the voice starts sounding. */
+  startTime: number;
+  env: Envelope;
+  peak: number;
 };
+
+/**
+ * ADSR up to the release for a gate of `gate` seconds: the ramps after the
+ * initial 0 at the start (offsets from the start) and the level held when the
+ * release begins. A gate shorter than attack+decay cuts the envelope there.
+ */
+function envelopeShape(env: Envelope, peak: number, gate: number): { ramps: Array<[number, number]>; level: number } {
+  const { attack, decay, sustain } = env;
+  if (gate >= attack + decay) {
+    const level = peak * sustain;
+    return { ramps: [[attack, peak], [attack + decay, level]], level };
+  }
+  if (gate >= attack) {
+    const level = peak - (peak - peak * sustain) * ((gate - attack) / decay);
+    return { ramps: [[attack, peak], [gate, level]], level };
+  }
+  const level = peak * (gate / attack);
+  return { ramps: [[gate, level]], level };
+}
+
+/** Sounding length: a cut note releases at its duration, others after attack+decay at the earliest. */
+function gateOf(env: Envelope, duration: number, cutAtEnd: boolean | undefined): number {
+  return cutAtEnd ? Math.max(0, duration) : Math.max(duration, env.attack + env.decay);
+}
 
 /**
  * A polyphonic synth bound to one output node (the track's gain input).
@@ -140,7 +168,10 @@ export class SynthVoiceManager {
     duration: number,
     velocity: number,
     options: { env?: Envelope; cutAtEnd?: boolean } = {},
-  ): void {
+  ): {
+    release: (when: number) => void;
+    setDuration: (seconds: number, when: number, cutAtEnd?: boolean) => void;
+  } {
     const env = options.env ?? this.preset.env;
     this.reap(startTime);
     this.steal(startTime);
@@ -165,27 +196,17 @@ export class SynthVoiceManager {
     filter.Q.setValueAtTime(p.resonance, startTime);
 
     const gain = this.ctx.createGain();
-    const { attack, decay, sustain, release } = env;
+    const { release } = env;
 
     // ADSR. Sustain runs until releaseStart, then a release ramp to 0. A normal
     // note always plays its full attack+decay before releasing. A note cut short
     // (`cutAtEnd`, e.g. at the clip end) releases at its duration, matching the
     // MIDI note-off: the envelope is cut where it is.
-    const gate = options.cutAtEnd ? Math.max(0, duration) : Math.max(duration, attack + decay);
+    const gate = gateOf(env, duration, options.cutAtEnd);
     const releaseStart = startTime + gate;
     gain.gain.setValueAtTime(0, startTime);
-    let level = peak * sustain;
-    if (gate >= attack + decay) {
-      gain.gain.linearRampToValueAtTime(peak, startTime + attack);
-      gain.gain.linearRampToValueAtTime(level, startTime + attack + decay);
-    } else if (gate >= attack) {
-      level = peak - (peak - peak * sustain) * ((gate - attack) / decay);
-      gain.gain.linearRampToValueAtTime(peak, startTime + attack);
-      gain.gain.linearRampToValueAtTime(level, releaseStart);
-    } else {
-      level = peak * (gate / attack);
-      gain.gain.linearRampToValueAtTime(level, releaseStart);
-    }
+    const { ramps, level } = envelopeShape(env, peak, gate);
+    for (const [offset, value] of ramps) gain.gain.linearRampToValueAtTime(value, startTime + offset);
     gain.gain.setValueAtTime(level, releaseStart);
     gain.gain.linearRampToValueAtTime(0, releaseStart + release);
 
@@ -200,7 +221,91 @@ export class SynthVoiceManager {
     oscA.stop(stopAt);
     oscB.stop(stopAt);
 
-    this.voices.push({ oscA, oscB, gain, endTime: stopAt });
+    const voice: ActiveVoice = { oscA, oscB, gain, endTime: stopAt, startTime, env, peak };
+    this.voices.push(voice);
+    return {
+      release: (when: number) => this.release(voice, when),
+      setDuration: (seconds: number, when: number, cutAtEnd?: boolean) =>
+        this.setDuration(voice, seconds, when, cutAtEnd),
+    };
+  }
+
+  /**
+   * Move a voice's release (live edits) so it sounds for `seconds` from its
+   * start, as if noteOn had been given that duration. The voice keeps its
+   * slot: no other voice is taken. A release already past `when` ends it at
+   * `when` instead.
+   */
+  private setDuration(voice: ActiveVoice, seconds: number, when: number, cutAtEnd?: boolean): void {
+    if (voice.endTime <= when) return;
+    const gate = gateOf(voice.env, seconds, cutAtEnd);
+    const releaseStart = voice.startTime + gate;
+    if (releaseStart <= when) {
+      this.release(voice, when);
+      return;
+    }
+    const param = voice.gain.gain;
+    const from = Math.max(when, voice.startTime);
+    try {
+      if (from === voice.startTime) {
+        param.cancelScheduledValues(from);
+        param.setValueAtTime(0, from);
+      } else if (typeof param.cancelAndHoldAtTime === 'function') {
+        param.cancelAndHoldAtTime(from);
+      } else {
+        param.cancelScheduledValues(from);
+        param.setValueAtTime(param.value, from);
+      }
+      const { ramps, level } = envelopeShape(voice.env, voice.peak, gate);
+      for (const [offset, value] of ramps) {
+        if (voice.startTime + offset > from) param.linearRampToValueAtTime(value, voice.startTime + offset);
+      }
+      // A ramp, not a jump: a voice already in its old release returns smoothly.
+      param.linearRampToValueAtTime(level, releaseStart);
+      param.linearRampToValueAtTime(0, releaseStart + voice.env.release);
+      const stopAt = releaseStart + voice.env.release + 0.02;
+      voice.oscA.stop(stopAt);
+      voice.oscB.stop(stopAt);
+      voice.endTime = stopAt;
+    } catch {
+      // Node may already be stopped; ignore.
+    }
+  }
+
+  /**
+   * End one voice at `when` (live edits). A voice not started by then is
+   * silenced without a fade (a fade could run past its start and be heard);
+   * a sounding one fades out there instead of at its own end.
+   */
+  private release(voice: ActiveVoice, when: number, fadeSeconds = 0.03, stopPadSeconds = 0.02): void {
+    if (voice.endTime <= when) return;
+    const param = voice.gain.gain;
+    if (when <= voice.startTime) {
+      try {
+        param.cancelScheduledValues(when);
+        param.setValueAtTime(0, when);
+        voice.oscA.stop(voice.startTime);
+        voice.oscB.stop(voice.startTime);
+      } catch {
+        // Node may already be stopped; ignore.
+      }
+      voice.endTime = voice.startTime;
+      return;
+    }
+    try {
+      if (typeof param.cancelAndHoldAtTime === 'function') {
+        param.cancelAndHoldAtTime(when);
+      } else {
+        param.cancelScheduledValues(when);
+        param.setValueAtTime(Math.max(0.0001, param.value), when);
+      }
+      param.linearRampToValueAtTime(0, when + fadeSeconds);
+      voice.oscA.stop(when + fadeSeconds + stopPadSeconds);
+      voice.oscB.stop(when + fadeSeconds + stopPadSeconds);
+      voice.endTime = when + fadeSeconds + stopPadSeconds;
+    } catch {
+      // Node may already be stopped; ignore.
+    }
   }
 
   /**

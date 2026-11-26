@@ -41,31 +41,45 @@ export class DrumVoiceManager {
     this.noise = noise ?? createNoiseBuffer(ctx);
   }
 
-  /** Trigger a drum lane at an absolute audio time. */
-  trigger(lane: DrumLane, time: number, velocity: number): void {
+  /**
+   * Trigger a drum lane at an absolute audio time. The returned handle
+   * cancels a hit that has not started yet (live edits); a hit already
+   * playing is short and rings out.
+   */
+  trigger(lane: DrumLane, time: number, velocity: number): { release: (when: number) => void } {
     const vel = Math.min(1, Math.max(0, velocity / 127));
+    const out = this.ctx.createGain();
+    out.connect(this.output);
     switch (lane) {
       case 'kick':
-        this.kick(time, vel);
+        this.kick(time, vel, out);
         break;
       case 'snare':
-        this.snare(time, vel);
+        this.snare(time, vel, out);
         break;
       case 'closedHat':
-        this.hat(time, vel, 0.045);
+        this.hat(time, vel, 0.045, out);
         break;
       case 'openHat':
-        this.hat(time, vel, 0.32);
+        this.hat(time, vel, 0.32, out);
         break;
       case 'clap':
-        this.clap(time, vel);
+        this.clap(time, vel, out);
         break;
       case 'perc':
-        this.perc(time, vel);
+        this.perc(time, vel, out);
         break;
       default:
         break;
     }
+    return {
+      release: (when) => {
+        if (when > time) return;
+        // Silence without a fade: the hit has not started yet.
+        out.gain.setValueAtTime(0, when);
+        out.disconnect();
+      },
+    };
   }
 
   /** Shared noise source factory. */
@@ -80,7 +94,7 @@ export class DrumVoiceManager {
   }
 
   /** Sine body 150->50Hz with a short click transient. */
-  private kick(time: number, vel: number): void {
+  private kick(time: number, vel: number, out: AudioNode): void {
     const osc = this.ctx.createOscillator();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(150, time);
@@ -91,7 +105,7 @@ export class DrumVoiceManager {
     gain.gain.setValueAtTime(peak, time);
     gain.gain.exponentialRampToValueAtTime(0.001, time + 0.32);
     osc.connect(gain);
-    gain.connect(this.output);
+    gain.connect(out);
     osc.start(time);
     osc.stop(time + 0.35);
 
@@ -105,12 +119,12 @@ export class DrumVoiceManager {
     clickGain.gain.exponentialRampToValueAtTime(0.001, time + 0.02);
     click.connect(hp);
     hp.connect(clickGain);
-    clickGain.connect(this.output);
+    clickGain.connect(out);
     click.stop(time + 0.05);
   }
 
   /** Bandpassed noise + a 180Hz tone burst. */
-  private snare(time: number, vel: number): void {
+  private snare(time: number, vel: number, out: AudioNode): void {
     const noise = this.noiseSource(time);
     const bp = this.ctx.createBiquadFilter();
     bp.type = 'bandpass';
@@ -121,7 +135,7 @@ export class DrumVoiceManager {
     noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
     noise.connect(bp);
     bp.connect(noiseGain);
-    noiseGain.connect(this.output);
+    noiseGain.connect(out);
     noise.stop(time + 0.25);
 
     const tone = this.ctx.createOscillator();
@@ -131,13 +145,13 @@ export class DrumVoiceManager {
     toneGain.gain.setValueAtTime(0.4 * vel, time);
     toneGain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
     tone.connect(toneGain);
-    toneGain.connect(this.output);
+    toneGain.connect(out);
     tone.start(time);
     tone.stop(time + 0.15);
   }
 
   /** Highpassed noise; decay length distinguishes closed vs open. */
-  private hat(time: number, vel: number, decay: number): void {
+  private hat(time: number, vel: number, decay: number, out: AudioNode): void {
     const noise = this.noiseSource(time);
     const hp = this.ctx.createBiquadFilter();
     hp.type = 'highpass';
@@ -147,12 +161,12 @@ export class DrumVoiceManager {
     gain.gain.exponentialRampToValueAtTime(0.001, time + decay);
     noise.connect(hp);
     hp.connect(gain);
-    gain.connect(this.output);
+    gain.connect(out);
     noise.stop(time + decay + 0.05);
   }
 
   /** Three staggered noise bursts to imitate a hand clap. */
-  private clap(time: number, vel: number): void {
+  private clap(time: number, vel: number, out: AudioNode): void {
     const offsets = [0, 0.012, 0.024];
     for (const offset of offsets) {
       const start = time + offset;
@@ -166,13 +180,13 @@ export class DrumVoiceManager {
       gain.gain.exponentialRampToValueAtTime(0.001, start + 0.09);
       noise.connect(bp);
       bp.connect(gain);
-      gain.connect(this.output);
+      gain.connect(out);
       noise.stop(start + 0.12);
     }
   }
 
   /** Mid tom-like body. */
-  private perc(time: number, vel: number): void {
+  private perc(time: number, vel: number, out: AudioNode): void {
     const osc = this.ctx.createOscillator();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(320, time);
@@ -181,7 +195,7 @@ export class DrumVoiceManager {
     gain.gain.setValueAtTime(0.5 * vel, time);
     gain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
     osc.connect(gain);
-    gain.connect(this.output);
+    gain.connect(out);
     osc.start(time);
     osc.stop(time + 0.28);
   }

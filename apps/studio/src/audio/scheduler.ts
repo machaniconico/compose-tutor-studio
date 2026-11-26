@@ -296,6 +296,39 @@ export class Scheduler {
     this.timer = setInterval(() => this.tick(), this.tickMs);
   }
 
+  /**
+   * Swap in new events and a new end while running (live clip edits). The
+   * playhead and the scheduled frontier stay; what was already scheduled is
+   * the caller's to reconcile.
+   */
+  update(events: readonly ScheduledEvent[], endBeat: number): void {
+    this.events = events;
+    this.endBeat = Number.isFinite(endBeat) ? endBeat : Infinity;
+  }
+
+  /**
+   * The events this run plays with playhead beats in `[fromBeat, toBeat)`,
+   * resolved to audio times exactly as a tick would.
+   */
+  eventsBetween(fromBeat: number, toBeat: number): DueEvent[] {
+    return nextEventsInWindow(this.events, fromBeat, toBeat, this.bpm, this.anchorBeat, this.anchorTime, this.loop);
+  }
+
+  /** Unwrapped playhead beat up to which events are already scheduled. */
+  get scheduledUntil(): number {
+    return this.scheduledBeat;
+  }
+
+  /** The unwrapped playhead beat at `time`, by default now (see {@link currentBeat} for the wrapped one). */
+  playheadBeat(time = this.clock()): number {
+    return timeToBeat(time, this.bpm, this.anchorBeat, this.anchorTime);
+  }
+
+  /** Audio time of an unwrapped playhead beat. */
+  timeAt(playheadBeat: number): number {
+    return beatToTime(playheadBeat, this.bpm, this.anchorBeat, this.anchorTime);
+  }
+
   /** Stop the timer. Does not release any already-scheduled audio. */
   stop(): void {
     if (this.timer != null) {
@@ -310,7 +343,7 @@ export class Scheduler {
    * the playback layer to drive the on-screen playhead. Loop-wrapped.
    */
   currentBeat(): number {
-    const raw = timeToBeat(this.clock(), this.bpm, this.anchorBeat, this.anchorTime);
+    const raw = this.playheadBeat();
     if (this.loop) return wrapBeat(raw, this.loop);
     return raw;
   }

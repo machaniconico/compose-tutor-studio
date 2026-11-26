@@ -8,14 +8,15 @@
 //   transport.isPlaying  false->true  => startPlayback()
 //                        true ->false  => stopAudio()
 //   project / mixer changes            => live volume/pan/mute/solo update
-//   timing / clip changes              => schedule rebuilt from the playhead
+//   tempo / meter changes              => schedule rebuilt from the playhead
+//   clip edits / song length           => schedule updated in place (applyLiveEdit)
 //
 // The bridge writes transport.positionBeat back to the store ~30fps while
 // playing so the playhead UI tracks the audio clock. The store owns play/stop
 // *intent* and the position semantics (see store.stop(reset?)); this bridge owns
 // the actual audio lifecycle.
 
-import { beatsPerBar as beatsPerBarOf, computeAudibleTracks, songEndBeat, type Project, type Track } from '@cts/project-model';
+import { beatTick, beatsPerBar as beatsPerBarOf, computeAudibleTracks, songEndBeat, type Project, type Track } from '@cts/project-model';
 import { activeLoopRange, useStore } from '../state/store';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
@@ -30,7 +31,6 @@ import {
   secondsPerBeat,
   type DueEvent,
   type LoopRegion,
-  type ScheduledEvent,
 } from './scheduler';
 import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
@@ -39,6 +39,28 @@ import { songTailSeconds } from './wav';
 
 /** Position update rate while playing (ms ~= 30fps). */
 const POSITION_TICK_MS = 33;
+
+/**
+ * Ledger entry: a note or drum hit actually handed to a voice in this run
+ * (queued or sounding). Only these are ever continued by a live edit or a
+ * restart; nothing is inferred from beat positions.
+ */
+type LiveVoice = {
+  /** What the event sounds like: track, start tick, pitch or lane, velocity (see buildScheduleEvents). */
+  key: string;
+  /** Start and end on the run's playhead timeline (unwrapped beats); end = start for a drum hit. */
+  startBeat: number;
+  endBeat: number;
+  /** Playhead beat the voice itself started at (later than `startBeat` when resumed part-way). */
+  soundFrom: number;
+  payload: SchedulePayload;
+  release?: (when: number) => void;
+  /** Move a note's end; its length is counted from `soundFrom`. */
+  setDuration?: (seconds: number, when: number, cutAtEnd?: boolean) => void;
+};
+
+/** Identity of every scheduled payload, filled by buildScheduleEvents. */
+const eventKeys = new WeakMap<object, string>();
 
 /** Mutable bridge state held at module scope (singleton, like the engine). */
 type BridgeState = {
@@ -53,6 +75,12 @@ type BridgeState = {
   drums: Map<string, DrumVoiceManager>;
   bpm: number;
   loop: LoopRegion | null;
+  /** Song end of the running schedule; live edits move it. */
+  songEnd: number;
+  /** Voices handed out in this run that may still sound or are yet to start. */
+  voices: LiveVoice[];
+  /** Metronome clicks scheduled in this run; a stop silences those not yet heard. */
+  clicks: Array<{ time: number; cancel?: () => void }>;
   positionTimer: ReturnType<typeof setInterval> | null;
   /** Bumped by every play and stop; a start that no longer matches is abandoned. */
   playGeneration: number;
@@ -77,6 +105,9 @@ const state: BridgeState = {
   drums: new Map(),
   bpm: 120,
   loop: null,
+  songEnd: 0,
+  voices: [],
+  clicks: [],
   positionTimer: null,
   playGeneration: 0,
   ringUntil: null,
@@ -116,9 +147,8 @@ export function initAudioBridge(): () => void {
 
   // React to project / mixer changes. The master volume follows the project
   // even while stopped, so piano-roll previews (which go through the master
-  // bus) hear the current master fader. While playing, the mix is updated live;
-  // timing and clip edits (including undo/redo) rebuild the schedule from the
-  // current playhead.
+  // bus) hear the current master fader. While playing, mix and clip edits
+  // apply live, and tempo or meter changes rebuild from the current playhead.
   const unsubProject = useStore.subscribe((s, prev) => {
     if (s.project === prev.project) return;
     let clipsChanged = false;
@@ -139,7 +169,14 @@ export function initAudioBridge(): () => void {
       }
       return;
     }
-    if (clipsChanged || timingChanged(s.project, prev.project)) {
+    if (tempoOrMeterChanged(s.project, prev.project)) {
+      restartPlayback();
+      return;
+    }
+    if (
+      (clipsChanged || s.project.lengthBars !== prev.project.lengthBars) &&
+      !applyLiveEdit(playbackProject(s.project))
+    ) {
       restartPlayback();
       return;
     }
@@ -196,51 +233,198 @@ export function restartAt(beat: number): void {
   store.play();
 }
 
-/** True when tempo, meter or song length differs between two project states. */
-function timingChanged(next: Project, prev: Project): boolean {
-  return (
-    next.bpm !== prev.bpm ||
-    next.lengthBars !== prev.lengthBars ||
-    next.timeSignature.join('/') !== prev.timeSignature.join('/')
-  );
+/** True when tempo or meter differs between two project states. */
+function tempoOrMeterChanged(next: Project, prev: Project): boolean {
+  return next.bpm !== prev.bpm || next.timeSignature.join('/') !== prev.timeSignature.join('/');
 }
+
+/** The project as this run plays it: the tracks selected at play time plus the master. */
+function playbackProject(project: Project): Project {
+  return {
+    ...project,
+    tracks: [...state.playbackTracks.values(), ...project.tracks.filter((track) => track.type === 'master')],
+  };
+}
+
+/** The notes sounding when a restart began, from the ledger, on the old run's timeline. */
+type ResumePoint = { playhead: number; sounding: LiveVoice[] };
 
 /**
  * Tear the running audio down and start again from the audio clock's current
- * playhead. Notes that were sounding across the playhead are started again
- * for their remaining length according to the updated schedule.
+ * playhead. Notes that had a sounding voice and are still in the updated
+ * schedule are started again for their remaining length.
  * Play intent is untouched; a start past the new end stops through the
  * scheduler's own end handling, as usual.
  */
 function restartPlayback(): void {
   // The displayed position can lag the audio by a position-timer tick. Capture
   // the old scheduler position before stopping it, using its old tempo.
-  const beat = state.scheduler?.currentBeat();
+  const scheduler = state.scheduler;
+  const beat = scheduler?.currentBeat();
+  const playhead = scheduler?.playheadBeat();
+  const resume: ResumePoint | undefined = playhead === undefined ? undefined : {
+    playhead,
+    sounding: state.voices.filter((v) => v.payload.kind === 'note' && v.startBeat < playhead && v.endBeat > playhead),
+  };
   stopAudio();
   if (beat !== undefined && Number.isFinite(beat) && beat >= 0) {
     useStore.getState().setPosition(beat);
   }
   const generation = ++state.playGeneration;
-  void startPlayback(generation, true).catch((error: unknown) => {
+  void startPlayback(generation, resume).catch((error: unknown) => {
     if (generation === state.playGeneration) handlePlaybackStartFailure(error);
   });
 }
 
 /**
- * Start the notes that began before `beat` and still sound at it, for their
- * remaining length from `now`. Used when the voices were rebuilt mid-note.
+ * Hand a note or drum hit starting at playhead beat `startBeat` to its voice
+ * at audio time `time`, from playhead beat `from` (later than the start only
+ * for the rest of a note that already had a voice), and add it to the ledger.
  */
-function resumeSoundingNotes(events: readonly ScheduledEvent[], beat: number, now: number): void {
-  const spb = secondsPerBeat(state.bpm);
-  for (const ev of events) {
-    const payload = ev.payload as SchedulePayload;
-    if (payload.kind !== 'note' || ev.beat >= beat) continue;
-    const remainingBeats = ev.beat + payload.durationBeats - beat;
-    if (remainingBeats <= 0) continue;
-    state.synths
-      .get(payload.trackId)
-      ?.noteOn(payload.pitch, now, remainingBeats * spb, payload.velocity, { cutAtEnd: payload.cut });
+function startVoice(key: string, payload: SchedulePayload, startBeat: number, from: number, time: number): void {
+  let handle: Pick<LiveVoice, 'release' | 'setDuration'> | undefined;
+  if (payload.kind === 'note') {
+    handle = state.synths.get(payload.trackId)?.noteOn(
+      payload.pitch,
+      time,
+      (from === startBeat ? payload.durationBeats : startBeat + payload.durationBeats - from) * secondsPerBeat(state.bpm),
+      payload.velocity,
+      { cutAtEnd: payload.cut },
+    );
+  } else {
+    handle = state.drums.get(payload.trackId)?.trigger(payload.lane, time, payload.velocity);
   }
+  const endBeat = payload.kind === 'note' ? startBeat + payload.durationBeats : startBeat;
+  state.voices.push({
+    key, startBeat, endBeat, soundFrom: from, payload,
+    release: handle?.release,
+    setDuration: handle?.setDuration,
+  });
+}
+
+/** The scheduled payloads by identity, as a multiset (equal sounds share a key). */
+function payloadsByKey(events: readonly { payload: unknown }[]): Map<string, SchedulePayload[]> {
+  const byKey = new Map<string, SchedulePayload[]>();
+  for (const ev of events) {
+    const key = eventKeys.get(ev.payload as object) ?? '';
+    const same = byKey.get(key);
+    if (same) same.push(ev.payload as SchedulePayload);
+    else byKey.set(key, [ev.payload as SchedulePayload]);
+  }
+  return byKey;
+}
+
+function voicePass(key: string, startBeat: number): string {
+  return `${key}@${beatTick(startBeat)}`;
+}
+
+function voicesByPass(voices: readonly LiveVoice[]): Map<string, LiveVoice[]> {
+  const passes = new Map<string, LiveVoice[]>();
+  for (const voice of voices) {
+    const pass = voicePass(voice.key, voice.startBeat);
+    const same = passes.get(pass);
+    if (same) same.push(voice);
+    else passes.set(pass, [voice]);
+  }
+  return passes;
+}
+
+const durationOf = (payload: SchedulePayload) => payload.kind === 'note' ? payload.durationBeats : 0;
+
+/** Keep equal ends first, then pair the remaining voices and events in end order. */
+function matchPass(voices: LiveVoice[], candidates: readonly SchedulePayload[]): Map<LiveVoice, SchedulePayload> {
+  const byEnd = new Map<number, SchedulePayload[]>();
+  for (const payload of candidates) {
+    const end = beatTick(voices[0]!.startBeat + durationOf(payload));
+    const same = byEnd.get(end);
+    if (same) same.push(payload);
+    else byEnd.set(end, [payload]);
+  }
+
+  const matches = new Map<LiveVoice, SchedulePayload>();
+  const unmatched: LiveVoice[] = [];
+  for (const voice of voices) {
+    const payload = byEnd.get(beatTick(voice.endBeat))?.pop();
+    if (payload) matches.set(voice, payload);
+    else unmatched.push(voice);
+  }
+  const remaining = [...byEnd.values()].flat().sort((a, b) => durationOf(b) - durationOf(a));
+  unmatched.sort((a, b) => b.endBeat - a.endBeat);
+  for (const [index, payload] of remaining.entries()) {
+    const voice = unmatched[index];
+    if (!voice) break;
+    matches.set(voice, payload);
+  }
+  return matches;
+}
+
+/**
+ * Bring the running schedule in line with an edited project without
+ * restarting. A ledger voice keeps sounding while the new schedule has a
+ * sound with the same identity (track, start, pitch or lane, velocity),
+ * matched as a multiset per pass; when that sound's end moved, only the
+ * voice's release moves, so no voice is rebuilt or taken from another note.
+ * Voices without a match are released. Events without a voice are only
+ * queued at their own start, when it falls in the window the scheduler has
+ * already passed, never started part-way.
+ * Returns false when playback has to restart instead: the song now ends at or
+ * before the playhead.
+ */
+function applyLiveEdit(project: Project): boolean {
+  const scheduler = state.scheduler;
+  if (!scheduler) return false;
+  const songEnd = songEndBeat(project);
+  const playhead = scheduler.playheadBeat();
+  if (!state.loop && playhead >= songEnd) return false;
+  const events = buildScheduleEvents(project, eventKeys);
+  scheduler.update(events, state.loop ? Infinity : songEnd);
+  state.songEnd = songEnd;
+
+  const byKey = payloadsByKey(events);
+  const now = getAudioEngine().now();
+  const spb = secondsPerBeat(state.bpm);
+  const passes = voicesByPass(state.voices.filter((voice) => voice.startBeat >= playhead || voice.endBeat > playhead));
+  const held = new Map<string, Set<SchedulePayload>>();
+  state.voices = [];
+  for (const [pass, group] of passes) {
+    const matches = matchPass(group, byKey.get(group[0]!.key) ?? []);
+    const heldInPass = new Set<SchedulePayload>();
+    held.set(pass, heldInPass);
+    for (const voice of group) {
+      const payload = matches.get(voice);
+      if (!payload) {
+        voice.release?.(now);
+        continue;
+      }
+      if (payload.kind !== 'note') {
+        state.voices.push({ ...voice, payload });
+        heldInPass.add(payload);
+        continue;
+      }
+      const endBeat = voice.startBeat + payload.durationBeats;
+      const before = voice.payload.kind === 'note' ? voice.payload.cut : undefined;
+      if (beatTick(endBeat) !== beatTick(voice.endBeat) || before !== payload.cut) {
+        if (endBeat <= playhead) {
+          voice.release?.(now);
+          continue;
+        }
+        if (voice.setDuration) voice.setDuration((endBeat - voice.soundFrom) * spb, now, payload.cut);
+        else if (endBeat < voice.endBeat) voice.release?.(scheduler.timeAt(endBeat));
+      }
+      state.voices.push({ ...voice, endBeat, payload });
+      heldInPass.add(payload);
+    }
+  }
+
+  // Events in the already scheduled window that have no voice yet.
+  for (const due of scheduler.eventsBetween(playhead, scheduler.scheduledUntil)) {
+    const payload = due.payload as SchedulePayload;
+    const key = eventKeys.get(payload) ?? '';
+    const startBeat = scheduler.playheadBeat(due.time);
+    if (held.get(voicePass(key, startBeat))?.delete(payload)) continue;
+    startVoice(key, payload, startBeat, startBeat, due.time);
+  }
+  return true;
 }
 
 export function audioPlaybackFailureMessage(error: unknown): string {
@@ -299,11 +483,12 @@ function buildVoices(
 }
 
 /**
- * Start audio playback from the current transport position. With
- * `resumeSounding` the notes already sounding at that position are restored
- * (see `resumeSoundingNotes`); a plain start or seek leaves them silent.
+ * Start audio playback from the current transport position. With `resume`
+ * (a restart) the notes sounding at that point of the old run, loop passes
+ * included, go on for their remaining length; a plain start or seek leaves
+ * them silent.
  */
-async function startPlayback(generation: number, resumeSounding = false): Promise<void> {
+async function startPlayback(generation: number, resume?: ResumePoint): Promise<void> {
   const engine = getAudioEngine();
   const { context, master } = await engine.ensureContext();
 
@@ -312,15 +497,12 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
 
   const store = useStore.getState();
 
-  const project: Project = {
-    ...store.project,
-    tracks: [...state.playbackTracks.values(), ...store.project.tracks.filter((track) => track.type === 'master')],
-  };
+  const project = playbackProject(store.project);
   const transport = store.transport;
   applyMasterVolume(master, project.tracks, context.currentTime);
   const bpb = beatsPerBarOf(project.timeSignature);
   const beatsPerBar = bpb > 0 ? bpb : 4;
-  const lengthBeats = songEndBeat(project);
+  state.songEnd = songEndBeat(project);
 
   state.bpm = project.bpm;
   const loop = activeLoopRange(store);
@@ -333,9 +515,19 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
   silenceRinging();
   buildVoices(context, master, project.tracks, now);
 
-  const events = buildScheduleEvents(project);
-  const endBeat = state.loop ? Infinity : lengthBeats;
-  if (resumeSounding && startBeat < endBeat) resumeSoundingNotes(events, startBeat, now);
+  const events = buildScheduleEvents(project, eventKeys);
+  const endBeat = state.loop ? Infinity : state.songEnd;
+  if (resume && startBeat < endBeat) {
+    const byKey = payloadsByKey(events);
+    // Map the old run's timeline onto this one, which starts at `startBeat`.
+    const offset = startBeat - resume.playhead;
+    for (const group of voicesByPass(resume.sounding).values()) {
+      for (const [voice, next] of matchPass(group, byKey.get(group[0]!.key) ?? [])) {
+        if (next.kind !== 'note' || voice.startBeat + next.durationBeats <= resume.playhead) continue;
+        startVoice(voice.key, next, voice.startBeat + offset, startBeat, now);
+      }
+    }
+  }
 
   const tailSeconds = songTailSeconds(project);
   const scheduler = new Scheduler({
@@ -343,8 +535,11 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
     fire: fireEvents,
     onWindow: (fromBeat, toBeat) => {
       if (!transport.metronome) return;
+      const clickNow = engine.now();
+      state.clicks = state.clicks.filter((click) => click.time >= clickNow);
       for (const click of metronomeBeatEvents(fromBeat, toBeat, beatsPerBar)) {
-        scheduleMetronomeClick(context, master, beatToTime(click.beat, project.bpm, startBeat, now), click.accent);
+        const time = beatToTime(click.beat, project.bpm, startBeat, now);
+        state.clicks.push({ time, cancel: scheduleMetronomeClick(context, master, time, click.accent) });
       }
     },
     onEnd: () => {
@@ -352,8 +547,8 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
       // Keep the release and effect tails after the shared note cutoff.
       const s = useStore.getState();
       if (s.transport.isPlaying) {
-        if (startBeat < lengthBeats) {
-          state.ringUntil = beatToTime(lengthBeats, project.bpm, startBeat, now) + tailSeconds;
+        if (startBeat < state.songEnd) {
+          state.ringUntil = beatToTime(state.songEnd, project.bpm, startBeat, now) + tailSeconds;
         }
         s.stop(true);
       }
@@ -371,22 +566,13 @@ async function startPlayback(generation: number, resumeSounding = false): Promis
 
 /** Schedule a batch of due note/drum events (light work only). */
 function fireEvents(due: DueEvent[]): void {
-  const spb = secondsPerBeat(state.bpm);
+  const scheduler = state.scheduler;
+  if (!scheduler) return;
+  const playhead = scheduler.playheadBeat();
+  state.voices = state.voices.filter((voice) => voice.startBeat >= playhead || voice.endBeat > playhead);
   for (const ev of due) {
-    const payload = ev.payload as SchedulePayload;
-    if (payload.kind === 'note') {
-      const synth = state.synths.get(payload.trackId);
-      if (synth) {
-        synth.noteOn(payload.pitch, ev.time, payload.durationBeats * spb, payload.velocity, {
-          cutAtEnd: payload.cut,
-        });
-      }
-    } else {
-      const drum = state.drums.get(payload.trackId);
-      if (drum) {
-        drum.trigger(payload.lane, ev.time, payload.velocity);
-      }
-    }
+    const startBeat = scheduler.playheadBeat(ev.time);
+    startVoice(eventKeys.get(ev.payload as object) ?? '', ev.payload as SchedulePayload, startBeat, startBeat, ev.time);
   }
 }
 
@@ -423,6 +609,11 @@ function stopAudio(): void {
 
   const engine = getAudioEngine();
   const when = engine.now();
+  for (const click of state.clicks) {
+    if (click.time >= when) click.cancel?.();
+  }
+  state.clicks = [];
+  state.voices = [];
   const ringUntil = state.ringUntil;
   state.ringUntil = null;
   if (ringUntil !== null && ringUntil > when) {

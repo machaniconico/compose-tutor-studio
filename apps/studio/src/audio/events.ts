@@ -1,6 +1,6 @@
 // Map sounding events onto the shared Web Audio schedule.
 import type { DrumLane, Project } from '@cts/project-model';
-import { DEFAULT_STEPS_PER_BAR, soundingEvents } from '@cts/project-model';
+import { beatTick, DEFAULT_STEPS_PER_BAR, soundingEvents } from '@cts/project-model';
 import type { ScheduledEvent } from './scheduler';
 
 export { DEFAULT_STEPS_PER_BAR };
@@ -47,7 +47,12 @@ export function drumStepToBeat(
   return clipStartBeat + stepIndex * beatsPerStep;
 }
 
-export function buildScheduleEvents(project: Project): ScheduledEvent[] {
+/**
+ * With `identities`, each payload is mapped to what it sounds like: track,
+ * start tick, pitch (or drum lane) and velocity. Live edits match voices on
+ * this, so a note keeps its voice whatever clip or saved event it comes from.
+ */
+export function buildScheduleEvents(project: Project, identities?: WeakMap<object, string>): ScheduledEvent[] {
   const presets = new Map(project.tracks.map((track) => [track.id, track.instrument?.preset ?? 'warmPad']));
   return soundingEvents(project).events.map((event): ScheduledEvent => {
     const { trackId, startBeat: beat, velocity } = event;
@@ -57,6 +62,9 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
           pitch: event.pitch, durationBeats: event.durationBeats, ...(event.cut ? { cut: event.cut } : {}),
         }
       : { kind: 'drum', trackId, velocity, lane: event.lane };
+    identities?.set(payload, [
+      trackId, beatTick(beat), event.kind === 'note' ? `n${event.pitch}` : event.lane, velocity,
+    ].join('|'));
     return { beat, payload };
   });
 }

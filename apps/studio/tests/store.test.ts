@@ -51,6 +51,18 @@ vi.mock('../src/audio/scheduler', async (importOriginal) => {
     currentBeat(): number {
       return 0;
     }
+    // Live clip edits (US-012b) update the running schedule in place.
+    readonly scheduledUntil = 0;
+    eventsBetween(): [] {
+      return [];
+    }
+    playheadBeat(): number {
+      return 0;
+    }
+    timeAt(): number {
+      return 0;
+    }
+    update(): void {}
   }
   return { ...actual, Scheduler: FakeScheduler };
 });

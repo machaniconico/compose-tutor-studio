@@ -34,13 +34,16 @@ export function metronomeBeatEvents(
   return clicks;
 }
 
-/** Schedule one metronome click at an absolute audio time. */
+/**
+ * Schedule one metronome click at an absolute audio time. The returned
+ * function silences the click if it has not sounded yet (playback restart).
+ */
 export function scheduleMetronomeClick(
   ctx: BaseAudioContext,
   output: AudioNode,
   time: number,
   accent: boolean,
-): void {
+): () => void {
   const osc = ctx.createOscillator();
   osc.type = 'square';
   osc.frequency.setValueAtTime(accent ? 1600 : 1000, time);
@@ -54,4 +57,5 @@ export function scheduleMetronomeClick(
   gain.connect(output);
   osc.start(time);
   osc.stop(time + 0.06);
+  return () => gain.disconnect();
 }
