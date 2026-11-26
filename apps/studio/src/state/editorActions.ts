@@ -35,6 +35,10 @@ import {
   removeClip,
   quantizeClipNotes,
   splitClip,
+  deleteSection,
+  duplicateSection,
+  moveSection,
+  type SectionEditResult,
   drumBeatToStep,
   resolveEditTarget,
   resolveLinkSource,
@@ -1195,4 +1199,53 @@ export function openClipInEditor(clipId: string): void {
   selectTrackClip(clip);
   if (clip.type === 'drum') useStore.getState().setActiveView('drums');
   else if (clip.type === 'midi') useStore.getState().setActiveView('pianoRoll');
+}
+
+/**
+ * Apply a section edit as one undo step, or explain why it failed. Clears the
+ * clip selection when the selected clip is gone (deleted or split).
+ */
+function applySectionEdit(edit: (project: Project) => SectionEditResult): boolean {
+  const store = useStore.getState();
+  store.commitTransaction();
+  const before = store.project;
+  const result = edit(before);
+  if (!result.ok) {
+    pushToast(result.reason, 'error');
+    return false;
+  }
+  if (!store.applyProjectChange(() => result.project)) return false;
+  if (!findClip(result.project, useStore.getState().editor.selectedClipId)) {
+    store.selectClip(null);
+    store.selectNotes([]);
+  }
+  return true;
+}
+
+/** Duplicate a section with its clips and chords right after itself (the song grows). */
+export function duplicateSectionInSong(sectionId: string): boolean {
+  return applySectionEdit((project) => duplicateSection(project, sectionId));
+}
+
+/** Swap a section with the one before (-1) or after (1) it, with their clips and chords. */
+export function moveSectionInSong(sectionId: string, direction: -1 | 1): boolean {
+  return applySectionEdit((project) => moveSection(project, sectionId, direction));
+}
+
+/** Delete a section with its clips and chords; later bars move forward. */
+export function deleteSectionFromSong(sectionId: string): boolean {
+  return applySectionEdit((project) => deleteSection(project, sectionId));
+}
+
+/** Loop the bars of a section (within the song) and turn loop on. */
+export function loopSection(sectionId: string): void {
+  const store = useStore.getState();
+  const { project } = store;
+  const section = project.sections.find((s) => s.id === sectionId);
+  if (!section) return;
+  const bpb = beatsPerBarOf(project.timeSignature);
+  const startBeat = section.startBar * bpb;
+  const endBeat = Math.min(section.startBar + section.lengthBars, project.lengthBars) * bpb;
+  if (endBeat <= startBeat) return;
+  store.loopRangeOn({ startBeat, endBeat });
 }

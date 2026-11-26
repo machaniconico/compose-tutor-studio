@@ -222,6 +222,8 @@ type StoreState = {
   toggleMetronome: () => void;
   /** Set the looped beat range, or clear it with null (one undo step). */
   setLoopRange: (range: { startBeat: number; endBeat: number } | null) => void;
+  /** Set the looped beat range (one undo step, none when unchanged) and turn loop on. */
+  loopRangeOn: (range: { startBeat: number; endBeat: number }) => void;
 
   // history actions
   /**
@@ -871,6 +873,11 @@ export const useStore = create<StoreState>((set, get) => {
       // A loop range change is its own undo step, apart from an open (tap tempo) transaction.
       get().commitTransaction();
       commitProject(setProjectLoopRange(get().project, range));
+    },
+    loopRangeOn: (range) => {
+      const current = get().project.loopRange;
+      if (current?.startBeat !== range.startBeat || current.endBeat !== range.endBeat) get().setLoopRange(range);
+      set((s) => ({ transport: { ...s.transport, loopEnabled: true } }));
     },
 
     // --- history ---

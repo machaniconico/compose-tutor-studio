@@ -368,6 +368,8 @@ describe('text input undo steps', () => {
     const sectionName = () => useStore.getState().project.sections.at(-1)?.name;
     render(<Arranger />);
     fireEvent.click(screen.getAllByTitle(/はじめ/)[0] as HTMLElement);
+    // The click also loops the section (its own undo step); count only the name edits.
+    useStore.setState({ past: [] });
     const input = screen.getByLabelText('セクション名');
 
     for (const value of ['は', 'はし', 'はしり']) fireEvent.change(input, { target: { value } });

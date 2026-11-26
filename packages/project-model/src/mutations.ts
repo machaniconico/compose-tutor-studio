@@ -181,7 +181,7 @@ export const MAX_CLIP_END_BEATS = 4 * MAX_SONG_BARS * 510;
  * MAX_CLIP_END_BEATS. Saved files may hold other clips; the operations leave
  * a track with any of them unchanged.
  */
-function inClipDomain(clip: Pick<Clip, 'startBeat' | 'lengthBeats'>): boolean {
+export function inClipDomain(clip: Pick<Clip, 'startBeat' | 'lengthBeats'>): boolean {
   return clip.startBeat >= 0 && clip.lengthBeats >= MIN_LOOP_PERIOD_BEATS &&
     clip.startBeat + clip.lengthBeats <= MAX_CLIP_END_BEATS;
 }
@@ -560,6 +560,7 @@ export function duplicateClip(
     duplicate.aliasOf = source!.id;
     delete duplicate.notes;
     delete duplicate.drumEvents;
+    delete duplicate.audioAssetId;
   } else {
     const content = source ?? clip;
     delete duplicate.aliasOf;
@@ -567,6 +568,7 @@ export function duplicateClip(
     delete duplicate.drumEvents;
     if (content.notes) duplicate.notes = content.notes.map((n) => ({ ...n, id: allocateId('note') }));
     if (content.drumEvents) duplicate.drumEvents = content.drumEvents.map((d) => ({ ...d, id: allocateId('drum') }));
+    if (content.audioAssetId !== undefined) duplicate.audioAssetId = content.audioAssetId;
   }
   const placed = opts.mode === 'copy' ? withStepsPerBarOf(duplicate, source ?? clip) : duplicate;
   const tracks = mapTrack(project, track.id, (t) => ({ ...t, clips: [...t.clips, placed] }));
@@ -596,6 +598,8 @@ export function removeClip(project: Project, clipId: string, clock: Clock = syst
         delete own.drumEvents;
         if (clip.notes) own.notes = clip.notes.map((n) => ({ ...n, id: allocateId('note') }));
         if (clip.drumEvents) own.drumEvents = clip.drumEvents.map((d) => ({ ...d, id: allocateId('drum') }));
+        // An audio clip's content is its asset reference.
+        if (clip.audioAssetId !== undefined) own.audioAssetId = clip.audioAssetId;
         return own;
       }),
   }));
@@ -659,7 +663,7 @@ function nextTrackName(project: Project, type: 'instrument' | 'drum'): string {
 }
 
 /** Allocate IDs against all saved entities and clip links, including dangling links. */
-function trackIdAllocator(project: Project): (prefix: string, preferred?: string) => string {
+export function trackIdAllocator(project: Project): (prefix: string, preferred?: string) => string {
   const ids = new Set([project.id]);
   for (const chord of project.chordTrack) ids.add(chord.id);
   for (const section of project.sections) ids.add(section.id);

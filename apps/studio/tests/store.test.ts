@@ -1002,6 +1002,17 @@ describe('loop range', () => {
     expect(useStore.getState().project.loopRange).toEqual({ startBeat: 4, endBeat: 12 });
   });
 
+  it('loopRangeOn sets the range in one undo step and turns loop on; the same range adds no step', () => {
+    useStore.setState((s) => ({ transport: { ...s.transport, loopEnabled: false } }));
+    useStore.getState().loopRangeOn({ startBeat: 16, endBeat: 32 });
+    expect(useStore.getState().project.loopRange).toEqual({ startBeat: 16, endBeat: 32 });
+    expect(useStore.getState().transport.loopEnabled).toBe(true);
+    expect(useStore.getState().past).toHaveLength(1);
+
+    useStore.getState().loopRangeOn({ startBeat: 16, endBeat: 32 });
+    expect(useStore.getState().past).toHaveLength(1);
+  });
+
   it('derives the transport loop bounds from project.loopRange', () => {
     useStore.getState().setLoopRange({ startBeat: 4, endBeat: 12 });
     expect(activeLoopRange(useStore.getState())).toBeNull(); // loop is off
