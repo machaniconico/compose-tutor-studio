@@ -1330,3 +1330,25 @@ describe('seek', () => {
     }
   });
 });
+
+describe('ゴーストノートと色分けの UI 状態(US-017)', () => {
+  it('トラックごとの表示を切り替えられ、保存データ(project)は変わらない', async () => {
+    const { useStore } = await import('../src/state/store');
+    const s = useStore.getState();
+    s.createNewProject('ゴースト');
+    const project = useStore.getState().project;
+    expect(useStore.getState().editor.ghostHiddenTrackIds).toEqual([]);
+    useStore.getState().toggleGhostTrack('t1');
+    expect(useStore.getState().editor.ghostHiddenTrackIds).toEqual(['t1']);
+    useStore.getState().toggleGhostTrack('t1');
+    expect(useStore.getState().editor.ghostHiddenTrackIds).toEqual([]);
+    expect(useStore.getState().project).toBe(project);
+  });
+  it('色分けモードを選べる(既定は plain)', async () => {
+    const { useStore } = await import('../src/state/store');
+    expect(useStore.getState().editor.noteColorMode).toBe('plain');
+    useStore.getState().setNoteColorMode('velocity');
+    expect(useStore.getState().editor.noteColorMode).toBe('velocity');
+    useStore.getState().setNoteColorMode('plain');
+  });
+});

@@ -8,6 +8,7 @@ import { pxPerBeat } from '../timeline';
 import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { useScaleInfo } from './useScaleInfo';
+import { classifyNote, noteColorLabel, NOTE_COLOR_MODES, type NoteColorMode } from './noteColor';
 import { PREVIEW_DURATION_MS, previewNote } from '../../audio/livePreview';
 import {
   GRID_SNAP_OPTIONS,
@@ -27,6 +28,10 @@ import {
   snapBeat,
   snapPitchToPitchClasses,
   visibleRowRange,
+  visibleGhostNotes,
+  ghostNotesFromEvents,
+  soundingStartByNoteId,
+  chordTickFinder,
   xToBeat,
   yToPitch,
 } from './gridMath';
@@ -194,6 +199,8 @@ export function PianoRoll() {
   const setZoomX = useStore((s) => s.setZoomX);
   const toggleScaleSnap = useStore((s) => s.toggleScaleSnap);
   const toggleChordToneHighlight = useStore((s) => s.toggleChordToneHighlight);
+  const toggleGhostTrack = useStore((s) => s.toggleGhostTrack);
+  const setNoteColorMode = useStore((s) => s.setNoteColorMode);
   const togglePreviewOnPlace = useStore((s) => s.togglePreviewOnPlace);
   const beginTransaction = useStore((s) => s.beginTransaction);
   const commitTransaction = useStore((s) => s.commitTransaction);
@@ -231,13 +238,22 @@ export function PianoRoll() {
   const { length: clipLength, firstPassLength: firstPassEnd } = clip
     ? clipEditSpan(project, clip)
     : { length: 0, firstPassLength: 0 };
+  // soundingEvents is the source of truth for what sounds: the clip's own notes,
+  // their swung onsets (for the chord lookup) and the other tracks' ghosts.
+  const allEvents = useMemo(
+    () => (clip?.type === 'midi' ? soundingEvents(project, { includeMuted: true }).events : []),
+    [clip?.type, project],
+  );
   const notes = useMemo(() => {
     if (clip?.type !== 'midi' || !clip.notes) return [];
-    return soundingEvents(project, { clipId: clip.id, includeMuted: true }).events.flatMap((event) => {
+    return allEvents.flatMap((event) => {
+      if (event.clipId !== clip.id) return [];
       const note = clip.notes?.[event.sourceIndex];
       return event.kind === 'note' && event.repeat === 0 && note ? [note] : [];
     });
-  }, [clip, project]);
+  }, [clip, allEvents]);
+  const colorChordAt = useMemo(() => chordTickFinder(project.chordTrack), [project.chordTrack]);
+  const soundStarts = useMemo(() => (clip ? soundingStartByNoteId(allEvents, clip) : new Map<string, number>()), [clip, allEvents]);
   const selected = useMemo(() => {
     const ids = new Set(editor.selectedNoteIds);
     return new Set(notes.filter((note) => ids.has(note.id)).map((note) => note.id));
@@ -323,6 +339,36 @@ export function PianoRoll() {
     }
     return out;
   }, [notesByRow, firstRow, lastRow, heldNoteId, notes, rows.length]);
+
+  // Ghost notes: other tracks' sounding notes (loops, links and the song-end
+  // cut included, from soundingEvents), read-only. Muted tracks are shown too:
+  // only the per-track checkbox decides, like the clip's own notes above.
+  const ownTrackId = clip ? project.tracks.find((t) => t.clips.some((c) => c.id === clip.id))?.id : undefined;
+  const ghostTracks = useMemo(() => {
+    const sounding = new Set(allEvents.filter((e) => e.kind === 'note').map((e) => e.trackId));
+    return project.tracks.filter((t) => t.id !== ownTrackId && t.type !== 'drum' && sounding.has(t.id));
+  }, [project.tracks, ownTrackId, allEvents]);
+  const ghostHidden = editor.ghostHiddenTrackIds;
+  const allGhosts = useMemo(() => {
+    if (!clip || ownTrackId === undefined || ghostTracks.every((t) => ghostHidden.includes(t.id))) return [];
+    return ghostNotesFromEvents(allEvents, {
+      viewClip: clip,
+      ownTrackId,
+      hiddenTrackIds: new Set(ghostHidden),
+    });
+  }, [allEvents, clip, ownTrackId, ghostTracks, ghostHidden]);
+  const ghostColors = useMemo(() => new Map(ghostTracks.map((t) => [t.id, t.color])), [ghostTracks]);
+  const ghostNames = useMemo(() => new Map(ghostTracks.map((t) => [t.id, t.name])), [ghostTracks]);
+  const visibleGhosts = useMemo(
+    () =>
+      visibleGhostNotes(allGhosts, {
+        lowMidi: rows[Math.min(lastRow, rows.length - 1)] ?? PIANO_LOW_MIDI,
+        highMidi: rows[firstRow] ?? PIANO_HIGH_MIDI,
+        clipStartBeat: clip?.startBeat ?? 0,
+        gridLength,
+      }),
+    [allGhosts, rows, firstRow, lastRow, gridLength, clip?.startBeat],
+  );
 
   const previewKey = useCallback(
     (midi: number) => {
@@ -838,6 +884,38 @@ export function PianoRoll() {
           />
           <span>置いたら試聴</span>
         </label>
+        <label className="pr__field" title="ノートの色と記号を、コードの音・スケールの度数・音の強さで分けます">
+          <span>ノートの色分け</span>
+          <select
+            aria-label="ノートの色分け"
+            value={editor.noteColorMode}
+            onChange={(e) => setNoteColorMode(e.target.value as NoteColorMode)}
+          >
+            {NOTE_COLOR_MODES.map((m) => (
+              <option key={m.mode} value={m.mode}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {ghostTracks.length > 0 ? (
+          <div className="pr__ghosts" role="group" aria-label="ほかのトラックを重ねる">
+            <span className="pr__ghosts-title">ほかのトラックを薄く重ねる(編集はできません)</span>
+            {ghostTracks.map((t) => (
+              <label key={t.id} className="pr__field">
+                <input
+                  type="checkbox"
+                  checked={!ghostHidden.includes(t.id)}
+                  onChange={() => toggleGhostTrack(t.id)}
+                />
+                <span>
+                  {t.name}
+                  {t.mute ? '(ミュート中)' : ''}
+                </span>
+              </label>
+            ))}
+          </div>
+        ) : null}
         <p className="pr__hint">
           左の鍵盤クリックで試聴 / ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 /
           Alt+ドラッグで複製 / Q=クオンタイズ / Delete=削除 / Ctrl+C・X・V=コピー・切り取り・貼り付け / ↑↓=1 半音 /
@@ -991,16 +1069,49 @@ export function PianoRoll() {
               )
             : null}
 
+          {/* ghost notes: other tracks, read-only (pointer-events: none) */}
+          {visibleGhosts.map((g) => {
+            const left = Math.max(0, g.startBeat);
+            const width = Math.min(gridLength, g.startBeat + g.durationBeats) - left;
+            return (
+              <div
+                key={g.key}
+                data-testid="ghost-note"
+                className="pr__ghost"
+                style={{
+                  top: (PIANO_HIGH_MIDI - g.pitch) * ROW_HEIGHT + 1,
+                  left: left * ppb,
+                  width: Math.max(3, width * ppb - 1),
+                  height: ROW_HEIGHT - 2,
+                  background: ghostColors.get(g.trackId),
+                }}
+                title={`${midiToNoteName(g.pitch)}(${ghostNames.get(g.trackId) ?? ''})`}
+                aria-hidden="true"
+              />
+            );
+          })}
+
           {/* notes */}
           {renderedNotes.map((note) => {
             const i = PIANO_HIGH_MIDI - note.pitch;
             const pc = ((note.pitch % 12) + 12) % 12;
             const outOfScale = scaleInfo.scalePcs.size > 0 && !scaleInfo.scalePcs.has(pc);
             const isSelected = selected.has(note.id);
+            // The chord track is absolute: look it up where the note actually
+            // sounds (swing included), not at the stored clip-relative beat.
+            const color = classifyNote(
+              note.pitch,
+              colorChordAt(soundStarts.get(note.id) ?? clip.startBeat + note.startBeat),
+              project.key,
+              project.scale,
+              editor.noteColorMode,
+              note.velocity,
+            );
+            const colorLabel = noteColorLabel(color, editor.difficulty);
             return (
               <div
                 key={note.id}
-                className={`pr__note${isSelected ? ' is-selected' : ''}${outOfScale ? ' is-out' : ''}`}
+                className={`pr__note${isSelected ? ' is-selected' : ''}${outOfScale && color.category === 'plain' ? ' is-out' : ''}${color.className ? ` pr__note--${color.className}` : ''}`}
                 style={{
                   top: i * ROW_HEIGHT + 1,
                   left: note.startBeat * ppb,
@@ -1009,8 +1120,9 @@ export function PianoRoll() {
                   opacity: 0.45 + (note.velocity / 127) * 0.55,
                 }}
                 onPointerDown={(e) => onNotePointerDown(e, note)}
-                title={`${midiToNoteName(note.pitch)} / 強さ ${note.velocity}`}
+                title={`${midiToNoteName(note.pitch)} / 強さ ${note.velocity}${colorLabel ? ` / ${colorLabel}` : ''}`}
               >
+                {color.symbol ? <span className="pr__note-mark" aria-hidden="true">{color.symbol}</span> : null}
                 <span className="pr__note-resize" />
               </div>
             );

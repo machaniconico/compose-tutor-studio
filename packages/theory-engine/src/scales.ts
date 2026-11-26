@@ -20,6 +20,12 @@ const SCALE_INTERVALS: Record<ScaleName, number[]> = {
   blues: [0, 3, 5, 6, 7, 10],
 };
 
+/** 値がサポート済みのスケール名か。保存データの scale は検査されないので、未知の名前に備えて使う。 */
+export function isScaleName(name: unknown): name is ScaleName {
+  // 文字列以外はキーに変換する時点で throw しうる({ toString: null } など)ので先に弾く。
+  return typeof name === 'string' && Object.prototype.hasOwnProperty.call(SCALE_INTERVALS, name);
+}
+
 /** 指定スケールのインターバル配列を返す (コピー)。 */
 export function getScaleIntervals(scale: ScaleName): number[] {
   const intervals = SCALE_INTERVALS[scale];

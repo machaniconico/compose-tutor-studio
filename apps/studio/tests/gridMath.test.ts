@@ -25,7 +25,16 @@ import {
   addGridSteps,
   GRID_SNAP_OPTIONS,
   GRID_SNAP_LABELS,
+  ghostNotesFromEvents,
+  visibleGhostNotes,
+  soundingStartByNoteId,
+  chordTickFinder,
+  MAX_RENDERED_GHOSTS,
 } from '../src/features/pianoRoll/gridMath';
+import { soundingEvents } from '@cts/project-model';
+import { createPrng } from '@cts/theory-engine';
+import { chordFinder } from '../src/features/pianoRoll/useScaleInfo';
+import { makeProject, makeTrack, midiClip, drumClip } from '../../../packages/project-model/tests/acceptance/helpers';
 
 describe('notesInRows', () => {
   it('collects 150,000 notes in one visible row in order', () => {
@@ -346,5 +355,194 @@ describe('windowScrollTop', () => {
     expect(windowScrollTop(win, 40 * H, H, ROWS, 108, { low: 60, high: 60 })).toBe(
       windowScrollTop(win, 40 * H, H, ROWS),
     );
+  });
+});
+
+describe('ghostNotesFromEvents (他トラックのノートを表示クリップの相対拍へ)', () => {
+  const own = (startBeat: number) => ({ id: 'view', startBeat });
+  const ghostsOf = (project: ReturnType<typeof makeProject>, view: { id: string; startBeat: number }, ownTrackId: string, hidden: string[] = []) =>
+    ghostNotesFromEvents(soundingEvents(project, { includeMuted: true }).events, {
+      viewClip: view,
+      ownTrackId,
+      hiddenTrackIds: new Set(hidden),
+    });
+
+  it('クリップ startBeat 16・相対 2 のノートは、表示クリップ(startBeat 8)の相対 10 拍', () => {
+    const project = makeProject([
+      makeTrack('a', 'instrument', [midiClip('view', 'a', 8, 8, [])]),
+      makeTrack('b', 'instrument', [midiClip('other', 'b', 16, 8, [[2, 1, 64]])]),
+    ]);
+    const g = ghostsOf(project, own(8), 'a');
+    expect(g).toHaveLength(1);
+    expect(g[0]).toMatchObject({ trackId: 'b', pitch: 64, startBeat: 10, durationBeats: 1 });
+  });
+  it('startBeat が小数のクリップでも相対拍が合う', () => {
+    const project = makeProject([
+      makeTrack('a', 'instrument', [midiClip('view', 'a', 0.5, 8, [])]),
+      makeTrack('b', 'instrument', [midiClip('other', 'b', 4.25, 4, [[0.5, 1, 60]])]),
+    ]);
+    expect(ghostsOf(project, { id: 'view', startBeat: 0.5 }, 'a')[0]!.startBeat).toBeCloseTo(4.25, 9);
+  });
+  it('ループの繰り返し・リンクされたクリップも鳴る位置で出る', () => {
+    const project = makeProject([
+      makeTrack('a', 'instrument', [midiClip('view', 'a', 0, 8, [])]),
+      makeTrack('b', 'instrument', [
+        midiClip('loop', 'b', 0, 6, [[0, 1, 60]], { contentLengthBeats: 2, loop: true }),
+        midiClip('src', 'b', 8, 2, [[1, 1, 62]]),
+        midiClip('link', 'b', 12, 2, [], { aliasOf: 'src' }),
+      ]),
+    ]);
+    const g = ghostsOf(project, own(0), 'a');
+    expect(g.filter((n) => n.pitch === 60).map((n) => n.startBeat)).toEqual([0, 2, 4]);
+    expect(g.filter((n) => n.pitch === 62).map((n) => n.startBeat).sort((x, y) => x - y)).toEqual([9, 13]);
+  });
+  it('曲末をまたぐ音は切り詰めた長さで出る', () => {
+    const project = makeProject(
+      [
+        makeTrack('a', 'instrument', [midiClip('view', 'a', 0, 4, [])]),
+        makeTrack('b', 'instrument', [midiClip('other', 'b', 0, 4, [[3, 8, 60]])]),
+      ],
+      { lengthBars: 1 },
+    );
+    const g = ghostsOf(project, own(0), 'a');
+    expect(g).toHaveLength(1);
+    expect(g[0]!.startBeat + g[0]!.durationBeats).toBeLessThanOrEqual(4 + 1e-9);
+  });
+  it('自分のトラック・非表示トラック・ドラムは出ない', () => {
+    const project = makeProject([
+      makeTrack('a', 'instrument', [midiClip('view', 'a', 0, 4, [[0, 1, 60]]), midiClip('mine2', 'a', 4, 4, [[0, 1, 61]])]),
+      makeTrack('b', 'instrument', [midiClip('ob', 'b', 0, 4, [[0, 1, 62]])]),
+      makeTrack('d', 'drum', [drumClip('dc', 'd', 0, 4, [[0, 'kick']])]),
+    ]);
+    expect(ghostsOf(project, own(0), 'a').map((n) => n.pitch)).toEqual([62]);
+    expect(ghostsOf(project, own(0), 'a', ['b'])).toEqual([]);
+  });
+  it('ミュート中のトラックも出す(表示は表示チェックだけで決める)', () => {
+    const muted = { ...makeTrack('b', 'instrument', [midiClip('ob', 'b', 0, 4, [[0, 1, 62]])]), mute: true };
+    const project = makeProject([makeTrack('a', 'instrument', [midiClip('view', 'a', 0, 4, [])]), muted]);
+    expect(ghostsOf(project, own(0), 'a')).toHaveLength(1);
+  });
+  it('トラックが 1 本・ノート 0 件なら空', () => {
+    const one = makeProject([makeTrack('a', 'instrument', [midiClip('view', 'a', 0, 4, [[0, 1, 60]])])]);
+    expect(ghostsOf(one, own(0), 'a')).toEqual([]);
+    const empty = makeProject([
+      makeTrack('a', 'instrument', [midiClip('view', 'a', 0, 4, [])]),
+      makeTrack('b', 'instrument', [midiClip('ob', 'b', 0, 4, [])]),
+    ]);
+    expect(ghostsOf(empty, own(0), 'a')).toEqual([]);
+  });
+});
+
+describe('visibleGhostNotes (表示範囲と上限)', () => {
+  const g = (pitch: number, startBeat: number, durationBeats = 1) => ({
+    key: `${pitch}-${startBeat}`,
+    trackId: 'b',
+    absStartBeat: startBeat,
+    pitch,
+    startBeat,
+    durationBeats,
+    velocity: 100,
+  });
+  const view = { lowMidi: 60, highMidi: 72, clipStartBeat: 0, gridLength: 8 };
+  it('音域・拍の範囲外は描画しない', () => {
+    const inRange = [g(65, -2, 3), g(65, 7.5)];
+    const out = visibleGhostNotes([g(59, 0), g(73, 0), g(65, 8), g(65, -2, 1), ...inRange], view);
+    expect(out).toEqual(inRange);
+  });
+  it('個数に上限がある', () => {
+    const many = Array.from({ length: MAX_RENDERED_GHOSTS * 3 }, (_, i) => g(65, i / 100, 0.01));
+    const out = visibleGhostNotes(many, { ...view, gridLength: 1000 });
+    expect(out).toHaveLength(MAX_RENDERED_GHOSTS);
+  });
+});
+
+describe('表示範囲の判定は絶対 tick で行う(浮動小数の誤差で余分なゴーストを出さない)', () => {
+  it('他トラックの音が絶対 0.1 拍から 4 拍、表示クリップが 4.1 拍開始なら、左端に出ない', () => {
+    const project = makeProject(
+      [
+        makeTrack('a', 'instrument', [midiClip('view', 'a', 4.1, 4, [])]),
+        makeTrack('b', 'instrument', [midiClip('other', 'b', 0.1, 8, [[0, 4, 60]])]),
+      ],
+      { lengthBars: 4 },
+    );
+    const ghosts = ghostNotesFromEvents(soundingEvents(project, { includeMuted: true }).events, {
+      viewClip: { startBeat: 4.1 },
+      ownTrackId: 'a',
+      hiddenTrackIds: new Set(),
+    });
+    expect(ghosts).toHaveLength(1);
+    const out = visibleGhostNotes(ghosts, { lowMidi: 21, highMidi: 108, clipStartBeat: 4.1, gridLength: 16 - 4.1 });
+    expect(out).toEqual([]);
+  });
+  it('終端がクリップ開始と tick で一致するなら出さず、1 tick でも越えれば出す', () => {
+    const base = { key: 'k', trackId: 'b', pitch: 60, velocity: 100 };
+    const view = { lowMidi: 21, highMidi: 108, clipStartBeat: 4.1, gridLength: 8 };
+    expect(visibleGhostNotes([{ ...base, absStartBeat: 0.1, startBeat: 0.1 - 4.1, durationBeats: 4 }], view)).toEqual([]);
+    expect(visibleGhostNotes([{ ...base, absStartBeat: 0.1, startBeat: 0.1 - 4.1, durationBeats: 4 + 1 / 480 }], view)).toHaveLength(1);
+  });
+});
+
+describe('soundingStartByNoteId (スウィング込みの発音位置)', () => {
+  it('保存データの拍ではなく soundingEvents の開始拍を返す', () => {
+    const project = makeProject([makeTrack('a', 'instrument', [midiClip('view', 'a', 0, 4, [[0.25, 0.25, 64]])])], { swing: 60 });
+    const clip = project.tracks[0]!.clips[0]!;
+    const map = soundingStartByNoteId(soundingEvents(project, { includeMuted: true }).events, clip);
+    expect(map.get(clip.notes![0]!.id)).toBeGreaterThan(0.25);
+  });
+});
+
+describe('chordTickFinder (発音 tick とコード区間 tick の整数比較)', () => {
+  const chord = (id: string, startBeat: number, durationBeats: number, symbol: string) => ({
+    id, startBeat, durationBeats, symbol, root: symbol, quality: 'major', notes: [] as number[],
+  });
+  it('発音 0.4010414 拍は、0.4010419 拍に始まる F ではなくまだ C の区間(許容誤差を使わない)', () => {
+    const project = makeProject([makeTrack('a', 'instrument', [midiClip('view', 'a', 0, 4, [[0.2510414, 0.25, 64]])])], { swing: 60 });
+    const clip = project.tracks[0]!.clips[0]!;
+    const sounded = soundingStartByNoteId(soundingEvents(project, { includeMuted: true }).events, clip).get(clip.notes![0]!.id)!;
+    expect(sounded).toBeGreaterThan(0.4);
+    expect(sounded).toBeLessThan(0.4010419);
+    const find = chordTickFinder([chord('c', 0, 0.4010419, 'C'), chord('f', 0.4010419, 3, 'F')]);
+    expect(find(sounded)?.symbol).toBe('C');
+  });
+  it('境界の tick ちょうどは次のコード、終端は含まない', () => {
+    const find = chordTickFinder([chord('b', 2, 2, 'F'), chord('a', 0, 2, 'C')]);
+    expect(find(0)?.symbol).toBe('C');
+    expect(find(1.9989)?.symbol).toBe('C');
+    expect(find(2)?.symbol).toBe('F');
+    expect(find(4)).toBeUndefined();
+    expect(find(-0.5)).toBeUndefined();
+  });
+  it('コードが無ければ undefined', () => {
+    expect(chordTickFinder([])(1)).toBeUndefined();
+  });
+  it('重なり・同じ tick 開始では、格納順でなく元の startBeat が早い方を選ぶ(chordFinder と同じ規則)', () => {
+    const f = chord('f', 0.0005, 4, 'F');
+    const c = chord('c', 0, 4, 'C');
+    expect(chordTickFinder([f, c])(1)?.symbol).toBe('C');
+    expect(chordTickFinder([c, f])(1)?.symbol).toBe('C');
+  });
+  it('プロパティ(seed 固定): 境界から 1 tick 以上離れた位置では chordFinder と一致する', () => {
+    const rnd = createPrng(20261127);
+    const TICK = 1 / 480;
+    let compared = 0;
+    for (let round = 0; round < 300; round += 1) {
+      const n = 1 + Math.floor(rnd() * 6);
+      const track = Array.from({ length: n }, (_, i) => {
+        // 端数の拍・同じ開始・重なりを混ぜる。開始が 1 tick 未満だけずれる組も作る。
+        const base = Math.floor(rnd() * 8) * 0.5;
+        const jitter = rnd() < 0.4 ? Math.floor(rnd() * 3) * 0.0005 : rnd() < 0.5 ? rnd() * 0.37 : 0;
+        return chord(`k${i}`, base + jitter, 0.25 + Math.floor(rnd() * 9) * 0.5 + (rnd() < 0.3 ? rnd() * 0.3 : 0), `S${i}`);
+      });
+      const edges = track.flatMap((c) => [c.startBeat, c.startBeat + c.durationBeats]);
+      const finder = chordFinder(track as never);
+      const finder2 = chordTickFinder(track);
+      for (let k = 0; k < 40; k += 1) {
+        const beat = rnd() * 12 - 1;
+        if (edges.some((e) => Math.abs(beat - e) < TICK + 1e-9)) continue;
+        compared += 1;
+        expect(finder2(beat)?.id, `beat=${beat} track=${JSON.stringify(track)}`).toBe(finder(beat)?.id);
+      }
+    }
+    expect(compared).toBeGreaterThan(1000);
   });
 });

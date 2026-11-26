@@ -38,6 +38,7 @@ import { createDefaultProject } from './defaultProject';
 import { nowIso, uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { pushToast } from './tutorialBridge';
+import type { NoteColorMode } from '../features/pianoRoll/noteColor';
 import {
   deleteProject as deleteStoredProject,
   listSavedProjects,
@@ -70,6 +71,10 @@ export type EditorState = {
   selectedNoteIds: string[];
   scaleSnap: boolean;
   chordToneHighlight: boolean;
+  /** ピアノロールで他トラックのゴーストノートを隠すトラック ID(UI 状態。保存しない)。 */
+  ghostHiddenTrackIds: string[];
+  /** ピアノロールのノート色分け(UI 状態。保存しない)。 */
+  noteColorMode: NoteColorMode;
   /** ピアノロールでノートを置いたときに短く試聴する(既定オン)。 */
   previewOnPlace: boolean;
   zoomX: number;
@@ -196,6 +201,8 @@ type StoreState = {
   setActiveView: (view: EditorView) => void;
   toggleScaleSnap: () => void;
   toggleChordToneHighlight: () => void;
+  toggleGhostTrack: (trackId: string) => void;
+  setNoteColorMode: (mode: NoteColorMode) => void;
   togglePreviewOnPlace: () => void;
   setZoomX: (zoomX: number) => void;
   toggleTutorialPanel: () => void;
@@ -365,6 +372,8 @@ function makeEditor(project: Project): EditorState {
     selectedNoteIds: [],
     scaleSnap: true,
     chordToneHighlight: true,
+    ghostHiddenTrackIds: [],
+    noteColorMode: 'plain',
     previewOnPlace: true,
     zoomX: 1,
     difficulty: loadDifficulty(),
@@ -826,6 +835,13 @@ export const useStore = create<StoreState>((set, get) => {
         });
       }
     },
+    toggleGhostTrack: (trackId) =>
+      set((s) => {
+        const hidden = s.editor.ghostHiddenTrackIds;
+        const next = hidden.includes(trackId) ? hidden.filter((id) => id !== trackId) : [...hidden, trackId];
+        return { editor: { ...s.editor, ghostHiddenTrackIds: next } };
+      }),
+    setNoteColorMode: (mode) => set((s) => ({ editor: { ...s.editor, noteColorMode: mode } })),
     toggleChordToneHighlight: () =>
       set((s) => ({ editor: { ...s.editor, chordToneHighlight: !s.editor.chordToneHighlight } })),
     togglePreviewOnPlace: () =>

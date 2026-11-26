@@ -70,6 +70,7 @@ export {
   isPitchClassInScale,
   scaleDegreeToPitchClass,
   SCALE_NAMES,
+  isScaleName,
 } from './scales';
 
 // 3. コードシンボルパーサ (内部 parseChord 系。chordIntervals は parse-chord 側を採用)
@@ -113,6 +114,9 @@ export {
   type NoteRelation,
   type NoteAnalysis,
 } from './note-analysis';
+
+// ピアノロールの色分け用: ノートの役割(コードの音 / スケールの音 / スケール外)
+export { classifyNoteRole, type NoteRole } from './note-role';
 
 // 6. 進行テンプレート
 export {

@@ -1159,6 +1159,48 @@ input[type='range'] {
   background: var(--warning);
 }
 
+.pr__note-mark {
+  position: absolute;
+  left: 2px;
+  top: 0;
+  right: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--accent-contrast);
+  pointer-events: none;
+}
+
+.pr__note--chordTone { background: var(--chord-tone); }
+.pr__note--scaleTone { background: var(--scale-in); }
+.pr__note--outside { background: var(--warning); }
+.pr__note--v0 { background: var(--bg-elevated); }
+.pr__note--v1 { background: var(--scale-in); }
+.pr__note--v2 { background: var(--accent-strong); }
+.pr__note--v3 { background: var(--accent); }
+
+.pr__ghosts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.pr__ghosts-title {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ほかのトラックのノート。半透明で、クリックは下のグリッドへ通す(編集不可)。 */
+.pr__ghost {
+  position: absolute;
+  background: var(--text-dim);
+  opacity: 0.3;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 .pr__note-resize {
   position: absolute;
   top: 0;

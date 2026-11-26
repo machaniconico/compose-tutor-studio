@@ -1,6 +1,8 @@
 // Pure grid-geometry + quantization helpers for the piano roll and other
 // beat-based editors. No React, no store — easy to unit test.
 
+import { beatTick } from '@cts/project-model';
+
 /**
  * Available snap resolutions, in beats. 1 = quarter note in 4/4; 1/3 and 1/6
  * are the eighth- and sixteenth-note triplet grids.
@@ -296,5 +298,132 @@ export function normalizeRect(
     y: Math.min(y0, y1),
     w: Math.abs(x1 - x0),
     h: Math.abs(y1 - y0),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ghost notes: other tracks' sounding notes, shown read-only behind the clip.
+// ---------------------------------------------------------------------------
+
+/** Upper bound on mounted ghost notes (same idea as the ruler's MAX_RENDERED_BEATS). */
+export const MAX_RENDERED_GHOSTS = 600;
+
+/** A sounding note of another track, in the viewed clip's relative beats. */
+export type GhostNote = {
+  key: string;
+  trackId: string;
+  pitch: number;
+  /** Absolute song beat of the onset (swing included), the source of truth for range checks. */
+  absStartBeat: number;
+  /** Beats from the viewed clip's start (may be negative or past the grid). */
+  startBeat: number;
+  durationBeats: number;
+  velocity: number;
+};
+
+/** The part of a `soundingEvents` event the ghost view reads (absolute song beats). */
+type GhostSourceEvent = {
+  kind: string;
+  trackId: string;
+  clipId: string;
+  sourceIndex: number;
+  repeat: number;
+  startBeat: number;
+  durationBeats?: number;
+  pitch?: number;
+  velocity: number;
+};
+
+/**
+ * Turn `soundingEvents` output into ghost notes for the viewed clip. Events
+ * carry absolute song beats (loops, links and the song-end cut already
+ * applied), so the relative beat is `event.startBeat - viewClip.startBeat`.
+ * Drum events, the viewed clip's own track and hidden tracks are left out.
+ */
+export function ghostNotesFromEvents(
+  events: readonly GhostSourceEvent[],
+  opts: {
+    viewClip: { startBeat: number };
+    ownTrackId: string;
+    hiddenTrackIds: ReadonlySet<string>;
+  },
+): GhostNote[] {
+  const out: GhostNote[] = [];
+  for (const e of events) {
+    if (e.kind !== 'note' || e.pitch === undefined || e.durationBeats === undefined) continue;
+    if (e.trackId === opts.ownTrackId || opts.hiddenTrackIds.has(e.trackId)) continue;
+    out.push({
+      key: `${e.clipId}:${e.sourceIndex}:${e.repeat}`,
+      trackId: e.trackId,
+      pitch: e.pitch,
+      absStartBeat: e.startBeat,
+      startBeat: e.startBeat - opts.viewClip.startBeat,
+      durationBeats: e.durationBeats,
+      velocity: e.velocity,
+    });
+  }
+  return out;
+}
+
+/**
+ * Ghosts that intersect the shown pitch rows and the clip's span, capped at
+ * `max` so a dense song cannot flood the DOM. The span test runs on absolute
+ * ticks (each edge rounded on its own, as soundingEvents does), so float error
+ * in relative beats cannot add or drop an edge ghost. `startBeat` is only the
+ * drawing position.
+ */
+export function visibleGhostNotes(
+  ghosts: readonly GhostNote[],
+  view: { lowMidi: number; highMidi: number; clipStartBeat: number; gridLength: number },
+  max = MAX_RENDERED_GHOSTS,
+): GhostNote[] {
+  const viewStartTick = beatTick(view.clipStartBeat);
+  const viewEndTick = beatTick(view.clipStartBeat + view.gridLength);
+  const out: GhostNote[] = [];
+  for (const g of ghosts) {
+    if (out.length >= max) break;
+    if (g.pitch < view.lowMidi || g.pitch > view.highMidi) continue;
+    if (beatTick(g.absStartBeat) >= viewEndTick || beatTick(g.absStartBeat + g.durationBeats) <= viewStartTick) continue;
+    out.push(g);
+  }
+  return out;
+}
+
+/**
+ * Where each of a clip's own notes actually sounds, by note id: the absolute
+ * onset from soundingEvents (swing included), first repeat only. Colouring
+ * looks up the chord at this beat, not at the stored one.
+ */
+export function soundingStartByNoteId(
+  events: readonly GhostSourceEvent[],
+  clip: { id: string; notes?: readonly { id: string }[] },
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const e of events) {
+    if (e.kind !== 'note' || e.clipId !== clip.id || e.repeat !== 0) continue;
+    const note = clip.notes?.[e.sourceIndex];
+    if (note) out.set(note.id, e.startBeat);
+  }
+  return out;
+}
+
+/**
+ * Chord lookup for colouring, by integer ticks: a note sounds in a chord when
+ * `startTick <= noteTick < endTick`, each edge rounded on its own as
+ * soundingEvents does. No tolerance constant, so a swung onset just before a
+ * chord change stays in the earlier chord. Overlaps go to the chord with the earliest raw startBeat.
+ * (useScaleInfo's `chordFinder` keeps its 1e-6 tolerance for its other callers.)
+ */
+export function chordTickFinder<C extends { startBeat: number; durationBeats: number }>(
+  chordTrack: readonly C[],
+): (beat: number) => C | undefined {
+  const spans = chordTrack
+    .map((chord) => ({ chord, start: beatTick(chord.startBeat), end: beatTick(chord.startBeat + chord.durationBeats) }))
+    // chordFinder's rule: order by the raw startBeat (stable, so equal starts keep stored order),
+    // never by the rounded tick; the first covering chord wins.
+    .sort((a, b) => a.chord.startBeat - b.chord.startBeat);
+  return (beat) => {
+    const tick = beatTick(beat);
+    return spans.find((s) => tick >= s.start && tick < s.end)?.chord;
   };
 }
