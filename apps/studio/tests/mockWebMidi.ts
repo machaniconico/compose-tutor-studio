@@ -8,8 +8,10 @@ export class MockMidiInput extends EventTarget {
     super();
   }
 
-  send(data: readonly number[]) {
-    this.dispatchEvent(Object.assign(new Event('midimessage'), { data: Uint8Array.from(data) }));
+  send(data: readonly number[], timing?: { timeStamp: number | undefined }) {
+    const message = Object.assign(new Event('midimessage'), { data: Uint8Array.from(data) });
+    if (timing) Object.defineProperty(message, 'timeStamp', { value: timing.timeStamp });
+    this.dispatchEvent(message);
   }
 }
 

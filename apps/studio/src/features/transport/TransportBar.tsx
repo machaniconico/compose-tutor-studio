@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   textUndoProps,
   useStore,
@@ -16,14 +16,15 @@ import {
 } from '@cts/project-model';
 import { pushToast } from '../../state/tutorialBridge';
 import { formatPosition, keyboardSeekBeat } from '../timeline';
-import { initAudioBridge, restartAt } from '../../audio/playback';
+import { initAudioBridge, restartAt, startMidiRecording, stopMidiRecording } from '../../audio/playback';
+import { recordingPhase, subscribeRecordingPhase } from '../../audio/recorder';
 import { ProjectMenu } from '../projectMenu/ProjectMenu';
 import { ExportMenu } from '../export/ExportMenu';
 import { SupportMenu } from '../support/SupportMenu';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { ShortcutHelpDialog } from '../common/ShortcutHelpDialog';
 import { Dialog } from '../common/Dialog';
-import { setSwing, transposeSongToKey } from '../../state/editorActions';
+import { setSwing, transposeSongToKey, type RecordingSettings } from '../../state/editorActions';
 import { keyShiftSemitones } from '@cts/theory-engine';
 
 const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
@@ -225,6 +226,10 @@ export function TransportBar() {
   const transport = useStore((s) => s.transport);
   const save = useStore((s) => s.save);
   const isPlaying = transport.isPlaying;
+  const phase = useSyncExternalStore(subscribeRecordingPhase, recordingPhase);
+  const recordingActive = phase !== 'idle';
+  const [recordingMode, setRecordingMode] = useState<RecordingSettings['mode']>('overdub');
+  const [recordingGrid, setRecordingGrid] = useState<RecordingSettings['grid']>(0);
   const play = useStore((s) => s.play);
   const stop = useStore((s) => s.stop);
   const toggleLoop = useStore((s) => s.toggleLoop);
@@ -331,7 +336,7 @@ export function TransportBar() {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isTapActivation(event, tapButton.current)) return;
       if ((event.key === ' ' || event.code === 'Space') &&
-          event.target instanceof Element && event.target.closest('.live-input button')) return;
+          event.target instanceof Element && event.target.closest('.live-input button, .transport-recording button')) return;
       handleTransportShortcutKeyDown(event, {
         isPlaying,
         play,
@@ -421,6 +426,43 @@ export function TransportBar() {
         >
           メトロノーム
         </button>
+
+        <div className="transport-recording">
+          <button
+            type="button"
+            className={recordingActive ? 'is-active' : ''}
+            aria-pressed={recordingActive}
+            disabled={startScreenOpen}
+            onClick={() => recordingActive
+              ? stopMidiRecording()
+              : startMidiRecording({ mode: recordingMode, grid: recordingGrid })}
+          >
+            {recordingActive ? '■ 録音を止める' : '● 録音'}
+          </button>
+          <label>
+            録り方
+            <select value={recordingMode} disabled={recordingActive}
+              onChange={(event) => setRecordingMode(event.currentTarget.value === 'replace' ? 'replace' : 'overdub')}>
+              <option value="overdub">重ね録り</option>
+              <option value="replace">上書き</option>
+            </select>
+          </label>
+          <label>
+            音の位置を自動でそろえる
+            <select value={recordingGrid} disabled={recordingActive}
+              onChange={(event) => {
+                const grid = Number(event.currentTarget.value);
+                setRecordingGrid(grid === 0.25 || grid === 0.5 ? grid : 0);
+              }}>
+              <option value={0}>切</option>
+              <option value={0.5}>8 分音符</option>
+              <option value={0.25}>16 分音符</option>
+            </select>
+          </label>
+          {recordingActive && <span role="status">
+            {phase === 'count-in' ? 'カウントイン中。合図のあとに弾いてください。' : '録音中'}
+          </span>}
+        </div>
 
         <div className="position-display" aria-label="再生位置(小節.拍)" title="小節.拍">
           {formatPosition(transport.positionBeat, beatsPerBar)}

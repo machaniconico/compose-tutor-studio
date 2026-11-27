@@ -11,6 +11,7 @@ export const DIAGNOSTIC_KINDS = [
   'storage-recovery',
   'storage-save',
   'audio-playback',
+  'midi-recording',
   'template-load',
   'project-load',
   'import-midi',

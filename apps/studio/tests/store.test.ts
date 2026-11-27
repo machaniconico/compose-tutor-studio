@@ -1,13 +1,20 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetIdCounter,
+  beatTick,
   duplicateTrack,
   expandClip,
+  groovePrng,
+  PPQ,
   removeTrack,
+  soundingEvents,
+  songEndBeat,
+  swingBeat,
   validateProject,
   type Clip,
 } from '@cts/project-model';
 import { installLocalStorage, MemoryStorage } from './localStorageStub';
+import type { SchedulePayload } from '../src/audio/events';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { createSampleProject, SAMPLE_PROJECT_TITLE } from '../src/state/sampleProject';
 import { isInScale, PITCH_CLASS } from '../src/state/music';
@@ -1351,4 +1358,447 @@ describe('ゴーストノートと色分けの UI 状態(US-017)', () => {
     expect(useStore.getState().editor.noteColorMode).toBe('velocity');
     useStore.getState().setNoteColorMode('plain');
   });
+});
+
+describe('writing MIDI recordings', () => {
+  async function prepareTake(clipStartBeat = 4, lengthBeats = 4) {
+    const actions = await import('../src/state/editorActions');
+    const store = useStore.getState();
+    const trackId = store.project.tracks.find((track) => track.type === 'instrument')!.id;
+    const clip: Clip = {
+      id: 'destination', trackId, type: 'midi', startBeat: clipStartBeat, lengthBeats, loop: false,
+      notes: [{ id: 'existing', pitch: 55, startBeat: 3, durationBeats: 0.25, velocity: 90 }],
+    };
+    store.applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id === trackId ? { ...track, clips: [clip] } : track),
+    }));
+    store.selectTrack(trackId);
+    store.selectClip(clip.id);
+    return {
+      ...actions, trackId, clip,
+      target: actions.selectedRecordingTarget(0)!,
+      savedClip: () => useStore.getState().project.tracks.find((track) => track.id === trackId)!.clips[0]!,
+    };
+  }
+
+  const note = (midi: number, start: number, end: number) => [
+    { timeBeat: start, midi, velocity: 100, on: true },
+    { timeBeat: end, midi, velocity: 0, on: false },
+  ];
+  const toastMessages = async () => (await import('../src/state/tutorialBridge')).getBridgeSnapshot()
+    .toasts.map((toast) => toast.message);
+
+  it('wraps a press just before the loop end to the loop start and saves both notes in one undo step', async () => {
+    const { target, savedClip, writeRecordingTake } = await prepareTake(0, 16);
+    const before = useStore.getState();
+    expect(writeRecordingTake(target, [...note(60, 0.5, 0.9), ...note(62, 3.95, 4.3)], {
+      mode: 'replace', grid: 0.5, loopRange: { startBeat: 0, endBeat: 4 }, stopBeat: 4.4,
+    })).toBe(true);
+    expect(savedClip().notes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pitch: 60, startBeat: 0.5, durationBeats: 0.4 }),
+      expect.objectContaining({ pitch: 62, startBeat: 0, durationBeats: 0.35 }),
+    ]));
+    expect(savedClip().notes).toHaveLength(2);
+    expect(useStore.getState().past).toHaveLength(before.past.length + 1);
+  });
+
+  it('cuts notes at the clip end and reports starts outside either edge', async () => {
+    const { target, savedClip, writeRecordingTake } = await prepareTake();
+    expect(writeRecordingTake(target, [
+      ...note(58, 3.75, 4.25), ...note(60, 4.5, 4.9), ...note(62, 8 - 1 / PPQ, 8.2), ...note(64, 8, 8.5),
+    ], { mode: 'replace', grid: 0, stopBeat: 9 })).toBe(true);
+    expect(savedClip().notes).toEqual([
+      expect.objectContaining({ pitch: 60, startBeat: 0.5, durationBeats: 0.4 }),
+      expect.objectContaining({ pitch: 62, startBeat: 4 - 1 / PPQ, durationBeats: 1 / PPQ }),
+    ]);
+    expect(await toastMessages()).toContain('2 音はクリップの外だったので入れませんでした。');
+  });
+
+  it('keeps notes that swing delays on a muted track at their written place', async () => {
+    const { clip, trackId, savedClip, selectedRecordingTarget, writeRecordingTake } = await prepareTake();
+    useStore.getState().applyProjectChange((project) => ({
+      ...project, swing: 50, tracks: project.tracks.map((track) =>
+        track.id === trackId ? { ...track, mute: true } : track),
+    }));
+    // 7.75 is an off-beat 16th: swing 50 moves it to 7.875, still inside the clip (ends at 8).
+    expect(writeRecordingTake(selectedRecordingTarget(4)!, [
+      ...note(60, 4.25, 4.5), ...note(62, 4.5, 4.75), ...note(64, 7.75, 7.9),
+    ], { mode: 'replace', grid: 0, stopBeat: 8 })).toBe(true);
+    expect(savedClip().notes).toEqual([
+      expect.objectContaining({ pitch: 60, startBeat: 0.25 }),
+      expect.objectContaining({ pitch: 62, startBeat: 0.5 }),
+      expect.objectContaining({ pitch: 64, startBeat: 3.75 }),
+    ]);
+    const sounds = soundingEvents(useStore.getState().project, { clipId: clip.id, includeMuted: true }).events;
+    expect(sounds.map((sound) => sound.startBeat)).toEqual([4.375, 4.5, 7.875]);
+  });
+
+  it('keeps all 8 evenly played 16ths at swing 60 with 1/16 quantize', async () => {
+    const { clip, savedClip, target, writeRecordingTake } = await prepareTake();
+    useStore.getState().applyProjectChange((project) => ({ ...project, swing: 60 }));
+    const events = Array.from({ length: 8 }, (_, i) => note(60 + i, 4 + i * 0.25 + 0.02, 4 + i * 0.25 + 0.2)).flat();
+    expect(writeRecordingTake(target, events, { mode: 'replace', grid: 0.25, stopBeat: 6.5 })).toBe(true);
+    expect(savedClip().notes!.map((n) => n.startBeat)).toEqual([0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75]);
+    const sounds = soundingEvents(useStore.getState().project, { clipId: clip.id, includeMuted: true }).events;
+    expect(sounds.map((sound) => sound.startBeat)).toEqual([4, 4.4, 4.5, 4.9, 5, 5.4, 5.5, 5.9]);
+  });
+
+  it('puts a new clip on the bar line and quantizes on the song grid after pausing off the grid', async () => {
+    const { clip, selectedRecordingTarget, trackId, writeRecordingTake } = await prepareTake();
+    useStore.getState().selectClip(null);
+    const target = selectedRecordingTarget(1.1)!;
+    expect(target.clipStartBeat).toBe(0);
+    expect(writeRecordingTake(target, note(60, 2.02, 2.4), { mode: 'replace', grid: 0.25, stopBeat: 2.6 })).toBe(true);
+    const created = useStore.getState().project.tracks.find((track) => track.id === trackId)!.clips
+      .find((c) => c.id !== clip.id)!;
+    expect(created).toMatchObject({ startBeat: 0, notes: [{ pitch: 60, startBeat: 2 }] });
+    const sounds = soundingEvents(useStore.getState().project, { clipId: created.id, includeMuted: true }).events;
+    expect(sounds.map((sound) => sound.startBeat)).toEqual([2]);
+  });
+
+  it('snaps down to the last grid line inside a 1-beat clip instead of out of it while the loop is longer', async () => {
+    const { savedClip, target, writeRecordingTake } = await prepareTake(0, 1);
+    expect(writeRecordingTake(target, note(60, 0.9, 0.97), {
+      mode: 'replace', grid: 0.5, loopRange: { startBeat: 0, endBeat: 4 }, stopBeat: 1.5,
+    })).toBe(true);
+    expect(savedClip().notes).toEqual([expect.objectContaining({ pitch: 60, startBeat: 0.5 })]);
+  });
+
+  it('clamps a snap to the last grid line before the song end when both the clip and loop extend beyond it', async () => {
+    const { target, savedClip, writeRecordingTake } = await prepareTake(0, 8);
+    useStore.getState().applyProjectChange((project) => ({ ...project, lengthBars: 1 }));
+    expect(writeRecordingTake(target, note(60, 3.92, 4.4), {
+      mode: 'replace', grid: 0.25, loopRange: { startBeat: 0, endBeat: 8 }, stopBeat: 4.5,
+    })).toBe(true);
+    expect(savedClip().notes).toEqual([expect.objectContaining({ pitch: 60, startBeat: 3.75, durationBeats: 0.25 })]);
+  });
+
+  it.each([true, false])('shortens the saved note to fit after swing (loop: %s)', async (loop) => {
+    const { clip, target, savedClip, writeRecordingTake } = await prepareTake(0, loop ? 4 : 1.5);
+    useStore.getState().applyProjectChange((project) => ({ ...project, swing: 60 }));
+    expect(writeRecordingTake(target, note(60, 1.25, 1.5), {
+      mode: 'replace', grid: 0, loopRange: loop ? { startBeat: 0.5, endBeat: 1.5 } : undefined, stopBeat: 1.5,
+    })).toBe(true);
+    const written = savedClip().notes![0]!;
+    expect(written.startBeat).toBe(1.25);
+    expect(written.durationBeats).toBeCloseTo(0.1, 12);
+    const [sound] = soundingEvents(useStore.getState().project, { clipId: clip.id }).events;
+    if (sound?.kind !== 'note') throw new Error('Expected a sounding note');
+    expect(sound.startBeat).toBe(1.4);
+    expect(sound.startBeat + sound.durationBeats).toBe(1.5);
+  });
+
+  it('drops and counts a swung note with less than one tick left, keeping the rest of the take', async () => {
+    const { target, savedClip, writeRecordingTake } = await prepareTake(0, 1.4 + 0.75 / PPQ);
+    useStore.getState().applyProjectChange((project) => ({ ...project, swing: 60 }));
+    expect(writeRecordingTake(target, [...note(60, 1, 1.1), ...note(62, 1.25, 1.4)], {
+      mode: 'replace', grid: 0, stopBeat: 1.45,
+    })).toBe(true);
+    expect(savedClip().notes!.map((n) => n.pitch)).toEqual([60]);
+    expect(await toastMessages()).toContain('1 音はスウィングでクリップやループ、曲の終わりより後ろにずれて鳴らないので入れませんでした。');
+  });
+
+  it('cuts a held note at the exact clip end inside a loop even when that end falls between ticks', async () => {
+    const end = 1.5 + 0.25 / PPQ;
+    const { target, savedClip, writeRecordingTake } = await prepareTake(0, end);
+    expect(writeRecordingTake(target, note(60, 1, 1.75), {
+      mode: 'replace', grid: 0, loopRange: { startBeat: 0, endBeat: 2 }, stopBeat: 2,
+    })).toBe(true);
+    expect(1 + savedClip().notes![0]!.durationBeats).toBe(end);
+  });
+
+  it('drops and counts a note that swing pushes past the end of a 1-beat loop instead of storing it silent', async () => {
+    const { savedClip, target, writeRecordingTake } = await prepareTake(0, 4);
+    useStore.getState().applyProjectChange((project) => ({ ...project, swing: 60 }));
+    const loopRange = { startBeat: 0.3, endBeat: 1.3 };
+    // 1.27 snaps to 1.25, an off-beat 16th: swing 60 plays it at 1.40, past the loop end.
+    // 1.02 snaps to 1.00 and sounds in every pass.
+    expect(writeRecordingTake(target, [...note(60, 1.02, 1.1), ...note(62, 1.27, 1.29)], {
+      mode: 'replace', grid: 0.25, loopRange, stopBeat: 1.3,
+    })).toBe(true);
+    expect(savedClip().notes).toEqual([expect.objectContaining({ pitch: 60, startBeat: 1 })]);
+    expect(await toastMessages()).toContain('1 音はスウィングでクリップやループ、曲の終わりより後ろにずれて鳴らないので入れませんでした。');
+  });
+
+  it.each([{ startBeat: 0, endBeat: 1.001 }, { startBeat: 0, endBeat: 0.375 }])(
+    'refuses a take over a loop outside the recording domain: %j', async (loopRange) => {
+      const { target, writeRecordingTake } = await prepareTake(0, 4);
+      const before = useStore.getState();
+      expect(writeRecordingTake(target, note(60, 0.25, 0.3), { mode: 'replace', grid: 0.25, loopRange, stopBeat: 0.5 })).toBe(false);
+      expect(useStore.getState().project).toBe(before.project);
+      expect(await toastMessages()).toContain('ループしながら録音するには、ループを 1 拍以上の長さにして、始まりと終わりを目盛りにそろえてください。');
+    },
+  );
+
+  it('starts a new clip at the record position when a clip ends between the bar line and it', async () => {
+    const { selectedRecordingTarget } = await prepareTake(0, 1);
+    useStore.getState().selectClip(null);
+    expect(selectedRecordingTarget(2.5)!.clipStartBeat).toBe(2.5);
+  });
+
+  it('quantizes into an off-grid clip on the song grid, not on the clip start', async () => {
+    const { savedClip, target, writeRecordingTake } = await prepareTake(1.1, 4);
+    expect(writeRecordingTake(target, [...note(60, 2.02, 2.4), ...note(62, 1.12, 1.3)], {
+      mode: 'replace', grid: 0.25, stopBeat: 2.6,
+    })).toBe(true);
+    // 2.02 → song 2.00 (local 0.9). 1.12 rounds to 1.00, before the clip: first grid line inside is 1.25.
+    expect(savedClip().notes!.map((n) => [n.pitch, beatTick(1.1 + n.startBeat)])).toEqual([
+      [62, beatTick(1.25)], [60, beatTick(2)],
+    ]);
+  });
+
+  it('keeps a playable note in every seeded take and writes only notes that sound (swung) as written', async () => {
+    const random = groovePrng(0x250eed);
+    for (let sequence = 0; sequence < 100; sequence++) {
+      const { clip, savedClip, selectedRecordingTarget, writeRecordingTake } = await prepareTake(1, 4);
+      const loopRange = sequence % 2 ? { startBeat: 1.125, endBeat: 4.875 } : undefined;
+      const grid = ([0, 0.25, 0.5] as const)[sequence % 3]!;
+      useStore.getState().applyProjectChange((project) => ({
+        ...project, swing: sequence % 4 >= 2 ? 50 : 0,
+        tracks: project.tracks.map((track) => track.id === clip.trackId ? { ...track, mute: sequence % 5 === 0 } : track),
+      }));
+      const events = [
+        ...note(60, loopRange?.startBeat ?? 1.5, 1.75),
+        ...Array.from({ length: 12 }, (_, i) => {
+          const start = random() * 10;
+          return note(61 + i, start, start + random());
+        }).flat(),
+      ];
+      expect(writeRecordingTake(selectedRecordingTarget(1)!, events, { mode: 'replace', grid, loopRange, stopBeat: 11 }),
+        `sequence ${sequence}`).toBe(true);
+      const notes = savedClip().notes!;
+      expect(notes.some(({ pitch }) => pitch === 60)).toBe(true);
+      const sounds = soundingEvents(useStore.getState().project, { clipId: clip.id, includeMuted: true }).events;
+      expect(sounds).toHaveLength(notes.length);
+      const swing = useStore.getState().project.swing ?? 0;
+      for (const sound of sounds) {
+        expect(sound.kind).toBe('note');
+        if (sound.kind !== 'note') continue;
+        const written = notes[sound.sourceIndex]!;
+        const swung = swingBeat(clip.startBeat + written.startBeat, swing);
+        expect(beatTick(sound.startBeat)).toBe(beatTick(swung));
+        expect(beatTick(sound.startBeat + sound.durationBeats))
+          .toBe(Math.min(beatTick(swung + written.durationBeats), beatTick(clip.startBeat + clip.lengthBeats)));
+        expect(written.durationBeats).toBeGreaterThanOrEqual(1 / PPQ);
+        expect(sound.pitch).toBe(written.pitch);
+        expect(sound.velocity).toBe(written.velocity);
+      }
+    }
+  });
+
+  it('keeps 240 seeded recording attempts tick-aligned, audible in each pass and undoable in one step', async () => {
+    const { captureLiveNote, initAudioBridge, recordingTrackId, startMidiRecording, stopMidiRecording } =
+      await import('../src/audio/playback');
+    const { buildScheduleEvents } = await import('../src/audio/events');
+    const { nextEventsInWindow } = await import('../src/audio/scheduler');
+    const random = groovePrng(0x25f00d);
+    const tick = (beat: number) => beatTick(beat) / PPQ;
+    let now = 50_000;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const teardown = initAudioBridge();
+    useStore.getState().setStartScreenOpen(false);
+    try {
+      for (let sequence = 0; sequence < 240; sequence++) {
+        const newClip = sequence % 2 === 0;
+        const offTick = !newClip && sequence % 5 === 0;
+        const looping = Math.floor(sequence / 6) % 2 === 1;
+        const shortSong = looping && Math.floor(sequence / 12) % 2 === 0;
+        const recordStart = tick(shortSong ? 13 + random() : random() * 16);
+        const clipLength = tick(shortSong ? 3.5 + random() * 0.5 : 1 + random() * 3);
+        const { clip, trackId } = await prepareTake(
+          newClip ? 40 : recordStart + (offTick ? 0.25 / PPQ : 0), newClip ? 4 : clipLength,
+        );
+        const grid = ([0, 0.5, 0.25] as const)[Math.floor(sequence / 2) % 3]!;
+        const swing = 50 + Math.floor(random() * 11);
+        const loopStart = tick(recordStart + 0.01 + random() * 0.4);
+        const loopRange = looping
+          ? { startBeat: loopStart, endBeat: shortSong ? 16.75 : tick(loopStart + 1 + random() * 2) }
+          : undefined;
+        const store = useStore.getState();
+        store.applyProjectChange((project) => ({ ...project, lengthBars: shortSong ? 4 : 16, swing }));
+        if (loopRange) store.loopRangeOn(loopRange);
+        else if (store.transport.loopEnabled) store.toggleLoop();
+        if (newClip) store.selectClip(null);
+        store.setPosition(recordStart);
+        useStore.setState({ past: [], future: [] }); // stay below the history cap
+        const before = useStore.getState();
+        const label = `sequence ${sequence}, new=${newClip}, grid=${grid}, swing=${swing}, loop=${JSON.stringify(loopRange)}`;
+        now = 50_000;
+        startMidiRecording({ mode: 'replace', grid });
+        if (offTick) {
+          expect(recordingTrackId(), label).toBeUndefined();
+          expect(useStore.getState().transport.isPlaying, label).toBe(false);
+          expect(useStore.getState().project, label).toBe(before.project);
+          expect(await toastMessages()).toContain('録音するには、クリップの始まりを目盛りにそろえてください。');
+          continue;
+        }
+        expect(recordingTrackId(), label).toBe(trackId);
+        await Promise.resolve(); // install the count-in clock after audio initialization
+        const start = loopRange?.startBeat ?? recordStart;
+        const eventTime = (beat: number) => 52_000 + (beat - start) * 500;
+        // An even 8th safely inside the clip and loop is immune to swing.
+        const anchor = Math.ceil(start / 0.5) * 0.5;
+        const events = [
+          ...note(59, start - 0.04, start + 0.1),
+          ...note(60, anchor, anchor + 0.2),
+          ...Array.from({ length: 12 }, (_, i) => {
+            const played = recordStart - 1 + random() * 9;
+            return note(61 + i, played, played + random());
+          }).flat(),
+        ].map((e) => ({
+          ...e, timeStamp: eventTime(e.timeBeat), delivered: eventTime(e.timeBeat) + 50 + random() * 150,
+        })).sort((a, b) => a.delivered - b.delivered);
+        for (const e of events) {
+          now = e.delivered;
+          captureLiveNote(e.midi, e.on, e.velocity, e.timeStamp);
+        }
+        now = eventTime(recordStart + 9.5);
+        stopMidiRecording();
+
+        const after = useStore.getState();
+        expect(after.past, label).toHaveLength(before.past.length + 1);
+        const saved = after.project.tracks.find((track) => track.id === trackId)!.clips
+          .find((c) => newClip ? c.id !== clip.id : c.id === clip.id)!;
+        const notes = saved.notes!;
+        expect(notes.some(({ pitch }) => pitch === 60), label).toBe(true);
+        expect(notes.some(({ pitch }) => pitch === 59), label).toBe(false);
+        if (newClip) expect(beatTick(saved.startBeat) % beatTick(4), label).toBe(0);
+        if (grid) {
+          for (const written of notes) {
+            expect(beatTick(saved.startBeat + written.startBeat) % beatTick(grid), `${label}, note ${written.pitch}`).toBe(0);
+          }
+        }
+        const songEnd = songEndBeat(after.project);
+        const effectiveEnd = Math.min(saved.startBeat + saved.lengthBeats, loopRange?.endBeat ?? Infinity, songEnd);
+        const period = loopRange ? loopRange.endBeat - loopRange.startBeat : 0;
+        const pitches = new Set(notes.map((n) => n.pitch));
+        const scheduled = buildScheduleEvents(after.project, undefined, loopRange)
+          .map(({ beat, payload }) => ({ beat, payload: payload as SchedulePayload }))
+          .filter(({ payload }) => payload.kind === 'note' && payload.trackId === trackId && pitches.has(payload.pitch));
+        expect(scheduled, label).toHaveLength(notes.length);
+        for (const { beat, payload } of scheduled) {
+          if (payload.kind !== 'note') throw new Error(label);
+          const written = notes.find((n) => n.pitch === payload.pitch)!;
+          expect(beat, label).toBe(swingBeat(saved.startBeat + written.startBeat, swing));
+          expect(beat + written.durationBeats, label).toBeLessThanOrEqual(effectiveEnd + 1e-12);
+          expect(payload.durationBeats, label).toBeGreaterThanOrEqual(1 / PPQ - 1e-12);
+        }
+        for (let pass = 0; pass < (loopRange ? 3 : 1); pass++) {
+          const offset = pass * period;
+          const passStart = (loopRange?.startBeat ?? 0) + offset;
+          const passEnd = (loopRange?.endBeat ?? songEnd) + offset;
+          // At 60 BPM scheduler time is the unwrapped beat.
+          const due = nextEventsInWindow(scheduled, passStart, passEnd, 60, 0, 0, loopRange ?? null);
+          expect(due, label).toHaveLength(notes.length);
+          for (const event of scheduled) {
+            const sound = due.find((entry) => entry.payload === event.payload);
+            if (!sound || event.payload.kind !== 'note') throw new Error(label);
+            expect(sound.time, label).toBeGreaterThanOrEqual(passStart);
+            expect(sound.time + event.payload.durationBeats, label).toBeLessThanOrEqual(effectiveEnd + offset + 1e-12);
+          }
+        }
+        useStore.getState().undo();
+        expect(useStore.getState().project, label).toBe(before.project);
+      }
+    } finally {
+      teardown();
+      clock.mockRestore();
+    }
+  });
+
+  it.each(['replace', 'overdub'] as const)('writes %s in clip-relative beats and undoes the whole take once', async (mode) => {
+    const { clip, target, savedClip, writeRecordingTake } = await prepareTake();
+    const before = useStore.getState();
+    expect(writeRecordingTake(target, [
+      { timeBeat: 4.31, midi: 67, velocity: 103, on: true },
+      { timeBeat: 4.81, midi: 67, velocity: 0, on: false },
+    ], { mode, grid: 0.25, stopBeat: 5 })).toBe(true);
+    expect(useStore.getState().past).toHaveLength(before.past.length + 1);
+    const notes = savedClip().notes!;
+    expect(notes.some((note) => note.id === 'existing')).toBe(mode === 'overdub');
+    expect(notes.at(-1)).toMatchObject({ pitch: 67, startBeat: 0.25, durationBeats: 0.5, velocity: 103 });
+    useStore.getState().undo();
+    expect(savedClip()).toEqual(clip);
+  });
+
+  it('creates a clip on the selected instrument when no clip is selected', async () => {
+    const { selectedRecordingTarget, trackId, writeRecordingTake } = await prepareTake();
+    const store = useStore.getState();
+    store.selectClip(null);
+    const target = selectedRecordingTarget(8)!;
+    const before = useStore.getState();
+    expect(writeRecordingTake(target, [
+      { timeBeat: 8.25, midi: 60, velocity: 100, on: true },
+    ], { mode: 'overdub', grid: 0, stopBeat: 9 })).toBe(true);
+    const after = useStore.getState();
+    const clips = after.project.tracks.find((track) => track.id === trackId)!.clips;
+    expect(clips).toHaveLength(2);
+    expect(clips[1]).toMatchObject({ startBeat: 8, lengthBeats: 1, notes: [{ pitch: 60, startBeat: 0.25, durationBeats: 0.75 }] });
+    expect(after.editor.selectedClipId).toBe(clips[1]!.id);
+    expect(after.past).toHaveLength(before.past.length + 1);
+  });
+
+  it('keeps an open-ended new clip inside the gap when recording continues past the next clip', async () => {
+    const { selectedRecordingTarget, trackId, writeRecordingTake } = await prepareTake();
+    useStore.getState().selectClip(null);
+    expect(writeRecordingTake(selectedRecordingTarget(2)!, [
+      ...note(60, 3.75, 4.25), ...note(62, 4.5, 5),
+    ], { mode: 'overdub', grid: 0, stopBeat: 6 })).toBe(true);
+    const clips = useStore.getState().project.tracks.find((track) => track.id === trackId)!.clips;
+    expect(clips).toHaveLength(2);
+    // Started at beat 2: the new clip snaps down to the bar line at 0 and fills the gap up to 4.
+    expect(clips[1]).toMatchObject({
+      startBeat: 0, lengthBeats: 4, notes: [{ pitch: 60, startBeat: 3.75, durationBeats: 0.25 }],
+    });
+    expect(await toastMessages()).toContain('1 音はクリップの外だったので入れませんでした。');
+  });
+
+  it('saves the notes that fit when the song has room for only part of the take', async () => {
+    const { clip, trackId, savedClip, selectedRecordingTarget, writeRecordingTake } = await prepareTake();
+    const period = 1 / 64;
+    const loopClip: Clip = {
+      ...clip, id: 'sound-budget-loop', startBeat: 8, lengthBeats: 11_111 * period,
+      loop: true, contentLengthBeats: period,
+      notes: Array.from({ length: 9 }, (_, index) => ({
+        id: `sound-budget-${index}`, pitch: 70, startBeat: 0, durationBeats: period, velocity: 100,
+      })),
+    };
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project, lengthBars: 48,
+      tracks: project.tracks.map((track) => ({
+        ...track, clips: track.id === trackId ? [clip, loopClip] : [],
+      })),
+    }))).toBe(true);
+    expect(writeRecordingTake(selectedRecordingTarget(4)!, [...note(60, 4.5, 5), ...note(62, 5.5, 6)], {
+      mode: 'replace', grid: 0, stopBeat: 6.5,
+    })).toBe(true);
+    expect(savedClip().notes).toEqual([expect.objectContaining({ pitch: 60 })]);
+    expect(await toastMessages()).toContain('1 音は曲に入れられる音の上限に達したので入れませんでした。');
+  });
+
+  it.each(['linked', 'looping'] as const)(
+    'leaves the project and undo history untouched when the take is %s',
+    async (condition) => {
+      const { clip, trackId, target, writeRecordingTake } = await prepareTake();
+      const store = useStore.getState();
+      store.applyProjectChange((project) => ({
+        ...project,
+        tracks: project.tracks.map((track) => track.id !== trackId ? track : {
+          ...track,
+          clips: [
+            { ...clip, loop: condition === 'looping' },
+            ...(condition === 'linked' ? [{ ...clip, id: 'linked-recording', notes: [], startBeat: 8, aliasOf: clip.id }] : []),
+          ],
+        }),
+      }));
+      const before = useStore.getState();
+      const timeBeat = 4.25;
+      expect(writeRecordingTake(target, [{ timeBeat, midi: 60, velocity: 100, on: true }], {
+        mode: 'replace', grid: 0, stopBeat: timeBeat + 0.5,
+      })).toBe(false);
+      expect(useStore.getState().project).toBe(before.project);
+      expect(useStore.getState().past).toBe(before.past);
+    },
+  );
 });

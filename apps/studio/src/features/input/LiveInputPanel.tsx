@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { nearestScalePitch, transposeByDegree } from '@cts/theory-engine';
 import { getAudioEngine } from '../../audio/engine';
 import { allNotesOff, noteOff, noteOn } from '../../audio/livePreview';
+import { captureLiveNote, recordingTrackId, stopMidiRecording } from '../../audio/playback';
+import { recordingPhase, subscribeRecordingPhase } from '../../audio/recorder';
 import { listenForMidiInput, requestWebMidi, supportsWebMidi } from '../../platform/webMidi';
 import { isEditableShortcutTarget } from '../../state/keymap';
 import { useStore } from '../../state/store';
@@ -17,7 +19,7 @@ type MidiSession =
   | { status: 'unsupported' | 'idle' | 'pending' | 'failed' }
   | { status: 'ready'; access: MIDIAccess };
 
-function startNote(held: Map<string, number>, key: string, pitch: number, velocity?: number) {
+function startNote(held: Map<string, number>, key: string, pitch: number, timeStamp: number, velocity?: number) {
   if (held.has(key)) return;
   const { editor, project } = useStore.getState();
   if (editor.liveInputScaleLock) {
@@ -36,17 +38,23 @@ function startNote(held: Map<string, number>, key: string, pitch: number, veloci
   const alreadySounding = [...held.values()].includes(pitch);
   held.set(key, pitch);
   if (alreadySounding) return;
-  const instrument = project.tracks.find((track) => track.id === editor.selectedTrackId)?.instrument;
+  // During a take, monitor with the recording track's instrument, not the selection.
+  const monitorTrackId = recordingTrackId() ?? editor.selectedTrackId;
+  const instrument = project.tracks.find((track) => track.id === monitorTrackId)?.instrument;
   const played = velocity === undefined ? noteOn(pitch, instrument) : noteOn(pitch, instrument, velocity);
+  captureLiveNote(pitch, true, velocity, timeStamp);
   void played.catch(() => pushToast(AUDIO_ERROR, 'error'));
 }
 
-function releaseNote(held: Map<string, number>, key: string) {
+function releaseNote(held: Map<string, number>, key: string, timeStamp?: number) {
   const pitch = held.get(key);
   if (pitch === undefined) return;
   held.delete(key);
   // Different keys, including MIDI and PC keys, can share one preview voice.
-  if (![...held.values()].includes(pitch)) noteOff(pitch);
+  if (![...held.values()].includes(pitch)) {
+    captureLiveNote(pitch, false, undefined, timeStamp);
+    noteOff(pitch);
+  }
 }
 
 export function LiveInputPanel() {
@@ -83,6 +91,7 @@ export function LiveInputPanel() {
     const held = heldNotes.current;
 
     function stopPlaying() {
+      for (const pitch of new Set(held.values())) captureLiveNote(pitch, false);
       held.clear();
       allNotesOff();
     }
@@ -99,13 +108,13 @@ export function LiveInputPanel() {
         setLiveInputOctave(input.octave);
         return;
       }
-      startNote(held, event.code, input.pitch);
+      startNote(held, event.code, input.pitch, event.timeStamp);
     }
 
     function onKeyUp(event: KeyboardEvent) {
       // keyup は repeat しない。IME が途中で入って 'Process' / isComposing の keyup になっても、
       // 押していたキーの音は必ず止める(鳴りっぱなし防止)。
-      releaseNote(held, event.code);
+      releaseNote(held, event.code, event.timeStamp);
     }
 
     function onBlur() {
@@ -128,6 +137,9 @@ export function LiveInputPanel() {
     const unsubscribe = useStore.subscribe((state, previous) => {
       if (previous.editor.liveInputEnabled && !state.editor.liveInputEnabled) stopPlaying();
     });
+    const unsubscribeRecording = subscribeRecordingPhase(() => {
+      if (recordingPhase() === 'idle') stopPlaying();
+    });
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
@@ -135,6 +147,8 @@ export function LiveInputPanel() {
     document.addEventListener('visibilitychange', onVisibilityChange);
     document.addEventListener('focusin', onFocusIn, true);
     return () => {
+      stopMidiRecording();
+      unsubscribeRecording();
       unsubscribe();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
@@ -159,16 +173,16 @@ export function LiveInputPanel() {
     const unlisten = listenForMidiInput(midiAccess, midiChannel, {
       onInputsChanged: setMidiInputs,
       onDisconnect: stopMidi,
-      onNote(deviceId, note) {
+      onNote(deviceId, note, timeStamp) {
         const key = `midi:${deviceId}:${note.pitch}`;
         if (note.type === 'noteOff') {
-          releaseNote(held, key);
+          releaseNote(held, key, timeStamp);
           return;
         }
         const { editor, startScreenOpen } = useStore.getState();
         if (!editor.liveInputEnabled || !midiFocused.current || document.hidden ||
             startScreenOpen || isAnyDialogOpen()) return;
-        startNote(held, key, note.pitch, note.velocity);
+        startNote(held, key, note.pitch, timeStamp, note.velocity);
       },
     });
     return () => {

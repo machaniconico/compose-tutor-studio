@@ -33,11 +33,18 @@ import {
   drumStepsPerBar,
   duplicateClip,
   findProjectSoundingLimitProblem,
+  eventsToNotes,
+  fitRecordingNote,
+  isWholeRecordingTick,
+  type RecordingEvent,
+  type RecordingRange,
+  trackIdAllocator,
   humanize,
   type HumanizeOptions,
   MAX_CLIP_END_BEATS,
   MAX_SOUNDING_EVENTS,
   MAX_SWING_PERCENT,
+  MIN_LOOP_PERIOD_BEATS,
   moveClip,
   removeClip,
   quantizeClipNotes,
@@ -105,10 +112,11 @@ import {
   transposeKeyName,
 } from '@cts/theory-engine';
 import { roleForTrackName } from '@cts/tutorial-engine';
-import { fitClipToNotes, useStore, type ClipboardNote, type NoteEditOptions } from './store';
+import { finishRecordingForProjectChange, fitClipToNotes, useStore, type ClipboardNote, type NoteEditOptions } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { upsertEffect, type SupportedEffectType } from '../audio/effects';
+import { loopPlacement } from '../audio/scheduler';
 import { findChannelPreset } from '../features/mixer/channelPresets';
 import { withSongLength } from '../features/arranger/arrangeMath';
 import { addGridSteps } from '../features/pianoRoll/gridMath';
@@ -444,6 +452,207 @@ export function insertProgressionAtBeat(templateId: string, startBeat: number): 
 // ---------------------------------------------------------------------------
 // Note edits (piano roll).
 // ---------------------------------------------------------------------------
+
+export type RecordingTarget = { trackId: string; clipId?: string; clipStartBeat: number };
+export type RecordingSettings = { mode: 'replace' | 'overdub'; grid: 0 | 0.5 | 0.25 };
+
+function recordingTargetProblem(project: Project, track?: Track, clip?: Clip): string | undefined {
+  if (track?.type !== 'instrument') return '録音するには、楽器トラックを選んでください。';
+  if (clip && !isWholeRecordingTick(clip.startBeat)) {
+    return '録音するには、クリップの始まりを目盛りにそろえてください。';
+  }
+  if (clip?.loop) return '繰り返し設定のあるクリップには録音できません。クリップの繰り返しをオフにしてください。';
+  if (clip && (clip.aliasOf !== undefined || project.tracks.some((t) => t.clips.some((c) => c.aliasOf === clip.id)))) {
+    return 'リンクしたクリップには録音できません。独立したクリップを選んでください。';
+  }
+}
+
+export const RECORDING_LOOP_DOMAIN_MESSAGE =
+  'ループしながら録音するには、ループを 1 拍以上の長さにして、始まりと終わりを目盛りにそろえてください。';
+
+/**
+ * Loop recording needs a loop of at least one beat whose ends are whole ticks,
+ * so the folded take and loop playback share one timeline and every grid
+ * position can sound in each pass.
+ */
+export function recordingLoopProblem(loop: RecordingRange): string | undefined {
+  if (!isWholeRecordingTick(loop.startBeat) || !isWholeRecordingTick(loop.endBeat) || loop.startBeat < 0 ||
+      beatTick(loop.endBeat) - beatTick(loop.startBeat) < PPQ) {
+    return RECORDING_LOOP_DOMAIN_MESSAGE;
+  }
+}
+
+const NEW_RECORDING_CLIP_OVERLAP = 'ほかのクリップと重なる場所には録音できません。録音先のクリップを選ぶか、空いている場所から始めてください。';
+const MIN_RECORDING_CLIP_TICKS = Math.ceil(MIN_LOOP_PERIOD_BEATS * PPQ);
+
+/** A loop needs room through its effective end. An open-ended take can fill the gap up to the next clip. */
+function newRecordingClipEnd(project: Project, track: Track, start: number, loopEnd?: number): number | undefined {
+  const minimumEnd = start + MIN_RECORDING_CLIP_TICKS;
+  const requiredEnd = loopEnd ?? minimumEnd;
+  let end = Math.min(beatTick(songEndBeat(project)), beatTick(MAX_CLIP_END_BEATS));
+  for (const clip of track.clips) {
+    const span = clipTickSpan(clip.startBeat, clip.lengthBeats);
+    if (tickSpansOverlap([start, requiredEnd], span)) return;
+    if (span[0] >= start) end = Math.min(end, span[0]);
+  }
+  if (!Number.isSafeInteger(start) || start < 0 || requiredEnd < minimumEnd || requiredEnd > end) return;
+  return loopEnd ?? end;
+}
+
+/** Keep the destination fixed even if the editor selection changes during a take. */
+export function selectedRecordingTarget(newClipStart: number, loop?: RecordingRange): RecordingTarget | undefined {
+  const { project, editor } = useStore.getState();
+  const track = project.tracks.find((t) => t.id === editor.selectedTrackId);
+  const clip = track?.clips.find((c) => c.id === editor.selectedClipId && c.type === 'midi');
+  const problem = recordingTargetProblem(project, track, clip);
+  if (problem) pushToast(problem, 'error');
+  if (problem || !track) return;
+  const loopEnd = loop && beatTick(Math.min(loop.endBeat, songEndBeat(project)));
+  let start = beatTick(newClipStart);
+  if (!clip && newRecordingClipEnd(project, track, start, loopEnd) === undefined) {
+    pushToast(NEW_RECORDING_CLIP_OVERLAP, 'error');
+    return;
+  }
+  // A new clip starts on the bar line at or before the record position, so
+  // its local grid matches the song grid, unless another clip lies between
+  // that bar line and the record position.
+  const barTicks = beatTick(beatsPerBarOf(project.timeSignature));
+  const barStart = Math.floor(start / barTicks) * barTicks;
+  if (!clip && newRecordingClipEnd(project, track, barStart, loopEnd ?? start + MIN_RECORDING_CLIP_TICKS) !== undefined) {
+    start = barStart;
+  }
+  return { trackId: track.id, clipId: clip?.id, clipStartBeat: clip?.startBeat ?? start / PPQ };
+}
+
+/** Save the notes that fit and sound as written in one undoable project change. */
+export function writeRecordingTake(
+  target: RecordingTarget,
+  events: readonly RecordingEvent[],
+  options: RecordingSettings & { loopRange?: RecordingRange; stopBeat: number },
+): boolean {
+  const store = useStore.getState();
+  const { project } = store;
+  const fail = (message: string): false => {
+    pushToast(message, 'error');
+    return false;
+  };
+  const track = project.tracks.find((t) => t.id === target.trackId);
+  const clip = track?.clips.find((c) => c.id === target.clipId && c.type === 'midi');
+  if (target.clipId && (!clip || clip.startBeat !== target.clipStartBeat)) {
+    return fail('録音先のクリップが移動または削除されました。録音先を選び直してください。');
+  }
+  const problem = recordingTargetProblem(project, track, clip);
+  if (problem || !track) return fail(problem ?? '録音先のトラックがありません。');
+
+  const clipStart = beatTick(target.clipStartBeat);
+  const loop = options.loopRange;
+  const loopProblem = loop && recordingLoopProblem(loop);
+  if (loopProblem) return fail(loopProblem);
+  if (loop && loop.startBeat < target.clipStartBeat) {
+    return fail('ループの始まりが録音先のクリップより前です。ループ範囲を選び直してください。');
+  }
+
+  const songEnd = songEndBeat(project);
+  let clipEndBeat = clip ? clip.startBeat + clip.lengthBeats : 0;
+  if (!clip) {
+    const loopEnd = loop && beatTick(Math.min(loop.endBeat, songEnd));
+    const availableEnd = newRecordingClipEnd(project, track, clipStart, loopEnd);
+    if (availableEnd === undefined) return fail(NEW_RECORDING_CLIP_OVERLAP);
+    const clipEnd = loopEnd ?? Math.min(availableEnd, Math.max(clipStart + MIN_RECORDING_CLIP_TICKS, beatTick(options.stopBeat)));
+    clipEndBeat = clipEnd / PPQ;
+  }
+  const effectiveEnd = Math.min(clipEndBeat, loop?.endBeat ?? Infinity, songEnd);
+  const endTick = beatTick(effectiveEnd);
+  let captured: NoteEvent[];
+  try {
+    // Keep absolute starts so presses outside the clip can be counted too.
+    captured = eventsToNotes(events, {
+      clipStartBeat: 0, loopRange: loop, loopGrid: options.grid, stopBeat: options.stopBeat, snapEndBeat: effectiveEnd,
+    });
+  } catch (error) {
+    if (error instanceof RangeError) return fail(error.message);
+    throw error;
+  }
+  if (captured.length === 0) return false;
+
+  const grid = beatTick(options.grid);
+  const allocateId = trackIdAllocator(project);
+  const clipId = clip?.id ?? allocateId('clip');
+  // Grid lines are song-absolute (multiples of the grid from song beat 0).
+  // Loop takes were snapped by eventsToNotes inside the loop and clip.
+  const firstLine = grid ? Math.ceil(clipStart / grid) * grid : 0;
+  const lastLine = grid ? Math.floor((endTick - 1) / grid) * grid : 0;
+  const notes = captured.flatMap((note) => {
+    const played = beatTick(note.startBeat);
+    if (played < clipStart || played >= endTick) return [];
+    // Snap to the nearest song grid line inside the clip. When that line is
+    // at or past the clip end, use the last line inside, never one outside;
+    // keep the played tick if no line lies inside.
+    const absolute = !loop && grid && firstLine <= lastLine
+      ? Math.min(Math.max(Math.round(played / grid) * grid, firstLine), lastLine)
+      : played;
+    return [{ ...note, id: allocateId('note'), startBeat: (absolute - clipStart) / PPQ }];
+  });
+  const outside = captured.length - notes.length;
+  if (outside) pushToast(`${outside} 音はクリップの外だったので入れませんでした。`, 'info');
+  if (notes.length === 0) return false;
+
+  const existingNotes = options.mode === 'overdub' ? clip?.notes ?? [] : [];
+  const destination = clip ?? {
+    id: clipId, trackId: track.id, type: 'midi' as const, loop: false,
+    startBeat: target.clipStartBeat, lengthBeats: (beatTick(clipEndBeat) - clipStart) / PPQ,
+  };
+  const withNotes = (recorded: readonly NoteEvent[]): Project => {
+    const nextClip = { ...destination, notes: [...existingNotes, ...recorded] };
+    return clip
+      ? mapClip(project, clipId, () => nextClip)
+      : { ...project, tracks: project.tracks.map((t) => t === track ? { ...t, clips: [...t.clips, nextClip] } : t) };
+  };
+
+  const fitted = notes.flatMap((note) => fitRecordingNote(destination, note, project.swing, effectiveEnd) ?? []);
+  const all = withNotes(fitted);
+  const matches = new Set<number>();
+  for (const sound of soundingEvents(all, { clipId, includeMuted: true }).events) {
+    if (sound.kind !== 'note') continue;
+    const index = sound.sourceIndex - existingNotes.length;
+    const note = fitted[index];
+    if (!note) continue;
+    const expected = placedNoteTicks(destination, note, { swing: all.swing, songEnd });
+    if (beatTick(sound.startBeat) === expected.startTick &&
+        beatTick(sound.startBeat + sound.durationBeats) === expected.endTick &&
+        sound.pitch === note.pitch && sound.velocity === note.velocity &&
+        (!loop || loopPlacement(sound.startBeat, loop) === 'everyPass')) {
+      matches.add(index);
+    }
+  }
+  const playable = fitted.filter((_, index) => matches.has(index));
+  const changedByPlayback = notes.length - playable.length;
+  if (changedByPlayback) {
+    pushToast(`${changedByPlayback} 音はスウィングでクリップやループ、曲の終わりより後ろにずれて鳴らないので入れませんでした。`, 'info');
+  }
+  if (playable.length === 0) return false;
+
+  let candidate = withNotes(playable);
+  if (findProjectSoundingLimitProblem(candidate)) {
+    // A non-repeating, unlinked clip adds at most one sound per stored note.
+    // Fit the largest prefix that leaves the project within its limits.
+    let fits = 0;
+    let exceeds = playable.length;
+    while (exceeds - fits > 1) {
+      const count = Math.floor((fits + exceeds) / 2);
+      if (findProjectSoundingLimitProblem(withNotes(playable.slice(0, count)))) exceeds = count;
+      else fits = count;
+    }
+    pushToast(`${playable.length - fits} 音は曲に入れられる音の上限に達したので入れませんでした。`, 'info');
+    if (fits === 0) return false;
+    candidate = withNotes(playable.slice(0, fits));
+  }
+
+  store.commitTransaction();
+  if (!store.applyProjectChange(() => candidate)) return false;
+  if (!clip && useStore.getState().editor.selectedTrackId === track.id) store.selectClip(clipId);
+  return true;
+}
 
 /**
  * Quantize the start of the given notes (within a clip) to a grid snap, moving
@@ -1887,6 +2096,7 @@ export function importMidiTracks(parsed: ParsedMidi, confirmed = false): MidiImp
     }
   }
 
+  finishRecordingForProjectChange();
   let firstTrackId: string | null = null;
   let firstClipId: string | null = null;
   let warnings: string[] = [];

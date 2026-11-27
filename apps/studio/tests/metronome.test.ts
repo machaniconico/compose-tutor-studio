@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { metronomeBeatEvents } from '../src/audio/metronome';
+import { countInBeatEvents, metronomeBeatEvents } from '../src/audio/metronome';
 
 describe('metronomeBeatEvents', () => {
   it('emits one click per whole beat in [from, to)', () => {
@@ -34,4 +34,15 @@ describe('metronomeBeatEvents', () => {
   it('returns nothing for an empty range', () => {
     expect(metronomeBeatEvents(4, 4, 4)).toEqual([]);
   });
+});
+
+it('counts one 6/8 bar before recording with the first eighth note accented', () => {
+  expect(countInBeatEvents([6, 8], -3, 1)).toEqual([
+    { beat: -3, accent: true },
+    { beat: -2.5, accent: false },
+    { beat: -2, accent: false },
+    { beat: -1.5, accent: false },
+    { beat: -1, accent: false },
+    { beat: -0.5, accent: false },
+  ]);
 });

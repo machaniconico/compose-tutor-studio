@@ -300,7 +300,7 @@ function SavedProjectList({ onDone }: { onDone: () => void }) {
 
   const remove = (id: string, title: string) => {
     if (!window.confirm(`「${title}」を削除しますか？この操作は元に戻せません。`)) return;
-    deleteProject(id);
+    if (!deleteProject(id)) return;
     setVersion((v) => v + 1);
     pushToast('プロジェクトを削除しました。', 'info');
   };

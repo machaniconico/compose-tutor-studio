@@ -34,6 +34,17 @@ export function metronomeBeatEvents(
   return clicks;
 }
 
+/** One bar of clicks, counted in the meter's denominator notes. */
+export function countInBeatEvents(
+  [count, denominator]: [number, number],
+  fromBeat: number,
+  toBeat: number,
+): MetronomeClick[] {
+  const step = 4 / denominator;
+  return metronomeBeatEvents(Math.max(-count, fromBeat / step), Math.min(0, toBeat / step), count)
+    .map((click) => ({ ...click, beat: click.beat * step }));
+}
+
 /**
  * Schedule one metronome click at an absolute audio time. The returned
  * function silences the click if it has not sounded yet (playback restart).

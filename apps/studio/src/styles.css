@@ -222,6 +222,17 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
+.transport-recording,
+.transport-recording label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.transport-recording {
+  flex-wrap: wrap;
+}
+
 .transport-bar__title {
   background: transparent;
   border: 1px solid transparent;

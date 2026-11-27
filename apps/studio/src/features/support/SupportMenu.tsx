@@ -102,6 +102,8 @@ export function diagnosticKindLabel(kind: DiagnosticKind): string {
       return '保存復元';
     case 'storage-save':
       return '保存';
+    case 'midi-recording':
+      return 'MIDI録音';
     case 'audio-playback':
       return '音声';
     case 'template-load':

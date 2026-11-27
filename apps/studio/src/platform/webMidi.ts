@@ -41,7 +41,7 @@ export function listenForMidiInput(
   callbacks: {
     onInputsChanged: (inputs: MIDIInput[]) => void;
     onDisconnect: () => void;
-    onNote: (deviceId: string, note: MidiNote) => void;
+    onNote: (deviceId: string, note: MidiNote, timeStamp: number) => void;
   },
 ): () => void {
   const listening = new Map<MIDIInput, (event: MIDIMessageEvent) => void>();
@@ -66,7 +66,7 @@ export function listenForMidiInput(
       const handler = (message: MIDIMessageEvent) => {
         if (input.state !== 'connected') return;
         const note = parseMidiMessage(message.data, channel);
-        if (note) callbacks.onNote(input.id, note);
+        if (note) callbacks.onNote(input.id, note, message.timeStamp);
       };
       listening.set(input, handler);
       input.addEventListener('midimessage', handler);

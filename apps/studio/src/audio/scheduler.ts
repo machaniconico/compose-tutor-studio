@@ -286,6 +286,7 @@ export class Scheduler {
    * @param startBeat  playhead start position in beats
    * @param loop       loop region, or null for one-shot playback
    * @param endBeat    project end (stop point when loop is off)
+   * @param countIn   Optional earlier window for clicks before the song starts.
    */
   start(
     events: readonly ScheduledEvent[],
@@ -293,6 +294,7 @@ export class Scheduler {
     startBeat: number,
     loop: LoopRegion | null,
     endBeat: number,
+    countIn?: { startTime: number; beats: number },
   ): void {
     this.stop();
     this.events = events;
@@ -300,8 +302,8 @@ export class Scheduler {
     this.loop = isValidLoop(loop) ? loop : null;
     this.endBeat = Number.isFinite(endBeat) ? endBeat : Infinity;
     this.anchorBeat = startBeat;
-    this.scheduledBeat = startBeat;
-    this.anchorTime = this.clock();
+    this.scheduledBeat = startBeat - (countIn?.beats ?? 0);
+    this.anchorTime = countIn?.startTime ?? this.clock();
     this.running = true;
     // Schedule the first window immediately, then on each tick. Starting at the
     // project end stops inside this first tick, so no timer is created then.
@@ -325,7 +327,7 @@ export class Scheduler {
    * resolved to audio times exactly as a tick would.
    */
   eventsBetween(fromBeat: number, toBeat: number): DueEvent[] {
-    return nextEventsInWindow(this.events, fromBeat, toBeat, this.bpm, this.anchorBeat, this.anchorTime, this.loop);
+    return nextEventsInWindow(this.events, Math.max(fromBeat, this.anchorBeat), toBeat, this.bpm, this.anchorBeat, this.anchorTime, this.loop);
   }
 
   /** Unwrapped playhead beat up to which events are already scheduled. */
@@ -373,15 +375,7 @@ export class Scheduler {
     const effectiveHorizon = this.loop ? horizonBeat : Math.min(horizonBeat, this.endBeat);
 
     if (effectiveHorizon > this.scheduledBeat) {
-      const due = nextEventsInWindow(
-        this.events,
-        this.scheduledBeat,
-        effectiveHorizon,
-        this.bpm,
-        this.anchorBeat,
-        this.anchorTime,
-        this.loop,
-      );
+      const due = this.eventsBetween(this.scheduledBeat, effectiveHorizon);
       if (due.length > 0) this.fire(due);
       this.onWindow?.(this.scheduledBeat, effectiveHorizon);
       this.scheduledBeat = effectiveHorizon;

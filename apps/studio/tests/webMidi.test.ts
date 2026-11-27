@@ -37,13 +37,13 @@ describe('Web MIDI access', () => {
 
     midi.connect(second);
     expect(onInputsChanged).toHaveBeenLastCalledWith([first, second]);
-    second.send([0x90, 60, 100]);
-    second.send([0x80, 60, 64]);
-    second.send([0x90, 60, 0]);
+    second.send([0x90, 60, 100], { timeStamp: 0 });
+    second.send([0x80, 60, 64], { timeStamp: 25 });
+    second.send([0x90, 60, 0], { timeStamp: 30 });
     expect(onNote.mock.calls).toEqual([
-      ['second', { type: 'noteOn', pitch: 60, velocity: 100 }],
-      ['second', { type: 'noteOff', pitch: 60 }],
-      ['second', { type: 'noteOff', pitch: 60 }],
+      ['second', { type: 'noteOn', pitch: 60, velocity: 100 }, 0],
+      ['second', { type: 'noteOff', pitch: 60 }, 25],
+      ['second', { type: 'noteOff', pitch: 60 }, 30],
     ]);
 
     const removeSecondListener = vi.spyOn(second, 'removeEventListener');

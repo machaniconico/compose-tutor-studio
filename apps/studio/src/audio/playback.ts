@@ -16,8 +16,14 @@
 // *intent* and the position semantics (see store.stop(reset?)); this bridge owns
 // the actual audio lifecycle.
 
-import { beatTick, beatsPerBar as beatsPerBarOf, computeAudibleTracks, songEndBeat, type Project, type Track } from '@cts/project-model';
-import { activeLoopRange, useStore } from '../state/store';
+import { beatTick, beatsPerBar as beatsPerBarOf, computeAudibleTracks, tickAlignedRecordingLoop, songEndBeat, type Project, type Track } from '@cts/project-model';
+import { activeLoopRange, setRecordingStop, useStore } from '../state/store';
+import {
+  recordingLoopProblem, selectedRecordingTarget, writeRecordingTake, type RecordingSettings, type RecordingTarget,
+} from '../state/editorActions';
+import {
+  recordingBeat, recordingBeatAtAudioTime, RecordingBuffer, setRecordingPhase, type RecordingClock,
+} from './recorder';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
 import { getAudioEngine } from './engine';
@@ -27,6 +33,7 @@ import { applyMasterVolume } from './masterChain';
 import {
   beatToTime,
   isValidLoop,
+  LOOKAHEAD_S,
   Scheduler,
   secondsPerBeat,
   type DueEvent,
@@ -34,7 +41,7 @@ import {
 } from './scheduler';
 import { DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
-import { metronomeBeatEvents, scheduleMetronomeClick } from './metronome';
+import { countInBeatEvents, metronomeBeatEvents, scheduleMetronomeClick } from './metronome';
 import { songTailSeconds } from './wav';
 
 /** Position update rate while playing (ms ~= 30fps). */
@@ -116,6 +123,139 @@ const state: BridgeState = {
   installed: false,
 };
 
+type ActiveRecording = {
+  target: RecordingTarget;
+  settings: RecordingSettings;
+  projectVersion: number;
+  startBeat: number;
+  loop: LoopRegion | null;
+  clock: RecordingClock | null;
+  buffer: RecordingBuffer;
+};
+
+let activeRecording: ActiveRecording | null = null;
+let pendingRecordingCommit: (() => void) | undefined;
+
+export function startMidiRecording(settings: RecordingSettings): void {
+  const store = useStore.getState();
+  if (activeRecording || pendingRecordingCommit || store.startScreenOpen) return;
+
+  let loop = activeLoopRange(store);
+  if (store.transport.loopEnabled) {
+    const loopProblem = loop && recordingLoopProblem(loop);
+    if (loopProblem) {
+      pushToast(loopProblem, 'error');
+      return;
+    }
+    try {
+      if (!loop) throw new RangeError();
+      loop = tickAlignedRecordingLoop(loop);
+      if (!isValidLoop(loop)) throw new RangeError();
+    } catch {
+      pushToast('録音するループの範囲を広げてください。', 'error');
+      return;
+    }
+  }
+  const position = store.transport.positionBeat;
+  const songEnd = songEndBeat(store.project);
+  let startBeat = loop
+    ? (position >= loop.startBeat && position < loop.endBeat ? position : loop.startBeat)
+    : (position < songEnd ? position : 0);
+  const target = selectedRecordingTarget(loop?.startBeat ?? startBeat, loop ?? undefined);
+  if (!target) return;
+  if (loop && beatTick(loop.startBeat) < beatTick(target.clipStartBeat)) {
+    pushToast('ループの始まりが録音先のクリップより前です。ループ範囲を選び直してください。', 'error');
+    return;
+  }
+  const clip = store.project.tracks.find((t) => t.id === target.trackId)?.clips.find((c) => c.id === target.clipId);
+  if (clip && !loop && (startBeat < clip.startBeat || startBeat >= clip.startBeat + clip.lengthBeats)) {
+    startBeat = clip.startBeat;
+  }
+  if (!(startBeat >= 0 && startBeat < songEnd) || !Number.isSafeInteger(beatTick(songEnd))) {
+    pushToast('曲の範囲内で録音を始めてください。', 'error');
+    return;
+  }
+
+  if (store.transport.isPlaying) store.stop();
+  store.commitTransaction();
+  const take: ActiveRecording = {
+    target, settings, projectVersion: store.projectOpenVersion, startBeat, loop, clock: null,
+    buffer: new RecordingBuffer(() => queueMicrotask(() => {
+      if (activeRecording !== take) return;
+      pushToast('録音できる入力の上限に達したため、録音を止めました。', 'info');
+      stopMidiRecording();
+    })),
+  };
+  activeRecording = take;
+  setRecordingStop(stopMidiRecording);
+  setRecordingPhase('count-in');
+  if (!store.editor.liveInputEnabled) store.toggleLiveInput();
+  store.setPosition(startBeat);
+  store.play();
+}
+
+/** The track a running take records to, fixed at record start; live monitoring plays its instrument. */
+export function recordingTrackId(): string | undefined {
+  return activeRecording?.target.trackId;
+}
+
+export function stopMidiRecording(): void {
+  if (activeRecording) useStore.getState().stop();
+  commitPendingRecording();
+}
+
+/** Called by the live input path with the pitch shared by its preview voice. */
+export function captureLiveNote(midi: number, on: boolean, velocity = 100, timeStamp?: number): void {
+  const take = activeRecording;
+  if (!take?.clock) return;
+  const time = timeStamp !== undefined && Number.isFinite(timeStamp) ? timeStamp : performance.now();
+  const elapsed = recordingBeat(take.clock, time);
+  if (elapsed >= 0) take.buffer.append({ timeBeat: take.startBeat + elapsed, midi, velocity, on });
+}
+
+function commitPendingRecording(): void {
+  const commit = pendingRecordingCommit;
+  if (!commit) return;
+  pendingRecordingCommit = undefined;
+  setRecordingStop(undefined);
+  commit();
+}
+
+function finishRecording(songEnd?: number): void {
+  const take = activeRecording;
+  if (!take) return;
+  activeRecording = null;
+  if (!take.clock || take.buffer.captured.length === 0) {
+    setRecordingStop(undefined);
+    setRecordingPhase('idle');
+    return;
+  }
+  const stopBeat = songEnd ?? Math.min(
+    take.startBeat + recordingBeat(take.clock, performance.now()), take.loop ? Infinity : state.songEnd,
+  );
+  // Let the transport stop before writing. A project switch can drain this
+  // synchronously so it always commits to the project the take started in.
+  const commit = () => {
+    if (useStore.getState().projectOpenVersion !== take.projectVersion) {
+      pushToast('録音中に別の曲が開かれました。録音先の曲を開いて、もう一度録音してください。', 'error');
+      return;
+    }
+    try {
+      writeRecordingTake(take.target, take.buffer.captured, {
+        ...take.settings, loopRange: take.loop ?? undefined, stopBeat,
+      });
+    } catch (error) {
+      recordDiagnostic('midi-recording', error);
+      pushToast('録音を保存できませんでした。録音先を確認して、もう一度お試しください。', 'error');
+    }
+  };
+  pendingRecordingCommit = commit;
+  setRecordingPhase('idle');
+  queueMicrotask(() => {
+    if (pendingRecordingCommit === commit) commitPendingRecording();
+  });
+}
+
 /**
  * Install the store subscriptions. Idempotent — safe to call from multiple
  * component mounts. Returns a teardown function.
@@ -140,6 +280,7 @@ export function initAudioBridge(): () => void {
         if (generation === state.playGeneration) handlePlaybackStartFailure(error);
       });
     } else {
+      finishRecording();
       stopAudio();
       state.playbackTracks.clear();
     }
@@ -151,6 +292,10 @@ export function initAudioBridge(): () => void {
   // apply live, and tempo or meter changes rebuild from the current playhead.
   const unsubProject = useStore.subscribe((s, prev) => {
     if (s.project === prev.project) return;
+    if (activeRecording && tempoOrMeterChanged(s.project, prev.project)) {
+      stopMidiRecording();
+      return;
+    }
     let clipsChanged = false;
     let previousAudible: Set<string> | undefined;
     for (const track of s.project.tracks) {
@@ -198,16 +343,20 @@ export function initAudioBridge(): () => void {
   // Turning loop on/off or changing the loop range while playing rebuilds the
   // schedule from the current playhead, so the new range is heard at once.
   const unsubLoop = useStore.subscribe((s, prev) => {
-    if (!state.scheduler?.isRunning) return;
+    if (!activeRecording && !state.scheduler?.isRunning) return;
     const next = activeLoopRange(s);
     const before = activeLoopRange(prev);
     if (next?.startBeat === before?.startBeat && next?.endBeat === before?.endBeat) return;
-    restartPlayback();
+    if (activeRecording) stopMidiRecording();
+    else restartPlayback();
   });
 
   state.unsub = [unsubPlaying, unsubProject, unsubLoop];
+  globalThis.window?.addEventListener('blur', stopMidiRecording);
 
   return () => {
+    globalThis.window?.removeEventListener('blur', stopMidiRecording);
+    stopMidiRecording();
     for (const u of state.unsub) u();
     state.unsub = [];
     state.installed = false;
@@ -257,6 +406,10 @@ type ResumePoint = { playhead: number; sounding: LiveVoice[] };
  * scheduler's own end handling, as usual.
  */
 function restartPlayback(): void {
+  if (activeRecording) {
+    stopMidiRecording();
+    return;
+  }
   // The displayed position can lag the audio by a position-timer tick. Capture
   // the old scheduler position before stopping it, using its old tempo.
   const scheduler = state.scheduler;
@@ -509,18 +662,25 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
   state.songEnd = songEndBeat(project);
 
   state.bpm = project.bpm;
-  const loop = activeLoopRange(store);
+  const take = activeRecording;
+  const loop = take ? take.loop : activeLoopRange(store);
   // A region shorter than the shortest loop period plays as if loop were off.
   state.loop = loop && isValidLoop(loop) ? { startBeat: loop.startBeat, endBeat: loop.endBeat } : null;
 
   const startBeat = transport.positionBeat;
-  const now = engine.now();
+  let now = engine.now();
 
   silenceRinging();
   buildVoices(context, master, project.tracks, now);
 
   const events = buildScheduleEvents(project, eventKeys, state.loop);
   const endBeat = state.loop ? Infinity : state.songEnd;
+  if (take) {
+    const audioTime = engine.now();
+    const performanceTime = performance.now();
+    now = beatToTime(beatsPerBar, project.bpm, 0, audioTime);
+    take.clock = { audioTime, performanceTime, recordTime: now, bpm: project.bpm };
+  }
   if (resume && startBeat < endBeat) {
     const byKey = payloadsByKey(events);
     // Map the old run's timeline onto this one, which starts at `startBeat`.
@@ -537,10 +697,20 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
     clock: () => engine.now(),
     fire: fireEvents,
     onWindow: (fromBeat, toBeat) => {
-      if (!transport.metronome) return;
+      if (!take && !transport.metronome) return;
       const clickNow = engine.now();
       state.clicks = state.clicks.filter((click) => click.time >= clickNow);
-      for (const click of metronomeBeatEvents(fromBeat, toBeat, beatsPerBar)) {
+      if (take?.clock && fromBeat < startBeat) {
+        // Skip old clicks if the timer woke late, even for very large imported meters.
+        const recent = recordingBeatAtAudioTime(take.clock, clickNow - LOOKAHEAD_S);
+        const from = Math.max(fromBeat - startBeat, recent);
+        for (const click of countInBeatEvents(project.timeSignature, from, toBeat - startBeat)) {
+          const time = beatToTime(click.beat, project.bpm, 0, now);
+          state.clicks.push({ time, cancel: scheduleMetronomeClick(context, master, time, click.accent) });
+        }
+      }
+      if (!transport.metronome) return;
+      for (const click of metronomeBeatEvents(take ? Math.max(startBeat, fromBeat) : fromBeat, toBeat, beatsPerBar)) {
         const time = beatToTime(click.beat, project.bpm, startBeat, now);
         state.clicks.push({ time, cancel: scheduleMetronomeClick(context, master, time, click.accent) });
       }
@@ -560,12 +730,14 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
           const tail = songTailSeconds(project, { liveReleaseOverhang: latestReleaseEnd - songEndTime });
           state.ringUntil = songEndTime + tail;
         }
+        finishRecording(state.songEnd);
         s.stop(true);
       }
     },
   });
   state.scheduler = scheduler;
-  scheduler.start(events, project.bpm, startBeat, state.loop, endBeat);
+  scheduler.start(events, project.bpm, startBeat, state.loop, endBeat,
+    take ? { startTime: now, beats: beatsPerBar } : undefined);
 
   // Starting at the project end ends synchronously: onEnd already reset the
   // transport and the store subscription tore the audio down, so no loop.
@@ -592,6 +764,10 @@ function startPositionLoop(): void {
   state.positionTimer = setInterval(() => {
     const scheduler = state.scheduler;
     if (!scheduler?.isRunning) return;
+    if (activeRecording?.clock) {
+      if (recordingBeatAtAudioTime(activeRecording.clock, getAudioEngine().now()) < 0) return;
+      setRecordingPhase('recording');
+    }
     const beat = scheduler.currentBeat();
     if (Number.isFinite(beat) && beat >= 0) {
       useStore.getState().setPosition(beat);

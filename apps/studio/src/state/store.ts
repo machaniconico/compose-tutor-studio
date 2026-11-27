@@ -273,7 +273,7 @@ type StoreState = {
   flushPendingSave: () => boolean;
   listSavedProjects: () => ProjectSummary[];
   createNewProject: (title?: string) => void;
-  deleteProject: (id: string) => void;
+  deleteProject: (id: string) => boolean;
   /** Load a saved project by id into the store (resets history + selection). */
   loadProjectById: (id: string) => boolean;
   /** Replace the whole project (e.g. template instantiation / file import). */
@@ -431,6 +431,29 @@ function pitchInScale(project: Project, pitch: number): boolean {
 
 const startingProject = initialProject();
 
+let stopRecording: (() => void) | undefined;
+
+/** The audio bridge provides a synchronous stop and commit for project switches. */
+export function setRecordingStop(stop: (() => void) | undefined): void {
+  stopRecording = stop;
+}
+
+export function finishRecordingForProjectChange(): boolean {
+  if (!stopRecording) return false;
+  stopRecording();
+  return true;
+}
+
+function refuseRecordingEdit(): boolean {
+  if (!stopRecording) return false;
+  pushToast('録音中は曲を編集できません。録音を止めてから操作してください。', 'info');
+  return true;
+}
+
+function prepareProjectSwitch(): void {
+  if (finishRecordingForProjectChange()) flushScheduledSave();
+}
+
 /** Whether a role suits a track type: 'drums' only on drum tracks, the other roles only on instrument tracks. */
 export function roleFitsTrackType(role: TrackRole, type: Track['type']): boolean {
   return role === 'drums' ? type === 'drum' : type === 'instrument';
@@ -464,6 +487,7 @@ export const useStore = create<StoreState>((set, get) => {
 
   /** Apply an immutable project change: bump updatedAt, push history, save. */
   const commitProject = (next: Project): boolean => {
+    if (refuseRecordingEdit()) return false;
     const current = get().project;
     if (next.tracks !== current.tracks || next.timeSignature !== current.timeSignature || next.lengthBars !== current.lengthBars) {
       const problem = findProjectSoundingLimitProblem(next);
@@ -541,7 +565,7 @@ export const useStore = create<StoreState>((set, get) => {
     future: [],
     transactionBase: null,
 
-    applyProjectChange: (fn) => commitProject(fn(get().project)),
+    applyProjectChange: (fn) => !refuseRecordingEdit() && commitProject(fn(get().project)),
 
     // --- project metadata ---
     setBpm: (bpm) => commitProject({ ...get().project, bpm }),
@@ -549,6 +573,7 @@ export const useStore = create<StoreState>((set, get) => {
     setScale: (scale) => commitProject({ ...get().project, scale }),
     setTitle: (title) => commitProject({ ...get().project, title }),
     setTimeSignature: (timeSignature, confirmed = false) => {
+      if (refuseRecordingEdit()) return { confirm: null, warnings: [] };
       const { project, warnings, droppedHits } = setProjectTimeSignature(get().project, timeSignature);
       if (droppedHits > 0 && !confirmed) {
         return {
@@ -560,6 +585,7 @@ export const useStore = create<StoreState>((set, get) => {
       return { confirm: null, warnings: committed ? warnings : [] };
     },
     setLengthBars: (lengthBars, confirmed = false) => {
+      if (refuseRecordingEdit()) return null;
       const project = get().project;
       if (!Number.isInteger(lengthBars) || lengthBars < 1 || lengthBars === project.lengthBars) {
         return null;
@@ -743,7 +769,7 @@ export const useStore = create<StoreState>((set, get) => {
     // --- mixer ---
     setTrackVolume: (trackId, volume) => {
       const project = get().project;
-      commitProject(mapTracks(project, (t) => (t.id === trackId ? { ...t, volume } : t)));
+      if (!commitProject(mapTracks(project, (t) => (t.id === trackId ? { ...t, volume } : t)))) return;
       const track = project.tracks.find((t) => t.id === trackId);
       publishAppEvent({
         type: 'track.volumeChanged',
@@ -898,6 +924,7 @@ export const useStore = create<StoreState>((set, get) => {
       const { project, transport } = get();
       const loopEnabled = !transport.loopEnabled;
       if (loopEnabled && !project.loopRange) {
+        if (refuseRecordingEdit()) return;
         // The default range is its own undo step, apart from an open (tap tempo) transaction.
         get().commitTransaction();
         const bpb = beatsPerBarOf(project.timeSignature);
@@ -910,18 +937,23 @@ export const useStore = create<StoreState>((set, get) => {
     toggleMetronome: () =>
       set((s) => ({ transport: { ...s.transport, metronome: !s.transport.metronome } })),
     setLoopRange: (range) => {
+      if (refuseRecordingEdit()) return;
       // A loop range change is its own undo step, apart from an open (tap tempo) transaction.
       get().commitTransaction();
       commitProject(setProjectLoopRange(get().project, range));
     },
     loopRangeOn: (range) => {
       const current = get().project.loopRange;
-      if (current?.startBeat !== range.startBeat || current.endBeat !== range.endBeat) get().setLoopRange(range);
+      if (current?.startBeat !== range.startBeat || current.endBeat !== range.endBeat) {
+        if (refuseRecordingEdit()) return;
+        get().setLoopRange(range);
+      }
       set((s) => ({ transport: { ...s.transport, loopEnabled: true } }));
     },
 
     // --- history ---
     beginTransaction: (owner) => {
+      if (stopRecording) return;
       if (get().transactionBase) {
         if (mayClose(owner)) return;
         get().commitTransaction();
@@ -947,6 +979,7 @@ export const useStore = create<StoreState>((set, get) => {
     },
     ownsTransaction: (owner) => get().transactionBase !== null && owner === transactionOwner,
     undo: () => {
+      if (refuseRecordingEdit()) return;
       restoreTransactionBase();
       const { past, project, future } = get();
       const previous = past[past.length - 1];
@@ -961,6 +994,7 @@ export const useStore = create<StoreState>((set, get) => {
       dropRemovedTrackSelection();
     },
     redo: () => {
+      if (refuseRecordingEdit()) return;
       restoreTransactionBase();
       const { past, project, future } = get();
       const next = future[0];
@@ -985,6 +1019,7 @@ export const useStore = create<StoreState>((set, get) => {
     flushPendingSave: () => flushScheduledSave(),
     listSavedProjects: () => listSavedProjects(),
     createNewProject: (title) => {
+      prepareProjectSwitch();
       clearScheduledSave();
       const project = createDefaultProject(title);
       set({
@@ -1004,6 +1039,7 @@ export const useStore = create<StoreState>((set, get) => {
       });
     },
     loadProjectById: (id) => {
+      prepareProjectSwitch();
       const loaded = loadStoredProject(id);
       if (!loaded) return false;
       clearScheduledSave();
@@ -1020,6 +1056,7 @@ export const useStore = create<StoreState>((set, get) => {
       return true;
     },
     replaceProject: (project) => {
+      prepareProjectSwitch();
       clearScheduledSave();
       set({
         project,
@@ -1038,6 +1075,7 @@ export const useStore = create<StoreState>((set, get) => {
       });
     },
     loadProjectForPreview: (project) => {
+      prepareProjectSwitch();
       clearScheduledSave();
       set({
         project,
@@ -1051,10 +1089,12 @@ export const useStore = create<StoreState>((set, get) => {
       });
     },
     deleteProject: (id) => {
-      deleteStoredProject(id);
+      const deletingCurrent = get().project.id === id;
+      if (deletingCurrent && refuseRecordingEdit()) return false;
+      if (!deleteStoredProject(id)) return false;
       // If the active project was deleted, switch to the most recent saved one
       // or a fresh default so the UI always has a project to render.
-      if (get().project.id === id) {
+      if (deletingCurrent) {
         clearScheduledSave();
         const savedFallback = loadMostRecentProject();
         const fallback = savedFallback ?? createDefaultProject();
@@ -1069,6 +1109,7 @@ export const useStore = create<StoreState>((set, get) => {
           transactionBase: null,
         });
       }
+      return true;
     },
   };
 });
