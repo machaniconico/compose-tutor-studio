@@ -65,7 +65,7 @@ const MAX_AUDIO_ASSET_STORAGE_ENTRIES: usize = 65_536;
 const RETAIN_GENERATIONS: usize = 3;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SAFE_SQLITE_VFS_NAME: &str = "cts-safe-vfs-v1";
-const EXPECTED_BUNDLED_SQLITE_VERSION: i32 = 3_053_002;
+const EXPECTED_BUNDLED_SQLITE_VERSION: i32 = 3_054_001;
 const MIGRATION_V1: &str = include_str!("../../migrations/0001_init.sql");
 const MIGRATION_V2: &str = include_str!("../../migrations/0002_crash_drafts.sql");
 const GENERATION_COLUMNS: &str = "seq, project_id, kind, operation_id, head_version, \
@@ -6327,24 +6327,31 @@ fn configure_and_migrate(connection: &mut Connection) -> Result<(), PersistenceE
     connection
         .busy_timeout(BUSY_TIMEOUT)
         .map_err(initialize_sql_error)?;
+    // rusqlite 0.41's pragma_* helpers first query pragma_pragma_list, which loads
+    // the schema (opening an existing WAL database with a shared -shm before the
+    // exclusive lock) and can be shadowed by a table of that name in an untrusted
+    // database. Use fixed PRAGMA SQL only on this path.
+    connection
+        .execute_batch("PRAGMA locking_mode = EXCLUSIVE")
+        .map_err(initialize_sql_error)?;
     let locking_mode: String = connection
-        .pragma_update_and_check(None, "locking_mode", "EXCLUSIVE", |row| row.get(0))
+        .query_row("PRAGMA locking_mode", [], |row| row.get(0))
         .map_err(initialize_sql_error)?;
     if !locking_mode.eq_ignore_ascii_case("exclusive") {
         return Err(database_boundary_error());
     }
     connection
-        .pragma_update(None, "temp_store", "MEMORY")
+        .execute_batch("PRAGMA temp_store = MEMORY")
         .map_err(initialize_sql_error)?;
     connection
-        .pragma_update(None, "foreign_keys", true)
+        .execute_batch("PRAGMA foreign_keys = ON")
         .map_err(initialize_sql_error)?;
     connection
-        .pragma_update(None, "trusted_schema", false)
+        .execute_batch("PRAGMA trusted_schema = OFF")
         .map_err(initialize_sql_error)?;
 
     let mut user_version: i64 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(initialize_sql_error)?;
     if user_version > DATABASE_SCHEMA_VERSION {
         return Err(persistence_error(
@@ -6355,7 +6362,7 @@ fn configure_and_migrate(connection: &mut Connection) -> Result<(), PersistenceE
         ));
     }
     let application_id: i64 = connection
-        .pragma_query_value(None, "application_id", |row| row.get(0))
+        .query_row("PRAGMA application_id", [], |row| row.get(0))
         .map_err(initialize_sql_error)?;
     if application_id != 0 && application_id != APPLICATION_ID {
         return Err(persistence_error(
@@ -6393,7 +6400,7 @@ fn configure_and_migrate(connection: &mut Connection) -> Result<(), PersistenceE
     }
 
     let journal_mode: String = connection
-        .pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))
+        .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
         .map_err(initialize_sql_error)?;
     if !journal_mode.eq_ignore_ascii_case("wal") {
         return Err(persistence_error(
@@ -6404,10 +6411,10 @@ fn configure_and_migrate(connection: &mut Connection) -> Result<(), PersistenceE
         ));
     }
     connection
-        .pragma_update(None, "synchronous", "FULL")
+        .execute_batch("PRAGMA synchronous = FULL")
         .map_err(initialize_sql_error)?;
     connection
-        .pragma_update(None, "wal_autocheckpoint", 1_000_i64)
+        .execute_batch("PRAGMA wal_autocheckpoint = 1000")
         .map_err(initialize_sql_error)?;
 
     if user_version == 0 {
@@ -6418,10 +6425,10 @@ fn configure_and_migrate(connection: &mut Connection) -> Result<(), PersistenceE
             .execute_batch(MIGRATION_V1)
             .map_err(migration_sql_error)?;
         transaction
-            .pragma_update(None, "application_id", APPLICATION_ID)
+            .execute_batch(&format!("PRAGMA application_id = {APPLICATION_ID}"))
             .map_err(migration_sql_error)?;
         transaction
-            .pragma_update(None, "user_version", 1_i64)
+            .execute_batch("PRAGMA user_version = 1")
             .map_err(migration_sql_error)?;
         transaction.commit().map_err(migration_sql_error)?;
         user_version = 1;
@@ -6435,7 +6442,7 @@ fn configure_and_migrate(connection: &mut Connection) -> Result<(), PersistenceE
             .execute_batch(MIGRATION_V2)
             .map_err(migration_sql_error)?;
         transaction
-            .pragma_update(None, "user_version", DATABASE_SCHEMA_VERSION)
+            .execute_batch(&format!("PRAGMA user_version = {DATABASE_SCHEMA_VERSION}"))
             .map_err(migration_sql_error)?;
         transaction.commit().map_err(migration_sql_error)?;
         user_version = DATABASE_SCHEMA_VERSION;
@@ -6451,10 +6458,10 @@ fn configure_and_migrate(connection: &mut Connection) -> Result<(), PersistenceE
     }
 
     let foreign_keys: i64 = connection
-        .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
         .map_err(initialize_sql_error)?;
     let synchronous: i64 = connection
-        .pragma_query_value(None, "synchronous", |row| row.get(0))
+        .query_row("PRAGMA synchronous", [], |row| row.get(0))
         .map_err(initialize_sql_error)?;
     if foreign_keys != 1 || synchronous != 2 {
         return Err(persistence_error(
@@ -6465,7 +6472,7 @@ fn configure_and_migrate(connection: &mut Connection) -> Result<(), PersistenceE
         ));
     }
     let quick_check: String = connection
-        .pragma_query_value(None, "quick_check", |row| row.get(0))
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
         .map_err(initialize_sql_error)?;
     let foreign_key_violation = connection
         .prepare("PRAGMA foreign_key_check")
