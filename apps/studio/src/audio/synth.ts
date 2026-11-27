@@ -90,6 +90,7 @@ export class SynthVoiceManager {
     preset: unknown,
     maxVoices: number = MAX_VOICES,
     macros?: InstrumentMacros,
+    private readonly cutoffSource?: ConstantSourceNode,
   ) {
     this.ctx = ctx;
     this.output = output;
@@ -184,12 +185,16 @@ export class SynthVoiceManager {
     oscA.start(startTime);
     oscB.start(startTime);
     const voice: ActiveVoice = { oscA, oscB, gain, endTime: stopAt, releaseEndTime, startTime, env, peak };
+    const cutoffSource = this.cutoffSource;
+    cutoffSource?.connect(filter.detune);
     if (timing) {
       oscA.stop(stopAt);
       oscB.stop(stopAt);
-    } else {
+    }
+    if (!timing || cutoffSource) {
       oscB.onended = () => {
         oscB.onended = null;
+        cutoffSource?.disconnect(filter.detune);
         oscA.disconnect();
         oscB.disconnect();
         filter.disconnect();

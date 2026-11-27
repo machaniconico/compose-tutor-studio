@@ -1,9 +1,8 @@
 // Per-track audio routing graph and mute/solo resolution.
 //
 // Each non-master track gets:
-// trackGain (volume) -> automation gain (when present) -> panner (pan) -> FX -> meter tap -> master bus.
-// Sends branch from the panner before track FX. Both the fader and volume
-// automation scale the signal sent to each shared return.
+// Fader -> optional volume and pan automation -> existing panner
+// -> FX -> meter tap -> master bus. Sends branch after the existing panner.
 
 import { computeAudibleTracks, resolveMuteSolo, sendLevel, type AutomationLane, type Track } from '@cts/project-model';
 import {
@@ -12,8 +11,10 @@ import {
   type SupportedEffectType,
   type TrackEffectChain,
 } from './effects';
-import { buildParamSchedule, type AutomationPlayback } from './automationSchedule';
+import { buildParamSchedule, type AutomationPlayback, type ParamTarget } from './automationSchedule';
+import { applyMacros } from './macros';
 import { METER_ANALYSER_FFT_SIZE } from './metering';
+import { resolvePreset } from './presets';
 
 const liveTrackAnalysers = new Map<string, AnalyserNode>();
 
@@ -40,19 +41,32 @@ export class TrackGraph {
   private readonly master: AudioNode;
   private readonly gain: GainNode;
   private readonly automationGain: GainNode | undefined;
-  private readonly volumeLane: AutomationLane | undefined;
+  readonly cutoffSource: ConstantSourceNode | undefined;
+  private readonly cutoffTarget: ParamTarget | undefined;
+  private readonly automationPanner: StereoPannerNode | undefined;
+  private readonly lanes: Track['automation'];
+  private readonly mixerPan: number;
   private readonly panner: StereoPannerNode;
   private readonly meterTap: GainNode;
   private effects: TrackEffectChain | null = null;
   private readonly sends = new Map<string, GainNode>();
 
-  constructor(ctx: BaseAudioContext, master: AudioNode, track: Track, audible = true) {
+  constructor(ctx: BaseAudioContext, master: AudioNode, track: Track, audible = true, startTime = ctx.currentTime) {
     this.ctx = ctx;
     this.master = master;
     this.trackId = track.id;
     this.gain = ctx.createGain();
-    this.volumeLane = track.automation?.volume;
-    this.automationGain = this.volumeLane?.points.length ? ctx.createGain() : undefined;
+    this.lanes = track.type === 'master' ? undefined : track.automation;
+    this.automationGain = this.lanes?.volume?.points.length ? ctx.createGain() : undefined;
+    if (track.type !== 'drum' && track.type !== 'bus' && this.lanes?.cutoff?.points.length) {
+      const { preset, macros } = track.instrument ?? {};
+      const baseHz = applyMacros(resolvePreset(preset), macros).cutoffHz;
+      this.cutoffTarget = { kind: 'cutoff', baseHz, sampleRate: ctx.sampleRate };
+      this.cutoffSource = ctx.createConstantSource();
+      this.cutoffSource.offset.value = 0;
+      this.cutoffSource.start(startTime);
+    }
+    this.automationPanner = this.lanes?.pan?.points.length ? ctx.createStereoPanner() : undefined;
     this.panner = ctx.createStereoPanner();
     this.meterTap = ctx.createGain();
     if (track.type === 'bus' && !audible) this.meterTap.gain.value = 0;
@@ -60,13 +74,20 @@ export class TrackGraph {
     this.analyser.fftSize = METER_ANALYSER_FFT_SIZE;
     this.analyser.smoothingTimeConstant = 0;
     this.gain.gain.value = clampVolume(track.volume);
-    this.panner.pan.value = clampPan(track.pan);
+    this.mixerPan = clampPan(track.pan);
+    // Apply the sum once. Two non-zero stereo pans in series pan the signal twice.
+    if (this.automationPanner) this.automationPanner.pan.value = this.mixerPan;
+    else this.panner.pan.value = this.mixerPan;
     this.meterTap.connect(this.master);
     this.meterTap.connect(this.analyser);
     registerLiveTrackAnalyser(ctx, this.trackId, this.analyser);
     this.input = this.gain;
-    this.gain.connect(this.automationGain ?? this.panner);
-    this.automationGain?.connect(this.panner);
+    let previous: AudioNode = this.gain;
+    for (const node of [this.automationGain, this.automationPanner, this.panner]) {
+      if (!node) continue;
+      previous.connect(node);
+      previous = node;
+    }
     this.rebuildEffects(track, ctx.currentTime);
   }
 
@@ -75,14 +96,16 @@ export class TrackGraph {
   }
 
   scheduleAutomation(playback: AutomationPlayback, firstPass = 0, passes = 1): void {
-    const gain = this.automationGain?.gain;
-    if (!gain) return;
     const { startBeat, loop, bpm, startTime, endBeat } = playback;
-    for (const { method, time, value } of buildParamSchedule(
-      this.volumeLane, startBeat, loop, bpm, { startTime, endBeat, firstPass, passes },
-    )) {
-      gain[method](value, time);
-    }
+    const schedule = (param: AudioParam | undefined, lane: AutomationLane | undefined, target?: ParamTarget) => {
+      if (!param) return;
+      for (const { method, time, value } of buildParamSchedule(
+        lane, startBeat, loop, bpm, { startTime, endBeat, firstPass, passes, target },
+      )) param[method](value, time);
+    };
+    schedule(this.automationGain?.gain, this.lanes?.volume);
+    schedule(this.automationPanner?.pan, this.lanes?.pan, { kind: 'pan', mixerPan: this.mixerPan });
+    schedule(this.cutoffSource?.offset, this.lanes?.cutoff, this.cutoffTarget);
   }
 
   /** Apply volume/pan/mute/solo state to the live nodes. */
@@ -90,7 +113,7 @@ export class TrackGraph {
     const target = audible ? clampVolume(track.volume) : 0;
     // Short ramp avoids zipper noise on live changes.
     this.gain.gain.setTargetAtTime(target, when, 0.01);
-    this.panner.pan.setTargetAtTime(clampPan(track.pan), when, 0.01);
+    if (!this.automationPanner) this.panner.pan.setTargetAtTime(clampPan(track.pan), when, 0.01);
     // Also gate the output so muting a return silences echoes already in its FX.
     if (track.type === 'bus') this.meterTap.gain.setTargetAtTime(audible ? 1 : 0, when, 0.01);
     this.syncEffects(track, when);
@@ -128,6 +151,8 @@ export class TrackGraph {
       // already disconnected
     }
     this.automationGain?.disconnect();
+    this.cutoffSource?.stop(); // Each voice removes its connection when it ends.
+    this.automationPanner?.disconnect();
     for (const gain of this.sends.values()) gain.disconnect();
     this.sends.clear();
     try {
@@ -186,7 +211,7 @@ export function buildTrackGraphs(
   for (const track of tracks) {
     if (track.type === 'master') continue;
     const isAudible = audible.has(track.id);
-    const graph = new TrackGraph(ctx, master, track, isAudible);
+    const graph = new TrackGraph(ctx, master, track, isAudible, when);
     graph.apply(track, isAudible, when);
     graphs.set(track.id, graph);
   }

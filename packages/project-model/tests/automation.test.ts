@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addPoint, createDefaultProject, deserializeProject, evaluateAutomation, movePoint, removePoint,
+  addPoint, createDefaultProject, createEmptyProject, createTrack, deserializeProject, evaluateAutomation, MAX_AUTOMATION_POINTS, movePoint, removePoint,
   serializeProject, validateProject, type AutomationLane,
 } from '../src';
 
@@ -54,5 +54,86 @@ describe('volume automation', () => {
       ok: false,
       errors: [{ path: `tracks[${index}].automation.volume`, message: 'マスタートラックには音量の変化を設定できません。' }],
     });
+  });
+});
+
+describe('pan and cutoff automation', () => {
+  const keysProject = () => ({ ...createEmptyProject(), tracks: [createTrack('Keys', 'instrument')] });
+
+  it('interpolates pan linearly and cutoff in log space, with the last point winning', () => {
+    const pan = { points: [{ beat: 0, value: -1 }, { beat: 4, value: 1 }] };
+    const cutoff = { points: [{ beat: 0, value: 0.1 }, { beat: 4, value: 2 }, { beat: 4, value: 10 }] };
+    expect([-1, 0, 2, 4, 8].map((beat) => evaluateAutomation(pan, beat, 'pan'))).toEqual([-1, -1, 0, 1, 1]);
+    expect([-1, 0, 2, 4, 8].map((beat) => evaluateAutomation(cutoff, beat, 'cutoff'))).toEqual([0.1, 0.1, 1, 10, 10]);
+    expect(evaluateAutomation(undefined, 0, 'pan')).toBe(0);
+    expect(evaluateAutomation({ points: [] }, 0, 'cutoff')).toBe(1);
+  });
+
+  it('enforces parameter bounds and the point cap for adding and moving points', () => {
+    const empty = { points: [] };
+    const point = { beat: 0, value: -1 };
+    const pan = addPoint(empty, point, 'pan');
+    expect(pan.points).toEqual([point]);
+    expect(movePoint(pan, 0, { beat: 2, value: 1.01 }, 'pan')).toBe(pan);
+    expect(addPoint(empty, { beat: 0, value: 0 }, 'cutoff')).toBe(empty);
+    const full = { points: Array.from({ length: MAX_AUTOMATION_POINTS }, () => ({ beat: 0, value: 10 })) };
+    expect(addPoint(full, { beat: 2, value: 0.1 }, 'cutoff')).toBe(full);
+    const moved = movePoint(full, 0, { beat: 2, value: 0.1 }, 'cutoff');
+    expect(moved.points).toHaveLength(MAX_AUTOMATION_POINTS);
+    expect(moved.points.at(-1)).toEqual({ beat: 2, value: 0.1 });
+  });
+
+  it('keeps unsorted pan and duplicate cutoff points as saved, leaving validation to report them', () => {
+    const project = keysProject();
+    project.tracks[0]!.automation = {
+      pan: { points: [{ beat: 2, value: 1 }, { beat: 1, value: -0.5 }] },
+      cutoff: { points: [{ beat: 0.123, value: 0.1 }, { beat: 0.123, value: 10 }] },
+    };
+    const loaded = deserializeProject(serializeProject(project));
+    expect(loaded).toEqual(project);
+    expect(validateProject(loaded).errors.map(({ path }) => path)).toEqual(['tracks[0].automation.pan.points[1].beat']);
+  });
+
+  it.each([
+    ['pan', [-1.01, 1.01, NaN, Infinity, null, { toString: null }]],
+    ['cutoff', [0, 0.099, 10.01, -Infinity, null, { toString: null }]],
+  ] as const)('rejects malformed %s values without coercing them', (parameter, values) => {
+    const project = keysProject();
+    project.tracks[0]!.automation = {
+      [parameter]: { points: values.map((value, beat) => ({ beat, value: value as number })) },
+    };
+    expect(validateProject(project).errors.map(({ path }) => path)).toEqual(
+      values.map((_, i) => `tracks[0].automation.${parameter}.points[${i}].value`),
+    );
+  });
+
+  it('rejects malformed automation containers, points and oversized lanes', () => {
+    const project = keysProject();
+    const track = project.tracks[0]!;
+    for (const malformed of [null, { toString: null }, { pan: null }, { cutoff: { points: { toString: null } } },
+      { cutoff: { points: [null] } }, { pan: { points: Array(MAX_AUTOMATION_POINTS + 1).fill({ beat: 0, value: 0 }) } }]) {
+      track.automation = malformed as typeof track.automation;
+      expect(validateProject(project).ok).toBe(false);
+    }
+    Object.defineProperty(track, 'automation', { get() { throw new Error('unreadable'); } });
+    expect(validateProject(project).errors).toMatchObject([{ path: 'tracks[0].automation' }]);
+  });
+
+  it.each([{ points: [] }, { points: [{ beat: 0, value: 1 }] }])('rejects cutoff lanes on drums', (cutoff) => {
+    const project = { ...createEmptyProject(), tracks: [createTrack('Drums', 'drum')] };
+    project.tracks[0]!.automation = { volume: fade, pan: { points: [] }, cutoff };
+    expect(validateProject(project).errors.filter(({ path }) => path.includes('automation'))).toEqual([
+      { path: 'tracks[0].automation.cutoff', message: 'ドラムトラックには明るさの変化を設定できません。' },
+    ]);
+  });
+
+  it('rejects all three lanes on the master including empty lanes', () => {
+    const project = createDefaultProject();
+    const index = project.tracks.findIndex((track) => track.type === 'master');
+    const empty = { points: [] };
+    project.tracks[index]!.automation = { volume: empty, pan: empty, cutoff: empty };
+    expect(validateProject(project).errors.map(({ path }) => path)).toEqual(
+      ['volume', 'pan', 'cutoff'].map((parameter) => `tracks[${index}].automation.${parameter}`),
+    );
   });
 });

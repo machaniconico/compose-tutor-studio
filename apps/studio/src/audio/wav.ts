@@ -6,7 +6,7 @@
 // clamping are unit testable.
 
 import type { Project } from '@cts/project-model';
-import { beatTick, PPQ, resolveMuteSolo, sendLevel, songEndBeat } from '@cts/project-model';
+import { beatTick, hasAutomation, PPQ, resolveMuteSolo, sendLevel, songEndBeat } from '@cts/project-model';
 import { delaySettings, enabledSupportedEffects, reverbSettings, REVERB_IMPULSE_SECONDS } from './effects';
 import { noteEnvelopeTiming } from './envelope';
 import { buildScheduleEvents, type SchedulePayload } from './events';
@@ -242,7 +242,7 @@ export async function renderProjectToWav(project: Project, options: WavExportOpt
   for (const track of project.tracks) {
     const graph = graphs.get(track.id);
     if (!graph) continue;
-    if (track.automation?.volume?.points.length) graph.scheduleAutomation(automation);
+    if (hasAutomation(track)) graph.scheduleAutomation(automation);
     if (track.type === 'bus') continue;
     if (track.type === 'drum') {
       drums.set(track.id, new DrumVoiceManager(ctx, graph.input));
@@ -250,7 +250,9 @@ export async function renderProjectToWav(project: Project, options: WavExportOpt
       // The voice manager applies the track's macros, as in live playback.
       synths.set(
         track.id,
-        new SynthVoiceManager(ctx, graph.input, track.instrument?.preset, undefined, track.instrument?.macros),
+        new SynthVoiceManager(
+          ctx, graph.input, track.instrument?.preset, undefined, track.instrument?.macros, graph.cutoffSource,
+        ),
       );
     }
   }

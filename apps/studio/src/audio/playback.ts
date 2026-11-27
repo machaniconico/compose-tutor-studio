@@ -16,7 +16,7 @@
 // *intent* and the position semantics (see store.stop(reset?)); this bridge owns
 // the actual audio lifecycle.
 
-import { beatTick, beatsPerBar as beatsPerBarOf, computeAudibleTracks, songEndBeat, type Project, type Track } from '@cts/project-model';
+import { beatTick, beatsPerBar as beatsPerBarOf, computeAudibleTracks, hasAutomation, songEndBeat, type Project, type Track } from '@cts/project-model';
 import { activeLoopRange, useStore } from '../state/store';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
@@ -155,11 +155,13 @@ export function initAudioBridge(): () => void {
   const unsubProject = useStore.subscribe((s, prev) => {
     if (s.project === prev.project) return;
     let clipsChanged = false;
+    let automatedPanChanged = false;
     let previousAudible: Set<string> | undefined;
     for (const track of s.project.tracks) {
       const playingTrack = state.playbackTracks.get(track.id);
       if (!playingTrack || playingTrack === track) continue;
       clipsChanged ||= track.clips !== playingTrack.clips;
+      automatedPanChanged ||= Boolean(playingTrack.automation?.pan?.points.length) && track.pan !== playingTrack.pan;
       if (track.mute !== playingTrack.mute || track.solo !== playingTrack.solo) {
         previousAudible ??= computeAudibleTracks([...state.playbackTracks.values()]);
       }
@@ -192,8 +194,8 @@ export function initAudioBridge(): () => void {
       return;
     }
     const lengthChanged = s.project.lengthBars !== prev.project.lengthBars;
-    if (returnsChanged || tempoOrMeterChanged(s.project, prev.project) ||
-      (lengthChanged && !state.loop && [...state.playbackTracks.values()].some(hasVolumeAutomation))) {
+    if (returnsChanged || automatedPanChanged || tempoOrMeterChanged(s.project, prev.project) ||
+      (lengthChanged && !state.loop && [...state.playbackTracks.values()].some(hasAutomation))) {
       restartPlayback();
       return;
     }
@@ -483,10 +485,6 @@ function handlePlaybackStartFailure(error: unknown): void {
   pushToast(audioPlaybackFailureMessage(error), 'error');
 }
 
-function hasVolumeAutomation(track: Track): boolean {
-  return track.type !== 'master' && Boolean(track.automation?.volume?.points.length);
-}
-
 /** Build (or rebuild) the per-track graph + voice managers for a render pass. */
 function buildVoices(
   ctx: AudioContext,
@@ -508,7 +506,9 @@ function buildVoices(
       state.synths.set(
         track.id,
         // The voice manager applies the track's macros, as in the WAV render.
-        new SynthVoiceManager(ctx, graph.input, track.instrument?.preset, undefined, track.instrument?.macros),
+        new SynthVoiceManager(
+          ctx, graph.input, track.instrument?.preset, undefined, track.instrument?.macros, graph.cutoffSource,
+        ),
       );
     }
   }
@@ -544,7 +544,7 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
   const startBeat = transport.positionBeat;
   const now = engine.now();
   const automation = { bpm: project.bpm, startBeat, loop: state.loop, endBeat: state.songEnd, startTime: now };
-  const hasAutomation = project.tracks.some(hasVolumeAutomation);
+  const automationActive = project.tracks.some(hasAutomation);
   let nextAutomationPass = 0;
 
   silenceRinging();
@@ -568,7 +568,7 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
     clock: () => engine.now(),
     fire: fireEvents,
     onWindow: (fromBeat, toBeat) => {
-      if (hasAutomation) {
+      if (automationActive) {
         automation.startTime = scheduler.timeAt(startBeat);
         const schedule = (pass: number) => {
           for (const graph of state.graphs.values()) graph.scheduleAutomation(automation, pass);

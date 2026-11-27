@@ -194,14 +194,14 @@ function countingContext() {
   const param = () => ({ setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() });
   const node = <T extends object>(extra: T) => {
     counts.nodes += 1;
-    return { connect: vi.fn(), ...extra };
+    return { connect: vi.fn(), disconnect: vi.fn(), ...extra };
   };
   const ctx = {
     currentTime: 0,
     createOscillator: vi.fn(() =>
       node({ type: 'sine', frequency: param(), detune: param(), start: vi.fn(), stop: vi.fn() }),
     ),
-    createBiquadFilter: vi.fn(() => node({ type: 'lowpass', frequency: param(), Q: param() })),
+    createBiquadFilter: vi.fn(() => node({ type: 'lowpass', frequency: param(), detune: param(), Q: param() })),
     createGain: vi.fn(() => node({ gain: param() })),
     createStereoPanner: vi.fn(() => {
       counts.panners += 1;
@@ -222,6 +222,27 @@ describe('voice node budget', () => {
         expect(counts.nodes / 16, info.id).toBeLessThanOrEqual(MAX_NODES_PER_VOICE);
       }
     }
+  });
+
+  it('shares one cutoff source across existing voice filters and disconnects each on end', () => {
+    const { ctx, counts } = countingContext();
+    const source = { connect: vi.fn(), disconnect: vi.fn() };
+    const synth = new SynthVoiceManager(
+      ctx, {} as AudioNode, 'brightLead', undefined, undefined, source as unknown as ConstantSourceNode,
+    );
+    synth.noteOn(60, 0, 0.5, 100);
+    synth.noteOn(64, 0, null, 100);
+    expect(counts.nodes).toBe(8);
+    const filters = vi.mocked(ctx.createBiquadFilter).mock.results.map(({ value }) => value as BiquadFilterNode);
+    expect(source.connect.mock.calls).toEqual(filters.map(({ detune }) => [detune]));
+    synth.releaseAll(0.25);
+    const oscillators = vi.mocked(ctx.createOscillator).mock.results.map(({ value }) => value as OscillatorNode);
+    oscillators[1]!.onended?.call(oscillators[1]!, new Event('ended'));
+    expect(source.disconnect.mock.calls).toEqual([[filters[0]!.detune]]);
+    oscillators[3]!.onended?.call(oscillators[3]!, new Event('ended'));
+    expect(source.disconnect.mock.calls).toEqual(filters.map(({ detune }) => [detune]));
+    expect(oscillators[1]!.onended).toBeNull();
+    expect(oscillators[3]!.onended).toBeNull();
   });
 
   it('adds no panner node without a width spread, so old songs keep their exact graph', () => {
