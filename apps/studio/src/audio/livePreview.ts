@@ -117,7 +117,12 @@ export class LivePreview {
    * second `hold` of the same id is ignored (key repeat); distinct ids on one
    * pitch are independent voices. Shares the synth, so the voice cap holds.
    */
-  async hold(id: string, instrument: InstrumentConfig | undefined, pitch: number): Promise<void> {
+  async hold(
+    id: string,
+    instrument: InstrumentConfig | undefined,
+    pitch: number,
+    velocity: number = PREVIEW_VELOCITY,
+  ): Promise<void> {
     if (this.held.has(id) || !Number.isInteger(pitch) || pitch < 0 || pitch > 127) return;
     if (this.held.size >= MAX_PREVIEW_VOICES) return;
     const entry: { voice: SynthVoiceHandle | null } = { voice: null };
@@ -149,7 +154,7 @@ export class LivePreview {
       this.synthInstrument = instrument;
     }
     const held = heldEnvelope(instrument);
-    const voice = this.synth.noteOn(pitch, context.currentTime, held.hold, PREVIEW_VELOCITY, {
+    const voice = this.synth.noteOn(pitch, context.currentTime, held.hold, velocity, {
       envelope: held.envelope,
     });
     if (voice) entry.voice = voice;
@@ -162,6 +167,13 @@ export class LivePreview {
     const voice = this.held.get(id)?.voice;
     this.held.delete(id);
     if (voice && this.synth && this.busContext) this.synth.releaseVoice(voice, this.busContext.currentTime);
+  }
+
+  /** Release only held notes whose id starts with `prefix` (e.g. the MIDI keyboard's). */
+  releaseMatching(prefix: string): void {
+    for (const id of [...this.held.keys()]) {
+      if (id.startsWith(prefix)) this.release(id);
+    }
   }
 
   /** Release everything now and invalidate starts still waiting for audio. */
@@ -250,13 +262,23 @@ export function previewChord(project: Project, chord: ChordEvent): boolean {
 }
 
 /** Start a key-held note on the shared preview. Refused while recording. */
-export function holdNote(id: string, instrument: InstrumentConfig | undefined, pitch: number): void {
+export function holdNote(
+  id: string,
+  instrument: InstrumentConfig | undefined,
+  pitch: number,
+  velocity: number = PREVIEW_VELOCITY,
+): void {
   if (!canPreview()) return;
-  run(shared().hold(id, instrument, pitch));
+  const v = Number.isFinite(velocity) ? Math.min(127, Math.max(1, Math.round(velocity))) : PREVIEW_VELOCITY;
+  run(shared().hold(id, instrument, pitch, v));
 }
 
 export function releaseHeldNote(id: string): void {
   singleton?.release(id);
+}
+
+export function releaseHeldNotesMatching(prefix: string): void {
+  singleton?.releaseMatching(prefix);
 }
 
 export function stopPreview(): void {

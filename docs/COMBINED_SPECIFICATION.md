@@ -268,6 +268,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | Chord Palette | コード候補 | Yes | ダイアトニック、代理、借用、セカンダリ候補 |
 | Scale Assist | スケールガイド | Yes | スケール内外を可視化。スナップ可能 |
 | Piano Roll | MIDI編集 | Yes | ノート作成、移動、複製、量子化、ベロシティ、コピー・貼り付け、選択音の移調・スケール合わせ |
+| MIDI Keyboard | Track Listの「MIDI」から「MIDI キーボードを使う」を押すと、USB MIDIキーボードで選択中の楽器Trackを試聴 | Yes | Web MIDIはWindows・Linux版のみ。許可は明示操作の後だけ(sysexなし、保存なし、前回の入力名だけUI設定として保存)。全チャンネル受付、Note On velocity 0はNote Off、CC64など制御変更は無視。鍵盤を押している間だけ鳴り(PC鍵盤と同じく最大8秒、複数の鍵盤・機器・PC鍵盤が同じ高さでも別々に扱う)、抜き差し・画面非表示・再生状態や曲の切替・録音開始・終了で全て止める。パネルを閉じてもMIDIはオフにならず、押している音はNote Offか8秒の上限で止まる(オフにするのは「使うのをやめる」)。入力名が空の機器はその回だけ選べ、記憶しない。録音・サステインは未実装。macOSでは使えない理由を表示する |
 | Drum Sequencer | ステップ入力 | Yes | 16ステップ基本。後続で確率/スウィング |
 | Clip Launcher | ループ試作 | Partial | MVPは簡易クリップ一覧。v1で非線形再生 |
 | Arranger | セクション配置 | Yes | Intro/A/B/Chorus/Bridge/Outro ラベル |
@@ -1138,6 +1139,8 @@ channel 9の1候補は、全noteが次の条件をすべて満たす場合だけ
 - Clip/Pattern Lane
 - Editor Pane
 - Learn Panel
+
+Track Listの見出しに小さな「MIDI」ボタンを置く。開くと「MIDI キーボードを使う」ボタンだけが出て、押すまでMIDI許可は求めない。許可後は入力(すべて/機器名)を選べ、抜き差しに追従し、抜けた時は鳴っている音を止める。非対応環境(macOS)では「この環境では MIDI キーボードを使えません(Windows・Linux 版で使えます)」と表示する。録音中・曲切替・再生状態の変化・ウィンドウ非表示では試聴を止める。
 
 Track Listの管理UI:
 
