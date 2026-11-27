@@ -48,6 +48,8 @@ function schedulerLoadProject(): Project {
   return {
     id: 'scheduler-stress-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: STRESS_TITLE,
     bpm: 300,
     timeSignature: [32, 4],
@@ -112,6 +114,8 @@ function shortLoopDensityProject(noteCount: number): Project {
   return {
     id: `short-loop-${noteCount}`,
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: `Short Loop ${noteCount}`,
     bpm: 300,
     timeSignature: [1, 16],

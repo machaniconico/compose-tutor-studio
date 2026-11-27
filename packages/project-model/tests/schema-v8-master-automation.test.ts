@@ -44,24 +44,26 @@ function expectRejected(input: unknown, path: string): void {
 }
 
 describe('schema-v8 effective-Master volume automation', () => {
-  it('migrates v7 by changing only schemaVersion', () => {
+  it('migrates v7 with the v11 groove defaults', () => {
     const { project } = projectWithCompatibilityMaster();
-    const v7 = { ...structuredClone(project), schemaVersion: 7 };
+    const { swing, hiHatChoke, ...legacy } = structuredClone(project);
+    const v7 = { ...legacy, schemaVersion: 7 };
     const migrated = migrateProject(v7);
-    expect(CURRENT_SCHEMA_VERSION).toBe(10);
-    expect(migrated).toEqual({ ...v7, schemaVersion: 10 });
+    expect(CURRENT_SCHEMA_VERSION).toBe(11);
+    expect(migrated).toEqual({ ...v7, schemaVersion: 11, swing: 0, hiHatChoke: false });
   });
 
   it('rejects every Master automation lane and Read id during legacy-v7 inspection', () => {
     const { project, effectiveMaster, compatibilityMaster } = projectWithCompatibilityMaster();
+    const { swing, hiHatChoke, ...legacy } = structuredClone(project);
     for (const master of [effectiveMaster, compatibilityMaster]) {
       expectRejected({
-        ...structuredClone(project),
+        ...legacy,
         schemaVersion: 7,
         automationLanes: [lane(master.id)],
       }, 'automationLanes[0].target.trackId');
       expectRejected({
-        ...structuredClone(project),
+        ...legacy,
         schemaVersion: 7,
         automationReadState: { globalEnabled: true, disabledTrackIds: [master.id] },
       }, 'automationReadState.disabledTrackIds[0]');
@@ -70,8 +72,9 @@ describe('schema-v8 effective-Master volume automation', () => {
 
   it('accepts only effective-Master volume and its canonical Read gate in v8', () => {
     const { project, effectiveMaster, compatibilityMaster } = projectWithCompatibilityMaster();
+    const { swing, hiHatChoke, ...legacy } = project;
     const canonical = {
-      ...project,
+      ...legacy,
       schemaVersion: 8,
       automationLanes: [lane(effectiveMaster.id)],
       automationReadState: {

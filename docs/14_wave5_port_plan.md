@@ -246,6 +246,7 @@ P70 変換器(wave5 の d85f796 で `soundingEvents` を実行して作った固
 - **TypeScript と Rust の移行・検証がずれる**: 各スキーマ PR に Rust テストを入れ、CI の `desktop` 行列の `cargo test` で見ます。
 - **スウィングが二重にかかる**: main のドラムはクリップ単位(`drumGroove.swing`、ステップ偶奇)、wave5 は曲単位(曲頭からの 1/16、最大 60%)で、定義が違います。P20 の 2 本のテストで固定します。
 - **3 経路(ライブ・WAV・MIDI)がずれる**: MIDI だけ別経路なので、P20 / P32 / P42 に一致テストを入れます。
+- **P20 の 2 つのモード**。**legacy**(`swing === 0 && hiHatChoke === false`、v10 から移行した曲はすべてこれ)では、ライブ・WAV・MIDI とも main の経路をそのまま使い、スケジュール、WAV の末尾、MIDI のバイト列が main と一致します。main のクリップ終端と曲末の規則(拍で比較)もそのままで、tick の新規則はかけません。ドラムの probability・humanize・クリップの swing は、main と同じくライブと WAV にだけ反映します。**resolved**(`swing > 0 || hiHatChoke === true`、新規の曲の既定)では、3 経路とも 1 つの共通処理(`packages/project-model/src/groove-schedule.ts`)が発音・省略・終端を 480 PPQ の整数 tick で決めます。値は 1 回だけ丸め、`onsetTick >= min(clipEndTick, songEndTick)` の発音を省きます。コードの自動伴奏は和音の各音に同じ規則をかけます。MIDI はこの 480 PPQ の決定を自分の PPQ へ換算するだけで、省略を判定し直しません。同じトラック・同じ打楽器・同じ tick の打点は 1 つにまとめ、WAV と MIDI の音数を揃えます。検知: `apps/studio/tests/v11-legacy-main-parity.test.ts`(固定 seed の 200 曲で main の出力と照合)と `v11-resolved-mode.test.ts`。
 - **イベント上限の差**: wave5 は 10 万、main は実行時 2 万・WAV 1 万です。大きな曲は、変換できても再生や書き出しができません。変換器が事前確認で止めます。
 - **`store.ts`(4190 行)と `editorActions.ts` への差分**: 両側で大きく変わっているので、wave5 版の貼り付けは禁止です。main 版に関数単位で足します。
 - **エフェクトの params 名**: `effects.ts` は両側が独立に作りました。変換時は対応表に無いエフェクトを無効化して報告します【対応表は未作成】。

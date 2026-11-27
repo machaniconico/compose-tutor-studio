@@ -3,7 +3,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -245,7 +247,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -487,7 +491,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -729,7 +735,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -971,7 +979,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -1213,7 +1223,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -1455,7 +1467,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -1697,7 +1711,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -1939,7 +1955,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -2181,7 +2199,9 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 10,
+      "schemaVersion": 11,
+      "swing": 0,
+      "hiHatChoke": false,
       "title": "Main fixture",
       "bpm": 96,
       "timeSignature": [
@@ -2417,6 +2437,6 @@
       "updatedAt": "2026-07-10T00:05:00.000Z"
     },
     "sourceSchemaVersion": 10,
-    "migrated": false
+    "migrated": true
   }
 }

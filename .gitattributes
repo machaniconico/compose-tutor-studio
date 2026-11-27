@@ -2,3 +2,6 @@
 packages/project-model/tests/golden/expected/** text eol=lf
 packages/project-model/tests/golden/fixtures/** text eol=lf
 apps/studio/tests/golden/expected/** text eol=lf
+
+# Portable bundles exported by older builds (byte fixtures)
+packages/project-bundle/fixtures/*.ctsbundle binary

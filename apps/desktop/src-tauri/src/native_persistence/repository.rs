@@ -43,7 +43,7 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 10;
+const PROJECT_SCHEMA_VERSION: u64 = 11;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const V3_PROJECT_FIELDS: &[&str] = &[
     "lengthBeats",
@@ -581,6 +581,8 @@ struct LegacyDeletedEvidence {
 struct ProjectDto {
     id: String,
     schema_version: u64,
+    swing: Option<f64>,
+    hi_hat_choke: Option<bool>,
     title: String,
     bpm: f64,
     time_signature: [u64; 2],
@@ -3485,6 +3487,13 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
             7 => migrate_project_value_v7_to_v8(project)?,
             8 => migrate_project_value_v8_to_v9(project)?,
             9 => migrate_project_value_v9_to_v10(project)?,
+            10 => {
+                let record = project.as_object_mut()?;
+                record.insert("schemaVersion".to_owned(), Value::from(11));
+                record.insert("swing".to_owned(), Value::from(0));
+                record.insert("hiHatChoke".to_owned(), Value::Bool(false));
+                project
+            }
             _ => return None,
         };
         version += 1;
@@ -7506,6 +7515,8 @@ fn validate_project_versioned_presence(
         || project.contains_key("audioRouting") != has_v4_fields
         || project.contains_key("audioTakeFolders") != has_v5_fields
         || project.contains_key("automationReadState") != has_v7_read_state
+        || project.contains_key("swing") != (schema_version >= 11)
+        || project.contains_key("hiHatChoke") != (schema_version >= 11)
     {
         return Err(GenerationIssue::Corrupt);
     }
@@ -7673,6 +7684,11 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
     let project: ProjectDto =
         serde_json::from_value(value.clone()).map_err(|_| GenerationIssue::Corrupt)?;
     if !(MIN_PROJECT_SCHEMA_VERSION..=PROJECT_SCHEMA_VERSION).contains(&project.schema_version)
+        || (project.schema_version >= 11
+            && (!project
+                .swing
+                .is_some_and(|swing| (0.0..=60.0).contains(&swing))
+                || project.hi_hat_choke.is_none()))
         || !valid_project_string(&project.id, MAX_STRING_CHARS, false)
         || !valid_project_string(&project.title, MAX_STRING_CHARS, true)
         || !project.bpm.is_finite()

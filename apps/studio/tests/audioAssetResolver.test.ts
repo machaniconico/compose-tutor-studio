@@ -62,6 +62,8 @@ function projectWithAsset(asset: ReadyAudioAsset): Project {
   return {
     id: 'audio-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Asset resolver test',
     bpm: 120,
     timeSignature: [4, 4],

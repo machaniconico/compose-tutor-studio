@@ -173,6 +173,8 @@ function tinyProject(): Project {
   const project: Project = {
     id: 'p',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Tiny',
     bpm: 120,
     timeSignature: [4, 4],
@@ -805,6 +807,10 @@ describe('projectToMidi chord playback', () => {
 
   it('orders note-off before note-on for a shared pitch even when chords are unsorted', () => {
     const project = chordPlaybackProject();
+    // The G chord starts at the 1-bar song end. v11 resolved mode (the new
+    // project default, choke on) drops such onsets; this case pins main's
+    // legacy ordering, so use the legacy configuration.
+    project.hiHatChoke = false;
     project.chordTrack = [
       {
         id: 'g-major',

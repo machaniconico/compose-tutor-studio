@@ -49,6 +49,8 @@ function sourceProject(): Project {
   return {
     id: 'midi-roundtrip-source',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: '往復テスト🎼',
     bpm: SOURCE_BPM,
     timeSignature: [3, 4],

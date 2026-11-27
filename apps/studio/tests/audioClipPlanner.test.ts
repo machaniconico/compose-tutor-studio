@@ -66,6 +66,8 @@ function project(
   return {
     id: 'audio-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Audio planner test',
     bpm: tempoMap[0]?.bpm ?? 120,
     timeSignature: [4, 4],

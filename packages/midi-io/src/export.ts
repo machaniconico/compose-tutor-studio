@@ -7,8 +7,10 @@ import {
   beatsPerBar as beatsPerBarForTimeSignature,
   buildClipIndex,
   compileDrumStepProjector,
+  assertScheduleEventBudget,
   compileMusicalTime,
   countMidiClipNoteOccurrences,
+  createDrumScheduleEvent,
   CURRENT_SCHEMA_VERSION,
   MAX_AUDIO_COMP_SEGMENTS_PER_FOLDER,
   MAX_AUDIO_TAKE_FOLDERS,
@@ -18,15 +20,23 @@ import {
   MAX_PROJECT_TIMELINE_BEATS,
   MAX_PROJECT_TOTAL_ITEMS,
   MIN_EVENT_DURATION_BEATS,
+  finalizeGrooveTrackDrums,
+  GROOVE_RESOLVER_PPQ,
+  isGrooveResolvedMode,
   projectDrumStep,
   realizeChordTrack,
   resolveClipContent,
+  resolveDrumOccurrence,
+  resolveGrooveDrumEvent,
+  resolveGrooveNoteSpan,
+  ScheduleEventLimitError,
   SHA256_PATTERN,
   visitMidiClipNoteOccurrences,
   type AudioAsset,
   type Project,
   type NoteEvent,
   type DrumLane,
+  type DrumScheduleOccurrence,
   type Track,
   type Clip,
   type ClipIndex,
@@ -134,7 +144,13 @@ export type MidiExportFailure = Readonly<{
 }>;
 
 export type MidiExportResult =
-  | Readonly<{ ok: true; bytes: Uint8Array; eventCount: number }>
+  | Readonly<{
+      ok: true;
+      bytes: Uint8Array;
+      eventCount: number;
+      /** PPQ actually written: 480 in v11 resolved mode, whatever was requested. */
+      effectivePpq: number;
+    }>
   | Readonly<{ ok: false; error: MidiExportFailure }>;
 
 export type MidiExportOptions = Readonly<{
@@ -1162,6 +1178,38 @@ function quantizedEndTick(
   return startTick + 1;
 }
 
+/**
+ * Convert a shared groove-resolver tick (480 PPQ) to the output PPQ.
+ *
+ * Resolved mode decides onsets, drops and ends once at 480 PPQ; MIDI only
+ * rescales those decisions and never re-derives a drop at its own PPQ.
+ */
+function resolverTickToMidi(tick: number, ppq: number, label: string): number {
+  return beatToTick(tick / GROOVE_RESOLVER_PPQ, ppq, label);
+}
+
+function isResolvedModeInput(project: unknown): boolean {
+  return typeof project === 'object' && project !== null
+    && isGrooveResolvedMode(project as Pick<Project, 'swing' | 'hiHatChoke'>);
+}
+
+/**
+ * Resolved mode: refuse with the same schedule budget, at the same counting
+ * point, as live playback and WAV, so all three paths decide alike.
+ */
+function assertResolvedScheduleBudget(project: Project): void {
+  if (!isGrooveResolvedMode(project)) return;
+  try {
+    assertScheduleEventBudget(project);
+  } catch (error) {
+    if (!(error instanceof ScheduleEventLimitError)) throw error;
+    exportFailure('event-limit-exceeded', error.message, {
+      limit: error.limit,
+      observed: error.observed,
+    });
+  }
+}
+
 /** Map track volume (0..2) to a CC7 value (0..127). */
 export function volumeToCc(volume: number): number {
   return Math.round(clamp(volume / 2, 0, 1) * 127);
@@ -1185,6 +1233,7 @@ function appendClipNotes(
   ppq: number,
   messages: MidiMessage[],
   budget: MidiExportBudget,
+  resolvedProject: Project | null,
 ): void {
   const notes = clip.notes ?? [];
   if (notes.length === 0) return;
@@ -1218,6 +1267,17 @@ function appendClipNotes(
   ): Readonly<{ startTick: number; endTick: number }> | null => {
     const { note } = occurrence;
     const startBeat = clip.startBeat + occurrence.localStartBeat;
+    if (resolvedProject) {
+      const span = resolveGrooveNoteSpan(
+        resolvedProject, startBeat, occurrence.durationBeats, clipEndBeat,
+      );
+      if (!span) return null;
+      const startTick = resolverTickToMidi(span.onsetTick, ppq, `note ${note.id} start`);
+      const endTick = quantizedEndTick(
+        startTick, span.endTick / GROOVE_RESOLVER_PPQ, ppq, `note ${note.id} end`,
+      );
+      return { startTick, endTick };
+    }
     const endBeat = Math.min(
       clipEndBeat,
       startBeat + occurrence.durationBeats,
@@ -1265,18 +1325,32 @@ function appendRealizedChordNotes(
   ppq: number,
   messages: MidiMessage[],
   budget: MidiExportBudget,
+  resolvedProject: Project | null,
 ): void {
   budget.reserve(notes.length * 2);
   for (const note of notes) {
     requireFiniteNonNegative(note.startBeat, 'realized chord note start');
     requireFinitePositive(note.durationBeats, 'realized chord note duration');
-    const startTick = beatToTick(note.startBeat, ppq, 'realized chord note start');
-    const endTick = quantizedEndTick(
-      startTick,
-      note.startBeat + note.durationBeats,
-      ppq,
-      'realized chord note end',
-    );
+    let startTick: number;
+    let endTick: number;
+    if (resolvedProject) {
+      const span = resolveGrooveNoteSpan(
+        resolvedProject, note.startBeat, note.durationBeats, note.startBeat + note.durationBeats,
+      );
+      if (!span) continue;
+      startTick = resolverTickToMidi(span.onsetTick, ppq, 'realized chord note start');
+      endTick = quantizedEndTick(
+        startTick, span.endTick / GROOVE_RESOLVER_PPQ, ppq, 'realized chord note end',
+      );
+    } else {
+      startTick = beatToTick(note.startBeat, ppq, 'realized chord note start');
+      endTick = quantizedEndTick(
+        startTick,
+        note.startBeat + note.durationBeats,
+        ppq,
+        'realized chord note end',
+      );
+    }
     const pitch = midiDataByte(note.pitch, 'realized chord note pitch');
     const velocity = midiVelocity(note.velocity, 'realized chord note velocity');
     messages.push({ tick: startTick, bytes: [0x90 | channel, pitch, velocity] });
@@ -1291,6 +1365,7 @@ function appendClipDrums(
   musicalTime: MusicalTimeIndex,
   messages: MidiMessage[],
   budget: MidiExportBudget,
+  resolved: ResolvedDrumSink | null,
 ): void {
   const events = clip.drumEvents ?? [];
   const clipStepsPerBar = clip.stepsPerBar ?? 16;
@@ -1326,6 +1401,20 @@ function appendClipDrums(
     const pitch = midiDataByte(DRUM_NOTE[evt.lane], `drum event ${evt.id} pitch`);
     const timing = projectDrumStep(drumProjector, evt.stepIndex);
     requireFinitePositive(timing.beatsPerBar, `clip ${clip.id} beats per bar`);
+    if (resolved) {
+      midiVelocity(evt.velocity, `drum event ${evt.id} velocity`);
+      const event = resolveGrooveDrumEvent(resolved.project, createDrumScheduleEvent(
+        resolved.trackId,
+        resolved.clipId,
+        clip,
+        evt,
+        timing.beat,
+        stepsPerBar,
+        timing.beatsPerBar,
+      ));
+      if (event) resolved.hits.push(event);
+      continue;
+    }
     const startBeat = timing.beat;
     const startTick = beatToTick(startBeat, ppq, `drum event ${evt.id} start`);
     const endTick = quantizedEndTick(
@@ -1337,6 +1426,59 @@ function appendClipDrums(
     const velocity = midiVelocity(evt.velocity, `drum event ${evt.id} velocity`);
     messages.push({ tick: startTick, bytes: [0x90 | DRUM_CHANNEL, pitch, velocity] });
     messages.push({ tick: endTick, bytes: [0x80 | DRUM_CHANNEL, pitch, 0] });
+  }
+}
+
+type ResolvedDrumSink = {
+  project: Project;
+  trackId: string;
+  clipId: string;
+  hits: DrumScheduleOccurrence[];
+};
+
+/**
+ * Write one track's resolved-mode drums on channel 9.
+ *
+ * Onsets, drops, same-tick de-duplication, probability, velocity and choke
+ * all come from the shared groove resolver (the same calls WAV makes). An
+ * interval is also capped at the next same-pitch onset, because MIDI Note Off
+ * cannot tell same-pitch notes apart.
+ */
+function appendResolvedTrackDrums(
+  project: Project,
+  hits: readonly DrumScheduleOccurrence[],
+  ppq: number,
+  messages: MidiMessage[],
+): void {
+  const notes = finalizeGrooveTrackDrums(project, hits).flatMap((event) => {
+    const sounding = resolveDrumOccurrence(event);
+    if (!sounding) return [];
+    const { eventId, lane, velocity, chokedAtBeat } = sounding.payload;
+    const startTick = resolverTickToMidi(
+      Math.round(sounding.beat * GROOVE_RESOLVER_PPQ), ppq, `drum event ${eventId} start`,
+    );
+    const naturalEndTick = quantizedEndTick(
+      startTick, sounding.beat + DRUM_HIT_DURATION_BEATS, ppq, `drum event ${eventId} end`,
+    );
+    const endTick = chokedAtBeat === undefined
+      ? naturalEndTick
+      : Math.min(
+          naturalEndTick,
+          resolverTickToMidi(
+            Math.round(chokedAtBeat * GROOVE_RESOLVER_PPQ), ppq, `drum event ${eventId} choke`,
+          ),
+        );
+    return [{ pitch: DRUM_NOTE[lane], velocity, startTick, endTick }];
+  });
+  notes.sort((left, right) => left.startTick - right.startTick);
+  const nextOnsetByPitch = new Map<number, number>();
+  for (let index = notes.length - 1; index >= 0; index -= 1) {
+    const { pitch, velocity, startTick, endTick } = notes[index]!;
+    const end = Math.min(endTick, nextOnsetByPitch.get(pitch) ?? Number.POSITIVE_INFINITY);
+    nextOnsetByPitch.set(pitch, startTick);
+    if (end <= startTick) continue;
+    messages.push({ tick: startTick, bytes: [0x90 | DRUM_CHANNEL, pitch, velocity] });
+    messages.push({ tick: end, bytes: [0x80 | DRUM_CHANNEL, pitch, 0] });
   }
 }
 
@@ -1418,18 +1560,33 @@ function buildInstrumentTrack(
     { tick: 0, bytes: [0xb0 | channel, 10, panCc] },
   ];
 
+  // Legacy mode (swing 0, choke off) keeps main's v10 bytes exactly.
+  const resolvedProject = isGrooveResolvedMode(project) ? project : null;
+  const resolvedDrums: DrumScheduleOccurrence[] = [];
   for (const clip of track.clips) {
     const effectiveClip = resolveClipContent(project, clip, clipIndex);
     if (!effectiveClip) {
       exportFailure('invalid-project', `clip ${clip.id} has an invalid linked source`);
     }
     if (effectiveClip.type === 'drum') {
-      appendClipDrums(effectiveClip, ppq, musicalTime, msgs, budget);
+      appendClipDrums(
+        effectiveClip,
+        ppq,
+        musicalTime,
+        msgs,
+        budget,
+        resolvedProject
+          ? { project: resolvedProject, trackId: track.id, clipId: clip.id, hits: resolvedDrums }
+          : null,
+      );
     } else if (effectiveClip.type === 'midi') {
-      appendClipNotes(effectiveClip, channel, ppq, msgs, budget);
+      appendClipNotes(effectiveClip, channel, ppq, msgs, budget, resolvedProject);
     }
   }
-  appendRealizedChordNotes(realizedChordNotes, channel, ppq, msgs, budget);
+  if (resolvedProject && resolvedDrums.length > 0) {
+    appendResolvedTrackDrums(resolvedProject, resolvedDrums, ppq, msgs);
+  }
+  appendRealizedChordNotes(realizedChordNotes, channel, ppq, msgs, budget, resolvedProject);
   assertNoAmbiguousNoteOverlap(msgs, track);
   return buildTrackChunk(msgs);
 }
@@ -1458,8 +1615,11 @@ export function projectToMidiResult(
   try {
     const resolved = resolveExportOptions(options);
     const budget = new MidiExportBudget(resolved.maxEvents);
-    const bytes = projectToMidiWithinBudget(project, resolved.ppq, budget);
-    return { ok: true, bytes, eventCount: budget.eventCount };
+    // Resolved mode always writes the shared resolver's 480 PPQ so no two
+    // live/WAV onsets collapse onto one MIDI tick. Legacy keeps main's PPQ.
+    const ppq = isResolvedModeInput(project) ? GROOVE_RESOLVER_PPQ : resolved.ppq;
+    const bytes = projectToMidiWithinBudget(project, ppq, budget);
+    return { ok: true, bytes, eventCount: budget.eventCount, effectivePpq: ppq };
   } catch (error) {
     if (error instanceof MidiExportError) return { ok: false, error: error.failure };
     return {
@@ -1481,6 +1641,7 @@ function projectToMidiWithinBudget(
     exportFailure('invalid-project', 'project must be an object');
   }
   validateExportProjectShape(project);
+  assertResolvedScheduleBudget(project);
   const realizedChords = realizeChordTrack(project);
   const clipIndex = buildClipIndex(project);
   const tempoMap = projectTempoMap(project);

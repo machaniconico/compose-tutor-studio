@@ -189,14 +189,46 @@ function assertPortableProjectJsonSize(byteLength: number): void {
   }
 }
 
-function serializePortableProject(project: Project): string {
-  const encoded = encodeProjectJson(project);
+function serializePortableProject(
+  project: Project,
+  maxBytes: number = DEFAULT_MAX_PROJECT_JSON_BYTES,
+): string {
+  const encoded = encodeProjectJson(project, { maxBytes });
   if (!encoded.ok) {
     throw new PortableProjectBundleError(
       encoded.error.code === 'too-large' ? 'too-large' : 'invalid-project',
     );
   }
   return encoded.json;
+}
+
+/**
+ * Frozen top-level key order of main's schema v10 canonical encoder.
+ * v11 only inserts `swing` and `hiHatChoke` after `schemaVersion`; nested
+ * objects are unchanged. Pinned by fixtures/main-v10-two-assets.ctsbundle.
+ */
+const V10_PROJECT_KEYS = Object.freeze([
+  'id', 'schemaVersion', 'title', 'bpm', 'timeSignature', 'key', 'scale', 'lengthBars',
+  'lengthBeats', 'tempoMap', 'timeSignatureMap', 'audioAssets', 'audioTakeFolders',
+  'automationLanes', 'automationReadState', 'audioRouting', 'tracks', 'chordTrack',
+  'sections', 'createdAt', 'updatedAt',
+] as const);
+
+/** Re-encode a migrated v10 Project with the v10 canonical encoder; null if not v10-representable. */
+function serializeV10PortableProject(project: Project): string | null {
+  if (project.swing !== 0 || project.hiHatChoke !== false) return null;
+  // The size limit applies to the source bytes stored in the bundle (already
+  // checked), not to this intermediate v11 text, which carries 2 more fields.
+  const current = JSON.parse(
+    serializePortableProject(project, Number.MAX_SAFE_INTEGER),
+  ) as Record<string, unknown>;
+  const keys = Object.keys(current).filter((key) => key !== 'swing' && key !== 'hiHatChoke');
+  if (keys.length !== V10_PROJECT_KEYS.length || keys.some((key) => !V10_PROJECT_KEYS.includes(key as never))) {
+    return null;
+  }
+  const v10: Record<string, unknown> = {};
+  for (const key of V10_PROJECT_KEYS) v10[key] = key === 'schemaVersion' ? 10 : current[key];
+  return JSON.stringify(v10);
 }
 
 function distinctReadyAssets(project: Project): PortableProjectBundleAssetReference[] {
@@ -554,7 +586,17 @@ export async function decodePortableProjectBundle(
     );
   }
   const normalizedProject = canonicalProject(decodedProject.project);
-  if (serializePortableProject(normalizedProject) !== projectText) {
+  if (decodedProject.migrated) {
+    // A bundle exported by an older build holds the canonical JSON of its own
+    // schema. Only schema v10 bundles exist (bundles shipped with v10), so the
+    // decoded original must re-encode to exactly the same v10 bytes.
+    if (
+      decodedProject.sourceSchemaVersion !== 10
+      || serializeV10PortableProject(normalizedProject) !== projectText
+    ) {
+      throw new PortableProjectBundleError('non-canonical');
+    }
+  } else if (serializePortableProject(normalizedProject) !== projectText) {
     throw new PortableProjectBundleError('non-canonical');
   }
   const expectedAssets = distinctReadyAssets(normalizedProject);

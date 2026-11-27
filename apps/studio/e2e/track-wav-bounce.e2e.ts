@@ -13,6 +13,8 @@ function bounceProject(options: {
   return {
     id: 'project-track-bounce-e2e',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Track/Bounce E2E',
     bpm: 120,
     timeSignature: [4, 4],

@@ -108,6 +108,8 @@ function projectWithFolder(): Project {
 function schemaV4Record(project: Project): Record<string, unknown> {
   const legacy = structuredClone(project) as unknown as Record<string, unknown>;
   legacy.schemaVersion = 4;
+  delete legacy.swing;
+  delete legacy.hiHatChoke;
   delete legacy.audioTakeFolders;
   delete legacy.automationReadState;
   return legacy;
@@ -173,6 +175,8 @@ describe('schema-v5 Audio take folders', () => {
     expect(first).toEqual({
       ...legacy,
       schemaVersion: CURRENT_SCHEMA_VERSION,
+      swing: 0,
+      hiHatChoke: false,
       audioTakeFolders: [],
       automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     });

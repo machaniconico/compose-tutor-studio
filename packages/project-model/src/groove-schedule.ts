@@ -1,0 +1,140 @@
+// Shared v11 groove resolver for live playback, offline WAV and MIDI export.
+//
+// Legacy mode (`swing === 0 && hiHatChoke === false`, every migrated v10 file)
+// never reaches this module: all three paths keep main's v10 code and bytes.
+// Resolved mode (`swing > 0 || hiHatChoke === true`) takes every onset, drop
+// and end decision from here, in integer ticks at PPQ 480. Each value is
+// rounded to the 480 PPQ grid exactly once; an onset is dropped when
+// `onsetTick >= min(clipEndTick, songEndTick)`. MIDI converts these 480 PPQ
+// ticks to its own PPQ afterwards and never re-derives a drop.
+import {
+  applyDrumSwingToOccurrenceBeat,
+  resolveDrumOccurrence,
+  type DrumScheduleOccurrence,
+} from './drum-schedule';
+import { applyHiHatChoke, MAX_SWING_PERCENT, swingBeat } from './groove';
+import { beatTick, PPQ } from './ticks';
+import type { DrumLane, Project } from './types';
+
+/** The single tick grid on which resolved-mode decisions are made. */
+export const GROOVE_RESOLVER_PPQ = PPQ;
+
+type GrooveProject = Pick<Project, 'swing' | 'hiHatChoke' | 'lengthBeats'>;
+
+/** True when the project needs the v11 resolver; false keeps main's v10 paths. */
+export function isGrooveResolvedMode(project: Pick<Project, 'swing' | 'hiHatChoke'>): boolean {
+  return (Number.isFinite(project.swing) && project.swing > 0) || project.hiHatChoke === true;
+}
+
+function projectSwingPercent(project: GrooveProject): number {
+  return Number.isFinite(project.swing)
+    ? Math.min(MAX_SWING_PERCENT, Math.max(0, project.swing))
+    : 0;
+}
+
+/** Exclusive onset limit: the earlier of the owning span end and the song end. */
+function onsetLimitTick(project: GrooveProject, spanEndBeat: number): number {
+  return Math.min(beatTick(spanEndBeat), beatTick(project.lengthBeats));
+}
+
+export type GrooveNoteSpan = Readonly<{ onsetTick: number; endTick: number }>;
+
+/**
+ * Resolve one pitched note (a clip note occurrence or one realized chord voice).
+ *
+ * `spanEndBeat` is the owning clip end; a realized chord voice passes its own
+ * end. Returns null when the swung onset is at or past that end or the song
+ * end. The end is clamped to the owning span and is always after the onset.
+ */
+export function resolveGrooveNoteSpan(
+  project: GrooveProject,
+  sourceBeat: number,
+  durationBeats: number,
+  spanEndBeat: number,
+): GrooveNoteSpan | null {
+  const onsetBeat = swingBeat(sourceBeat, projectSwingPercent(project));
+  const onsetTick = beatTick(onsetBeat);
+  if (!Number.isFinite(onsetTick) || !(onsetTick < onsetLimitTick(project, spanEndBeat))) {
+    return null;
+  }
+  const endTick = Math.min(
+    beatTick(spanEndBeat),
+    Math.max(onsetTick + 1, beatTick(onsetBeat + durationBeats)),
+  );
+  return { onsetTick, endTick };
+}
+
+/**
+ * Resolve one raw drum occurrence built by `createDrumScheduleEvent`.
+ *
+ * Clip swing (`drumGroove.swing > 0`) wins over project swing. The returned
+ * event sits on its 480 PPQ onset with `swing: 0`, so the per-pass occurrence
+ * resolver adds no further delay. `authoredBeat` keeps the pre-swing beat so
+ * probability, humanize and voiceSeed stay identical to legacy mode.
+ * Null when the onset is dropped.
+ */
+export function resolveGrooveDrumEvent(
+  project: GrooveProject,
+  event: DrumScheduleOccurrence,
+): DrumScheduleOccurrence | null {
+  const { payload } = event;
+  const onsetBeat = payload.swing > 0
+    ? applyDrumSwingToOccurrenceBeat(
+        event.beat,
+        payload.sourceStepIndex,
+        payload.swing,
+        payload.stepsPerBar,
+        payload.beatsPerBar,
+      )
+    : swingBeat(event.beat, projectSwingPercent(project));
+  const onsetTick = beatTick(onsetBeat);
+  if (!Number.isFinite(onsetTick) || !(onsetTick < onsetLimitTick(project, payload.clipEndBeat))) {
+    return null;
+  }
+  const beat = onsetTick / PPQ;
+  // Only a moved onset needs the authored beat; an unmoved one salts identically
+  // (and keeps the P04 schedule payload unchanged).
+  return {
+    beat,
+    payload: beat === event.beat
+      ? { ...payload, swing: 0 }
+      : { ...payload, swing: 0, authoredBeat: event.beat },
+  };
+}
+
+function sameTickKey(lane: DrumLane, beat: number): string {
+  return `${lane}:${beatTick(beat)}`;
+}
+
+/**
+ * Finish one track's resolved drums: de-duplicate and apply the hi-hat choke.
+ *
+ * Hits of the same lane (one MIDI pitch) on the same tick collapse to the last
+ * one in source order, so WAV plays exactly the notes MIDI can represent. With
+ * `hiHatChoke`, each open hat gets `chokedAtBeat` from the first closed hat on
+ * this track that actually sounds after it (first-pass probability).
+ */
+export function finalizeGrooveTrackDrums(
+  project: Pick<Project, 'hiHatChoke'>,
+  events: readonly DrumScheduleOccurrence[],
+): DrumScheduleOccurrence[] {
+  const lastIndexByKey = new Map<string, number>();
+  events.forEach((event, index) => {
+    lastIndexByKey.set(sameTickKey(event.payload.lane, event.beat), index);
+  });
+  const kept = events.filter(
+    (event, index) => lastIndexByKey.get(sameTickKey(event.payload.lane, event.beat)) === index,
+  );
+  if (project.hiHatChoke !== true) return kept;
+
+  const hats = kept.flatMap((event) => {
+    const { lane } = event.payload;
+    if (lane !== 'openHat' && lane !== 'closedHat') return [];
+    const sounding = resolveDrumOccurrence(event);
+    return sounding ? [{ event, lane, startBeat: sounding.beat }] : [];
+  });
+  applyHiHatChoke(hats, (open, closed) => {
+    open.event.payload.chokedAtBeat = closed.startBeat;
+  });
+  return kept;
+}

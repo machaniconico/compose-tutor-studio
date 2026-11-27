@@ -16,7 +16,7 @@ import type {
   TrackType,
 } from './types';
 
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 11;
 
 export type CreateProjectOptions = {
   title?: string;
@@ -152,6 +152,8 @@ export function createEmptyProject(options: CreateProjectOptions = {}): Project 
   return {
     id: makeId('project'),
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: true,
     title,
     bpm,
     timeSignature,

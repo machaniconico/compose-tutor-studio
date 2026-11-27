@@ -20,6 +20,8 @@ function project(tracks: Track[], chordTrack: ChordEvent[] = []): Project {
   return {
     id: 'loop-density-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Loop density integration',
     bpm: 120,
     timeSignature: [4, 4],

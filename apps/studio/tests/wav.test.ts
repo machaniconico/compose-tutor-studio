@@ -112,6 +112,8 @@ function projectWithDrumClip(clip: Clip): Project {
   return {
     id: 'project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'WAV test',
     bpm: 120,
     timeSignature: [4, 4],
@@ -737,6 +739,8 @@ describe('buildWavScheduleEvents drum groove parity', () => {
     const project: Project = {
       id: 'ordered-linked-project',
       schemaVersion: CURRENT_SCHEMA_VERSION,
+      swing: 0,
+      hiHatChoke: false,
       title: 'Ordered linked WAV',
       bpm: 120,
       timeSignature: [4, 4],
@@ -997,6 +1001,8 @@ describe('MIDI Clip loop live/WAV parity', () => {
     return {
       id: 'wav-midi-loop-project',
       schemaVersion: CURRENT_SCHEMA_VERSION,
+      swing: 0,
+      hiHatChoke: false,
       title: 'MIDI loop parity',
       bpm: 120,
       timeSignature: [4, 4],
@@ -1179,6 +1185,8 @@ describe('WAV render allocation budget', () => {
         drumEvents: [],
       }),
       schemaVersion: CURRENT_SCHEMA_VERSION,
+      swing: 0,
+      hiHatChoke: false,
       lengthBars: 256,
       lengthBeats: 1_024,
       tracks: [track],

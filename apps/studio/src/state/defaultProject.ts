@@ -202,6 +202,8 @@ export function createDefaultProject(title = '最初の1曲'): Project {
   return {
     id: uid('project'),
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: true,
     title,
     bpm: 120,
     timeSignature: [4, 4],

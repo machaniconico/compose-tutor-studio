@@ -41,3 +41,5 @@ export type { CreateDefaultProjectOpts } from './factory';
 export * from './tapTempo';
 export * from './groove';
 export * from './ticks';
+export * from './drum-schedule';
+export * from './groove-schedule';

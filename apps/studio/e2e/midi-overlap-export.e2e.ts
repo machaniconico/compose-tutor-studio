@@ -6,6 +6,8 @@ function overlappingProject(): Project {
   return {
     id: 'midi-overlap-e2e',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'MIDI Overlap Safety',
     bpm: 120,
     timeSignature: [4, 4],

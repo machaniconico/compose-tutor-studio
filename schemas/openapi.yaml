@@ -230,7 +230,7 @@ components:
     Project:
       type: object
       description: >-
-        Current schema-v10 aggregate. lengthBeats, tempoMap, and timeSignatureMap
+        Current schema-v11 aggregate. lengthBeats, tempoMap, and timeSignatureMap
         are the musical-time authority; bpm, timeSignature, and lengthBars are
         validated compatibility mirrors. audioRouting is one normalized,
         acyclic stereo graph shared by realtime playback and offline WAV
@@ -267,10 +267,16 @@ components:
         none of that window and interrupts the session, although prior windows
         may already have played. WAV rejects its whole-song limits before the
         OfflineAudioContext is allocated.
+        swing delays odd absolute sixteenth-note positions. A positive drum
+        clip swing takes precedence. hiHatChoke lets a sounding closed hat stop
+        an earlier open hat on the same track. New projects use swing 0 and
+        hiHatChoke true; v10 projects migrate with swing 0 and hiHatChoke false.
       additionalProperties: false
       required:
         - id
         - schemaVersion
+        - swing
+        - hiHatChoke
         - title
         - bpm
         - timeSignature
@@ -297,7 +303,15 @@ components:
           maxLength: 4096
         schemaVersion:
           type: integer
-          const: 10
+          const: 11
+        swing:
+          type: number
+          minimum: 0
+          maximum: 60
+          description: Project-wide sixteenth-note swing percentage.
+        hiHatChoke:
+          type: boolean
+          description: Whether closed hats stop earlier open hats on the same track.
         title:
           type: string
           maxLength: 4096
@@ -664,7 +678,7 @@ components:
           minLength: 1
           maxLength: 4096
           description: >-
-            Linked-clip source id retained by current schema v10. MIDI/drum only;
+            Linked-clip source id retained by current schema v11. MIDI/drum only;
             the source must be
             a direct same-track, same-type non-alias clip of identical length.
             Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and

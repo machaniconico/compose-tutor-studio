@@ -190,6 +190,8 @@ function maximumAutomationLaneProject(): Project {
   return {
     id: 'automation-stress-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Automation 20k Load',
     bpm: 300,
     timeSignature: [32, 4],

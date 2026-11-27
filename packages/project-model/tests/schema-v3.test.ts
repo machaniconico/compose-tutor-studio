@@ -21,6 +21,8 @@ const clock = () => new Date('2026-07-16T00:00:00.000Z');
 function toLegacyRecord(project: Project, schemaVersion: 1 | 2): Record<string, unknown> {
   const legacy = structuredClone(project) as unknown as Record<string, unknown>;
   legacy.schemaVersion = schemaVersion;
+  delete legacy.swing;
+  delete legacy.hiHatChoke;
   delete legacy.lengthBeats;
   delete legacy.tempoMap;
   delete legacy.timeSignatureMap;
@@ -355,6 +357,8 @@ describe('schema-v3 audio and automation', () => {
 
     const legacy = structuredClone(project) as unknown as Record<string, unknown>;
     legacy.schemaVersion = 3;
+    delete legacy.swing;
+    delete legacy.hiHatChoke;
     delete legacy.audioTakeFolders;
     delete legacy.automationReadState;
     delete legacy.audioRouting;

@@ -16,6 +16,8 @@ function drumOnlyProject(grooveSeed: number): Project {
   return {
     id: 'project-drum-determinism',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: FIXTURE_TITLE,
     bpm: 120,
     timeSignature: [4, 4],
