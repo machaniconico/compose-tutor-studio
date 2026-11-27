@@ -14,7 +14,8 @@ import {
   type TrackMutationErrorCode,
   type TrackMutationResult,
 } from '@cts/project-model';
-import { listSynthPresets } from '../audio/synth';
+import { NEUTRAL_MACROS, readInstrumentMacro, type InstrumentMacroKey } from '../audio/macros';
+import { DEFAULT_PRESET, listSynthPresets } from '../audio/presets';
 import { useStore } from './store';
 
 export type AddStudioTrackKind = AddTrackKind;
@@ -248,6 +249,49 @@ export function setStudioTrackPreset(trackId: string, preset: string): TrackComm
   const adopted = projectTrack(useStore.getState().project, trackId);
   if (!adopted) return failed('commit-rejected');
   return successResult(adopted.id, adopted.name, mutation.changed, playbackWasActive);
+}
+
+/** Update only the requested macro, or clear the four macro keys together. */
+export function setStudioTrackMacro(
+  trackId: string,
+  adjustment: Readonly<{ key: InstrumentMacroKey; value: number }> | null,
+): TrackCommandResult {
+  const state = useStore.getState();
+  const snapshot = state.project;
+  const source = projectTrack(snapshot, trackId);
+  if (!source) return failed('track-not-found');
+  const current = source.instrument;
+  if (source.type !== 'instrument' || (current && current.type !== 'synth')) {
+    return failed('unsupported-track-type');
+  }
+
+  const storedParams = current?.params;
+  const params = { ...storedParams };
+  if (adjustment) {
+    const { key, value } = adjustment;
+    if (value === readInstrumentMacro(storedParams, key)) {
+      return successResult(trackId, source.name, false);
+    }
+    params[key] = value;
+  } else {
+    const keys = Object.keys(NEUTRAL_MACROS).filter((key) => Object.hasOwn(params, key));
+    if (keys.length === 0) return successResult(trackId, source.name, false);
+    for (const key of keys) delete params[key];
+  }
+
+  const instrument = {
+    type: 'synth' as const,
+    preset: current?.preset ?? DEFAULT_PRESET,
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+  };
+  const project = {
+    ...snapshot,
+    tracks: snapshot.tracks.map((track) => track === source ? { ...track, instrument } : track),
+  };
+  const mutation = { ok: true as const, project, trackId, changed: true };
+  const playbackWasActive = state.transport.phase !== 'stopped';
+  if (!commitMutation(snapshot, mutation)) return failed('commit-rejected');
+  return successResult(trackId, source.name, true, playbackWasActive);
 }
 
 /** Assign or transfer one semantic learning role without coupling it to the name. */

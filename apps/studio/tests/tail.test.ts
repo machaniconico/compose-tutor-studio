@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { exportProjectToMidi } from '@cts/midi-io';
 import {
   CURRENT_SCHEMA_VERSION,
   type Clip,
@@ -13,6 +14,8 @@ import {
   type DrumScheduleEvent,
   type NoteScheduleEvent,
 } from '../src/audio/events';
+import { NEUTRAL_MACROS } from '../src/audio/macros';
+import { buildWavScheduleEvents, planWavRender } from '../src/audio/wav';
 import { resolveDrumOccurrence, type ScheduledEvent } from '../src/audio/scheduler';
 import { resolveEqBiquadSettings } from '../src/audio/effects';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from '../src/audio/masterBus';
@@ -357,6 +360,35 @@ describe('planAudioTail', () => {
     expect(plan.postLimiterTailSeconds).toBe(MASTER_LIMITER_LOOKAHEAD_SECONDS);
     expect(plan.fadeStartSeconds).toBeCloseTo(3.42, 10);
     expect(plan.fadeEndSeconds).toBeCloseTo(3.47, 10);
+  });
+
+  it('schedules and plans the same WAV frames with absent or neutral macros', () => {
+    const track = instrumentTrack();
+    track.clips.push({
+      id: 'ending-clip', trackId: track.id, type: 'midi', startBeat: 0, lengthBeats: 4,
+      loop: false, notes: [{ id: 'ending-note', startBeat: 3.9, durationBeats: 0.1, pitch: 60, velocity: 100 }],
+    });
+    const original = project(track);
+    const neutral = project({ ...track, instrument: { ...track.instrument!, params: NEUTRAL_MACROS } });
+    const events = buildWavScheduleEvents(original);
+    const neutralEvents = buildWavScheduleEvents(neutral);
+    expect(events).toHaveLength(1);
+    expect(neutralEvents).toEqual(events);
+    expect(buildScheduleEvents(neutral)).toEqual(buildScheduleEvents(original));
+    expect(exportProjectToMidi(neutral)).toEqual(exportProjectToMidi(original));
+    expect(planWavRender(neutral, neutralEvents)).toEqual(planWavRender(original, events));
+  });
+
+  it('keeps a short song-end note through the adjusted attack, decay and full release', () => {
+    const track = instrumentTrack();
+    track.instrument!.params = { macroAttack: 1, macroRelease: 1 };
+    const plan = planAudioTail(project(track), [note(3.9, 0.1)], 0, 4);
+    const envelopeEnd = 1.95 + 1.12 + 0.42 + 3.2;
+    expect(plan.fadeStartSeconds).toBeCloseTo(envelopeEnd, 10);
+    expect(plan.totalSeconds).toBeCloseTo(
+      envelopeEnd + FINAL_TAIL_FADE_SECONDS + MASTER_LIMITER_LOOKAHEAD_SECONDS,
+      10,
+    );
   });
 
   it('uses the actual latest source stop for an open hat', () => {

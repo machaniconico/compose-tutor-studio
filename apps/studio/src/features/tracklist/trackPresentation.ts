@@ -1,9 +1,9 @@
 import type { Track, TrackType } from '@cts/project-model';
-import { listSynthPresets } from '../../audio/synth';
+import { listSynthPresets } from '../../audio/presets';
 
 export { isLearningTrack, isLearningTrackName } from '@cts/project-model';
 
-export { canonicalSynthPresetName } from '../../audio/synth';
+export { canonicalSynthPresetName } from '../../audio/presets';
 
 export const TRACK_TYPE_LABEL: Readonly<Record<TrackType, string>> = {
   instrument: '楽器',

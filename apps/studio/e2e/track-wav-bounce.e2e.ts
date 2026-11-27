@@ -274,6 +274,41 @@ test('selected Track WAV bounce is offered with its scope explained', async ({ p
   await expect(page.getByText(/加算しても元のミックス/)).toBeVisible();
 });
 
+test('neutral macros render identical PCM and long macros preserve the last note', async ({ page }) => {
+  const project = bounceProject({ normalizedReference: true });
+  const track = project.tracks[0]!;
+  const clip = track.clips[0]!;
+  track.effects = [];
+  project.automationLanes = [];
+  project.audioRouting.sends = [];
+  // Two oscillator inputs keep Chromium's floating-point sum independent of input order.
+  track.instrument = { type: 'synth', preset: 'p22:glassPad' };
+  clip.notes = [{ id: 'ending-note', pitch: 48, startBeat: 3.875, durationBeats: 0.125, velocity: 100 }];
+
+  await importProject(page, project);
+  const original = await exportFromDialog(page, 'WAVエクスポート');
+  expect(pcmSamples(original.bytes).some((sample) => sample !== 0)).toBe(true);
+
+  track.instrument.params = {
+    macroBrightness: 0.5, macroRelease: 0.5, macroWidth: 0, macroAttack: 0.5,
+  };
+  await importProject(page, project);
+  const neutral = await exportFromDialog(page, 'WAVエクスポート');
+  expect(neutral.bytes.equals(original.bytes)).toBe(true);
+
+  track.instrument.params = { macroAttack: 1, macroRelease: 1 };
+  await importProject(page, project);
+  const extended = await exportFromDialog(page, 'WAVエクスポート');
+  const extendedPcm = pcmSamples(extended.bytes);
+  expect(extendedPcm.length).toBeGreaterThan(pcmSamples(original.bytes).length);
+  const sampleRate = extended.bytes.readUInt32LE(24);
+  const endOfEnvelope = (1 + 1.875 * (60 / 90)) + 2 + 0.6 + 4;
+  const duringRelease = Math.floor((endOfEnvelope - 0.1) * sampleRate) * 2;
+  expect(extendedPcm.subarray(duringRelease, duringRelease + 512).some(
+    (sample) => sample !== 0,
+  )).toBe(true);
+});
+
 test('downloads immutable routed PCM equal to a normalized solo reference', async ({ page }) => {
   const original = bounceProject();
   await importProject(page, original);

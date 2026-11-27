@@ -1,13 +1,16 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { AudioAsset, Track, TrackRole } from '@cts/project-model';
+import { readInstrumentMacro, type InstrumentMacroKey } from '../../audio/macros';
+import { DEFAULT_PRESET } from '../../audio/presets';
 import { useStore, type AudioAssetRuntimeIssue } from '../../state/store';
 import {
   deleteStudioTrack,
   duplicateStudioTrack,
   moveStudioTrack,
   renameStudioTrack,
-  setStudioTrackRole,
+  setStudioTrackMacro,
   setStudioTrackPreset,
+  setStudioTrackRole,
   trackCommandErrorMessage,
 } from '../../state/trackActions';
 import { pushToast } from '../../state/tutorialBridge';
@@ -75,6 +78,13 @@ const TRACK_ROLE_OPTIONS: readonly Readonly<{ value: TrackRole; label: string }>
   { value: 'learning.melody', label: 'メロディ学習' },
 ];
 
+const MACRO_CONTROLS = [
+  { key: 'macroBrightness', label: '明るさ', help: '右に動かすと高い成分が増え、音がくっきりします。' },
+  { key: 'macroRelease', label: '余韻', help: '右に動かすと音が消えるまでの時間が長くなります。' },
+  { key: 'macroWidth', label: '広がり', help: '右に動かすと重ねた音の高さが少しずれ、厚みが増します。' },
+  { key: 'macroAttack', label: '立ち上がり', help: '右に動かすと音がゆっくり鳴り始めます。' },
+] as const satisfies readonly { key: InstrumentMacroKey; label: string; help: string }[];
+
 function TrackInspectorForm({
   track,
   tracks,
@@ -86,6 +96,7 @@ function TrackInspectorForm({
   const recordingControlsBusy = useStore(
     (state) => state.projectOperationBusy || state.audioRecordingOperationId !== null,
   );
+  const macroHelpId = useId();
   const [nameDraft, setNameDraft] = useState(track.name);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [status, setStatus] = useState<TrackInspectorStatus | null>(null);
@@ -96,12 +107,14 @@ function TrackInspectorForm({
     !isMaster && index > 0 && tracks[index - 1]?.type !== 'master';
   const canMoveDown =
     !isMaster && index >= 0 && index < tracks.length - 1 && tracks[index + 1]?.type !== 'master';
-  const synthInstrument =
-    track.type === 'instrument' && track.instrument?.type === 'synth'
-      ? track.instrument
-      : null;
-  const synthPreset = synthInstrument?.preset ?? null;
-  const displayedPreset = synthPreset === null ? null : canonicalSynthPresetName(synthPreset);
+  const canEditSynth = track.type === 'instrument'
+    && (!track.instrument || track.instrument.type === 'synth');
+  const storedPreset = track.instrument?.preset ?? DEFAULT_PRESET;
+  const synthPreset = typeof storedPreset === 'string' ? storedPreset : '';
+  const displayedPreset = canonicalSynthPresetName(synthPreset);
+  const params = track.instrument?.params;
+  const hasMacros = params != null && typeof params === 'object'
+    && MACRO_CONTROLS.some(({ key }) => Object.hasOwn(params, key));
   const referencedAudioAssets = track.type === 'audio'
     ? Array.from(new Set(
         track.clips
@@ -179,6 +192,15 @@ function TrackInspectorForm({
     if (result.changed) pushToast(message, 'success');
   };
 
+  const changeMacro = (adjustment: { key: InstrumentMacroKey; value: number } | null): void => {
+    const result = setStudioTrackMacro(track.id, adjustment);
+    if (!result.ok) {
+      showError(trackCommandErrorMessage(result.code));
+    } else if (result.playbackStopped) {
+      showInfo(`音色の調整を反映しました。${playbackStoppedNotice(true)}`);
+    }
+  };
+
   const changeRole = (role: TrackRole): void => {
     const result = setStudioTrackRole(track.id, role);
     if (!result.ok) {
@@ -248,12 +270,13 @@ function TrackInspectorForm({
         </label>
       ) : null}
 
-      {synthPreset !== null ? (
+      {canEditSynth ? (
         <label className="track-inspector__preset">
           <span>内蔵音色</span>
           <select
             aria-label={`${track.name} 音色`}
             value={displayedPreset ?? synthPreset}
+            disabled={recordingControlsBusy}
             onChange={(event) => changePreset(event.target.value)}
           >
             {displayedPreset === null ? (
@@ -275,6 +298,41 @@ function TrackInspectorForm({
               : '保存済みの音色を保持しています。別の音色を選ぶと新しい形式へ変更します。'}
           </small>
         </label>
+      ) : null}
+
+      {canEditSynth ? (
+        <details className="track-inspector__macros">
+          <summary>かんたん音色調整</summary>
+          {MACRO_CONTROLS.map(({ key, label, help }) => {
+            const value = readInstrumentMacro(params, key);
+            const helpId = `${macroHelpId}-${key}`;
+            return (
+              <label className="track-inspector__preset" key={key}>
+                <span>{label} {Math.round(value * 100)}%</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={value}
+                  aria-label={label}
+                  aria-valuetext={`${Math.round(value * 100)}%`}
+                  aria-describedby={helpId}
+                  disabled={recordingControlsBusy}
+                  onChange={(event) => changeMacro({ key, value: event.currentTarget.valueAsNumber })}
+                />
+                <small id={helpId}>{help}</small>
+              </label>
+            );
+          })}
+          <button
+            type="button"
+            disabled={recordingControlsBusy || !hasMacros}
+            onClick={() => changeMacro(null)}
+          >
+            音色調整をリセット
+          </button>
+        </details>
       ) : null}
 
       {track.type === 'audio' ? (

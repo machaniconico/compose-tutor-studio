@@ -824,6 +824,19 @@ input[type='range'] {
   margin-bottom: 0;
 }
 
+.track-inspector__macros summary {
+  cursor: pointer;
+}
+
+.track-inspector__macros > :not(summary) {
+  margin-top: var(--sp-3);
+}
+
+.track-inspector__macros input {
+  width: 100%;
+  margin: 0;
+}
+
 .track-inspector__operations {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
