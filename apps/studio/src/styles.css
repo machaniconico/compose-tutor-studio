@@ -1075,6 +1075,7 @@ input[type='range'] {
 }
 
 .editor-body {
+  grid-area: 2 / 1;
   display: flex;
   flex-direction: column;
   overflow: auto;
@@ -6689,4 +6690,73 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
   flex-direction: column;
   gap: var(--sp-1);
   align-items: flex-start;
+}
+
+.timeline-ruler-wrap {
+  /* editor-body と同じセルに重ね、上余白(--sp-3)の中に収める。行の高さを増やさない */
+  grid-area: 2 / 1;
+  align-self: start;
+  position: relative;
+  z-index: 1;
+  height: var(--sp-3);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  background: var(--bg-panel-2);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.timeline-ruler {
+  position: relative;
+  height: var(--sp-3);
+  cursor: pointer;
+  touch-action: none;
+  color: var(--text-faint);
+  font: 10px/1 var(--mono);
+}
+
+.timeline-ruler__bar {
+  position: absolute;
+  top: 1px;
+  transform: translateX(4px);
+  pointer-events: none;
+}
+
+.timeline-ruler__loop {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--accent, #4a90d9) 35%, transparent);
+  pointer-events: none;
+}
+
+.timeline-ruler__loop.is-off {
+  opacity: 0.45;
+}
+
+.timeline-ruler__message {
+  font-size: 10px;
+  position: absolute;
+  inset: 0 0 auto auto;
+  margin: 0;
+  padding: 0 var(--sp-2);
+  background: var(--bg-panel-2);
+  pointer-events: none;
+  color: var(--text-faint);
+}
+
+.timeline-ruler__message:empty {
+  display: none;
+}
+
+/* BPM 欄はトランスポート 1 行目の末尾にあり、余りは 25px ほどしかない(CI の書体で計測)。
+   タップぶん欄が広がると BPM 以降が折り返し、「カラオケ」が 3 行目へ落ちて中央ペインが縮む。
+   ボタンの左右余白と BPM 入力を詰め、増える幅を 1 行目に収める */
+.transport-bar__tap {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0 var(--sp-1);
+}
+
+.field #bpm-input {
+  width: 56px;
 }

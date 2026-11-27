@@ -576,6 +576,7 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - raw PCMを48 kHz PCM16 WAVへ正規化し、bytesとchecksum receiptをrepositoryへ確定してからだけProjectへ採用する。既存TrackではそのTrackのvolume / pan / effects / routingを保ったままAsset metadataと補正済みsource rangeのClipを追記し、新規TrackではTrack / routing / Clipを作る。どちらも開始時snapshotへのexact CAS、Undo 1回、revision 1回として扱う
 - cycle完走時は各周のReady Audio Assetを全件保存した後だけ、1 take folder、pass順のtake、最初のtake全体を採用する1 comp segmentをstrict CASで追加し、folder / Track / Comp Editorを選択する。新規Track生成を含む全体が1 Project change / 1 Undoである。manual stop / cancel / unmount / permission / device loss / context世代変更 / clock不連続 / arm失敗 / canonicalize / store失敗 / stale snapshot / target消失 / revoked tokenでは全passを破棄し、Project / history / selectionを変更しない。入力hot switch、長時間disk streaming、既存再生へ途中参加するQuick Punch、複数入力は未実装である
 - `パンチ`はloop locatorと別のruntime-only locatorを持ち、同時には有効化しない。一方を有効にしても双方の範囲値は保持する。既存Audio Trackを`R`で録音待機にした場合だけ開始でき、0〜16整数拍のpre/post-rollを曲端でclampする。3秒countdown後にpre-rollを開始し、可変tempo mapから累積丸めしたfuture AudioContext frameのpunch-inでcaptureをarmする。対象Trackだけを半開区間`[punchInBeat, punchOutBeat)`でsample-accurateにgateし、他Trackと前後の対象素材は再生する
+- Editor上部の定規はクリックで再生位置を1拍単位に移動し(停止中のみ。0〜曲末にclamp)、左右ドラッグでruntime-onlyのloop範囲を選ぶ。loop範囲は整数拍(=整数tick)の境界で、長さ1拍以上かつ曲内に収め(曲末が整数拍でなければfloor(曲末)が上限)、1拍未満のドラッグは1拍へ広げ、1拍の整数拍loopが入らない曲は理由つきで拒否する。Undo / Redo・読込・切替・曲長変更などProjectが変わるたびにruntimeのloop / punch範囲を曲長で再検査し、曲外へ出たものは無効化(0へ戻す)する。録音中とオートメーション記録パス(Write / Touch / Latch)の最中は、パスを終えず点も確定せずに理由つきで拒否し、移動・loop範囲変更はProject・Undo履歴に入れない。トップバーの「タップ」は拍に合わせて2回以上たたくとBPM(20〜300)を決め、2秒の間が空いた時点で先頭tempoへ1回だけ書き込む(Undo 1回)。たたき始めたProjectに紐づき、Projectの切替やボタンの消滅(unmount)ではその回を破棄し書き込まない
 - Auto Punchの出力は0.5〜60秒のexact windowである。正latencyは必要な末尾だけ追加captureして先頭をtrimし、負latencyは先頭silenceを加える。capture完了と同じrequestの自然post-roll完了を別々に証明し、両方が揃った時だけ保存へ進む。manual stop / cancel / unmount / device / context / clock変化 / post-roll interruption / canonicalize / store / stale CASではProject / history / selectionを変えない
 - 対象範囲が空ならexact Audio Clipを追加する。ready・non-loopのClip 1件が範囲全体を覆う場合は外側を保持し、旧中央をTake 1、新録音をTake 2としてfolder化してTake 2を全域採用する。同一窓のfolder 1件なら新takeを追加して全域採用する。部分重複、複数重複、loop、unavailable source、異なるfolder窓、source不足はpermission前に拒否する。Asset receipt後のdomain replay完全一致だけをstrict CASで1 Project change / 1 Undoとして採用する
 - これは開始時に既存再生を止めてpre-rollから新しい有限sessionを始める**bounded Auto Punch**である。既存再生へ途中参加するQuick Punch、自動input monitoring、cycleとの併用、長時間disk streaming、任意重複の自動修復、複数入力は未実装として区別する
@@ -1185,6 +1186,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 
 #### 2.3.5 Tempo / 拍子map Editor
 
+- Editorのtabの下に小節番号つきの定規(高さ12px。editor-bodyと同じグリッドセルの上余白に重ねて、ほかのパネルの位置と高さを変えない)を置く。クリックで再生位置、ドラッグでループ範囲(ドラッグ中は帯をプレビュー)を選び、拒否理由は定規の右端に重ねたpolite statusに日本語で出す。BPM欄の隣のタップテンポは最小ウィンドウ幅に収まる小さな「♩」ボタン(aria-label「タップテンポ」)で、たたいている間のBPMはtitleに出し、たたき終わると確定する
 - Editorの5つ目のARIA tabを「テンポ / 拍子」とし、tempo laneと拍子laneを同じ小節目盛り・playhead・内部横scroll領域に並べる。固定tempoだけの初期Projectでもbeat 0 anchorを明示し、空に見せない
 - 「再生位置に追加」はtempoを現在beatへ、拍子を現在位置を含む小節の開始境界へ置く。同beatに既存eventがある場合は黙って上書きせず、そのeventを選択して編集方法を案内する
 - eventは最低44×44 CSS pxのnative buttonとし、種類、順番、小節 / 拍、値、先頭anchorかどうかをaccessible nameに含める。矢印キーで前後event、Home / Endで先頭 / 末尾へ移り、削除後は次、前、追加buttonの順にfocusを回復する

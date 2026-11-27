@@ -1675,7 +1675,7 @@ export function createStudioStore(
     throw new Error('Failed to activate the initial project persistence context');
   }
 
-  return create<StoreState>((set, get) => {
+  const store = create<StoreState>((set, get) => {
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let maxWaitTimer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -4372,6 +4372,28 @@ export function createStudioStore(
     markNativeCloseHandoffUnknown,
   };
   });
+  // The one place that keeps runtime loop / punch locators inside the song:
+  // any project change (edit, undo, redo, load, switch) re-checks them.
+  store.subscribe((state, previous) => {
+    if (state.project === previous.project) return;
+    const length = transportProjectLengthBeats(state.project);
+    const { transport } = state;
+    const loopOut =
+      (transport.loopEnabled || transport.loopEndBeat > 0)
+      && !(transport.loopStartBeat >= 0 && transport.loopEndBeat <= length);
+    const punchOut =
+      (transport.punchEnabled || transport.punchOutBeat > 0)
+      && !(transport.punchInBeat >= 0 && transport.punchOutBeat <= length);
+    if (!loopOut && !punchOut) return;
+    store.setState({
+      transport: {
+        ...transport,
+        ...(loopOut ? { loopEnabled: false, loopStartBeat: 0, loopEndBeat: 0 } : {}),
+        ...(punchOut ? { punchEnabled: false, punchInBeat: 0, punchOutBeat: 0 } : {}),
+      },
+    });
+  });
+  return store;
 }
 
 export type StudioStore = ReturnType<typeof createStudioStore>;
