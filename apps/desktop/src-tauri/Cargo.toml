@@ -28,7 +28,7 @@ sha2 = "=0.10.9"
 tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = { version = "=2.7.1", default-features = false, features = ["gtk3"] }
 tauri-plugin-wdio-webdriver = { version = "1.2.0", optional = true }
-thiserror = "=2.0.18"
+thiserror = "=2.0.19"
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.186"
