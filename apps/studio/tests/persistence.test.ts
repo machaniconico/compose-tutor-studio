@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { serializeProject } from '@cts/project-model';
+import { captureLastPerformance, captureLiveNote } from '../src/audio/playback';
+import { useStore } from '../src/state/store';
 import {
   deleteProject,
   deleteProjectRecoveryIssue,
@@ -369,4 +372,31 @@ describe('persistence', () => {
     dispatchPageHide();
     expect(flushes).toBe(2);
   });
+});
+
+it('keeps unplaced performance input out of project serialization and all local storage writes', () => {
+  const storage = new MemoryStorage();
+  vi.stubGlobal('localStorage', storage);
+  const clock = vi.spyOn(performance, 'now').mockReturnValue(58_123);
+  try {
+    useStore.getState().createNewProject('演奏メモリ');
+    const store = useStore.getState();
+    store.setPosition(2);
+    expect(store.saveToLocalStorage()).toBe(true);
+    const snapshot = serializeProject(store.project);
+    const storageBefore = Array.from({ length: storage.length }, (_, i) => storage.key(i)!)
+      .map((key) => [key, storage.getItem(key)]);
+    captureLiveNote(126, true, 117, 58_001);
+    captureLiveNote(126, false, 117, 58_111);
+    expect(store.saveToLocalStorage()).toBe(true);
+    expect(serializeProject(useStore.getState().project)).toBe(snapshot);
+    expect(Array.from({ length: storage.length }, (_, i) => storage.key(i)!)
+      .map((key) => [key, storage.getItem(key)])).toEqual(storageBefore);
+    expect(captureLastPerformance()).toBe(true);
+    expect(serializeProject(useStore.getState().project)).not.toBe(snapshot);
+  } finally {
+    useStore.getState().flushPendingSave();
+    clock.mockRestore();
+    vi.unstubAllGlobals();
+  }
 });

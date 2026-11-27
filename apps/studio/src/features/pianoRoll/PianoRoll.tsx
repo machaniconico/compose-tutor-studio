@@ -340,7 +340,8 @@ export function PianoRoll() {
     : undefined;
   const scaleInfo = useScaleInfo(project);
 
-  const [gridSnap, setGridSnap] = useState(1);
+  const gridSnap = editor.gridSnap;
+  const setGridSnap = useStore((s) => s.setGridSnap);
   const [velocityFrom, setVelocityFrom] = useState(40);
   const [velocityTo, setVelocityTo] = useState(100);
   const [velocityCenter, setVelocityCenter] = useState(80);

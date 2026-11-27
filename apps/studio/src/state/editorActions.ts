@@ -113,11 +113,12 @@ import {
   transposeKeyName,
 } from '@cts/theory-engine';
 import { roleForTrackName } from '@cts/tutorial-engine';
-import { finishRecordingForProjectChange, fitClipToNotes, useStore, type ClipboardNote, type NoteEditOptions } from './store';
+import { activeLoopRange, finishRecordingForProjectChange, fitClipToNotes, useStore, type ClipboardNote, type NoteEditOptions } from './store';
 import { uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { upsertEffect, type SupportedEffectType } from '../audio/effects';
 import { loopPlacement } from '../audio/scheduler';
+import { recordingPhase } from '../audio/recorder';
 import { findChannelPreset } from '../features/mixer/channelPresets';
 import { withSongLength } from '../features/arranger/arrangeMath';
 import { addGridSteps } from '../features/pianoRoll/gridMath';
@@ -457,14 +458,17 @@ export function insertProgressionAtBeat(templateId: string, startBeat: number): 
 export type RecordingTarget = { trackId: string; clipId?: string; clipStartBeat: number };
 export type RecordingSettings = { mode: 'replace' | 'overdub'; grid: 0 | 0.5 | 0.25 };
 
-function recordingTargetProblem(project: Project, track?: Track, clip?: Clip): string | undefined {
-  if (track?.type !== 'instrument') return '録音するには、楽器トラックを選んでください。';
+function recordingTargetProblem(
+  project: Project, track?: Track, clip?: Clip, operation: '録音' | 'ステップ入力' | '取り込み' = '録音',
+): string | undefined {
+  const instruction = operation === '取り込み' ? '演奏を取り込むには' : `${operation}するには`;
+  if (track?.type !== 'instrument') return `${instruction}、楽器トラックを選んでください。`;
   if (clip && !isWholeRecordingTick(clip.startBeat)) {
-    return '録音するには、クリップの始まりを目盛りにそろえてください。';
+    return `${instruction}、クリップの始まりを目盛りにそろえてください。`;
   }
-  if (clip?.loop) return '繰り返し設定のあるクリップには録音できません。クリップの繰り返しをオフにしてください。';
+  if (clip?.loop) return `繰り返し設定のあるクリップには${operation}できません。クリップの繰り返しをオフにしてください。`;
   if (clip && (clip.aliasOf !== undefined || project.tracks.some((t) => t.clips.some((c) => c.aliasOf === clip.id)))) {
-    return 'リンクしたクリップには録音できません。独立したクリップを選んでください。';
+    return `リンクしたクリップには${operation}できません。独立したクリップを選んでください。`;
   }
 }
 
@@ -563,7 +567,6 @@ export function writeRecordingTake(
     clipEndBeat = clipEnd / PPQ;
   }
   const effectiveEnd = Math.min(clipEndBeat, loop?.endBeat ?? Infinity, songEnd);
-  const endTick = beatTick(effectiveEnd);
   let captured: NoteEvent[];
   try {
     // Keep absolute starts so presses outside the clip can be counted too.
@@ -574,43 +577,75 @@ export function writeRecordingTake(
     if (error instanceof RangeError) return fail(error.message);
     throw error;
   }
-  if (captured.length === 0) return false;
+  const destination = clip ?? {
+    id: trackIdAllocator(project)('clip'), trackId: track.id, type: 'midi' as const, loop: false,
+    startBeat: target.clipStartBeat, lengthBeats: (beatTick(clipEndBeat) - clipStart) / PPQ,
+  };
+  return writeLiveNotes(captured, destination, {
+    create: !clip, effectiveEnd, loop, mode: options.mode, grid: loop ? 0 : options.grid,
+  });
+}
 
-  const grid = beatTick(options.grid);
+type LiveNoteOptions = {
+  create?: boolean;
+  effectiveEnd: number;
+  loop?: RecordingRange;
+  grid?: number;
+  mode?: RecordingSettings['mode'];
+  wholeLengths?: boolean;
+  undoEachNote?: boolean;
+};
+
+/** Input notes carry song-absolute starts until this shared placement pass. */
+function writeLiveNotes(captured: readonly NoteEvent[], destination: Clip, options: LiveNoteOptions): boolean {
+  if (captured.length === 0) return false;
+  const store = useStore.getState();
+  const { project } = store;
+  const { id: clipId, trackId } = destination;
+  const { loop, effectiveEnd } = options;
+  const startTick = beatTick(Math.max(destination.startBeat, loop?.startBeat ?? 0));
+  const clipStart = beatTick(destination.startBeat);
+  const endTick = beatTick(effectiveEnd);
+  const grid = beatTick(options.grid ?? 0);
   const allocateId = trackIdAllocator(project);
-  const clipId = clip?.id ?? allocateId('clip');
-  // Grid lines are song-absolute (multiples of the grid from song beat 0).
-  // Loop takes were snapped by eventsToNotes inside the loop and clip.
-  const firstLine = grid ? Math.ceil(clipStart / grid) * grid : 0;
+  const firstLine = grid ? Math.ceil(startTick / grid) * grid : 0;
   const lastLine = grid ? Math.floor((endTick - 1) / grid) * grid : 0;
   const notes = captured.flatMap((note) => {
     const played = beatTick(note.startBeat);
-    if (played < clipStart || played >= endTick) return [];
-    // Snap to the nearest song grid line inside the clip. When that line is
-    // at or past the clip end, use the last line inside, never one outside;
-    // keep the played tick if no line lies inside.
-    const absolute = !loop && grid && firstLine <= lastLine
-      ? Math.min(Math.max(Math.round(played / grid) * grid, firstLine), lastLine)
-      : played;
+    if (played < startTick || played >= endTick) return [];
+    // Snap inside the range, keeping the played tick if no grid line fits.
+    let absolute = played;
+    if (grid && firstLine <= lastLine) {
+      const nearest = Math.round(played / grid) * grid;
+      absolute = nearest >= endTick && loop?.endBeat === effectiveEnd
+        ? firstLine
+        : Math.min(Math.max(nearest, firstLine), lastLine);
+    }
     return [{ ...note, id: allocateId('note'), startBeat: (absolute - clipStart) / PPQ }];
   });
   const outside = captured.length - notes.length;
-  if (outside) pushToast(`${outside} 音はクリップの外だったので入れませんでした。`, 'info');
+  if (outside) {
+    const range = loop && options.wholeLengths ? 'クリップやループの範囲外' : 'クリップの外';
+    pushToast(`${outside} 音は${range}だったので入れませんでした。`, 'info');
+  }
   if (notes.length === 0) return false;
 
-  const existingNotes = options.mode === 'overdub' ? clip?.notes ?? [] : [];
-  const destination = clip ?? {
-    id: clipId, trackId: track.id, type: 'midi' as const, loop: false,
-    startBeat: target.clipStartBeat, lengthBeats: (beatTick(clipEndBeat) - clipStart) / PPQ,
-  };
+  const existingNotes = options.mode === 'replace' ? [] : destination.notes ?? [];
+  const songEnd = songEndBeat(project);
   const withNotes = (recorded: readonly NoteEvent[]): Project => {
     const nextClip = { ...destination, notes: [...existingNotes, ...recorded] };
-    return clip
-      ? mapClip(project, clipId, () => nextClip)
-      : { ...project, tracks: project.tracks.map((t) => t === track ? { ...t, clips: [...t.clips, nextClip] } : t) };
+    return options.create
+      ? { ...project, tracks: project.tracks.map((t) => t.id === trackId ? { ...t, clips: [...t.clips, nextClip] } : t) }
+      : mapClip(project, clipId, () => nextClip);
   };
 
-  const fitted = notes.flatMap((note) => fitRecordingNote(destination, note, project.swing, effectiveEnd) ?? []);
+  const fitted = notes.flatMap((note) => {
+    const fit = fitRecordingNote(destination, note, project.swing, effectiveEnd);
+    if (!fit) return [];
+    return options.wholeLengths
+      ? [{ ...fit, durationBeats: wholeTicksAtOrBefore(fit.durationBeats) / PPQ }]
+      : [fit];
+  });
   const all = withNotes(fitted);
   const matches = new Set<number>();
   for (const sound of soundingEvents(all, { clipId, includeMuted: true }).events) {
@@ -621,6 +656,7 @@ export function writeRecordingTake(
     const expected = placedNoteTicks(destination, note, { swing: all.swing, songEnd });
     if (beatTick(sound.startBeat) === expected.startTick &&
         beatTick(sound.startBeat + sound.durationBeats) === expected.endTick &&
+        expected.endTick > expected.startTick && expected.endTick <= endTick &&
         sound.pitch === note.pitch && sound.velocity === note.velocity &&
         (!loop || loopPlacement(sound.startBeat, loop) === 'everyPass')) {
       matches.add(index);
@@ -633,6 +669,7 @@ export function writeRecordingTake(
   }
   if (playable.length === 0) return false;
 
+  let countToSave = playable.length;
   let candidate = withNotes(playable);
   if (findProjectSoundingLimitProblem(candidate)) {
     // A non-repeating, unlinked clip adds at most one sound per stored note.
@@ -646,13 +683,94 @@ export function writeRecordingTake(
     }
     pushToast(`${playable.length - fits} 音は曲に入れられる音の上限に達したので入れませんでした。`, 'info');
     if (fits === 0) return false;
+    countToSave = fits;
     candidate = withNotes(playable.slice(0, fits));
   }
 
   store.commitTransaction();
+  if (options.undoEachNote) {
+    for (let count = 1; count < countToSave; count++) {
+      store.applyProjectChange(() => withNotes(playable.slice(0, count)));
+    }
+  }
   if (!store.applyProjectChange(() => candidate)) return false;
-  if (!clip && useStore.getState().editor.selectedTrackId === track.id) store.selectClip(clipId);
+  if (options.create && useStore.getState().editor.selectedTrackId === trackId) store.selectClip(clipId);
   return true;
+}
+
+// Tolerate floating-point error in differences between whole-tick beats.
+function wholeTicksAtOrBefore(beat: number): number {
+  return Math.floor(beat * PPQ + 1e-8);
+}
+
+function selectedLiveNoteRange(operation: 'ステップ入力' | '取り込み') {
+  const state = useStore.getState();
+  const { project, editor } = state;
+  const track = project.tracks.find((t) => t.id === editor.selectedTrackId);
+  const clip = track?.clips.find((c) => c.id === editor.selectedClipId && c.type === 'midi');
+  const loop = activeLoopRange(state) ?? undefined;
+  const problem = recordingTargetProblem(project, track, clip, operation) ??
+    (!clip ? '音を入れるクリップを選んでください。' : undefined) ??
+    (loop ? recordingLoopProblem(loop) : state.transport.loopEnabled ? '再生ループの範囲を選んでください。' : undefined) ??
+    (clip && loop && loop.startBeat < clip.startBeat
+      ? 'ループがクリップより前から始まっています。ループの始まりを選び直してください。' : undefined);
+  if (problem) pushToast(problem, 'error');
+  if (!clip || problem) return;
+  return { clip, loop, effectiveEnd: Math.min(clip.startBeat + clip.lengthBeats, loop?.endBeat ?? Infinity, songEndBeat(project)) };
+}
+
+export function writeLastPerformance(notes: readonly NoteEvent[]): boolean {
+  const range = selectedLiveNoteRange('取り込み');
+  return !!range && writeLiveNotes(notes, range.clip, {
+    ...range, grid: useStore.getState().editor.gridSnap, wholeLengths: true,
+  });
+}
+
+export type StepInputPosition = {
+  tick: number;
+  lengthTicks: number;
+  nextTick: number;
+  clipId: string;
+  clipStart: number;
+  projectOpenVersion: number;
+};
+
+export function prepareStepInput(cursor?: number): StepInputPosition | undefined {
+  if (recordingPhase() !== 'idle') return;
+  const range = selectedLiveNoteRange('ステップ入力');
+  if (!range) return;
+  const { clip, loop, effectiveEnd } = range;
+  const state = useStore.getState();
+  const start = beatTick(loop?.startBeat ?? clip.startBeat);
+  const end = wholeTicksAtOrBefore(effectiveEnd);
+  const lengthTicks = beatTick(state.editor.gridSnap);
+  const firstLine = Math.ceil(start / lengthTicks) * lengthTicks;
+  const lastLine = Math.floor((end - 1) / lengthTicks) * lengthTicks;
+  const playhead = beatTick(state.transport.positionBeat);
+  const initial = playhead >= start && playhead < end ? playhead : start;
+  const tick = cursor ?? (firstLine <= lastLine
+    ? Math.min(lastLine, Math.max(firstLine, Math.round(initial / lengthTicks) * lengthTicks))
+    : initial);
+  if (tick < start || tick >= end) {
+    pushToast('入力できる範囲の終わりです。続けるには、入力位置やクリップを選び直してください。', 'info');
+    return;
+  }
+  return {
+    tick, lengthTicks, nextTick: Math.min(tick + lengthTicks, end),
+    clipId: clip.id, clipStart: clip.startBeat, projectOpenVersion: state.projectOpenVersion,
+  };
+}
+
+/** One chord shares a position and advances once. Each saved note has its own Undo. */
+export function writeStepInputChord(step: StepInputPosition, pitches: ReadonlyMap<number, number>): boolean {
+  if (recordingPhase() !== 'idle') return false;
+  const range = selectedLiveNoteRange('ステップ入力');
+  if (!range || range.clip.id !== step.clipId || range.clip.startBeat !== step.clipStart ||
+      useStore.getState().projectOpenVersion !== step.projectOpenVersion) return false;
+  const notes = Array.from(pitches, ([pitch, velocity]) => ({
+    id: '', startBeat: step.tick / PPQ, durationBeats: step.lengthTicks / PPQ, pitch, velocity,
+  }));
+  return writeLiveNotes(notes, range.clip, { ...range, wholeLengths: true, undoEachNote: true });
 }
 
 /**

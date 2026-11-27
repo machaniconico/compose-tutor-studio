@@ -419,3 +419,27 @@ describe('MIDI recording from the transport and live inputs', () => {
     ]);
   });
 });
+
+it('keeps notes played during recording out of the recent performance', async () => {
+  render(<><TransportBar /><LiveInputPanel /></>);
+  const store = useStore.getState();
+  const capture = screen.getByRole('button', { name: '今の演奏を拾う' });
+  fireEvent.click(screen.getByRole('button', { name: 'PC で演奏' }));
+  act(() => store.setPosition(2));
+  keyDown('KeyA');
+  audio.time = 0.125;
+
+  await begin();
+  expect((capture as HTMLButtonElement).disabled).toBe(true);
+  tickAt(2.375);
+  keyUp('KeyA');
+  keyDown('KeyS');
+  tickAt(2.5);
+  keyUp('KeyS');
+  await act(async () => fireEvent.click(stopButton()));
+
+  expect(destinationNotes().map((note) => note.pitch)).toEqual([55, 62]);
+  fireEvent.click(capture);
+  expect(destinationNotes().map((note) => note.pitch)).toEqual([55, 62, 60]);
+  expect(destinationNotes().at(-1)).toMatchObject({ startBeat: 2, durationBeats: 0.25 });
+});

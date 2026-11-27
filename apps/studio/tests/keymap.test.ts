@@ -175,3 +175,10 @@ describe('live input scope priority', () => {
     expect(findShortcut('global', press('s', { code: 'KeyS', ctrlKey: true }), true)).toBe('save');
   });
 });
+
+it('uses the unmodified period for rests only in the live input scope', () => {
+  expect(findShortcut('liveInput', press('.'))).toBe('stepInputRest');
+  expect(findShortcut('global', press('.'))).toBeNull();
+  expect(findShortcut('pianoRoll', press('.'))).toBeNull();
+  expect(findShortcut('liveInput', press('.', { ctrlKey: true }))).toBeNull();
+});

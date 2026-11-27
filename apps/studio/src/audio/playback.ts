@@ -19,10 +19,10 @@
 import { beatTick, beatsPerBar as beatsPerBarOf, computeAudibleTracks, tickAlignedRecordingLoop, songEndBeat, type Project, type Track } from '@cts/project-model';
 import { activeLoopRange, setRecordingStop, useStore } from '../state/store';
 import {
-  recordingLoopProblem, selectedRecordingTarget, writeRecordingTake, type RecordingSettings, type RecordingTarget,
+  recordingLoopProblem, selectedRecordingTarget, writeLastPerformance, writeRecordingTake, type RecordingSettings, type RecordingTarget,
 } from '../state/editorActions';
 import {
-  recordingBeat, recordingBeatAtAudioTime, RecordingBuffer, setRecordingPhase, type RecordingClock,
+  lastPerformanceNotes, PerformanceBuffer, recordingBeat, recordingBeatAtAudioTime, RecordingBuffer, recordingPhase, setRecordingPhase, type RecordingClock,
 } from './recorder';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
@@ -37,6 +37,7 @@ import {
   LOOKAHEAD_S,
   Scheduler,
   secondsPerBeat,
+  wrapBeat,
   type DueEvent,
   type LoopRegion,
 } from './scheduler';
@@ -138,6 +139,11 @@ type ActiveRecording = {
 
 let activeRecording: ActiveRecording | null = null;
 let pendingRecordingCommit: (() => void) | undefined;
+const performanceBuffer = new PerformanceBuffer();
+
+useStore.subscribe((next, previous) => {
+  if (next.projectOpenVersion !== previous.projectOpenVersion) performanceBuffer.clear();
+});
 
 export function startMidiRecording(settings: RecordingSettings): void {
   const store = useStore.getState();
@@ -179,6 +185,7 @@ export function startMidiRecording(settings: RecordingSettings): void {
     return;
   }
 
+  performanceBuffer.closeHeld(performance.now(), store.project.bpm);
   if (store.transport.isPlaying) store.stop();
   store.commitTransaction();
   const take: ActiveRecording = {
@@ -210,10 +217,38 @@ export function stopMidiRecording(): void {
 /** Called by the live input path with the pitch shared by its preview voice. */
 export function captureLiveNote(midi: number, on: boolean, velocity = 100, timeStamp?: number): void {
   const take = activeRecording;
-  if (!take?.clock) return;
-  const time = timeStamp !== undefined && Number.isFinite(timeStamp) ? timeStamp : performance.now();
-  const elapsed = recordingBeat(take.clock, time);
-  if (elapsed >= 0) take.buffer.append({ timeBeat: take.startBeat + elapsed, midi, velocity, on });
+  const now = performance.now();
+  const time = timeStamp !== undefined && Number.isFinite(timeStamp) ? timeStamp : now;
+  if (take) {
+    if (!take.clock) return;
+    const elapsed = recordingBeat(take.clock, time);
+    if (elapsed >= 0) take.buffer.append({ timeBeat: take.startBeat + elapsed, midi, velocity, on });
+    return;
+  }
+  if (pendingRecordingCommit || recordingPhase() !== 'idle') return;
+
+  const { transport } = useStore.getState();
+  let positionBeat = transport.positionBeat;
+  if (transport.isPlaying && state.scheduler?.isRunning) {
+    const audioTime = getAudioEngine().now() + (time - now) / 1000;
+    const beat = state.scheduler.playheadBeat(audioTime);
+    positionBeat = Math.max(0, state.loop ? wrapBeat(beat, state.loop) : beat);
+  }
+  performanceBuffer.append({ midi, on, velocity, timeStamp: time, positionBeat });
+}
+
+export function captureLastPerformance(): boolean {
+  if (activeRecording || pendingRecordingCommit || recordingPhase() !== 'idle') return false;
+  const now = performance.now();
+  const { project } = useStore.getState();
+  const notes = lastPerformanceNotes(performanceBuffer.snapshot(now), now, project.bpm);
+  if (!notes.length) {
+    pushToast('取り込める演奏がありません。鍵盤で弾いてから、もう一度押してください。', 'info');
+    return false;
+  }
+  const saved = writeLastPerformance(notes);
+  if (saved) pushToast('選んだクリップに演奏を入れました。', 'info');
+  return saved;
 }
 
 function commitPendingRecording(): void {

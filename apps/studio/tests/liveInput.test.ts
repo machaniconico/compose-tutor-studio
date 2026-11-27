@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
+import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAudioEngine } from '../src/audio/engine';
 import { LiveInputPanel } from '../src/features/input/LiveInputPanel';
 import { PianoRoll } from '../src/features/pianoRoll/PianoRoll';
+import { setSwing } from '../src/state/editorActions';
 import { useStore } from '../src/state/store';
+import { setRecordingPhase } from '../src/audio/recorder';
+import { getBridgeSnapshot } from '../src/state/tutorialBridge';
 import { MockMidiAccess, MockMidiInput } from './mockWebMidi';
 
 const audio = vi.hoisted(() => ({
@@ -451,6 +455,7 @@ describe('PC keyboard performance', () => {
 
   it('matches the pitches of held codes through 1,000 seeded event sequences and a final blur', () => {
     enable();
+    const scaleLock = scaleButton();
     let seed = 0x235eed;
     function random(max: number) {
       seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
@@ -482,17 +487,222 @@ describe('PC keyboard performance', () => {
           fireEvent.blur(window);
           held.clear();
         } else if (event === 9) {
-          fireEvent.click(scaleButton());
+          fireEvent.click(scaleLock);
           locked = !locked;
         } else {
           const down = event === 10;
           press(down ? 'KeyZ' : 'KeyX');
           octave = down ? Math.max(-1, octave - 1) : Math.min(8, octave + 1);
         }
-        expect(sounding, `sequence ${sequence}, event ${step}`).toEqual(new Set(held.values()));
+        assert.deepEqual(sounding, new Set(held.values()), `sequence ${sequence}, event ${step}`);
       }
     }
     fireEvent.blur(window);
     expect(sounding.size).toBe(0);
   });
+});
+
+function emptyClip(startBeat = 0, lengthBeats = 4) {
+  const { project, loadProjectForPreview } = useStore.getState();
+  const track = project.tracks[0]!;
+  const clip = { ...track.clips[0]!, startBeat, lengthBeats, notes: [] };
+  loadProjectForPreview({ ...project, tracks: [{ ...track, clips: [clip] }] });
+  return clip.id;
+}
+
+const liveNotes = () => useStore.getState().project.tracks[0]!.clips[0]!.notes!;
+const stepButton = () => screen.getByRole('button', { name: 'ステップ入力' });
+const captureButton = () => screen.getByRole('button', { name: '今の演奏を拾う' });
+const rest = (init: KeyboardEventInit = {}) => press('Period', { key: '.', ...init });
+
+describe('step input', () => {
+  it('places three notes at the piano roll grid length and leaves one step for a rest', () => {
+    emptyClip();
+    render(createElement('div', {}, createElement(LiveInputPanel), createElement(PianoRoll)));
+    fireEvent.change(screen.getByRole('combobox', { name: 'グリッド分解能' }), { target: { value: '0.5' } });
+    fireEvent.click(stepButton());
+    press('KeyA');
+    release('KeyA');
+    press('KeyS');
+    release('KeyS');
+    rest();
+    rest({ repeat: true });
+    rest({ isComposing: true });
+    press('KeyD');
+    release('KeyD');
+
+    expect(liveNotes().map(({ pitch, startBeat, durationBeats }) => [pitch, startBeat, durationBeats]))
+      .toEqual([[60, 0, 0.5], [62, 0.5, 0.5], [64, 1.5, 0.5]]);
+    act(() => useStore.getState().undo());
+    expect(liveNotes().map((note) => note.pitch)).toEqual([60, 62]);
+  });
+
+  it('groups every note before the first keyup and undoes chord tones individually', () => {
+    emptyClip();
+    render(createElement(LiveInputPanel));
+    fireEvent.click(stepButton());
+    press('KeyA');
+    press('KeyD');
+    press('KeyG');
+    release('KeyD');
+    press('KeyJ');
+    release('KeyJ');
+    release('KeyA');
+    release('KeyG');
+    expect(liveNotes().map(({ pitch, startBeat }) => [pitch, startBeat]))
+      .toEqual([[60, 0], [64, 0], [67, 0], [71, 1]]);
+    for (const count of [3, 2, 1, 0]) {
+      act(() => useStore.getState().undo());
+      expect(liveNotes()).toHaveLength(count);
+    }
+  });
+
+  it('cuts at the effective end and refuses more notes and rests without wrapping', () => {
+    emptyClip(0, 2);
+    const store = useStore.getState();
+    store.loopRangeOn({ startBeat: 0, endBeat: 1.25 });
+    store.setPosition(1);
+    render(createElement(LiveInputPanel));
+    fireEvent.click(stepButton());
+    press('KeyA');
+    release('KeyA');
+    rest();
+    press('KeyS');
+    release('KeyS');
+    expect(liveNotes()).toEqual([expect.objectContaining({ pitch: 60, startBeat: 1, durationBeats: 0.25 })]);
+    expect(getBridgeSnapshot().toasts.at(-1)?.message).toMatch(/入力できる範囲の終わり/);
+  });
+
+  it('disables both controls and ignores step notes and rests during a recording', () => {
+    emptyClip();
+    render(createElement(LiveInputPanel));
+    fireEvent.click(stepButton());
+    try {
+      for (const phase of ['count-in', 'recording'] as const) {
+        act(() => setRecordingPhase(phase));
+        expect((stepButton() as HTMLButtonElement).disabled).toBe(true);
+        expect((captureButton() as HTMLButtonElement).disabled).toBe(true);
+        press('KeyA');
+        release('KeyA');
+        rest();
+        expect(liveNotes()).toEqual([]);
+      }
+    } finally {
+      act(() => setRecordingPhase('idle'));
+    }
+    press('KeyS');
+    release('KeyS');
+    expect(liveNotes()).toEqual([expect.objectContaining({ pitch: 62, startBeat: 0 })]);
+  });
+});
+
+function timedKey(type: 'keydown' | 'keyup', code: string, timeStamp: number) {
+  const event = new KeyboardEvent(type, { code, key: code.slice(-1).toLowerCase(), cancelable: true });
+  Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+  fireEvent(window, event);
+}
+
+describe('capture the last performance', () => {
+  it('uses key event timestamps and the last position, drops only early notes, and undoes the whole capture', () => {
+    emptyClip(1, 3);
+    const store = useStore.getState();
+    store.setBpm(120);
+    store.setGridSnap(0.25);
+    vi.spyOn(performance, 'now').mockReturnValue(100_375);
+    enable();
+
+    // Arrival times are equal, but the actual keys were played 1.5 beats apart.
+    act(() => store.setPosition(1));
+    timedKey('keydown', 'KeyA', 99_250);
+    timedKey('keyup', 'KeyA', 99_500);
+    act(() => store.setPosition(2));
+    timedKey('keydown', 'KeyS', 100_000);
+    act(() => store.setPosition(2.5));
+    timedKey('keyup', 'KeyS', 100_250);
+    act(() => store.setPosition(4));
+    fireEvent.click(captureButton());
+
+    expect(liveNotes()).toEqual([expect.objectContaining({ pitch: 62, startBeat: 1, durationBeats: 0.5 })]);
+    expect(getBridgeSnapshot().toasts.some((toast) => toast.message === '1 音はクリップの外だったので入れませんでした。')).toBe(true);
+    act(() => store.undo());
+    expect(liveNotes()).toEqual([]);
+  });
+
+  it.each(['new', 'open'])('empties the recent performance on project %s, even with a held key', (kind) => {
+    emptyClip();
+    vi.spyOn(performance, 'now').mockReturnValue(100_250);
+    enable();
+    const store = useStore.getState();
+    fireEvent.click(captureButton());
+    expect(getBridgeSnapshot().toasts.at(-1)?.message).toMatch(/取り込める演奏がありません/);
+
+    act(() => store.setPosition(1));
+    timedKey('keydown', 'KeyA', 100_000);
+    fireEvent.click(captureButton());
+    expect(liveNotes().at(-1)).toMatchObject({ pitch: 60, durationBeats: useStore.getState().project.bpm / 240 });
+    const previous = useStore.getState().project;
+    act(() => {
+      if (kind === 'new') store.createNewProject();
+      else store.loadProjectForPreview(previous);
+    });
+    timedKey('keyup', 'KeyA', 100_125);
+    const opened = useStore.getState().project;
+    fireEvent.click(captureButton());
+    expect(useStore.getState().project).toBe(opened);
+    expect(getBridgeSnapshot().toasts.at(-1)?.message).toMatch(/取り込める演奏がありません/);
+  });
+});
+
+it.each([
+  { edit: { startBeat: 1 / 960 }, message: 'クリップの始まりを目盛りにそろえて' },
+  { edit: { loop: true }, message: '繰り返し設定のあるクリップ' },
+  { edit: { aliasOf: 'source' }, message: 'リンクしたクリップ' },
+])('uses the recording destination rules in both modes ($message)', ({ edit, message }) => {
+  emptyClip();
+  const store = useStore.getState();
+  const { project } = store;
+  const track = project.tracks[0]!;
+  const clip = { ...track.clips[0]!, ...edit };
+  store.loadProjectForPreview({ ...project, tracks: [{ ...track, clips: [clip] }] });
+  store.setPosition(1);
+  vi.spyOn(performance, 'now').mockReturnValue(100_250);
+  render(createElement(LiveInputPanel));
+  fireEvent.click(stepButton());
+  timedKey('keydown', 'KeyA', 100_000);
+  timedKey('keyup', 'KeyA', 100_125);
+  expect(getBridgeSnapshot().toasts.at(-1)?.message).toContain(message);
+  fireEvent.click(captureButton());
+  expect(getBridgeSnapshot().toasts.at(-1)?.message).toContain(message);
+  expect(liveNotes()).toEqual([]);
+});
+
+it('drops a note shifted past the clip end by swing and keeps the rest of the capture', () => {
+  emptyClip(0, 1.3);
+  const store = useStore.getState();
+  setSwing(50);
+  store.setGridSnap(0.25);
+  store.setPosition(1.25);
+  vi.spyOn(performance, 'now').mockReturnValue(100_250);
+  enable();
+  timedKey('keydown', 'KeyA', 99_750);
+  timedKey('keyup', 'KeyA', 99_875);
+  timedKey('keydown', 'KeyS', 100_000);
+  fireEvent.click(captureButton());
+
+  expect(liveNotes()).toEqual([expect.objectContaining({ pitch: 60, startBeat: 0.75 })]);
+  expect(getBridgeSnapshot().toasts.some((toast) => toast.message.startsWith('1 音はスウィング'))).toBe(true);
+});
+
+it('snaps a captured onset near the loop end to the first song grid line in the loop', () => {
+  emptyClip(1 / 480, 4);
+  const store = useStore.getState();
+  store.loopRangeOn({ startBeat: 0.25, endBeat: 2 });
+  store.setGridSnap(0.5);
+  store.setPosition(1.95);
+  vi.spyOn(performance, 'now').mockReturnValue(100_250);
+  enable();
+  timedKey('keydown', 'KeyS', 100_000);
+  fireEvent.click(captureButton());
+
+  expect(liveNotes()).toEqual([expect.objectContaining({ pitch: 62, startBeat: 239 / 480, durationBeats: 0.5 })]);
 });

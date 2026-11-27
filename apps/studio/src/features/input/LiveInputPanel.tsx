@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { PPQ } from '@cts/project-model';
 import { nearestScalePitch, transposeByDegree } from '@cts/theory-engine';
 import { getAudioEngine } from '../../audio/engine';
 import { allNotesOff, noteOff, noteOn } from '../../audio/livePreview';
-import { captureLiveNote, recordingTrackId, stopMidiRecording } from '../../audio/playback';
+import { captureLastPerformance, captureLiveNote, recordingTrackId, stopMidiRecording } from '../../audio/playback';
 import { recordingPhase, subscribeRecordingPhase } from '../../audio/recorder';
 import { listenForMidiInput, requestWebMidi, supportsWebMidi } from '../../platform/webMidi';
-import { isEditableShortcutTarget } from '../../state/keymap';
+import { prepareStepInput, writeStepInputChord, type StepInputPosition } from '../../state/editorActions';
+import { findShortcut, isEditableShortcutTarget } from '../../state/keymap';
 import { useStore } from '../../state/store';
 import { pushToast } from '../../state/tutorialBridge';
 import { isAnyDialogOpen } from '../common/dialogState';
-import { keyboardInput } from './keyboardMap';
+import { ignoreKeyboardEvent, keyboardInput } from './keyboardMap';
 
 const MIDI_CHANNELS = Array.from({ length: 16 }, (_, index) => index + 1);
 const NO_MIDI = 'この環境では MIDI 鍵盤を使えません。PC キーボードで演奏できます';
@@ -19,7 +21,15 @@ type MidiSession =
   | { status: 'unsupported' | 'idle' | 'pending' | 'failed' }
   | { status: 'ready'; access: MIDIAccess };
 
-function startNote(held: Map<string, number>, key: string, pitch: number, timeStamp: number, velocity?: number) {
+type StepInputSession = {
+  cursor?: number;
+  chord?: { position: StepInputPosition; pitches: Map<number, number> };
+};
+
+function startNote(
+  held: Map<string, number>, key: string, pitch: number, timeStamp: number,
+  onPitch: (pitch: number, velocity: number) => void, velocity?: number,
+) {
   if (held.has(key)) return;
   const { editor, project } = useStore.getState();
   if (editor.liveInputScaleLock) {
@@ -37,6 +47,7 @@ function startNote(held: Map<string, number>, key: string, pitch: number, timeSt
 
   const alreadySounding = [...held.values()].includes(pitch);
   held.set(key, pitch);
+  onPitch(pitch, velocity ?? 100);
   if (alreadySounding) return;
   // During a take, monitor with the recording track's instrument, not the selection.
   const monitorTrackId = recordingTrackId() ?? editor.selectedTrackId;
@@ -48,20 +59,28 @@ function startNote(held: Map<string, number>, key: string, pitch: number, timeSt
 
 function releaseNote(held: Map<string, number>, key: string, timeStamp?: number) {
   const pitch = held.get(key);
-  if (pitch === undefined) return;
+  if (pitch === undefined) return false;
   held.delete(key);
   // Different keys, including MIDI and PC keys, can share one preview voice.
   if (![...held.values()].includes(pitch)) {
     captureLiveNote(pitch, false, undefined, timeStamp);
     noteOff(pitch);
   }
+  return true;
 }
 
 export function LiveInputPanel() {
-  const { liveInputEnabled, liveInputOctave, liveInputScaleLock } = useStore((state) => state.editor);
+  const liveInputEnabled = useStore((state) => state.editor.liveInputEnabled);
+  const liveInputOctave = useStore((state) => state.editor.liveInputOctave);
+  const liveInputScaleLock = useStore((state) => state.editor.liveInputScaleLock);
   const toggleLiveInput = useStore((state) => state.toggleLiveInput);
   const toggleScaleLock = useStore((state) => state.toggleLiveInputScaleLock);
   const heldNotes = useRef(new Map<string, number>());
+  const step = useRef<StepInputSession | null>(null);
+  const [stepEnabled, setStepEnabled] = useState(false);
+  const [cursor, setCursor] = useState<number>();
+  const recordingActive = useSyncExternalStore(subscribeRecordingPhase, recordingPhase) !== 'idle';
+
   const midiFocused = useRef(true);
   const [midiSession, setMidiSession] = useState<MidiSession>(() => ({
     status: supportsWebMidi() ? 'idle' : 'unsupported',
@@ -70,6 +89,36 @@ export function LiveInputPanel() {
   const midiAccess = midiStatus === 'ready' ? midiSession.access : null;
   const [midiInputs, setMidiInputs] = useState<MIDIInput[]>([]);
   const [midiChannel, setMidiChannel] = useState(1);
+
+  function toggleStepInput() {
+    if (recordingPhase() !== 'idle') return;
+    finishStepChord();
+    step.current = step.current ? null : {};
+    setStepEnabled(step.current !== null);
+    setCursor(undefined);
+    if (step.current && !useStore.getState().editor.liveInputEnabled) toggleLiveInput();
+  }
+
+  const addStepPitch = useCallback((pitch: number, velocity: number) => {
+    const session = step.current;
+    if (!session || recordingPhase() !== 'idle') return;
+    if (!session.chord) {
+      const position = prepareStepInput(session.cursor);
+      if (!position) return;
+      session.chord = { position, pitches: new Map() };
+      session.cursor = position.nextTick;
+      setCursor(session.cursor);
+    }
+    if (!session.chord.pitches.has(pitch)) session.chord.pitches.set(pitch, velocity);
+  }, []);
+
+  const finishStepChord = useCallback(() => {
+    const session = step.current;
+    const chord = session?.chord;
+    if (!session || !chord) return;
+    session.chord = undefined;
+    writeStepInputChord(chord.position, chord.pitches);
+  }, []);
 
   async function enableMidi() {
     setMidiSession({ status: 'pending' });
@@ -90,8 +139,11 @@ export function LiveInputPanel() {
   useEffect(() => {
     const held = heldNotes.current;
 
-    function stopPlaying() {
-      for (const pitch of new Set(held.values())) captureLiveNote(pitch, false);
+    function stopPlaying(keepInput = true) {
+      if (keepInput) {
+        finishStepChord();
+        for (const pitch of new Set(held.values())) captureLiveNote(pitch, false);
+      }
       held.clear();
       allNotesOff();
     }
@@ -101,6 +153,18 @@ export function LiveInputPanel() {
       if (!editor.liveInputEnabled || startScreenOpen || isAnyDialogOpen() || event.defaultPrevented ||
           isEditableShortcutTarget(event.target) || isEditableShortcutTarget(document.activeElement)) return;
 
+      const session = step.current;
+      if (session && recordingPhase() === 'idle' && !ignoreKeyboardEvent(event) &&
+          findShortcut('liveInput', event) === 'stepInputRest') {
+        event.preventDefault();
+        const position = prepareStepInput(session.cursor);
+        if (position) {
+          session.cursor = position.nextTick;
+          setCursor(session.cursor);
+        }
+        return;
+      }
+
       const input = keyboardInput(event, editor.liveInputOctave);
       if (!input) return;
       event.preventDefault();
@@ -108,13 +172,13 @@ export function LiveInputPanel() {
         setLiveInputOctave(input.octave);
         return;
       }
-      startNote(held, event.code, input.pitch, event.timeStamp);
+      startNote(held, event.code, input.pitch, event.timeStamp, addStepPitch);
     }
 
     function onKeyUp(event: KeyboardEvent) {
       // keyup は repeat しない。IME が途中で入って 'Process' / isComposing の keyup になっても、
       // 押していたキーの音は必ず止める(鳴りっぱなし防止)。
-      releaseNote(held, event.code, event.timeStamp);
+      if (releaseNote(held, event.code, event.timeStamp)) finishStepChord();
     }
 
     function onBlur() {
@@ -135,10 +199,30 @@ export function LiveInputPanel() {
     }
 
     const unsubscribe = useStore.subscribe((state, previous) => {
-      if (previous.editor.liveInputEnabled && !state.editor.liveInputEnabled) stopPlaying();
+      if (previous.projectOpenVersion !== state.projectOpenVersion) {
+        step.current = null;
+        setStepEnabled(false);
+        setCursor(undefined);
+        stopPlaying(false);
+      } else if (previous.editor.liveInputEnabled && !state.editor.liveInputEnabled) {
+        stopPlaying();
+        step.current = null;
+        setStepEnabled(false);
+        setCursor(undefined);
+      } else if (step.current && (previous.editor.selectedClipId !== state.editor.selectedClipId ||
+                 previous.editor.selectedTrackId !== state.editor.selectedTrackId)) {
+        step.current = {};
+        setCursor(undefined);
+      }
     });
     const unsubscribeRecording = subscribeRecordingPhase(() => {
-      if (recordingPhase() === 'idle') stopPlaying();
+      const phase = recordingPhase();
+      if (phase === 'idle') stopPlaying(false);
+      if (phase === 'count-in' && step.current?.chord) {
+        step.current.cursor = step.current.chord.position.tick;
+        step.current.chord = undefined;
+        setCursor(step.current.cursor);
+      }
     });
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -158,7 +242,7 @@ export function LiveInputPanel() {
       document.removeEventListener('focusin', onFocusIn, true);
       stopPlaying();
     };
-  }, []);
+  }, [addStepPitch, finishStepChord]);
 
   useEffect(() => {
     if (!midiAccess) return;
@@ -166,7 +250,7 @@ export function LiveInputPanel() {
 
     function stopMidi() {
       for (const key of held.keys()) {
-        if (key.startsWith('midi:')) releaseNote(held, key);
+        if (key.startsWith('midi:') && releaseNote(held, key)) finishStepChord();
       }
     }
 
@@ -176,26 +260,34 @@ export function LiveInputPanel() {
       onNote(deviceId, note, timeStamp) {
         const key = `midi:${deviceId}:${note.pitch}`;
         if (note.type === 'noteOff') {
-          releaseNote(held, key, timeStamp);
+          if (releaseNote(held, key, timeStamp)) finishStepChord();
           return;
         }
         const { editor, startScreenOpen } = useStore.getState();
         if (!editor.liveInputEnabled || !midiFocused.current || document.hidden ||
             startScreenOpen || isAnyDialogOpen()) return;
-        startNote(held, key, note.pitch, timeStamp, note.velocity);
+        startNote(held, key, note.pitch, timeStamp, addStepPitch, note.velocity);
       },
     });
     return () => {
       unlisten();
       stopMidi();
     };
-  }, [midiAccess, midiChannel]);
+  }, [addStepPitch, finishStepChord, midiAccess, midiChannel]);
 
   return (
     <section className="live-input" aria-label="PCキーボード演奏">
       <div className="live-input__controls">
         <button type="button" aria-pressed={liveInputEnabled} onClick={toggleLiveInput}>
           PC で演奏<span aria-hidden="true"> {liveInputEnabled ? 'オン' : 'オフ'}</span>
+        </button>
+        <button type="button" aria-pressed={stepEnabled && !recordingActive}
+          aria-describedby={stepEnabled && !recordingActive ? 'live-input-step-help' : undefined}
+          disabled={recordingActive} onClick={toggleStepInput}>
+          ステップ入力
+        </button>
+        <button type="button" disabled={recordingActive} onClick={captureLastPerformance}>
+          今の演奏を拾う
         </button>
         {liveInputEnabled && (
           <>
@@ -206,6 +298,13 @@ export function LiveInputPanel() {
           </>
         )}
       </div>
+      {stepEnabled && !recordingActive && (
+        <p id="live-input-step-help">
+          音を押すと、ピアノロールのグリッドの長さで入ります。同じ位置に音を重ねるには、一緒に押してください。
+          休符を入れるには「.」を押します。
+          {cursor !== undefined && <> 次の入力位置は曲の先頭から {(cursor / PPQ).toLocaleString('ja-JP', { maximumFractionDigits: 3 })} 拍です。</>}
+        </p>
+      )}
       {liveInputEnabled && (
         <>
           <p>A S D F G H J K L が白鍵、W E T Y U が黒鍵です。押している間だけ音が鳴ります。</p>

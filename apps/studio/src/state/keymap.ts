@@ -37,7 +37,8 @@ export type ShortcutAction =
   | 'joinNotes'
   | 'splitNotesAtPlayhead'
   | 'duplicateClip'
-  | 'deleteClip';
+  | 'deleteClip'
+  | 'stepInputRest';
 
 /** `mod` is Ctrl on Windows/Linux and Cmd on macOS; either one matches. */
 export type ShortcutModifier = 'mod' | 'shift' | 'alt';
@@ -58,6 +59,7 @@ export type ShortcutEventLike = Pick<
   Partial<Pick<KeyboardEvent, 'code'>>;
 
 export const KEYMAP: readonly ShortcutEntry[] = [
+  { scope: 'liveInput', key: '.', modifiers: [], action: 'stepInputRest', labelJa: 'ステップ入力で休符を入れる' },
   { scope: 'global', key: 'space', modifiers: [], action: 'togglePlayback', labelJa: '再生/停止' },
   { scope: 'global', key: 'z', modifiers: ['mod'], action: 'undo', labelJa: '元に戻す' },
   { scope: 'global', key: 'z', modifiers: ['mod', 'shift'], action: 'redo', labelJa: 'やり直す' },

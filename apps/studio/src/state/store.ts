@@ -77,6 +77,7 @@ export type EditorState = {
   liveInputEnabled: boolean;
   liveInputOctave: number;
   liveInputScaleLock: boolean;
+  gridSnap: number;
   chordToneHighlight: boolean;
   /** ピアノロールで他トラックのゴーストノートを隠すトラック ID(UI 状態。保存しない)。 */
   ghostHiddenTrackIds: string[];
@@ -212,6 +213,7 @@ type StoreState = {
   toggleLiveInput: () => void;
   setLiveInputOctave: (octave: number) => void;
   toggleLiveInputScaleLock: () => void;
+  setGridSnap: (gridSnap: number) => void;
   toggleChordToneHighlight: () => void;
   toggleGhostTrack: (trackId: string) => void;
   setNoteColorMode: (mode: NoteColorMode) => void;
@@ -386,6 +388,7 @@ function makeEditor(project: Project): EditorState {
     liveInputEnabled: false,
     liveInputOctave: DEFAULT_KEYBOARD_OCTAVE,
     liveInputScaleLock: false,
+    gridSnap: 1,
     chordToneHighlight: true,
     ghostHiddenTrackIds: [],
     noteColorMode: 'plain',
@@ -895,6 +898,7 @@ export const useStore = create<StoreState>((set, get) => {
       set((s) => ({ editor: { ...s.editor, liveInputEnabled: !s.editor.liveInputEnabled } })),
     setLiveInputOctave: (octave) =>
       set((s) => ({ editor: { ...s.editor, liveInputOctave: octave } })),
+    setGridSnap: (gridSnap) => set((s) => ({ editor: { ...s.editor, gridSnap } })),
     toggleLiveInputScaleLock: () =>
       set((s) => ({ editor: { ...s.editor, liveInputScaleLock: !s.editor.liveInputScaleLock } })),
     toggleScaleSnap: () => {
