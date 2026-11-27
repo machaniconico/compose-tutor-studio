@@ -146,6 +146,13 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - local draftやfocus変更ではProjectを変えず、確定したadd / edit / move / deleteだけを1 gesture = 1 Undoにする。Undo / Redoと保存・再読込後もevent ID、位置、値、compatibility mirrorを保つ
 - 320px幅ではtoolbar / Inspectorを折り返し、document横overflowを出さず時間軸だけを内部scrollする。連続tempo ramp、audio follow / Smart Tempo、tempo automationを利用可能に見せるcontrolは置かない
 
+#### 2.3.6 曲全体の移調
+
+- トランスポートバー（キー / スケールの隣）の小さな「±」ボタン（読み上げ名・ツールチップは「曲全体を移調」）を押すとダイアログが開く。「移調する半音の数」（-12〜+12の整数）を入れると、今のキーと移調後のキーを表示する
+- 「移調する」で全ノートとコード名を動かして閉じ、完了を通知する。拒否時は日本語の理由（最も低い／高い音名を含む）をダイアログ内に表示し、曲は変えず開いたままにする
+- ドラムと録音した音声は動かない。その旨を常にダイアログに表示する。録音中はボタンを無効にする
+
+
 ### 2.4 Chord Palette
 
 タブ:
