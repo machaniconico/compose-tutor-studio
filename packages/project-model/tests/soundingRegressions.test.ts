@@ -47,17 +47,18 @@ function longNameDrumProject() {
   return makeProject([{ ...makeTrack('d', 'drum', clips), name: ' '.repeat(65_536) }], { lengthBars: 64 });
 }
 
+// 閾値 400ms: 二乗時間に戻る回帰(数秒〜)を捕まえるのが目的。100ms は並列テスト実行中に 125〜169ms で落ちた(2026-11-27)。
 describe('soundingEvents の性能', () => {
-  it('50,000 トラック・各トラック名が空白 8,192 個でも中央値 100ms 未満', () => {
+  it('50,000 トラック・各トラック名が空白 8,192 個でも中央値 400ms 未満', () => {
     const project = longNameInstrumentProject();
     expect(soundingEvents(project).events).toHaveLength(50_000);
-    expect(medianMs(() => soundingEvents(project))).toBeLessThan(100);
+    expect(medianMs(() => soundingEvents(project))).toBeLessThan(400);
   });
 
-  it('名前が空白 65,536 個のドラムトラックに 1 tick のクリップ 20,000 個でも中央値 100ms 未満', () => {
+  it('名前が空白 65,536 個のドラムトラックに 1 tick のクリップ 20,000 個でも中央値 400ms 未満', () => {
     const project = longNameDrumProject();
     expect(soundingEvents(project).problems).toHaveLength(20_000);
-    expect(medianMs(() => soundingEvents(project))).toBeLessThan(100);
+    expect(medianMs(() => soundingEvents(project))).toBeLessThan(400);
   });
 
   it('トラック名の整形(trim)はトラック数以下', () => {

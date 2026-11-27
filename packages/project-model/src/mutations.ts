@@ -13,6 +13,8 @@ import type {
   Clip,
   DrumEvent,
   DrumLane,
+  InstrumentConfig,
+  InstrumentMacros,
   MusicalKey,
   NoteEvent,
   Project,
@@ -811,6 +813,69 @@ export function setTrackColor(
   const track = project.tracks.find((t) => t.id === trackId);
   if (!track || track.color === color) return project;
   return touch({ ...project, tracks: mapTrack(project, trackId, (t) => ({ ...t, color })) }, clock);
+}
+
+/**
+ * Change a synth track's preset. Macros are kept (they shape any preset).
+ * A track without an instrument starts with the fallback synth.
+ */
+export function setTrackInstrumentPreset(
+  project: Project,
+  trackId: string,
+  preset: string,
+  clock: Clock = systemClock,
+): Project {
+  const track = project.tracks.find((t) => t.id === trackId);
+  if (!track || track.type === 'drum' || track.type === 'master') return project;
+  const instrument = track.instrument;
+  if (instrument?.type === 'synth' && instrument.preset === preset) return project;
+  return touch(
+    { ...project, tracks: mapTrack(project, trackId, (t) => ({ ...t, instrument: { ...instrument, type: 'synth', preset } })) },
+    clock,
+  );
+}
+
+/**
+ * Set (or with `undefined`, remove) a synth track's sound macros. Each value is
+ * clamped to 0..1; a non-finite value leaves the project unchanged.
+ */
+export function setTrackInstrumentMacros(
+  project: Project,
+  trackId: string,
+  macros: InstrumentMacros | undefined,
+  clock: Clock = systemClock,
+): Project {
+  const track = project.tracks.find((t) => t.id === trackId);
+  if (!track || track.type === 'drum' || track.type === 'master') return project;
+  const instrument = track.instrument ?? { type: 'synth', preset: 'warmPad' };
+  let nextInstrument: InstrumentConfig;
+  if (macros === undefined) {
+    if (instrument.macros === undefined) return project;
+    nextInstrument = { ...instrument };
+    delete nextInstrument.macros;
+  } else {
+    const values = [macros.brightness, macros.release, macros.width, macros.attack];
+    if (!values.every((v) => typeof v === 'number' && Number.isFinite(v))) return project;
+    const clamp = (v: number): number => Math.min(1, Math.max(0, v));
+    const next: InstrumentMacros = {
+      brightness: clamp(macros.brightness),
+      release: clamp(macros.release),
+      width: clamp(macros.width),
+      attack: clamp(macros.attack),
+    };
+    const prev = instrument.macros;
+    if (
+      prev &&
+      prev.brightness === next.brightness &&
+      prev.release === next.release &&
+      prev.width === next.width &&
+      prev.attack === next.attack
+    ) {
+      return project;
+    }
+    nextInstrument = { ...instrument, type: 'synth', macros: next };
+  }
+  return touch({ ...project, tracks: mapTrack(project, trackId, (t) => ({ ...t, instrument: nextInstrument })) }, clock);
 }
 
 // --- Sections ---

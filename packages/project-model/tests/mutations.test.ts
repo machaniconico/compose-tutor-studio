@@ -16,6 +16,9 @@ import {
   updateSection,
   setLoopRange,
   setLengthBars,
+  setTrackInstrumentMacros,
+  setTrackInstrumentPreset,
+  validateProject,
 } from '../src/index';
 import type { Project } from '../src/index';
 
@@ -156,5 +159,52 @@ describe('loop range mutations', () => {
     const project = setLoopRange({ ...base(), lengthBars: 8 }, { startBeat: 4, endBeat: 12 }, t1);
     expect(setLengthBars(project, 16, t1).loopRange).toEqual({ startBeat: 4, endBeat: 12 });
     expect(setLengthBars(project, 3, t1).loopRange).toEqual({ startBeat: 4, endBeat: 12 });
+  });
+});
+
+describe('instrument preset and macro mutations', () => {
+  const synthId = (project: Project): string =>
+    project.tracks.find((t) => t.instrument?.type === 'synth')!.id;
+  const drumId = (project: Project): string => project.tracks.find((t) => t.type === 'drum')!.id;
+  const instrumentOf = (project: Project, id: string) => project.tracks.find((t) => t.id === id)!.instrument;
+  const macros = { brightness: 0.8, release: 0.2, width: 0.5, attack: 0.1 };
+
+  it('changes a synth preset and keeps its macros', () => {
+    const start = base();
+    const id = synthId(start);
+    const project = setTrackInstrumentMacros(start, id, macros, t0);
+    const next = setTrackInstrumentPreset(project, id, 'bell', t1);
+    expect(instrumentOf(next, id)).toEqual({ type: 'synth', preset: 'bell', macros });
+    expect(next.updatedAt).toBe(t1().toISOString());
+    expect(instrumentOf(project, id)!.preset).not.toBe('bell');
+  });
+
+  it('leaves the project unchanged for the same preset, a drum track or an unknown track', () => {
+    const project = base();
+    const id = synthId(project);
+    expect(setTrackInstrumentPreset(project, id, instrumentOf(project, id)!.preset, t1)).toBe(project);
+    expect(setTrackInstrumentPreset(project, drumId(project), 'bell', t1)).toBe(project);
+    expect(setTrackInstrumentPreset(project, 'missing', 'bell', t1)).toBe(project);
+    expect(setTrackInstrumentMacros(project, drumId(project), macros, t1)).toBe(project);
+  });
+
+  it('sets, clamps and removes macros; the result stays valid', () => {
+    const project = base();
+    const id = synthId(project);
+    const set = setTrackInstrumentMacros(project, id, { brightness: 2, release: -1, width: 0.5, attack: 1 }, t1);
+    expect(instrumentOf(set, id)!.macros).toEqual({ brightness: 1, release: 0, width: 0.5, attack: 1 });
+    expect(validateProject(set).valid).toBe(true);
+    const cleared = setTrackInstrumentMacros(set, id, undefined, t1);
+    expect(instrumentOf(cleared, id)).not.toHaveProperty('macros');
+    expect(setTrackInstrumentMacros(cleared, id, undefined, t1)).toBe(cleared);
+  });
+
+  it('rejects non-finite macro values and ignores an unchanged set', () => {
+    const start = base();
+    const id = synthId(start);
+    const project = setTrackInstrumentMacros(start, id, macros, t0);
+    expect(project).not.toBe(start);
+    expect(setTrackInstrumentMacros(project, id, { ...macros, width: Number.NaN }, t1)).toBe(project);
+    expect(setTrackInstrumentMacros(project, id, { ...macros }, t1)).toBe(project);
   });
 });

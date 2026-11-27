@@ -15,6 +15,19 @@ describe('validateProject', () => {
     expect(result.errors).toHaveLength(0);
   });
 
+  it('reports a Japanese validation error for non-string saved presets', () => {
+    const project = baseProject();
+    for (const preset of [{ toString: null }, ['bell'], null, 42, true]) {
+      const instrument = { type: 'synth', preset } as unknown as NonNullable<Project['tracks'][number]['instrument']>;
+      const result = validateProject({ ...project, tracks: [{ ...project.tracks[0]!, instrument }, ...project.tracks.slice(1)] });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual({
+        path: 'tracks[0].instrument.preset',
+        message: expect.stringContaining('音色名は文字列にしてください'),
+      });
+    }
+  });
+
   it('flags eq and compressor params outside their ranges', () => {
     const project = baseProject();
     const track = project.tracks[0]!;
@@ -213,5 +226,79 @@ describe('validateProject: project sound limit', () => {
     const result = expandClip(track.clips[0]!, allClips, 4, track.type);
     expect(result.notes).toHaveLength(2048);
     expect(result.problems).toEqual([]);
+  });
+
+  describe('instrument macros', () => {
+    const withMacros = (macros: unknown): Project => {
+      const project = baseProject();
+      const index = project.tracks.findIndex((t) => t.instrument?.type === 'synth');
+      const track = project.tracks[index]!;
+      const tracks = [...project.tracks];
+      tracks[index] = {
+        ...track,
+        instrument: { ...track.instrument!, macros: macros as NonNullable<typeof track.instrument>['macros'] },
+      };
+      return { ...project, tracks };
+    };
+    const ok = { brightness: 0, release: 1, width: 0.5, attack: 0.25 };
+
+    it.each([[null], ['bright'], [0.5], [[0.5, 0.5, 0.5, 0.5]]])('reports macros = %j as an error instead of crashing', (macros) => {
+      const result = validateProject(withMacros(macros));
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => e.path.endsWith('instrument.macros') && e.message.includes('0〜1'))).toBe(true);
+    });
+
+    it('accepts macros inside 0..1 (bounds included) and tracks without macros', () => {
+      expect(validateProject(withMacros(ok)).valid).toBe(true);
+      expect(validateProject(withMacros({ brightness: 1, release: 0, width: 0, attack: 1 })).valid).toBe(true);
+      expect(validateProject(baseProject()).valid).toBe(true);
+    });
+
+    it.each([
+      ['brightness', -0.01],
+      ['release', 1.01],
+      ['width', Number.NaN],
+      ['attack', Number.POSITIVE_INFINITY],
+      ['width', '0.5'],
+      ['release', undefined],
+    ])('flags %s = %s with a Japanese message', (key, value) => {
+      const result = validateProject(withMacros({ ...ok, [key]: value }));
+      expect(result.valid).toBe(false);
+      const error = result.errors.find((e) => e.path.endsWith(`instrument.macros.${key}`));
+      expect(error).toBeDefined();
+      expect(error!.message).toMatch(/0〜1/);
+    });
+
+    it('reports a macro value whose toString is null without throwing', () => {
+      const macros = { brightness: { toString: null }, release: 0.5, width: 0, attack: 0.5 };
+      const result = validateProject(withMacros(macros));
+      expect(result.valid).toBe(false);
+      const error = result.errors.find((e) => e.path.endsWith('instrument.macros.brightness'));
+      expect(error!.message).toContain('(現在: object)');
+    });
+
+    it('reports macros whose toString is null without throwing', () => {
+      const result = validateProject(withMacros(Object.assign([], { toString: null })));
+      expect(result.valid).toBe(false);
+      const error = result.errors.find((e) => e.path.endsWith('instrument.macros'));
+      expect(error!.message).toContain('(現在: object)');
+    });
+
+    it.each([
+      [Number.NaN, 'NaN'],
+      [2, '2'],
+      [null, 'null'],
+      ['0.5', 'string'],
+      [undefined, 'undefined'],
+    ])('describes a bad macro value %s as %s', (value, shown) => {
+      const result = validateProject(withMacros({ ...ok, width: value }));
+      const error = result.errors.find((e) => e.path.endsWith('instrument.macros.width'));
+      expect(error!.message).toContain(`(現在: ${shown})`);
+    });
+
+    it('describes non-object macros by their type', () => {
+      expect(validateProject(withMacros(null)).errors[0]!.message).toContain('(現在: null)');
+      expect(validateProject(withMacros('bright')).errors[0]!.message).toContain('(現在: string)');
+    });
   });
 });

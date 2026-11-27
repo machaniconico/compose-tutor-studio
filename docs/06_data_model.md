@@ -63,6 +63,16 @@ export type Track = {
 //   範囲外は validateProject がエラーにする。
 // master トラックの volume(0〜2)がマスターゲインになる(ライブ再生と WAV 書き出しで共通)。
 
+// instrument は { type: 'synth' | 'drumkit'; preset: string; params?: Record<string, number>; macros?: InstrumentMacros }。
+// synth の preset は音色名(warmPad / roundBass / brightLead / pianoLike / bell / organLike / stringsLike / brassLike /
+//   pluck / deepSubBass / softKeys / squareLead / glassPad、別名 subBass = roundBass・leadSine = brightLead)。
+//   未知の名前('piano' / 'pad' / 'bass' / 'lead' など既存ファイルの値を含む)は warmPad で鳴る。
+// instrument.macros(オプション、スキーマ版は上げない)は { brightness, release, width, attack } で各 0〜1。
+//   brightness = フィルタのカットオフ、release / attack = エンベロープの時間(0.5 で音色のまま、0 で 1/4 倍、1 で 4 倍)、
+//   width = 左右の広がり(0 で中央、1 で隣り合う音を左右に振る)。未設定なら音色そのまま。
+//   範囲外・非有限・数値以外は validateProject がエラーにする(読み込み時に値を直したり補ったりはしない)。
+//   ライブ再生・WAV 書き出し・試聴は同じ applyMacros(apps/studio/src/audio/macros.ts)で音色に反映する。
+
 // role は役割(コード / ベース / メロディ / ドラム)を表す安定した識別子。
 // 表示名 `name` は自由に変えてよく、レッスン判定・アシスタント・コーチは role を優先し、
 // role が無い古いプロジェクトだけトラック名('Bass' など)にフォールバックする。

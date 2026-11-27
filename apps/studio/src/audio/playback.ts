@@ -479,7 +479,8 @@ function buildVoices(
     } else if (track.type !== 'master') {
       state.synths.set(
         track.id,
-        new SynthVoiceManager(ctx, graph.input, track.instrument?.preset),
+        // The voice manager applies the track's macros, as in the WAV render.
+        new SynthVoiceManager(ctx, graph.input, track.instrument?.preset, undefined, track.instrument?.macros),
       );
     }
   }
@@ -532,7 +533,6 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
     }
   }
 
-  const tailSeconds = songTailSeconds(project);
   const scheduler = new Scheduler({
     clock: () => engine.now(),
     fire: fireEvents,
@@ -551,7 +551,14 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
       const s = useStore.getState();
       if (s.transport.isPlaying) {
         if (startBeat < state.songEnd) {
-          state.ringUntil = beatToTime(state.songEnd, project.bpm, startBeat, now) + tailSeconds;
+          const songEndTime = beatToTime(state.songEnd, project.bpm, startBeat, now);
+          let latestReleaseEnd = songEndTime;
+          for (const synth of state.synths.values()) {
+            const releaseEnd = synth.latestReleaseEndTime;
+            if (releaseEnd > latestReleaseEnd) latestReleaseEnd = releaseEnd;
+          }
+          const tail = songTailSeconds(project, { liveReleaseOverhang: latestReleaseEnd - songEndTime });
+          state.ringUntil = songEndTime + tail;
         }
         s.stop(true);
       }
@@ -622,7 +629,8 @@ function stopAudio(): void {
   if (ringUntil !== null && ringUntil > when) {
     silenceRinging();
     const graphs = state.graphs;
-    const timer = setTimeout(silenceRinging, (ringUntil - when) * 1000);
+    // Timers use whole milliseconds. Keep the graph through the final fraction.
+    const timer = setTimeout(silenceRinging, Math.ceil((ringUntil - when) * 1000));
     state.ringing = { graphs, timer };
     state.graphs = new Map();
   } else {

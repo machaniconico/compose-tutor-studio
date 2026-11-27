@@ -8,11 +8,14 @@
 import type { Project } from '@cts/project-model';
 import { songEndBeat } from '@cts/project-model';
 import { delaySettings, enabledSupportedEffects } from './effects';
+import { noteEnvelopeTiming } from './envelope';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import { buildTrackGraphs } from './graph';
 import { createMasterChain } from './masterChain';
 import { beatToTime, secondsPerBeat, type DueEvent } from './scheduler';
 import { DrumVoiceManager } from './drums';
+import { applyMacros } from './macros';
+import { resolvePreset, type Envelope } from './presets';
 import { SynthVoiceManager } from './synth';
 
 /** Render sample rate (Hz). */
@@ -24,30 +27,56 @@ export const RENDER_TAIL_SECONDS = 1;
 
 export { songEndBeat as songSoundEndBeat };
 
+type RenderEvent = DueEvent & { payload: SchedulePayload };
+
 /**
- * Seconds kept after `songSoundEndBeat` for releases and echoes: the first
- * repeat of the longest enabled delay plus `RENDER_TAIL_SECONDS`.
+ * Seconds kept after the song end. Keep the existing release and delay
+ * allowance, extending it when a scheduled envelope rings out longer.
+ * Live playback supplies the overhang of its already-scheduled voices.
  */
-export function songTailSeconds(project: Project): number {
+export function songTailSeconds(
+  project: Project,
+  source?: { events: readonly RenderEvent[] } | { liveReleaseOverhang: number },
+): number {
+  const envelopes = new Map<string, Envelope>();
   let longestDelay = 0;
+  let tail = RENDER_TAIL_SECONDS;
   for (const track of project.tracks) {
+    if (track.type !== 'drum') {
+      const { env } = applyMacros(resolvePreset(track.instrument?.preset), track.instrument?.macros);
+      envelopes.set(track.id, env);
+      tail = Math.max(tail, env.release);
+    }
     for (const effect of enabledSupportedEffects(track.effects)) {
       if (effect.type !== 'delay') continue;
       longestDelay = Math.max(longestDelay, delaySettings(effect).timeSeconds);
     }
   }
-  return longestDelay + RENDER_TAIL_SECONDS;
+  if (source && 'liveReleaseOverhang' in source) {
+    return longestDelay + Math.max(tail, source.liveReleaseOverhang);
+  }
+
+  const spb = secondsPerBeat(project.bpm);
+  const songEnd = songEndBeat(project) * spb;
+  for (const { payload, time } of source?.events ?? renderScheduleEvents(project)) {
+    if (payload.kind !== 'note') continue;
+    const env = envelopes.get(payload.trackId);
+    if (!env) continue;
+    const { releaseEnd } = noteEnvelopeTiming(env, time, payload.durationBeats * spb, payload.cut);
+    tail = Math.max(tail, releaseEnd - songEnd);
+  }
+  return longestDelay + tail;
 }
 
 /** Render through the song end plus the release and echo tail. */
-export function renderLengthSeconds(project: Project): number {
-  return songEndBeat(project) * secondsPerBeat(project.bpm) + songTailSeconds(project);
+export function renderLengthSeconds(project: Project, events = renderScheduleEvents(project)): number {
+  return songEndBeat(project) * secondsPerBeat(project.bpm) + songTailSeconds(project, { events });
 }
 
 /** Resolve the shared schedule to absolute times for the offline context. */
-export function renderScheduleEvents(project: Project): DueEvent[] {
+export function renderScheduleEvents(project: Project): RenderEvent[] {
   return buildScheduleEvents(project)
-    .map(({ beat, payload }) => ({ beat, payload, time: beatToTime(beat, project.bpm, 0, 0) }))
+    .map(({ beat, payload }) => ({ beat, payload: payload as SchedulePayload, time: beatToTime(beat, project.bpm, 0, 0) }))
     .sort((a, b) => a.time - b.time);
 }
 
@@ -140,7 +169,8 @@ function writeAscii(view: DataView, offset: number, text: string): void {
  * of an exported render (the song plays once, no click).
  */
 export async function renderProjectToWav(project: Project): Promise<Blob> {
-  const frames = Math.max(1, Math.ceil(renderLengthSeconds(project) * RENDER_SAMPLE_RATE));
+  const events = renderScheduleEvents(project);
+  const frames = Math.max(1, Math.ceil(renderLengthSeconds(project, events) * RENDER_SAMPLE_RATE));
 
   const ctx = new OfflineAudioContext(RENDER_CHANNELS, frames, RENDER_SAMPLE_RATE);
 
@@ -157,15 +187,17 @@ export async function renderProjectToWav(project: Project): Promise<Blob> {
     if (track.type === 'drum') {
       drums.set(track.id, new DrumVoiceManager(ctx, graph.input));
     } else {
-      synths.set(track.id, new SynthVoiceManager(ctx, graph.input, track.instrument?.preset));
+      // The voice manager applies the track's macros, as in live playback.
+      synths.set(
+        track.id,
+        new SynthVoiceManager(ctx, graph.input, track.instrument?.preset, undefined, track.instrument?.macros),
+      );
     }
   }
 
   // Schedule the song window. anchorBeat=0, anchorTime=0 => beat n maps to n*spb.
   const spb = secondsPerBeat(project.bpm);
-  for (const ev of renderScheduleEvents(project)) {
-    const time = ev.time;
-    const payload = ev.payload as SchedulePayload;
+  for (const { time, payload } of events) {
     if (payload.kind === 'note') {
       const synth = synths.get(payload.trackId);
       if (synth) {

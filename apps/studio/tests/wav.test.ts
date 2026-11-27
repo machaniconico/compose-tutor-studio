@@ -1,23 +1,40 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   songEndBeat,
   createDefaultProject,
   createEmptyProject,
   setTimeSignature,
   type Clip,
+  type InstrumentMacros,
   type Project,
   type Track,
 } from '@cts/project-model';
 import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
 import { buildScheduleEvents, type SchedulePayload } from '../src/audio/events';
 import { nextEventsInWindow } from '../src/audio/scheduler';
+import { applyMacros } from '../src/audio/macros';
 import {
   encodeWav,
   floatToInt16,
   RENDER_TAIL_SECONDS,
   renderLengthSeconds,
+  renderProjectToWav,
   renderScheduleEvents,
+  songTailSeconds,
 } from '../src/audio/wav';
+
+// applyMacros is wrapped in a spy (calling the real mapping) so the WAV render
+// can be shown to go through it. Graph and master chain are stubbed: only the
+// voices are built on the fake OfflineAudioContext below.
+vi.mock('../src/audio/macros', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/audio/macros')>();
+  return { ...actual, applyMacros: vi.fn(actual.applyMacros) };
+});
+vi.mock('../src/audio/graph', () => ({
+  buildTrackGraphs: (_ctx: unknown, _master: unknown, tracks: ReadonlyArray<{ id: string }>) =>
+    new Map(tracks.map((t) => [t.id, { input: {}, dispose: () => {} }])),
+}));
+vi.mock('../src/audio/masterChain', () => ({ createMasterChain: () => ({ input: {} }) }));
 
 /** Read a 4-char ASCII tag from an ArrayBuffer at an offset. */
 function ascii(buffer: ArrayBuffer, offset: number, length = 4): string {
@@ -144,6 +161,75 @@ describe('renderLengthSeconds', () => {
   it('uses the clamped legacy delay time, not the raw saved value', () => {
     const project = { ...base, tracks: [delayTrack(true, { delayTime: 4 })] };
     expect(renderLengthSeconds(project)).toBe(12 + 1.5 + RENDER_TAIL_SECONDS);
+  });});
+
+describe('songTailSeconds: synth release', () => {
+  const base = createEmptyProject({
+    bpm: 120,
+    lengthBars: 1,
+    timeSignature: [4, 4],
+    clock: () => new Date('2026-06-11T00:00:00.000Z'),
+  });
+  const synthTrack = (id: string, preset: string | undefined, macros?: InstrumentMacros, delay?: number): Track => ({
+    id,
+    name: id,
+    type: 'instrument',
+    clips: [],
+    volume: 0.8,
+    pan: 0,
+    mute: false,
+    solo: false,
+    effects: delay === undefined ? [] : [{ id: `fx-${id}`, type: 'delay', enabled: true, params: { timeSeconds: delay } }],
+    instrument: preset === undefined ? undefined : { type: 'synth', preset, ...(macros ? { macros } : {}) },
+  });
+
+  it('keeps the previous tail for existing songs (no macros, old preset names, release <= 1 s)', () => {
+    // Existing presets and names stored in older projects (fall back to warmPad).
+    const tracks = [
+      synthTrack('a', 'warmPad'),
+      synthTrack('b', 'roundBass'),
+      synthTrack('c', 'brightLead'),
+      synthTrack('d', 'subBass'),
+      synthTrack('e', 'leadSine'),
+      synthTrack('f', 'piano'),
+      synthTrack('g', undefined),
+    ];
+    expect(songTailSeconds({ ...base, tracks })).toBe(RENDER_TAIL_SECONDS);
+    expect(songTailSeconds({ ...base, tracks: [...tracks, synthTrack('h', 'pad', undefined, 0.75)] })).toBe(
+      0.75 + RENDER_TAIL_SECONDS,
+    );
+    expect(songTailSeconds({ ...base, tracks: [] })).toBe(RENDER_TAIL_SECONDS);
+  });
+
+  it('extends the tail to a preset release longer than RENDER_TAIL_SECONDS', () => {
+    // glassPad releases over 1.2 s even without macros.
+    expect(songTailSeconds({ ...base, tracks: [synthTrack('a', 'glassPad')] })).toBeCloseTo(1.2, 9);
+  });
+
+  it('uses the release after the macros, plus the longest delay', () => {
+    const macros: InstrumentMacros = { brightness: 0.5, release: 1, width: 0, attack: 0.5 };
+    // warmPad release 0.5 s x4 = 2 s.
+    expect(songTailSeconds({ ...base, tracks: [synthTrack('a', 'warmPad', macros)] })).toBeCloseTo(2, 9);
+    expect(
+      songTailSeconds({ ...base, tracks: [synthTrack('a', 'warmPad', macros), synthTrack('b', 'roundBass', undefined, 0.5)] }),
+    ).toBeCloseTo(2.5, 9);
+    expect(renderLengthSeconds({ ...base, tracks: [synthTrack('a', 'warmPad', macros)] })).toBeGreaterThanOrEqual(4);
+  });
+
+  it('ignores drum tracks', () => {
+    const drums: Track = { ...synthTrack('d', 'glassPad'), type: 'drum' };
+    expect(songTailSeconds({ ...base, tracks: [drums] })).toBe(RENDER_TAIL_SECONDS);
+  });
+
+  it('uses the warm pad fallback for a non-string preset from saved JSON', () => {
+    const track = synthTrack('a', 'warmPad');
+    const project = { ...base, tracks: [track] };
+    const saved = JSON.stringify({
+      ...project,
+      tracks: [{ ...track, instrument: { type: 'synth', preset: { toString: null } } }],
+    });
+    const malformed = JSON.parse(saved) as Project;
+    expect(renderLengthSeconds(malformed)).toBe(renderLengthSeconds(project));
   });
 });
 
@@ -293,5 +379,86 @@ describe('live playback, WAV and MIDI sound the same events', () => {
     expect(durations(renderScheduleEvents(project))).toEqual([1]);
     expect(parseMidi(exportProjectToMidi(project)).tracks.flatMap((t) => t.notes).map((n) => n.durationBeats)).toEqual([1]);
     expect(renderLengthSeconds(project)).toBeCloseTo(4 * spb + RENDER_TAIL_SECONDS, 9);
+  });
+});
+
+describe('renderProjectToWav applies the track macros', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(applyMacros).mockClear();
+  });
+
+  /** Minimal OfflineAudioContext: records the filter cutoffs the voices set. */
+  function stubOfflineContext(cutoffs: number[]): void {
+    const param = (record?: number[]) => ({
+      setValueAtTime: vi.fn((v: number) => record?.push(v)),
+      linearRampToValueAtTime: vi.fn(),
+    });
+    vi.stubGlobal(
+      'OfflineAudioContext',
+      class {
+        currentTime = 0;
+        createOscillator() {
+          return { type: 'sine', frequency: param(), detune: param(), connect: vi.fn(), start: vi.fn(), stop: vi.fn() };
+        }
+        createBiquadFilter() {
+          return { type: 'lowpass', frequency: param(cutoffs), Q: param(), connect: vi.fn() };
+        }
+        createGain() {
+          return { gain: param(), connect: vi.fn() };
+        }
+        createStereoPanner() {
+          return { pan: param(), connect: vi.fn() };
+        }
+        async startRendering() {
+          return { numberOfChannels: 2, getChannelData: () => new Float32Array(1) };
+        }
+      },
+    );
+  }
+
+  const keysProject = (macros?: InstrumentMacros): Project => ({
+    ...createEmptyProject({ lengthBars: 1 }),
+    tracks: [
+      {
+        id: 'keys',
+        name: 'keys',
+        type: 'instrument',
+        instrument: macros ? { type: 'synth', preset: 'warmPad', macros } : { type: 'synth', preset: 'warmPad' },
+        clips: [
+          {
+            id: 'c1',
+            trackId: 'keys',
+            type: 'midi',
+            startBeat: 0,
+            lengthBeats: 4,
+            loop: false,
+            notes: [{ id: 'n1', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+          },
+        ],
+        volume: 0.8,
+        pan: 0,
+        mute: false,
+        solo: false,
+        effects: [],
+      },
+    ],
+  });
+
+  it('calls applyMacros with the track macros and renders the shaped cutoff', async () => {
+    const macros = { brightness: 1, release: 0.5, width: 0, attack: 0.5 };
+    const cutoffs: number[] = [];
+    stubOfflineContext(cutoffs);
+    await renderProjectToWav(keysProject(macros));
+    expect(vi.mocked(applyMacros)).toHaveBeenCalledWith(expect.objectContaining({ cutoffHz: 1400 }), macros);
+    // warmPad 1400 Hz, brightness 1 = 4x.
+    expect(cutoffs).toEqual([5600]);
+  });
+
+  it('renders a track without macros at the preset cutoff', async () => {
+    const cutoffs: number[] = [];
+    stubOfflineContext(cutoffs);
+    await renderProjectToWav(keysProject());
+    expect(cutoffs).toEqual([1400]);
   });
 });

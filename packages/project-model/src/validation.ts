@@ -1,7 +1,7 @@
 // Project validation. Enforces docs/06_data_model.md section 5 plus structural
 // integrity checks (unique ids, clip.trackId references an existing track).
 
-import type { Project, TrackRole } from './types';
+import type { InstrumentMacros, Project, TrackRole } from './types';
 import { findProjectSoundingLimitProblem, MAX_SONG_BARS, maxSongBars, MIN_LOOP_PERIOD_BEATS } from './sounding';
 import { clipTickSpan, tickSpansOverlap } from './time';
 
@@ -33,6 +33,14 @@ const EFFECT_PARAM_RANGES: Partial<Record<string, Record<string, [number, number
   },
 };
 
+const MACRO_KEYS = ['brightness', 'release', 'width', 'attack'] as const satisfies ReadonlyArray<keyof InstrumentMacros>;
+const MACRO_LABELS: Record<keyof InstrumentMacros, string> = {
+  brightness: '明るさ',
+  release: '余韻',
+  width: '広がり',
+  attack: '立ち上がり',
+};
+
 function inRange(value: number, min: number, max: number): boolean {
   return Number.isFinite(value) && value >= min && value <= max;
 }
@@ -41,6 +49,16 @@ function inRange(value: number, min: number, max: number): boolean {
  * Validate a project against the data-model rules.
  * Returns every violation found (does not stop at the first error).
  */
+/**
+ * A saved value for an error message without calling its own methods: numbers
+ * as is, anything else as its typeof ('null' for null). `String(value)` would
+ * throw for objects such as `{ toString: null }`.
+ */
+function describeValue(value: unknown): string {
+  if (typeof value === 'number') return String(value);
+  return value === null ? 'null' : typeof value;
+}
+
 export function validateProject(project: Project): ValidationResult {
   const errors: ValidationError[] = [];
   const push = (path: string, message: string): void => {
@@ -119,6 +137,27 @@ export function validateProject(project: Project): ValidationResult {
         }
       }
     });
+    const instrument = track.instrument;
+    if (instrument && typeof instrument.preset !== 'string') {
+      push(
+        `tracks[${ti}].instrument.preset`,
+        `音色名は文字列にしてください(現在: ${describeValue(instrument.preset)})`,
+      );
+    }
+    const macros = instrument?.macros;
+    if (macros !== undefined && (macros === null || typeof macros !== 'object' || Array.isArray(macros))) {
+      push(`tracks[${ti}].instrument.macros`, `音色マクロは 0〜1 の数値の組にしてください(現在: ${describeValue(macros)})`);
+    } else if (macros !== undefined) {
+      for (const key of MACRO_KEYS) {
+        const value = macros[key];
+        if (typeof value !== 'number' || !inRange(value, 0, 1)) {
+          push(
+            `tracks[${ti}].instrument.macros.${key}`,
+            `音色マクロ「${MACRO_LABELS[key]}」は 0〜1 の数値にしてください(現在: ${describeValue(value)})`,
+          );
+        }
+      }
+    }
     if (track.role !== undefined && !VALID_TRACK_ROLES.has(track.role)) {
       push(`tracks[${ti}].role`, `role must be chords, bass, melody, or drums (got ${track.role})`);
     }

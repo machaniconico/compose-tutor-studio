@@ -1,6 +1,8 @@
 // Polyphonic subtractive synth voice.
 //
-// Each voice is: 2 detuned oscillators -> lowpass BiquadFilter -> ADSR GainNode.
+// Each voice is: 2 detuned oscillators -> lowpass BiquadFilter -> ADSR GainNode
+// (-> StereoPannerNode only when the preset has a stereo spread): at most
+// MAX_NODES_PER_VOICE nodes, so 16 voices stay light.
 // Presets (keyed by InstrumentConfig.preset) tweak oscillator shapes, detune,
 // filter cutoff and the envelope. Voices are allocated per track with a steal
 // cap (~16) so a stuck progression cannot exhaust the audio graph.
@@ -8,80 +10,26 @@
 // Works with any BaseAudioContext so the same code drives live playback and the
 // OfflineAudioContext used for WAV render.
 
-/** ADSR envelope, seconds for A/D/R, 0..1 for sustain. */
-export type Envelope = {
-  attack: number;
-  decay: number;
-  sustain: number;
-  release: number;
-};
+import type { InstrumentMacros } from '@cts/project-model';
+import { noteEnvelopeTiming } from './envelope';
+import { applyMacros } from './macros';
+import { resolvePreset, type Envelope, type SynthPreset } from './presets';
 
-/** Subtractive-synth preset definition. */
-export type SynthPreset = {
-  /** Oscillator waveforms for the two detuned voices. */
-  waveA: OscillatorType;
-  waveB: OscillatorType;
-  /** Detune of the second oscillator, cents. */
-  detuneCents: number;
-  /** Base lowpass cutoff, Hz. */
-  cutoffHz: number;
-  /** Filter resonance (Q). */
-  resonance: number;
-  /** Per-note gain trim so presets sit at similar loudness. */
-  gain: number;
-  env: Envelope;
-};
+export {
+  PRESET_CATEGORY_LABELS,
+  PRESET_LIST,
+  resolvePreset,
+  type Envelope,
+  type PresetCategory,
+  type PresetInfo,
+  type SynthPreset,
+} from './presets';
 
-/**
- * Preset table. Keys cover both the canonical task names (warmPad / roundBass /
- * brightLead) and the names the default project currently ships with
- * (subBass / leadSine) so playback works without changing the project model.
- */
-const PRESETS: Record<string, SynthPreset> = {
-  // Soft attack, mellow filter — default for the Chords track.
-  warmPad: {
-    waveA: 'sawtooth',
-    waveB: 'triangle',
-    detuneCents: 8,
-    cutoffHz: 1400,
-    resonance: 0.6,
-    gain: 0.22,
-    env: { attack: 0.18, decay: 0.3, sustain: 0.7, release: 0.5 },
-  },
-  // Short attack, low filter, sine + triangle.
-  roundBass: {
-    waveA: 'sine',
-    waveB: 'triangle',
-    detuneCents: 4,
-    cutoffHz: 600,
-    resonance: 0.4,
-    gain: 0.32,
-    env: { attack: 0.005, decay: 0.12, sustain: 0.85, release: 0.12 },
-  },
-  // Saw, brighter filter — Melody.
-  brightLead: {
-    waveA: 'sawtooth',
-    waveB: 'sawtooth',
-    detuneCents: 12,
-    cutoffHz: 3200,
-    resonance: 0.9,
-    gain: 0.26,
-    env: { attack: 0.01, decay: 0.2, sustain: 0.75, release: 0.18 },
-  },
-};
+/** Most audio nodes one voice creates (2 oscillators, filter, gain, panner). */
+export const MAX_NODES_PER_VOICE = 6;
 
-// Aliases for the preset names used by the current default project factory.
-PRESETS['subBass'] = PRESETS['roundBass'] as SynthPreset;
-PRESETS['leadSine'] = PRESETS['brightLead'] as SynthPreset;
-
-/** Default preset when an unknown name is requested. */
-const DEFAULT_PRESET = 'warmPad';
-
-/** Resolve a preset by name, falling back to the default. */
-export function resolvePreset(preset: string | undefined): SynthPreset {
-  if (preset && PRESETS[preset]) return PRESETS[preset] as SynthPreset;
-  return PRESETS[DEFAULT_PRESET] as SynthPreset;
-}
+/** How far a fully spread voice pans, -1..1. */
+const SPREAD_PAN = 0.7;
 
 /** Convert a MIDI note number to frequency in Hz (A4 = 69 = 440Hz). */
 export function midiToFreq(midi: number): number {
@@ -96,8 +44,10 @@ type ActiveVoice = {
   oscA: OscillatorNode;
   oscB: OscillatorNode;
   gain: GainNode;
-  /** AudioContext time the voice fully finishes (after release). */
+  /** AudioContext time the oscillators stop, just after release. */
   endTime: number;
+  /** AudioContext time the gain ramp reaches zero. */
+  releaseEndTime: number;
   /** AudioContext time the voice starts sounding. */
   startTime: number;
   env: Envelope;
@@ -123,11 +73,6 @@ function envelopeShape(env: Envelope, peak: number, gate: number): { ramps: Arra
   return { ramps: [[gate, level]], level };
 }
 
-/** Sounding length: a cut note releases at its duration, others after attack+decay at the earliest. */
-function gateOf(env: Envelope, duration: number, cutAtEnd: boolean | undefined): number {
-  return cutAtEnd ? Math.max(0, duration) : Math.max(duration, env.attack + env.decay);
-}
-
 /**
  * A polyphonic synth bound to one output node (the track's gain input).
  * One instance per instrument track.
@@ -142,13 +87,21 @@ export class SynthVoiceManager {
   constructor(
     ctx: BaseAudioContext,
     output: AudioNode,
-    preset: string | undefined,
+    preset: unknown,
     maxVoices: number = MAX_VOICES,
+    macros?: InstrumentMacros,
   ) {
     this.ctx = ctx;
     this.output = output;
-    this.preset = resolvePreset(preset);
+    // Live playback, WAV render and the live preview all build voices here, so
+    // the macros are mapped by the same applyMacros on every path.
+    this.preset = applyMacros(resolvePreset(preset), macros);
     this.maxVoices = maxVoices;
+  }
+
+  /** AudioContext time when the last scheduled gain ramp reaches zero. */
+  get latestReleaseEndTime(): number {
+    return this.voices.reduce((latest, voice) => Math.max(latest, voice.releaseEndTime), 0);
   }
 
   /**
@@ -196,32 +149,39 @@ export class SynthVoiceManager {
     filter.Q.setValueAtTime(p.resonance, startTime);
 
     const gain = this.ctx.createGain();
-    const { release } = env;
-
     // ADSR. Sustain runs until releaseStart, then a release ramp to 0. A normal
     // note always plays its full attack+decay before releasing. A note cut short
     // (`cutAtEnd`, e.g. at the clip end) releases at its duration, matching the
     // MIDI note-off: the envelope is cut where it is.
-    const gate = gateOf(env, duration, options.cutAtEnd);
-    const releaseStart = startTime + gate;
+    const { gate, releaseStart, releaseEnd } = noteEnvelopeTiming(env, startTime, duration, options.cutAtEnd);
     gain.gain.setValueAtTime(0, startTime);
     const { ramps, level } = envelopeShape(env, peak, gate);
     for (const [offset, value] of ramps) gain.gain.linearRampToValueAtTime(value, startTime + offset);
     gain.gain.setValueAtTime(level, releaseStart);
-    gain.gain.linearRampToValueAtTime(0, releaseStart + release);
+    gain.gain.linearRampToValueAtTime(0, releaseEnd);
 
     oscA.connect(filter);
     oscB.connect(filter);
     filter.connect(gain);
-    gain.connect(this.output);
+    const spread = p.spread ?? 0;
+    if (spread > 0 && typeof this.ctx.createStereoPanner === 'function') {
+      // Alternate notes left / right so chords spread out (deterministic: same
+      // pan live and in the WAV render).
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.setValueAtTime((midi % 2 === 0 ? -1 : 1) * SPREAD_PAN * spread, startTime);
+      gain.connect(panner);
+      panner.connect(this.output);
+    } else {
+      gain.connect(this.output);
+    }
 
-    const stopAt = releaseStart + release + 0.02;
+    const stopAt = releaseEnd + 0.02;
     oscA.start(startTime);
     oscB.start(startTime);
     oscA.stop(stopAt);
     oscB.stop(stopAt);
 
-    const voice: ActiveVoice = { oscA, oscB, gain, endTime: stopAt, startTime, env, peak };
+    const voice: ActiveVoice = { oscA, oscB, gain, endTime: stopAt, releaseEndTime: releaseEnd, startTime, env, peak };
     this.voices.push(voice);
     return {
       release: (when: number) => this.release(voice, when),
@@ -238,8 +198,7 @@ export class SynthVoiceManager {
    */
   private setDuration(voice: ActiveVoice, seconds: number, when: number, cutAtEnd?: boolean): void {
     if (voice.endTime <= when) return;
-    const gate = gateOf(voice.env, seconds, cutAtEnd);
-    const releaseStart = voice.startTime + gate;
+    const { gate, releaseStart, releaseEnd } = noteEnvelopeTiming(voice.env, voice.startTime, seconds, cutAtEnd);
     if (releaseStart <= when) {
       this.release(voice, when);
       return;
@@ -262,11 +221,12 @@ export class SynthVoiceManager {
       }
       // A ramp, not a jump: a voice already in its old release returns smoothly.
       param.linearRampToValueAtTime(level, releaseStart);
-      param.linearRampToValueAtTime(0, releaseStart + voice.env.release);
-      const stopAt = releaseStart + voice.env.release + 0.02;
+      param.linearRampToValueAtTime(0, releaseEnd);
+      const stopAt = releaseEnd + 0.02;
       voice.oscA.stop(stopAt);
       voice.oscB.stop(stopAt);
       voice.endTime = stopAt;
+      voice.releaseEndTime = releaseEnd;
     } catch {
       // Node may already be stopped; ignore.
     }
@@ -290,6 +250,7 @@ export class SynthVoiceManager {
         // Node may already be stopped; ignore.
       }
       voice.endTime = voice.startTime;
+      voice.releaseEndTime = voice.startTime;
       return;
     }
     try {
@@ -303,6 +264,7 @@ export class SynthVoiceManager {
       voice.oscA.stop(when + fadeSeconds + stopPadSeconds);
       voice.oscB.stop(when + fadeSeconds + stopPadSeconds);
       voice.endTime = when + fadeSeconds + stopPadSeconds;
+      voice.releaseEndTime = when + fadeSeconds;
     } catch {
       // Node may already be stopped; ignore.
     }

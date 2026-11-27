@@ -10,6 +10,7 @@
 import type { InstrumentConfig } from '@cts/project-model';
 import { useStore } from '../state/store';
 import { getAudioEngine } from './engine';
+import { applyMacros } from './macros';
 import { SynthVoiceManager, resolvePreset, type Envelope } from './synth';
 
 /** Maximum simultaneous preview voices. */
@@ -144,8 +145,10 @@ export class LivePreview {
       }
     }
     const total = Math.max(MIN_PREVIEW_S, durationMs / 1000);
-    const fitted = fitEnvelope(resolvePreset(instrument?.preset).env, total);
-    const synth = new SynthVoiceManager(context, bus, instrument?.preset, 1);
+    // The fitted envelope starts from the macro-shaped one; the voice manager
+    // applies the same macros to the filter and stereo spread.
+    const fitted = fitEnvelope(applyMacros(resolvePreset(instrument?.preset), instrument?.macros).env, total);
+    const synth = new SynthVoiceManager(context, bus, instrument?.preset, 1, instrument?.macros);
     synth.noteOn(midi, start, fitted.hold, velocity, { env: fitted.env });
     this.voices.push({ synth, startTime: start, endTime: start + total });
   }

@@ -1,9 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project } from '@cts/project-model';
-import { splitClip } from '@cts/project-model';
+import type { InstrumentMacros, Project } from '@cts/project-model';
+import { PPQ, splitClip } from '@cts/project-model';
 import { projectToMidi } from '@cts/midi-io';
 import { fromMidiBytes } from '../../../packages/project-model/tests/acceptance/helpers';
 import { renderScheduleEvents } from '../src/audio/wav';
+import { PRESET_LIST } from '../src/audio/presets';
 import { installLocalStorage } from './localStorageStub';
 
 // Real Scheduler on a hand-driven audio clock: a note that starts before the
@@ -16,6 +17,8 @@ const synths = vi.hoisted(
 const disposed = vi.hoisted(() => ({ count: 0 }));
 const triggerDrum = vi.hoisted(() => vi.fn());
 const clickMetronome = vi.hoisted(() => vi.fn());
+const envelopeEnds = vi.hoisted(() => [] as number[]);
+let measureEnvelope = false;
 
 vi.mock('../src/audio/engine', () => ({
   getAudioEngine: () => ({
@@ -44,15 +47,37 @@ vi.mock('../src/audio/masterChain', () => ({
   applyMasterVolume: vi.fn(),
   createMasterChain: () => ({ input: {} }),
 }));
-vi.mock('../src/audio/synth', () => ({
-  SynthVoiceManager: class {
-    noteOn = vi.fn();
-    releaseAll = vi.fn();
-    constructor() {
-      synths.push(this);
-    }
-  },
-}));
+vi.mock('../src/audio/synth', async (importOriginal) => {
+  const { SynthVoiceManager } = await importOriginal<typeof import('../src/audio/synth')>();
+  return {
+    SynthVoiceManager: class {
+      private real?: InstanceType<typeof SynthVoiceManager>;
+      noteOn = vi.fn((...args: Parameters<InstanceType<typeof SynthVoiceManager>['noteOn']>) => this.real?.noteOn(...args));
+      releaseAll = vi.fn();
+      get latestReleaseEndTime() { return this.real?.latestReleaseEndTime ?? 0; }
+      constructor(_ctx: BaseAudioContext, output: AudioNode, preset: unknown, maxVoices?: number, macros?: InstrumentMacros) {
+        synths.push(this);
+        if (!measureEnvelope) return;
+        const param = () => ({ setValueAtTime() {}, linearRampToValueAtTime() {} });
+        const node = { connect() {} };
+        const ctx = {
+          createOscillator: () => ({ ...node, frequency: param(), detune: param(), start() {}, stop() {} }),
+          createBiquadFilter: () => ({ ...node, frequency: param(), Q: param() }),
+          createGain: () => ({
+            ...node,
+            gain: {
+              ...param(),
+              linearRampToValueAtTime(value: number, time: number) {
+                if (value === 0) envelopeEnds.push(time);
+              },
+            },
+          }),
+        };
+        this.real = new SynthVoiceManager(ctx as unknown as BaseAudioContext, output, preset, maxVoices, macros);
+      }
+    },
+  };
+});
 vi.mock('../src/audio/drums', () => ({ DrumVoiceManager: class { trigger = triggerDrum; } }));
 vi.mock('../src/audio/metronome', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/audio/metronome')>()),
@@ -124,6 +149,7 @@ describe('a note crossing the song end', () => {
   afterEach(() => {
     if (useStore.getState().transport.isPlaying) useStore.getState().stop();
     teardown();
+    measureEnvelope = false;
     vi.useRealTimers();
   });
 
@@ -139,6 +165,74 @@ describe('a note crossing the song end', () => {
     clock.now = seconds;
     vi.advanceTimersByTime(TICK_MS);
   }
+
+  async function checkLastNote(
+    preset: string, macros: InstrumentMacros, startBeat: number, durationBeats: number,
+    label: string, expectedEnd?: number,
+  ): Promise<void> {
+    measureEnvelope = true;
+    envelopeEnds.length = 0;
+    synths.length = 0;
+    clock.now = 0;
+    useStore.getState().applyProjectChange((project) => {
+      const track = project.tracks[0]!;
+      const clip = track.clips[0]!;
+      return {
+        ...project,
+        tracks: [{
+          ...track,
+          instrument: { type: 'synth', preset, macros },
+          clips: [{
+            ...clip,
+            lengthBeats: 4,
+            notes: [{ id: 'n', pitch: 60, startBeat, durationBeats, velocity: 100 }],
+          }],
+        }],
+      };
+    });
+    const wavEnd = renderLengthSeconds(useStore.getState().project);
+    await playFromStart();
+    const timer = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      advanceToSeconds(2);
+      expect(useStore.getState().transport.isPlaying).toBe(false);
+      expect(envelopeEnds, label).toHaveLength(1);
+      const envelopeEnd = envelopeEnds[0]!;
+      if (expectedEnd !== undefined) expect(envelopeEnd).toBeCloseTo(expectedEnd, 9);
+      const ringTimer = timer.mock.calls.find(([callback]) => callback.name === 'silenceRinging');
+      expect(ringTimer, label).toBeDefined();
+      const ringEnd = clock.now + Number(ringTimer?.[1]) / 1000;
+      expect.soft(wavEnd, `${label}: WAV`).toBeGreaterThanOrEqual(envelopeEnd);
+      expect.soft(ringEnd, `${label}: live`).toBeGreaterThanOrEqual(envelopeEnd);
+    } finally {
+      timer.mockRestore();
+    }
+  }
+
+  it('keeps the release of the short final warm pad note through 4.895 s', async () => {
+    await checkLastNote(
+      'warmPad', { brightness: 0.5, release: 1, width: 0, attack: 1 },
+      3.75, 0.25, 'short warm pad', 4.895,
+    );
+  });
+
+  it('covers the actual synth release in WAV and live playback across 500 seeded final notes', async () => {
+    const seed = 0xc75a020;
+    let randomState = seed;
+    function random(): number {
+      randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
+      return randomState / 2 ** 32;
+    }
+    const macro = (i: number) => i % 7 === 0 ? 0 : i % 7 === 1 ? 1 : random();
+    for (let i = 0; i < 500; i++) {
+      const preset = PRESET_LIST[i % PRESET_LIST.length]!.id;
+      const macros = { brightness: macro(i), release: macro(i + 1), width: macro(i + 2), attack: macro(i + 3) };
+      const remainingTicks = 1 + Math.floor(random() * PPQ);
+      const startBeat = 4 - remainingTicks / PPQ;
+      const ticks = i % 4 === 0 ? 1 : i % 4 === 1 ? remainingTicks : 1 + Math.floor(random() * 4 * PPQ);
+      await checkLastNote(preset, macros, startBeat, ticks / PPQ, `seed ${seed}, case ${i}, ${preset}`);
+    }
+  });
 
   it('schedules the metronome through a window with no audible notes', async () => {
     const state = useStore.getState();
@@ -205,6 +299,37 @@ describe('a note crossing the song end', () => {
   it('WAV: the render lasts through the song end and tail', () => {
     const project = useStore.getState().project;
     expect(renderLengthSeconds(project)).toBe(4 * SECONDS_PER_BEAT + RENDER_TAIL_SECONDS);
+  });
+
+  it('keeps a 2 s macro release on the last note in WAV and live playback', async () => {
+    useStore.getState().applyProjectChange((project) => {
+      const track = project.tracks[0]!;
+      const clip = track.clips[0]!;
+      return {
+        ...project,
+        tracks: [{
+          ...track,
+          // warmPad release 0.5 s, release macro 1 -> x4 = 2 s: fades out over 2.0..4.0 s.
+          instrument: { type: 'synth', preset: 'warmPad', macros: { brightness: 0.5, release: 1, width: 0, attack: 0.5 } },
+          clips: [{
+            ...clip,
+            lengthBeats: 4,
+            notes: [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 4, velocity: 100 }],
+          }],
+        }],
+      };
+    });
+    const wavEnd = renderLengthSeconds(useStore.getState().project);
+    expect(wavEnd).toBeGreaterThanOrEqual(4);
+    await playFromStart();
+    advanceToSeconds(2);
+    expect(useStore.getState().transport.isPlaying).toBe(false);
+    expect(disposed.count).toBe(0);
+    // Graphs (and so the fading voice) are kept until at least 4.0 s.
+    vi.advanceTimersByTime((4 - clock.now) * 1000 - 1);
+    expect(disposed.count).toBe(0);
+    vi.advanceTimersByTime((wavEnd - 4) * 1000 + 1);
+    expect(disposed.count).toBe(1);
   });
 
   it('keeps the warm pad release when a clipped note ends exactly at the song end', async () => {

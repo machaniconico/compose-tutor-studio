@@ -15,6 +15,7 @@ import type {
   Clip,
   DrumEvent,
   DrumLane,
+  InstrumentMacros,
   NoteEvent,
   Project,
   Track,
@@ -39,6 +40,8 @@ import {
   removeClip,
   quantizeClipNotes,
   splitClip,
+  setTrackInstrumentMacros,
+  setTrackInstrumentPreset,
   deleteSection,
   duplicateSection,
   moveSection,
@@ -2145,6 +2148,30 @@ export function applyChannelPreset(trackId: string, presetId: string): void {
       return { ...track, effects };
     }),
   }));
+}
+
+/**
+ * Switch a synth track to another sound preset as its own undo step (apart
+ * from an open slider transaction). Returns whether the project changed.
+ */
+export function changeInstrumentPreset(trackId: string, preset: string): boolean {
+  const state = useStore.getState();
+  state.commitTransaction();
+  const next = setTrackInstrumentPreset(state.project, trackId, preset);
+  if (next === state.project) return false;
+  return state.applyProjectChange(() => next);
+}
+
+/**
+ * Set or (with `undefined`) clear a synth track's sound macros. Like the mixer
+ * faders, a slider drag spread with `sliderUndoProps` is one undo step; outside
+ * a transaction each call is its own step. Returns whether the project changed.
+ */
+export function changeInstrumentMacros(trackId: string, macros: InstrumentMacros | undefined): boolean {
+  const state = useStore.getState();
+  const next = setTrackInstrumentMacros(state.project, trackId, macros);
+  if (next === state.project) return false;
+  return state.applyProjectChange(() => next);
 }
 
 // --- Song overview (ArrangeView) clip operations ---

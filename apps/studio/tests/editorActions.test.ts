@@ -1192,3 +1192,50 @@ describe('planDrumStepsChange / setDrumStepsPerBar (US-019)', () => {
     expect(seen.fractional).toBeGreaterThan(20);
   });
 });
+
+describe('changeInstrumentPreset / changeInstrumentMacros', () => {
+  const chordsTrack = () => useStore.getState().project.tracks.find((t) => t.role === 'chords')!;
+  const macros = { brightness: 0.9, release: 0.3, width: 0.6, attack: 0.2 };
+
+  it('switches the preset as one undo step', () => {
+    const before = useStore.getState().project;
+    const pastLength = useStore.getState().past.length;
+    expect(actions.changeInstrumentPreset(chordsTrack().id, 'stringsLike')).toBe(true);
+    expect(chordsTrack().instrument?.preset).toBe('stringsLike');
+    expect(useStore.getState().past.length).toBe(pastLength + 1);
+    useStore.getState().undo();
+    expect(useStore.getState().project).toEqual(before);
+  });
+
+  it('does nothing for the same preset', () => {
+    const pastLength = useStore.getState().past.length;
+    expect(actions.changeInstrumentPreset(chordsTrack().id, chordsTrack().instrument!.preset)).toBe(false);
+    expect(useStore.getState().past.length).toBe(pastLength);
+  });
+
+  it('sets and clears macros, each an undoable step', () => {
+    const before = useStore.getState().project;
+    expect(actions.changeInstrumentMacros(chordsTrack().id, macros)).toBe(true);
+    expect(chordsTrack().instrument?.macros).toEqual(macros);
+    expect(validateProject(useStore.getState().project).valid).toBe(true);
+    useStore.getState().commitTransaction();
+    expect(actions.changeInstrumentMacros(chordsTrack().id, undefined)).toBe(true);
+    expect(chordsTrack().instrument).not.toHaveProperty('macros');
+    useStore.getState().commitTransaction();
+    useStore.getState().undo();
+    expect(chordsTrack().instrument?.macros).toEqual(macros);
+    useStore.getState().undo();
+    expect(useStore.getState().project).toEqual(before);
+  });
+
+  it('groups a slider drag (one open transaction) into a single undo step', () => {
+    const before = useStore.getState().project;
+    const owner = {};
+    useStore.getState().beginTransaction(owner);
+    for (const brightness of [0.6, 0.7, 0.8]) actions.changeInstrumentMacros(chordsTrack().id, { ...macros, brightness });
+    useStore.getState().commitTransaction(owner);
+    expect(chordsTrack().instrument?.macros?.brightness).toBe(0.8);
+    useStore.getState().undo();
+    expect(useStore.getState().project).toEqual(before);
+  });
+});

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { roleFitsTrackType, sliderUndoProps, textUndoProps, useStore } from '../../state/store';
 import type { Track, TrackRole, TrackType } from '@cts/project-model';
+import { InstrumentPicker } from './InstrumentPicker';
 
 /** Tiny text label for each track type (no emoji, no SVG — simple shapes). */
 const TYPE_LABEL: Record<TrackType, string> = {
@@ -212,6 +213,7 @@ export function TrackList() {
                     </option>
                   ))}
                 </select>
+                <InstrumentPicker track={track} />
               </div>
             )}
           </div>

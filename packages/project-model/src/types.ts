@@ -25,10 +25,26 @@ export type Section = {
   lengthBars: number;
 };
 
+/**
+ * Beginner sound macros, each 0..1. Optional: a track without them plays the
+ * preset unchanged (no schema version bump).
+ */
+export type InstrumentMacros = {
+  /** High-frequency content (filter cutoff). */
+  brightness: number;
+  /** How long the sound lingers after note-off. */
+  release: number;
+  /** Left/right spread. */
+  width: number;
+  /** How quickly the sound starts. */
+  attack: number;
+};
+
 export type InstrumentConfig = {
   type: 'synth' | 'drumkit';
   preset: string;
   params?: Record<string, number>;
+  macros?: InstrumentMacros;
 };
 
 export type EffectType = 'filter' | 'delay' | 'reverb' | 'compressor' | 'eq';

@@ -331,6 +331,52 @@ input[type='range'] {
   font-size: 11px;
 }
 
+.instrument-picker {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: 11px;
+}
+
+.instrument-picker__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.instrument-picker__label,
+.instrument-picker__macro-label {
+  font-weight: 700;
+}
+
+.instrument-picker__select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.instrument-picker__desc,
+.instrument-picker__help {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.instrument-picker__macros summary {
+  cursor: pointer;
+}
+
+.instrument-picker__macro {
+  display: grid;
+  grid-template-columns: 5em 1fr;
+  align-items: center;
+  column-gap: var(--sp-1);
+}
+
+.instrument-picker__help {
+  grid-column: 1 / -1;
+}
+
 .track-row__rename {
   width: 100%;
   font-weight: 600;
