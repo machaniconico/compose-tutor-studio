@@ -78,7 +78,7 @@ tauri-build = { version = "2.6.3", features = [] }
 atomicwrites = "=0.4.4"
 crc32fast = "=1.5.0"
 fs4 = { version = "=1.1.0", default-features = false, features = ["sync"] }
-rusqlite = { version = "=0.40.1", default-features = false, features = ["bundled"] }
+rusqlite = { version = "=0.41.0", default-features = false, features = ["bundled"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.150"
 sha2 = "=0.10.9"
