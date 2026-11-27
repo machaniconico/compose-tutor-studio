@@ -135,6 +135,7 @@ flowchart LR
 
 - Web Audio APIのAudioContextを使用
 - AudioWorkletで簡易シンセ/ドラムサンプラー/エフェクトを処理
+  - 現状はスケジュール済み Web Audio ノードで実現し、AudioWorklet は見送り(docs/16 参照)
 - サンプルはライセンスクリアな最小セットのみ同梱
 - 正確なスケジューリングは lookahead scheduler で実装
 
