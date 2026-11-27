@@ -6836,3 +6836,22 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
 .pr__popover input[type='range'] {
   width: 100%;
 }
+
+.song-length-panel {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.song-length-panel h3,
+.song-length-panel p {
+  margin: 0;
+}
+
+.song-length-panel [role='group'],
+.song-length-panel form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}

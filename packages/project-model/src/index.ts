@@ -25,6 +25,7 @@ export * from './automation-mutations';
 export * from './automation-recording';
 export * from './automation-targets';
 export * from './tempo-map-mutations';
+export * from './song-length-mutations';
 // Persistable id helper with a per-realm nonce and monotonic local counter.
 export * from './ids';
 // New factory helpers (createDefaultProject, createInstrumentTrack, createDrumTrack,

@@ -604,6 +604,17 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - Editorの「テンポ / 拍子」tabは既存schema v4の`tempoMap`と`timeSignatureMap`を同じmusical timeline上で編集する。tempoは20〜300 BPM、拍子は分子1〜32・分母2 / 4 / 8 / 16で、beat 0の先頭eventは位置固定かつ削除不可だが値は編集できる
 - tempo eventは曲末未満の任意beat、拍子eventは曲末未満かつ直前segmentから見た小節境界だけへ新規追加・移動できる。同じmapの同beat重複、範囲外、後続拍子eventまたは曲末を小節途中にする候補をatomicに拒否する。canonical schema v4で既に`beat === lengthBeats`にある終端eventは互換入力として、位置を据え置いた値編集 / no-op、曲内への移動、削除だけを許し、新規追加または曲内eventの終端への移動は許さない
 - mapはbeat昇順とProject全体のglobal ID一意性を保つ。先頭tempo / 拍子の編集時は`bpm` / `timeSignature` mirrorを同じcommandで更新し、拍子map変更時は`lengthBeats`を正本として`lengthBars` mirrorを再計算する。schema versionは増やさない
+
+### 7.8.2 曲の長さ(小節数)の変更
+
+- 「テンポ / 拍子」tabの「曲の長さ」で、曲末に1小節追加・曲末の1小節削除・小節数の直接指定ができ、現在の長さを小節数と拍数で表示する。長さは現在の拍子mapでの整数小節で、1〜256小節。増やす時は最後の拍子で小節を足し、`lengthBeats`を正本として`lengthBars` mirrorも同じcommandで更新する。schema versionは増やさない
+- 短くする時は内容を失わない範囲でだけ自動整理する(content-safe truncate)。新しい曲末をまたぐ、または越えるclipは、鳴る内容が何も失われない場合に限り、曲末までに短縮する(完全に曲末以降にある空のclipは削除)。判定は再生と同じ配置(ループ・alias clipを含む)で行い、全ての音符・ドラムの音がhalf-openな曲末より前に始まり、音符は曲末までに鳴り終わることを条件とする。Audio clipは可聴範囲がclip窓全体なので、曲末をまたぐ・越える場合は短縮せず拒否する。削除対象のclipを残るalias clipが参照している場合も拒否する
+- 受け入れの正本は再生スケジュールの差分で行う。短縮候補と元のProjectから`buildScheduleEvents`(コードを除く)を作り、ライブ / WAVと同じ`resolveDrumOccurrence`でswingとclip終端を解決したあと(確率は1、velocity humanizeは0として扱い、鳴りうる全てのhitを内容と見なす。loopの周回はruntime状態なので対象外)、{beat, payload}の多重集合が完全一致し、かつ候補に曲末以降のeventが無い場合だけ受け入れる(clip終端はtrimで動くので比較から除く)。違いがあれば最初の欠落または余分なeventの小節とトラック名を挙げて拒否する。事前の個別判定は高速な経路に過ぎない。長さを増やす変更は内容では拒否せず、既に曲末を越えているalias onsetなど既存の状態は変更しない
+- 長さ変更は、開いているドラッグ操作(Undo transaction)があれば先にそれを1段としてcommitし、その後に独立した1段として適用する。以後、古い操作のcancelは何も戻さない。再生位置とloop / punch範囲の曲内への補正は、Projectの変化から導出する(store共通のsubscribe)ので、Undo / Redoでも同じ結果になる
+- 曲末以降に始まるコードとセクションは、同じUndo 1段の中で取り除く。曲末をまたぐコードは曲末までに短縮し(残りが`MIN_EVENT_DURATION_BEATS`未満なら取り除く)、またぐセクションは曲末までの整数小節に短縮する。パネルは「コード N 個・セクション M 個を取り除きました(元に戻すで復元できます)」のように件数を日本語で知らせ、短縮した分も別に件数を示す
+- 次の場合は何も変更せず、小節位置とトラック名・項目名を挙げる日本語の理由で拒否する(最大50件を保持、表示は5件+件数): 曲末以降で始まる音符・ドラムの音(内容を持つclip)、曲末より前に始まり曲末を越えて鳴る音符(音符を短くするよう案内する)、曲末を越える録音take folder、曲末を越えるオートメーションの点(ちょうど曲末の点は許可)、曲末以降のテンポ / 拍子event
+- 1回の長さ変更はUndo 1段。録音中、プロジェクト処理中は変更しない。変更後は再生を止め、再生位置を新しい曲末へclampし、収まらなくなったloop / punch範囲は無効にする(いずれもProject履歴には入らない)
+
 - add / update / move / deleteはsourceとcandidateのcanonical codecを通過した時だけ開始時Project参照へcompare-and-swapする。採用された1操作はProject変更・Undo・save revision各1回、no-op / stale / busy / invalid候補はProject、history、selection、transportを変えない
 - active playback中の採用はsession snapshotを停止して有限なplayheadを保持する。次の再生、metronome、live / WAV / MIDI、Arranger / Piano Roll / Drum / Chord timelineは保存済みmapを既存の共通musical-time compilerから読む
 - 320px幅ではdocument全体を横overflowさせず時間軸だけを内部scrollする。eventはnative controlで選択・keyboard操作でき、anchor保護、入力error、成功、再生停止を日本語のalert / statusで伝える。連続tempo ramp、audio follow / Smart Tempo、tempo automationはこのincrementに含めない
@@ -1225,6 +1236,10 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 「移調する」で全ノートとコード名を動かして閉じ、完了を通知する。拒否時は日本語の理由（最も低い／高い音名を含む）をダイアログ内に表示し、曲は変えず開いたままにする
 - ドラムと録音した音声は動かない。その旨を常にダイアログに表示する。録音中はボタンを無効にする
 
+#### 2.3.7 曲の長さパネル
+
+- 「テンポ / 拍子」tabのTempo / 拍子Editorの下に「曲の長さ」を置く。現在の長さを「N小節(M拍)」で表示し、「末尾に1小節追加」「末尾の1小節を削除」ボタンと、小節数を指定して「変更」するnumber入力を持つ。最小1小節、最大256小節の端ではボタンを無効にする
+- 結果は`role="status"`、拒否は`role="alert"`で読み上げる。短縮に成功した時、取り除いたコード・セクションの件数(「元に戻すで復元できます」を添える)と、空のまま曲末を越えていたclipを整えた場合は短縮・削除の件数を伝える。短縮を拒否する時は「曲を短くすると消えてしまう内容があるため、変更しませんでした。新しい終わりより後ろに、N小節目のクリップ「トラック名」…があります。先に移動または削除してから、もう一度短くしてください。」の形で何が邪魔かを示し、曲末をまたぐ音符があれば音符を短くするよう添える。録音中・処理中は操作を無効にして理由を表示する
 
 ### 2.4 Chord Palette
 

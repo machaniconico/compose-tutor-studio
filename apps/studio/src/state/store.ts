@@ -891,6 +891,27 @@ function transportAfterProjectChange(
   };
 }
 
+/** Keep the playhead and loop / punch ranges inside the song; same object when already inside. */
+function clampTransportToProjectLength(
+  transport: TransportState,
+  lengthBeats: number,
+): TransportState {
+  const loopOut =
+    (transport.loopEnabled || transport.loopEndBeat > 0)
+    && !(transport.loopStartBeat >= 0 && transport.loopEndBeat <= lengthBeats);
+  const punchOut =
+    (transport.punchEnabled || transport.punchOutBeat > 0)
+    && !(transport.punchInBeat >= 0 && transport.punchOutBeat <= lengthBeats);
+  const positionOut = transport.positionBeat > lengthBeats;
+  if (!loopOut && !punchOut && !positionOut) return transport;
+  return {
+    ...transport,
+    positionBeat: positionOut ? lengthBeats : transport.positionBeat,
+    ...(loopOut ? { loopEnabled: false, loopStartBeat: 0, loopEndBeat: 0 } : {}),
+    ...(punchOut ? { punchEnabled: false, punchInBeat: 0, punchOutBeat: 0 } : {}),
+  };
+}
+
 function makeEditor(project: Project): EditorState {
   const firstTrack = project.tracks[0];
   const firstClip = firstTrack?.clips[0];
@@ -4403,26 +4424,12 @@ export function createStudioStore(
     markNativeCloseHandoffUnknown,
   };
   });
-  // The one place that keeps runtime loop / punch locators inside the song:
-  // any project change (edit, undo, redo, load, switch) re-checks them.
+  // The one place that keeps runtime playhead / loop / punch locators inside the
+  // song: any project change (edit, undo, redo, load, switch, length change) re-checks them.
   store.subscribe((state, previous) => {
     if (state.project === previous.project) return;
-    const length = transportProjectLengthBeats(state.project);
-    const { transport } = state;
-    const loopOut =
-      (transport.loopEnabled || transport.loopEndBeat > 0)
-      && !(transport.loopStartBeat >= 0 && transport.loopEndBeat <= length);
-    const punchOut =
-      (transport.punchEnabled || transport.punchOutBeat > 0)
-      && !(transport.punchInBeat >= 0 && transport.punchOutBeat <= length);
-    if (!loopOut && !punchOut) return;
-    store.setState({
-      transport: {
-        ...transport,
-        ...(loopOut ? { loopEnabled: false, loopStartBeat: 0, loopEndBeat: 0 } : {}),
-        ...(punchOut ? { punchEnabled: false, punchInBeat: 0, punchOutBeat: 0 } : {}),
-      },
-    });
+    const next = clampTransportToProjectLength(state.transport, transportProjectLengthBeats(state.project));
+    if (next !== state.transport) store.setState({ transport: next });
   });
   return store;
 }
