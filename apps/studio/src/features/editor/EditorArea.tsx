@@ -7,6 +7,7 @@ import { Arranger } from '../arranger/Arranger';
 import { AutomationLaneEditor } from '../automation/AutomationLaneEditor';
 import { TempoMapEditor } from '../tempoMap/TempoMapEditor';
 import { TakeCompEditor } from '../comping/TakeCompEditor';
+import { TimelineRuler } from '../transport/TimelineRuler';
 import { handleTabKeyDown } from '../common/tabs';
 
 function isUnmodifiedCharacterKey(event: React.KeyboardEvent, key: string): boolean {
@@ -137,6 +138,8 @@ export function EditorArea() {
           </div>
         ) : null}
       </div>
+
+      <TimelineRuler />
 
       {TABS.map(({ view }) => {
         const active = activeView === view;

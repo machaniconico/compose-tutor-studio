@@ -142,6 +142,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 
 #### 2.3.5 Tempo / 拍子map Editor
 
+- Editorのtabの下に小節番号つきの定規を置く。クリックで再生位置、ドラッグでループ範囲(ドラッグ中は帯をプレビュー)を選び、拒否理由は定規下のpolite statusに日本語で出す。BPM欄の隣の「タップ」ボタンは押した回数に応じてBPMを表示し、たたき終わると確定する
 - Editorの5つ目のARIA tabを「テンポ / 拍子」とし、tempo laneと拍子laneを同じ小節目盛り・playhead・内部横scroll領域に並べる。固定tempoだけの初期Projectでもbeat 0 anchorを明示し、空に見せない
 - 「再生位置に追加」はtempoを現在beatへ、拍子を現在位置を含む小節の開始境界へ置く。同beatに既存eventがある場合は黙って上書きせず、そのeventを選択して編集方法を案内する
 - eventは最低44×44 CSS pxのnative buttonとし、種類、順番、小節 / 拍、値、先頭anchorかどうかをaccessible nameに含める。矢印キーで前後event、Home / Endで先頭 / 末尾へ移り、削除後は次、前、追加buttonの順にfocusを回復する

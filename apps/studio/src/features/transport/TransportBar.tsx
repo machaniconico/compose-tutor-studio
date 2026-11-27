@@ -22,6 +22,7 @@ import { VocalCutTool } from '../vocalCut/VocalCutTool';
 import { downloadBlob } from '../export/download';
 import { exportEmergencyProjectBackup } from '../export/emergencyProjectBackup';
 import { SaveControl } from './SaveControl';
+import { TapTempoButton } from './TapTempoButton';
 import { studioRuntime } from '../../platform/runtime';
 import { pushToast } from '../../state/tutorialBridge';
 import { AudioTrackRecordingDialog } from '../audioTrack/AudioTrackRecordingDialog';
@@ -948,6 +949,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
             disabled={recordingControlsLocked}
             onChange={(e) => setBpm(Number(e.target.value) || project.bpm)}
           />
+          <TapTempoButton disabled={recordingControlsLocked} />
         </div>
 
         <div className="field">

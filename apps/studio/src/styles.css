@@ -1024,7 +1024,7 @@ input[type='range'] {
 /* ------------------------------------------------------------------ */
 .editor-area {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   min-height: 0;
   overflow: hidden;
 }
@@ -6630,4 +6630,46 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
   flex-direction: column;
   gap: var(--sp-1);
   align-items: flex-start;
+.timeline-ruler-wrap {
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel-2);
+}
+
+.timeline-ruler {
+  position: relative;
+  height: 24px;
+  cursor: pointer;
+  touch-action: none;
+  color: var(--text-faint);
+  font: 10px/1 var(--mono);
+}
+
+.timeline-ruler__bar {
+  position: absolute;
+  top: 8px;
+  transform: translateX(4px);
+  pointer-events: none;
+}
+
+.timeline-ruler__loop {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--accent, #4a90d9) 35%, transparent);
+  pointer-events: none;
+}
+
+.timeline-ruler__loop.is-off {
+  opacity: 0.45;
+}
+
+.timeline-ruler__message {
+  margin: 0;
+  padding: 0 var(--sp-2);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.timeline-ruler__message:empty {
+  display: none;
 }
