@@ -100,6 +100,10 @@ describe('piano roll selection edits', () => {
 
   it('transposes and fits to the scale with the toolbar buttons, explaining the option', () => {
     const { notes } = setup();
+    const menu = screen.getByRole('button', { name: '移調…' });
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(menu);
+    expect(menu.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getAllByText(/スケール外の音は間違いではありません/).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: '選んだ音を半音上げる' }));
     expect(notes().map((n) => n.pitch)).toEqual([62, 65]);
@@ -122,6 +126,7 @@ describe('piano roll selection edits', () => {
     fireEvent.click(screen.getByRole('button', { name: '選んだ音を1オクターブ下げる' }));
     expect(notes().map((n) => n.pitch)).toEqual(start);
     // Seven scale steps up, then down: one undo step per click.
+    fireEvent.click(screen.getByRole('button', { name: '移調…' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'スケールに沿って動かす段数' }), { target: { value: '7' } });
     const beforeSteps = useStore.getState().past.length;
     fireEvent.click(screen.getByRole('button', { name: '選んだ音をスケールに沿って上げる' }));

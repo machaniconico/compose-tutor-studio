@@ -70,7 +70,8 @@ describe('PianoRoll accessibility rendering', () => {
 
     expect(html).toMatch(/class="pr__grid"[^>]*tabindex="0"/);
     expect(html).not.toContain('class="pr__note"');
-    expect(html).toMatch(/選択ノートをクオンタイズ<\/button>/);
-    expect(html).toMatch(/disabled=""[^>]*>選択ノートをクオンタイズ/);
+    // The visible label is short (クオンタイズ) so the toolbar fits the minimum window;
+    // the accessible name stays 選択ノートをクオンタイズ.
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="選択ノートをクオンタイズ"[^>]*>クオンタイズ<\/button>/);
   });
 });
