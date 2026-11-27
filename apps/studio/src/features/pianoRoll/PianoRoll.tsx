@@ -47,7 +47,22 @@ import {
   quantizeNotes,
   removeNotes,
 } from '../../state/editorActions';
+import {
+  FIT_TO_SCALE_HELP,
+  copySelectedNotes,
+  cutSelectedNotes,
+  fitSelectedNotesToScale,
+  pasteClipboardNotes,
+  transposeSelectedNotes,
+  type NoteEditResult,
+  type TransposeAmount,
+} from '../../state/noteEditActions';
+import { getNoteClipboard, useNoteClipboard } from '../../state/noteClipboard';
 
+const PIANO_ROLL_HINT =
+  'ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 / '
+  + 'Alt+ドラッグで複製 / Tabでノートへ移動 / 矢印キーで編集 / Delete=削除 / '
+  + 'Ctrl+C・X・V(MacはCmd)でコピー・切り取り・貼り付け';
 const FINE_ROW_HEIGHT = 16;
 const COARSE_ROW_HEIGHT = 24;
 const DEFAULT_VELOCITY = 100;
@@ -405,6 +420,11 @@ export function PianoRoll() {
   });
   const [gridKeyboardFocused, setGridKeyboardFocused] = useState(false);
   const [keyboardAnnouncement, setKeyboardAnnouncement] = useState('');
+  const [editMessage, setEditMessage] = useState('');
+  const [degreeStep, setDegreeStep] = useState(1);
+  const [scaleMenuOpen, setScaleMenuOpen] = useState(false);
+  const scaleMenuId = useId();
+  const noteClipboard = useNoteClipboard();
   const [pendingKeyboardFocus, setPendingKeyboardFocus] =
     useState<PendingKeyboardFocus | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -499,6 +519,7 @@ export function PianoRoll() {
     setKeyboardCursor({ startBeat: 0, pitch: 60 });
     setGridKeyboardFocused(false);
     setPendingKeyboardFocus(null);
+    setEditMessage('');
   }, [clip?.id]);
 
   useEffect(() => {
@@ -543,6 +564,33 @@ export function PianoRoll() {
     setPendingKeyboardFocus(null);
   }, [pendingKeyboardFocus, visibleNotes]);
 
+  // --- selection edits: clipboard, transpose, fit to scale (each one undo step) ---
+  const showEditResult = useCallback((result: NoteEditResult) => {
+    const message = result.ok ? result.message : result.reason;
+    setEditMessage(message);
+    setKeyboardAnnouncement(message);
+  }, []);
+  const copySelection = useCallback(() => {
+    if (!clip) return;
+    showEditResult(copySelectedNotes(clip.id, liveSelectedNoteIds));
+  }, [clip, liveSelectedNoteIds, showEditResult]);
+  const cutSelection = useCallback(() => {
+    if (!clip) return;
+    showEditResult(cutSelectedNotes(clip.id, liveSelectedNoteIds));
+  }, [clip, liveSelectedNoteIds, showEditResult]);
+  const pasteNotes = useCallback((at: 'auto' | 'original') => {
+    if (!clip) return;
+    showEditResult(pasteClipboardNotes(clip.id, at));
+  }, [clip, showEditResult]);
+  const transposeSelection = useCallback((by: TransposeAmount) => {
+    if (!clip) return;
+    showEditResult(transposeSelectedNotes(clip.id, liveSelectedNoteIds, by));
+  }, [clip, liveSelectedNoteIds, showEditResult]);
+  const fitSelectionToScale = useCallback(() => {
+    if (!clip) return;
+    showEditResult(fitSelectedNotesToScale(clip.id, liveSelectedNoteIds));
+  }, [clip, liveSelectedNoteIds, showEditResult]);
+
   // --- keyboard shortcuts (ignored while another interactive control owns focus) ---
   useEffect(() => {
     function isInteractiveTarget(t: EventTarget | null): boolean {
@@ -551,12 +599,32 @@ export function PianoRoll() {
         t.closest('button, a[href], summary, [data-shortcuts-suspended]') !== null
       );
     }
+    function hasTextSelection(): boolean {
+      const text = window.getSelection?.()?.toString() ?? '';
+      return text.length > 0;
+    }
     function onKey(e: KeyboardEvent) {
-      if (e.defaultPrevented || isInteractiveTarget(e.target)) return;
-      if (isAnyDialogOpen()) return;
-      if (editor.activeView !== 'pianoRoll') return;
+      if (e.defaultPrevented || isAnyDialogOpen()) return;
+      if (editor.activeView !== 'pianoRoll' || !clip) return;
+      const action = matchShortcut(e, 'pianoRoll');
       const ids = liveSelectedNoteIds;
-      if (matchShortcut(e, 'pianoRoll') === 'deleteSelectedNotes' && clip && ids.length > 0) {
+      // Clipboard keys also work while a note or the grid has focus (both
+      // suspend the other window shortcuts). Text fields never reach here.
+      const inGrid = e.target instanceof Node && gridRef.current?.contains(e.target) === true;
+      if (!inGrid && isInteractiveTarget(e.target)) return;
+      if ((action === 'copyNotes' || action === 'cutNotes') && ids.length > 0 && !hasTextSelection()) {
+        e.preventDefault();
+        if (action === 'copyNotes') copySelection();
+        else cutSelection();
+        return;
+      }
+      if ((action === 'pasteNotes' || action === 'pasteNotesAtOriginal') && getNoteClipboard()) {
+        e.preventDefault();
+        pasteNotes(action === 'pasteNotes' ? 'auto' : 'original');
+        return;
+      }
+      if (inGrid) return;
+      if (action === 'deleteSelectedNotes' && ids.length > 0) {
         e.preventDefault();
         removeNotes(clip.id, ids);
         selectNotes([]);
@@ -564,7 +632,7 @@ export function PianoRoll() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editor.activeView, clip, liveSelectedNoteIds, selectNotes]);
+  }, [editor.activeView, clip, liveSelectedNoteIds, selectNotes, copySelection, cutSelection, pasteNotes]);
 
   const localPoint = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = gridRef.current?.getBoundingClientRect();
@@ -1225,7 +1293,7 @@ export function PianoRoll() {
   return (
     <div className="pr">
       <span id={keyboardInstructionsId} className="visually-hidden">
-        ノートでは、矢印キーで移動、Shiftと左右矢印で長さ変更、PageUpとPageDownで強さ変更、ShiftとPageUpまたはPageDownで前後のノートへ移動します。Enterで単独選択、Spaceで選択切替、ControlまたはCommandとAで現在クリップの編集音域にある音をすべて選択、ControlまたはCommandとDで複製、Deleteで削除します。Escapeで入力位置へ戻ります。
+        ノートでは、矢印キーで移動、Shiftと左右矢印で長さ変更、PageUpとPageDownで強さ変更、ShiftとPageUpまたはPageDownで前後のノートへ移動します。Enterで単独選択、Spaceで選択切替、ControlまたはCommandとAで現在クリップの編集音域にある音をすべて選択、ControlまたはCommandとDで複製、Cでコピー、Xで切り取り、Vで貼り付け(再生ヘッドがクリップ内ならその位置、外ならコピーした位置。Shiftも押すと、いつもコピーした位置)、Deleteで削除します。Escapeで入力位置へ戻ります。
       </span>
       <span
         id={keyboardStatusId}
@@ -1236,33 +1304,6 @@ export function PianoRoll() {
         {keyboardAnnouncement}
       </span>
       <div className="pr__toolbar">
-        {/* DOM では先頭(Tab 順がクオンタイズ→ノートのまま変わらない)。見た目は order で最後に出す。 */}
-        <div className="pr__hint-row">
-          <div className="pr__view-opts" role="group" aria-label="表示の補助(表示だけで、曲は変わりません)">
-            <label className="pr__field">
-              <input
-                type="checkbox"
-                aria-label="ゴースト(ほかのノートを薄く重ねる)"
-                checked={editor.ghostNotes}
-                onChange={() => toggleGhostNotes()}
-              />
-              <span title="ほかのクリップ・トラックのノートを薄く重ねて表示します(編集はできません)">ゴースト</span>
-            </label>
-            <label className="pr__field">
-              <input
-                type="checkbox"
-                aria-label="役割色(音の役割で色分け)"
-                checked={editor.noteRoleColors}
-                onChange={() => toggleNoteRoleColors()}
-              />
-              <span title="コードの音・スケールの音・スケールの外の音を色と記号で分けます">役割色</span>
-            </label>
-          </div>
-          <p className="pr__hint">
-            ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 /
-            Alt+ドラッグで複製 / Tabでノートへ移動 / 矢印キーで編集 / Delete=削除
-          </p>
-        </div>
         <label className="pr__field">
           <span>グリッド</span>
           <select
@@ -1294,10 +1335,201 @@ export function PianoRoll() {
             ＋
           </button>
         </div>
+        <div className="pr__zoom" role="group" aria-label="クリップボード">
+          <button
+            type="button"
+            className="pr__icon-btn"
+            disabled={liveSelectedNoteIds.length === 0}
+            aria-label="コピー"
+            aria-keyshortcuts="Control+C Meta+C"
+            title="選んだ音をコピー(Ctrl+C / Mac は Cmd+C)"
+            onClick={copySelection}
+          >
+            ⧉
+          </button>
+          <button
+            type="button"
+            className="pr__icon-btn"
+            disabled={liveSelectedNoteIds.length === 0}
+            aria-label="切り取り"
+            aria-keyshortcuts="Control+X Meta+X"
+            title="選んだ音を切り取り(Ctrl+X / Mac は Cmd+X)"
+            onClick={cutSelection}
+          >
+            ✂
+          </button>
+          <button
+            type="button"
+            className="pr__icon-btn"
+            disabled={noteClipboard === null}
+            aria-label="貼り付け"
+            aria-keyshortcuts="Control+V Meta+V"
+            title="貼り付け(Ctrl+V)。再生ヘッドがこのクリップの中なら、いちばん早い音を再生ヘッドの位置に置きます。外なら、コピーした時と同じ位置に置きます"
+            onClick={() => pasteNotes('auto')}
+          >
+            📋
+          </button>
+          <button
+            type="button"
+            className="pr__icon-btn"
+            disabled={noteClipboard === null}
+            aria-label="元の位置に貼り付け"
+            aria-keyshortcuts="Control+Shift+V Meta+Shift+V"
+            title="元の位置に貼り付け(Ctrl+Shift+V)。再生ヘッドの位置にかかわらず、コピーした時と同じ位置(クリップの先頭から数えた位置)に貼り付けます"
+            onClick={() => pasteNotes('original')}
+          >
+            📋↺
+          </button>
+        </div>
+        <div className="pr__zoom" role="group" aria-label="選んだ音の高さ">
+          <button
+            type="button"
+            className="pr__icon-btn"
+            disabled={liveSelectedNoteIds.length === 0}
+            aria-label="選んだ音を半音上げる"
+            title="選んだ音を半音上げる"
+            onClick={() => transposeSelection({ semitones: 1 })}
+          >
+            +1
+          </button>
+          <button
+            type="button"
+            className="pr__icon-btn"
+            disabled={liveSelectedNoteIds.length === 0}
+            aria-label="選んだ音を半音下げる"
+            title="選んだ音を半音下げる"
+            onClick={() => transposeSelection({ semitones: -1 })}
+          >
+            −1
+          </button>
+          <button
+            type="button"
+            className="pr__icon-btn"
+            disabled={liveSelectedNoteIds.length === 0}
+            aria-label="選んだ音を1オクターブ上げる"
+            title="選んだ音を1オクターブ上げる"
+            onClick={() => transposeSelection({ semitones: 12 })}
+          >
+            +8va
+          </button>
+          <button
+            type="button"
+            className="pr__icon-btn"
+            disabled={liveSelectedNoteIds.length === 0}
+            aria-label="選んだ音を1オクターブ下げる"
+            title="選んだ音を1オクターブ下げる"
+            onClick={() => transposeSelection({ semitones: -12 })}
+          >
+            −8va
+          </button>
+        </div>
+        <div className="pr__popover-anchor">
+          <button
+            type="button"
+            aria-expanded={scaleMenuOpen}
+            aria-controls={scaleMenuId}
+            title="スケールに沿って動かす・スケールに合わせる"
+            onClick={() => setScaleMenuOpen((open) => !open)}
+          >
+            移調…
+          </button>
+          {scaleMenuOpen ? (
+            <div
+              id={scaleMenuId}
+              className="pr__popover"
+              role="group"
+              aria-label="スケールに沿った移調"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  setScaleMenuOpen(false);
+                }
+              }}
+            >
+              <div className="pr__zoom">
+                <label className="pr__field">
+                  <span>段数</span>
+                  <select
+                    value={degreeStep}
+                    onChange={(e) => setDegreeStep(Number(e.target.value))}
+                    aria-label="スケールに沿って動かす段数"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7].map((step) => (
+                      <option key={step} value={step}>
+                        {step}段
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={liveSelectedNoteIds.length === 0}
+                  aria-label="選んだ音をスケールに沿って上げる"
+                  title="曲のキーとスケールの音を、選んだ段数だけたどって上げます。スケール外の音は、上のいちばん近いスケールの音までを1段と数えます"
+                  onClick={() => transposeSelection({ degrees: degreeStep })}
+                >
+                  スケール↑
+                </button>
+                <button
+                  type="button"
+                  disabled={liveSelectedNoteIds.length === 0}
+                  aria-label="選んだ音をスケールに沿って下げる"
+                  title="曲のキーとスケールの音を、選んだ段数だけたどって下げます。スケール外の音は、下のいちばん近いスケールの音までを1段と数えます"
+                  onClick={() => transposeSelection({ degrees: -degreeStep })}
+                >
+                  スケール↓
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={liveSelectedNoteIds.length === 0}
+                title={FIT_TO_SCALE_HELP}
+                onClick={fitSelectionToScale}
+              >
+                スケールに合わせる(選んだ音だけ)
+              </button>
+              <p className="pr__popover-help">
+                「スケールに合わせる」は使っても使わなくてもかまいません。{FIT_TO_SCALE_HELP}
+              </p>
+            </div>
+          ) : null}
+        </div>
+        <div className="pr__view-opts" role="group" aria-label="表示の補助(表示だけで、曲は変わりません)">
+          <label className="pr__field">
+            <input
+              type="checkbox"
+              aria-label="ゴースト(ほかのノートを薄く重ねる)"
+              checked={editor.ghostNotes}
+              onChange={() => toggleGhostNotes()}
+            />
+            <span title="ほかのクリップ・トラックのノートを薄く重ねて表示します(編集はできません)">ゴースト</span>
+          </label>
+          <label className="pr__field">
+            <input
+              type="checkbox"
+              aria-label="役割色(音の役割で色分け)"
+              checked={editor.noteRoleColors}
+              onChange={() => toggleNoteRoleColors()}
+            />
+            <span title="コードの音・スケールの音・スケールの外の音を色と記号で分けます">役割色</span>
+          </label>
+        </div>
+        <button
+          type="button"
+          className="pr__icon-btn"
+          aria-label="操作のヒント"
+          title={PIANO_ROLL_HINT}
+          onClick={() => setEditMessage(PIANO_ROLL_HINT)}
+        >
+          ?
+        </button>
+        {/* クオンタイズはツールバーの最後に置き、Tab で次にノートへ進む順序を保つ。 */}
         <button
           type="button"
           disabled={liveSelectedNoteIds.length === 0}
           aria-keyshortcuts="Q"
+          aria-label="選択ノートをクオンタイズ"
+          title="選択ノートをクオンタイズ(フォーカス中にQ)"
           onClick={quantizeSelection}
           onKeyDown={(event) => {
             if (
@@ -1313,14 +1545,19 @@ export function PianoRoll() {
             }
           }}
         >
-          選択ノートをクオンタイズ
+          クオンタイズ
         </button>
         {editor.noteRoleColors ? (
-          <ul className="pr__legend" aria-label="色分けの見かた">
+          <ul className="pr__legend pr__legend--overlay" aria-label="色分けの見かた">
             <li className="pr__legend-item pr__note--chordTone">● コードの音</li>
             <li className="pr__legend-item pr__note--scaleTone">○ スケールの音(経過音にも使えます)</li>
             <li className="pr__legend-item pr__note--outside">◇ スケールの外の音(経過音などで使えます)</li>
           </ul>
+        ) : null}
+        {editMessage !== '' ? (
+          <p className="pr__edit-message">
+            {editMessage}
+          </p>
         ) : null}
       </div>
 

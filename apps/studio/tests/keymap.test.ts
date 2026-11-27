@@ -74,3 +74,26 @@ describe('P03 レビュー 3 回目の修正', () => {
     expect(matchShortcut({ key: 'z', shiftKey: false, altKey: false, metaKey: false, ctrlKey: true, keyCode: 229 } as never, 'control', false)).toBeNull();
   });
 });
+
+describe('note clipboard keys (P33)', () => {
+  it('binds Copy/Cut/Paste to Cmd on macOS and Ctrl elsewhere, piano roll only', () => {
+    expect(matchShortcut(key('c', { metaKey: true }), 'pianoRoll', true)).toBe('copyNotes');
+    expect(matchShortcut(key('x', { metaKey: true }), 'pianoRoll', true)).toBe('cutNotes');
+    expect(matchShortcut(key('v', { metaKey: true }), 'pianoRoll', true)).toBe('pasteNotes');
+    expect(matchShortcut(key('V', { metaKey: true, shiftKey: true }), 'pianoRoll', true)).toBe('pasteNotesAtOriginal');
+    expect(matchShortcut(key('c', { ctrlKey: true }), 'pianoRoll', true)).toBeNull();
+
+    expect(matchShortcut(key('c', { ctrlKey: true }), 'pianoRoll', false)).toBe('copyNotes');
+    expect(matchShortcut(key('x', { ctrlKey: true }), 'pianoRoll', false)).toBe('cutNotes');
+    expect(matchShortcut(key('v', { ctrlKey: true }), 'pianoRoll', false)).toBe('pasteNotes');
+    expect(matchShortcut(key('V', { ctrlKey: true, shiftKey: true }), 'pianoRoll', false)).toBe('pasteNotesAtOriginal');
+    expect(matchShortcut(key('v', { ctrlKey: true, altKey: true }), 'pianoRoll', false)).toBeNull();
+    expect(matchShortcut(key('c'), 'pianoRoll', false)).toBeNull();
+    expect(matchShortcut(key('c', { ctrlKey: true }), 'global', false)).toBeNull();
+  });
+
+  it('does not fire during IME composition', () => {
+    expect(matchShortcut(key('c', { ctrlKey: true, isComposing: true }), 'pianoRoll', false)).toBeNull();
+    expect(matchShortcut(key('v', { ctrlKey: true, keyCode: 229 }), 'pianoRoll', false)).toBeNull();
+  });
+});
