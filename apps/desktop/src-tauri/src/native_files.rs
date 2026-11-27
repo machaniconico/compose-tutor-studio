@@ -11,6 +11,8 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 
+use crate::native_persistence::{check_project_file_json, ProjectFileIssue};
+
 const MAIN_WINDOW_LABEL: &str = "main";
 const SUGGESTED_FILENAME_HEADER: &str = "x-cts-suggested-filename";
 const MAX_OPEN_FILENAME_UTF8_BYTES: usize = 1_024;
@@ -104,6 +106,7 @@ pub(crate) enum NativeFileErrorCode {
     InvalidRequest,
     InvalidFilename,
     InvalidFile,
+    LegacyWave5Format,
     UnsupportedVersion,
     FileTooLarge,
     DialogUnavailable,
@@ -976,7 +979,14 @@ fn validate_project_bundle_bytes(bytes: &[u8]) -> FileResult<()> {
 fn validate_file_bytes(format: FileFormat, bytes: &[u8]) -> FileResult<()> {
     validate_payload_size(format, bytes.len())?;
     let valid = match format {
-        FileFormat::Project => crate::native_persistence::validate_project_file_json(bytes),
+        FileFormat::Project => {
+            return check_project_file_json(bytes).map_err(|issue| {
+                NativeFileErrorDto::new(match issue {
+                    ProjectFileIssue::InvalidProject => NativeFileErrorCode::InvalidFile,
+                    ProjectFileIssue::LegacyWave5Format => NativeFileErrorCode::LegacyWave5Format,
+                })
+            });
+        }
         FileFormat::ProjectBundle => return validate_project_bundle_bytes(bytes),
         FileFormat::Midi => bytes.len() >= 14 && has_ascii(bytes, 0, b"MThd"),
         FileFormat::Wav => {
@@ -2234,6 +2244,12 @@ mod tests {
     fn validates_project_midi_and_wav_contents() {
         assert!(validate_file_bytes(FileFormat::Project, VALID_PROJECT).is_ok());
         assert!(validate_file_bytes(FileFormat::Project, VALID_PROJECT_V3).is_ok());
+        assert_eq!(
+            validate_file_bytes(FileFormat::Project, br#"{"schemaVersion":3}"#),
+            Err(NativeFileErrorDto::new(
+                NativeFileErrorCode::LegacyWave5Format
+            ))
+        );
         assert!(validate_file_bytes(FileFormat::Project, b"{}").is_err());
         assert!(validate_file_bytes(FileFormat::Project, b"\xff").is_err());
 

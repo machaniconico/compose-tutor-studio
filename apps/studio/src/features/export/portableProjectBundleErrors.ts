@@ -1,3 +1,4 @@
+import { LEGACY_WAVE5_FORMAT_MESSAGE } from '@cts/project-model';
 import {
   PORTABLE_PROJECT_BUNDLE_ERROR_CODES,
   PortableProjectBundleError,
@@ -190,6 +191,9 @@ export function portableProjectBundleFailure(
 PortableProjectBundleFailure | null {
   const normalized = normalizePortableProjectBundleError(error, operation);
   if (normalized.code === 'cancelled') return null;
+  if (normalized.reason === 'legacy-wave5-format') {
+    return { code: normalized.code, message: LEGACY_WAVE5_FORMAT_MESSAGE, nextAction: '' };
+  }
   const copy = failureCopy(normalized.code);
   return { code: normalized.code, ...copy };
 }
@@ -199,5 +203,6 @@ export function portableProjectBundleFailureMessage(
   operation: PortableProjectBundleOperation = 'import',
 ): string | null {
   const failure = portableProjectBundleFailure(error, operation);
-  return failure === null ? null : `${failure.message} ${failure.nextAction}`;
+  if (failure === null) return null;
+  return failure.nextAction ? `${failure.message} ${failure.nextAction}` : failure.message;
 }

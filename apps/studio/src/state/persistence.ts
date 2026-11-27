@@ -2,7 +2,6 @@ import {
   LocalStorageProjectRepository,
   legacyProjectKey,
   type PersistenceError,
-  type PersistenceErrorCode,
   type ProjectRepository,
   type RetryPolicy,
   type StorageLike,
@@ -18,6 +17,7 @@ export type SaveFailureCode =
   | 'too-large'
   | 'corrupt-data'
   | 'unsupported-version'
+  | 'legacy-wave5-format'
   | 'conflict'
   | 'read-failed'
   | 'write-failed'
@@ -50,7 +50,7 @@ export const browserProjectRepository = createBrowserProjectRepository();
 
 export function toSaveFailure(error: PersistenceError): SaveFailure {
   return {
-    code: error.code as Extract<PersistenceErrorCode, SaveFailureCode>,
+    code: error.reason ?? error.code,
     retry: error.retry,
   };
 }

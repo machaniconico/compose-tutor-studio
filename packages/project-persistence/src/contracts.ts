@@ -26,12 +26,15 @@ export type PersistenceErrorCode =
   | 'lock-unavailable'
   | 'sync-unsupported';
 
+export type PersistenceErrorReason = 'legacy-wave5-format';
+
 export type RetryPolicy = 'automatic' | 'manual' | 'never';
 
 export type PersistenceError = Readonly<{
   operation: RepositoryOperation;
   code: PersistenceErrorCode;
   retry: RetryPolicy;
+  reason?: PersistenceErrorReason;
   projectId?: string;
 }>;
 
@@ -77,6 +80,7 @@ export type UnreadableProjectSummary = Readonly<{
     PersistenceErrorCode,
     'corrupt-data' | 'unsupported-version' | 'migration-failed' | 'conflict'
   >;
+  reason?: PersistenceErrorReason;
   branches: readonly ProjectBranchSummary[];
 }>;
 

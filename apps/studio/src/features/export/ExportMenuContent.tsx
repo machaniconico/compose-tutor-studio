@@ -5,6 +5,7 @@ import { useRef } from 'react';
 import { MidiExportError, projectToMidi } from '@cts/midi-io';
 import {
   DEFAULT_MAX_PROJECT_JSON_BYTES,
+  LEGACY_WAVE5_FORMAT_MESSAGE,
   ScheduleEventLimitError,
   decodeProjectJson,
   serializeProject,
@@ -226,6 +227,10 @@ export function ExportMenuContent({
   const importProjectJson = async (text: string) => {
     const decoded = decodeProjectJson(text);
     if (!decoded.ok) {
+      if (decoded.error.code === 'legacy-wave5-format') {
+        pushToast(LEGACY_WAVE5_FORMAT_MESSAGE, 'error');
+        return;
+      }
       pushToast(
         decoded.error.code === 'future-schema-version'
           ? 'このファイルは新しいアプリ版で作成されています。アプリを更新してください。'
@@ -274,6 +279,10 @@ export function ExportMenuContent({
       const text = new TextDecoder('utf-8', { fatal: true }).decode(result.bytes);
       await importProjectJson(text);
     } catch (error) {
+      if (error instanceof NativeFileGatewayError && error.code === 'legacy-wave5-format') {
+        pushToast(LEGACY_WAVE5_FORMAT_MESSAGE, 'error');
+        return;
+      }
       pushToast(
         error instanceof NativeFileGatewayError && error.code === 'file-too-large'
           ? 'プロジェクトファイルが大きすぎます（上限16MB）。'

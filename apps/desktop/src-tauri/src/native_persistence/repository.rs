@@ -45,6 +45,13 @@ const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
 const PROJECT_SCHEMA_VERSION: u64 = 10;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
+const V3_PROJECT_FIELDS: &[&str] = &[
+    "lengthBeats",
+    "tempoMap",
+    "timeSignatureMap",
+    "audioAssets",
+    "automationLanes",
+];
 const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS: usize = 200_000;
 const CRASH_DRAFT_FORMAT_VERSION: i64 = 1;
 const LEGACY_STORAGE_VERSION: u64 = 1;
@@ -3453,7 +3460,15 @@ fn legacy_project_matches_migrated(source: &str, expected: &str) -> bool {
 }
 
 fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> Option<Value> {
-    let mut version = project.get("schemaVersion")?.as_u64()?;
+    let record = project.as_object()?;
+    let mut version = record.get("schemaVersion")?.as_u64()?;
+    if version == 3
+        && V3_PROJECT_FIELDS
+            .iter()
+            .any(|key| !record.contains_key(*key))
+    {
+        return None;
+    }
     if !(MIN_PROJECT_SCHEMA_VERSION..=PROJECT_SCHEMA_VERSION).contains(&target_version)
         || version >= target_version
     {
@@ -7385,15 +7400,34 @@ fn canonical_project_json(
     Ok(canonical)
 }
 
-pub(crate) fn validate_project_file_json(bytes: &[u8]) -> bool {
+pub(crate) enum ProjectFileIssue {
+    InvalidProject,
+    LegacyWave5Format,
+}
+
+pub(crate) fn check_project_file_json(bytes: &[u8]) -> Result<(), ProjectFileIssue> {
     let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
     if bytes.len() > MAX_PROJECT_JSON_BYTES || std::str::from_utf8(bytes).is_err() {
-        return false;
+        return Err(ProjectFileIssue::InvalidProject);
     }
-    serde_json::from_slice(bytes)
-        .ok()
-        .and_then(|value| canonical_project_for_validation(value).ok())
-        .is_some()
+    let value: Value =
+        serde_json::from_slice(bytes).map_err(|_| ProjectFileIssue::InvalidProject)?;
+    if value.as_object().is_some_and(|record| {
+        record.get("schemaVersion").and_then(Value::as_f64) == Some(3.0)
+            && V3_PROJECT_FIELDS
+                .iter()
+                .all(|key| !record.contains_key(*key))
+    }) {
+        return Err(ProjectFileIssue::LegacyWave5Format);
+    }
+    canonical_project_for_validation(value)
+        .map(|_| ())
+        .map_err(|_| ProjectFileIssue::InvalidProject)
+}
+
+#[cfg(test)]
+fn validate_project_file_json(bytes: &[u8]) -> bool {
+    check_project_file_json(bytes).is_ok()
 }
 
 fn canonical_project_for_validation(value: Value) -> Result<CanonicalProject, GenerationIssue> {
@@ -7445,13 +7479,6 @@ fn validate_project_versioned_presence(
     value: &Value,
     schema_version: u64,
 ) -> Result<(), GenerationIssue> {
-    const V3_PROJECT_FIELDS: &[&str] = &[
-        "lengthBeats",
-        "tempoMap",
-        "timeSignatureMap",
-        "audioAssets",
-        "automationLanes",
-    ];
     const V3_AUDIO_CLIP_FIELDS: &[&str] = &[
         "sourceStartFrame",
         "sourceFrameCount",
@@ -11268,3 +11295,7 @@ fn verify_project_audio_assets(
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "format_detection_tests.rs"]
+mod format_detection_tests;

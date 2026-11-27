@@ -70,6 +70,7 @@ export type NativeFileGatewayErrorCode =
   | 'invalid-envelope'
   | 'invalid-filename'
   | 'invalid-file'
+  | 'legacy-wave5-format'
   | 'unsupported-version'
   | 'file-too-large'
   | 'caller-not-allowed'
@@ -101,6 +102,7 @@ const nativeCommandErrorCodes = new Set<NativeFileGatewayErrorCode>([
   'invalid-request',
   'invalid-filename',
   'invalid-file',
+  'legacy-wave5-format',
   'unsupported-version',
   'file-too-large',
   'dialog-unavailable',

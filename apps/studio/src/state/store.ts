@@ -25,6 +25,7 @@ import {
   encodeProjectJson,
   findClip as findProjectClip,
   inspectAudioPunchTarget,
+  LEGACY_WAVE5_FORMAT_MESSAGE,
   MAX_AUDIO_TAKES_PER_FOLDER,
   MIN_EVENT_DURATION_BEATS,
   resolveClipContent,
@@ -2311,11 +2312,13 @@ export function createStudioStore(
         persistenceNotice: {
           kind: 'warning',
           message:
-            restored.error.code === 'unsupported-version'
-              ? '新しいバージョンで作成されたプロジェクトがあります。データは変更せず保持しています。'
-              : restored.error.code === 'conflict'
-                ? '複数画面で編集された未保存内容が競合しています。どちらも削除せず保持しています。'
-              : '保存データの一部を読み込めませんでした。破損したデータは削除せず保持しています。',
+            restored.error.reason === 'legacy-wave5-format'
+              ? LEGACY_WAVE5_FORMAT_MESSAGE
+              : restored.error.code === 'unsupported-version'
+                ? '新しいバージョンで作成されたプロジェクトがあります。データは変更せず保持しています。'
+                : restored.error.code === 'conflict'
+                  ? '複数画面で編集された未保存内容が競合しています。どちらも削除せず保持しています。'
+                : '保存データの一部を読み込めませんでした。破損したデータは削除せず保持しています。',
         },
       });
       return true;

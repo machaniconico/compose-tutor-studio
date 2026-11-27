@@ -1,8 +1,9 @@
-import { encodeProjectJson } from '@cts/project-model';
+import { decodeProjectJson, encodeProjectJson } from '@cts/project-model';
 import {
   LocalStorageProjectRepository,
   canStageCrashDraft,
   createLegacyStorageSnapshot,
+  legacyProjectKey,
   type CrashDraftCapability,
   type CrashDraftReceipt,
   type LegacyStorageSnapshot,
@@ -230,7 +231,9 @@ export class NativeLegacyMigratingRepository implements ProjectRepository {
     }
     // Register synchronously before invoking the delegate in a microtask, so a
     // close requested immediately after this call cannot overtake physical I/O.
-    const flight = Promise.resolve().then(() => repository.stageCrashDraft(request));
+    const flight = Promise.resolve().then(async () =>
+      this.withLegacyFormatReason(await repository.stageCrashDraft(request), request.project.id),
+    );
     this.crashDraftFlights.add(flight);
     void flight.finally(() => this.crashDraftFlights.delete(flight)).catch(() => undefined);
     return flight;
@@ -435,16 +438,51 @@ export class NativeLegacyMigratingRepository implements ProjectRepository {
     }
   }
 
-  list(): Promise<RepositoryResult<readonly ProjectSummary[]>> {
-    return this.isReady()
-      ? this.repository.list()
-      : Promise.resolve(this.notReady('list'));
+  // The native diagnostic carries the compatibility code. The original legacy
+  // mirror is retained, so it can supply the more specific presentation reason.
+  private hasLegacyFormat(projectId: string): boolean {
+    try {
+      const raw = this.storage()?.getItem(legacyProjectKey(projectId));
+      if (raw == null) return false;
+      const decoded = decodeProjectJson(raw);
+      return !decoded.ok && decoded.error.code === 'legacy-wave5-format';
+    } catch {
+      return false;
+    }
   }
 
-  load(id: string): Promise<RepositoryResult<LoadedProject | null>> {
-    return this.isReady()
-      ? this.repository.load(id)
-      : Promise.resolve(this.notReady('load', id));
+  private withLegacyFormatReason<T>(
+    result: RepositoryResult<T>,
+    projectId?: string,
+  ): RepositoryResult<T> {
+    if (result.ok || result.error.code !== 'unsupported-version' || result.error.reason) {
+      return result;
+    }
+    const id = result.error.projectId ?? projectId;
+    return id !== undefined && this.hasLegacyFormat(id)
+      ? { ok: false, error: { ...result.error, reason: 'legacy-wave5-format' } }
+      : result;
+  }
+
+  async list(): Promise<RepositoryResult<readonly ProjectSummary[]>> {
+    if (!this.isReady()) return this.notReady('list');
+    const listed = await this.repository.list();
+    if (!listed.ok) return listed;
+    return {
+      ok: true,
+      value: listed.value.map((summary) =>
+        summary.status === 'unreadable' &&
+        summary.errorCode === 'unsupported-version' &&
+        this.hasLegacyFormat(summary.id)
+          ? { ...summary, reason: 'legacy-wave5-format' }
+          : summary,
+      ),
+    };
+  }
+
+  async load(id: string): Promise<RepositoryResult<LoadedProject | null>> {
+    if (!this.isReady()) return this.notReady('load', id);
+    return this.withLegacyFormatReason(await this.repository.load(id), id);
   }
 
   getDurableProjectState(
@@ -474,16 +512,14 @@ export class NativeLegacyMigratingRepository implements ProjectRepository {
       : Promise.resolve({ ok: true, value: null });
   }
 
-  loadMostRecent(): Promise<RepositoryResult<LoadedProject | null>> {
-    return this.isReady()
-      ? this.repository.loadMostRecent()
-      : Promise.resolve(this.notReady('load'));
+  async loadMostRecent(): Promise<RepositoryResult<LoadedProject | null>> {
+    if (!this.isReady()) return this.notReady('load');
+    return this.withLegacyFormatReason(await this.repository.loadMostRecent());
   }
 
-  save(request: SaveRequest): Promise<RepositoryResult<SaveReceipt>> {
-    return this.isReady()
-      ? this.repository.save(request)
-      : Promise.resolve(this.notReady('save', request.project.id));
+  async save(request: SaveRequest): Promise<RepositoryResult<SaveReceipt>> {
+    if (!this.isReady()) return this.notReady('save', request.project.id);
+    return this.withLegacyFormatReason(await this.repository.save(request), request.project.id);
   }
 
   remove(request: RemoveRequest): Promise<RepositoryResult<RemoveReceipt>> {

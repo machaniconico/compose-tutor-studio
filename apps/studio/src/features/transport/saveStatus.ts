@@ -1,3 +1,4 @@
+import { LEGACY_WAVE5_FORMAT_MESSAGE } from '@cts/project-model';
 import type { SaveFailureCode } from '../../state/persistence';
 import type { RetryPolicy } from '@cts/project-persistence';
 
@@ -32,6 +33,7 @@ const FAILURE_MESSAGES: Record<SaveFailureCode, string> = {
   'serialization-failed': '保存データを作成できませんでした。もう一度お試しください。',
   'too-large': '保存できません。曲のトラックや音符を減らしてからもう一度お試しください。',
   'corrupt-data': '保存データの破損を検出しました。バックアップを書き出してください。',
+  'legacy-wave5-format': LEGACY_WAVE5_FORMAT_MESSAGE,
   'unsupported-version': '新しいバージョンの保存データです。アプリを更新してください。',
   conflict: '別の画面で更新されています。内容を確認してからもう一度保存してください。',
   'read-failed': '保存データを読み取れませんでした。もう一度お試しください。',
@@ -48,7 +50,7 @@ export function getSaveStatusPresentation(state: SaveStatusState): SaveStatusPre
   if (state.phase === 'error') {
     const canRetry = state.retry !== 'never';
     return {
-      label: state.protectionFailed
+      label: state.protectionFailed && state.failure !== 'legacy-wave5-format'
         ? canRetry
           ? '変更を強制終了から保護できません。今すぐ保存を再試行するか、バックアップを書き出してください。'
           : '変更を強制終了から保護できず、この画面では保存を再試行できません。バックアップを書き出してください。'

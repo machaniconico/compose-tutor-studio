@@ -4,6 +4,7 @@ import type {
   CrashDraftCapability,
   CrashDraftReceipt,
   LoadedProject,
+  PersistenceErrorReason,
   ProjectBranch,
   ProjectBranchSummary,
   ProjectRepository,
@@ -22,6 +23,7 @@ import {
   NativeRecoveryJournal,
   type NativeRecoveryEntry,
   type ReadyNativeRecoveryEntry,
+  type UnreadableNativeRecoveryEntry,
 } from './native-recovery-journal';
 
 const MAX_LOOKUP_ID_LENGTH = 4_096;
@@ -29,6 +31,7 @@ const NATIVE_BRANCH_PREFIX = 'native-recovery-branch-v1-';
 const NATIVE_BRANCH_PATTERN = /^native-recovery-branch-v1-[0-9a-f]{16}$/;
 
 type StickyJournalErrorCode = 'unsupported-version' | 'migration-failed';
+type JournalDiagnostic = Pick<UnreadableNativeRecoveryEntry, 'errorCode' | 'reason'>;
 
 const DIAGNOSTIC_PRIORITY = {
   'corrupt-data': 1,
@@ -97,14 +100,15 @@ function journalSaveReadFailure(projectId: string): RepositoryResult<never> {
 
 function stickyJournalFailure(
   operation: 'load' | 'save' | 'remove',
-  code: StickyJournalErrorCode,
+  diagnostic: JournalDiagnostic,
   projectId: string,
 ): RepositoryResult<never> {
   return {
     ok: false,
     error: {
       operation,
-      code,
+      code: diagnostic.errorCode,
+      ...(diagnostic.reason ? { reason: diagnostic.reason } : {}),
       retry: 'never',
       projectId,
     },
@@ -114,6 +118,7 @@ function stickyJournalFailure(
 function unreadableLoadFailure(
   code: 'corrupt-data' | 'unsupported-version' | 'migration-failed' | 'conflict',
   projectId: string,
+  reason?: PersistenceErrorReason,
 ): RepositoryResult<never> {
   return {
     ok: false,
@@ -121,6 +126,7 @@ function unreadableLoadFailure(
       operation: 'load',
       code,
       retry: code === 'conflict' ? 'manual' : 'never',
+      ...(reason ? { reason } : {}),
       projectId,
     },
   };
@@ -135,8 +141,8 @@ function isStickyJournalError(
 function stickyJournalError(
   entries: readonly NativeRecoveryEntry[],
   projectId: string,
-): StickyJournalErrorCode | undefined {
-  let code: StickyJournalErrorCode | undefined;
+): JournalDiagnostic | undefined {
+  let diagnostic: JournalDiagnostic | undefined;
   for (const entry of entries) {
     if (
       entry.status !== 'unreadable' ||
@@ -145,10 +151,12 @@ function stickyJournalError(
     ) {
       continue;
     }
-    if (entry.errorCode === 'unsupported-version') return entry.errorCode;
-    code = entry.errorCode;
+    if (entry.reason) return entry;
+    if (!diagnostic || DIAGNOSTIC_PRIORITY[entry.errorCode] > DIAGNOSTIC_PRIORITY[diagnostic.errorCode]) {
+      diagnostic = entry;
+    }
   }
-  return code;
+  return diagnostic;
 }
 
 function validLookupId(value: string): boolean {
@@ -368,21 +376,22 @@ export class NativeRecoveryProjectRepository
       return canonical;
     }
     if (!journalEntries.ok) return canonical;
-    const diagnostics = new Map<
-      string,
-      'corrupt-data' | 'unsupported-version' | 'migration-failed'
-    >();
+    const diagnostics = new Map<string, JournalDiagnostic>();
     for (const entry of journalEntries.value) {
       if (entry.status !== 'unreadable' || entry.projectId === undefined) continue;
       const current = diagnostics.get(entry.projectId);
-      if (!current || DIAGNOSTIC_PRIORITY[entry.errorCode] > DIAGNOSTIC_PRIORITY[current]) {
-        diagnostics.set(entry.projectId, entry.errorCode);
+      if (
+        !current ||
+        DIAGNOSTIC_PRIORITY[entry.errorCode] > DIAGNOSTIC_PRIORITY[current.errorCode] ||
+        (entry.errorCode === current.errorCode && entry.reason)
+      ) {
+        diagnostics.set(entry.projectId, entry);
       }
     }
     const ready = journalEntries.value
       .filter(
         (entry): entry is ReadyNativeRecoveryEntry =>
-          entry.status === 'ready' && !isStickyJournalError(diagnostics.get(entry.projectId)),
+          entry.status === 'ready' && !isStickyJournalError(diagnostics.get(entry.projectId)?.errorCode),
       )
       .sort(compareReadyEntries);
     if (ready.length === 0 && diagnostics.size === 0) return canonical;
@@ -406,7 +415,7 @@ export class NativeRecoveryProjectRepository
           .filter(
             (projectId) =>
               !canonicalReady.has(projectId) ||
-              isStickyJournalError(diagnostics.get(projectId)),
+              isStickyJournalError(diagnostics.get(projectId)?.errorCode),
           )
           .map(async (projectId) => {
             try {
@@ -422,7 +431,7 @@ export class NativeRecoveryProjectRepository
           verifiedDeleted.add(projectId);
           byProject.delete(projectId);
           diagnostics.delete(projectId);
-        } else if (!state?.ok && !isStickyJournalError(diagnostic)) {
+        } else if (!state?.ok && !isStickyJournalError(diagnostic?.errorCode)) {
           byProject.delete(projectId);
           diagnostics.delete(projectId);
         }
@@ -433,13 +442,19 @@ export class NativeRecoveryProjectRepository
       .filter((summary) => !verifiedDeleted.has(summary.id))
       .map((summary): ProjectSummary => {
         const diagnostic = diagnostics.get(summary.id);
-        if (isStickyJournalError(diagnostic)) {
+        if (diagnostic && isStickyJournalError(diagnostic.errorCode)) {
           diagnostics.delete(summary.id);
           byProject.delete(summary.id);
+          const reason = diagnostic.reason ?? (
+            summary.status === 'unreadable' && summary.errorCode === diagnostic.errorCode
+              ? summary.reason
+              : undefined
+          );
           return {
             status: 'unreadable',
             id: summary.id,
-            errorCode: diagnostic,
+            errorCode: diagnostic.errorCode,
+            ...(reason ? { reason } : {}),
             branches: [],
           };
         }
@@ -459,8 +474,8 @@ export class NativeRecoveryProjectRepository
         return { ...summary, branches };
       });
 
-    for (const [projectId, errorCode] of diagnostics) {
-      if (isStickyJournalError(errorCode)) byProject.delete(projectId);
+    for (const [projectId, diagnostic] of diagnostics) {
+      if (isStickyJournalError(diagnostic.errorCode)) byProject.delete(projectId);
     }
 
     for (const [projectId, entries] of [...byProject.entries()].sort(([left], [right]) =>
@@ -474,13 +489,14 @@ export class NativeRecoveryProjectRepository
       });
       diagnostics.delete(projectId);
     }
-    for (const [projectId, errorCode] of [...diagnostics.entries()].sort(([left], [right]) =>
+    for (const [projectId, diagnostic] of [...diagnostics.entries()].sort(([left], [right]) =>
       compareText(left, right),
     )) {
       summaries.push({
         status: 'unreadable',
         id: projectId,
-        errorCode,
+        errorCode: diagnostic.errorCode,
+        ...(diagnostic.reason ? { reason: diagnostic.reason } : {}),
         branches: [],
       });
     }
@@ -509,7 +525,7 @@ export class NativeRecoveryProjectRepository
     if (ready?.status === 'ready') return this.load(ready.id);
     const unreadable = listed.value.find((entry) => entry.status === 'unreadable');
     return unreadable?.status === 'unreadable'
-      ? unreadableLoadFailure(unreadable.errorCode, unreadable.id)
+      ? unreadableLoadFailure(unreadable.errorCode, unreadable.id, unreadable.reason)
       : { ok: true, value: null };
   }
 

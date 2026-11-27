@@ -141,6 +141,7 @@ type GenerationFailure = Readonly<{
   ordinal: number;
   code: PersistenceErrorCode;
   futureStorageVersion: boolean;
+  reason?: PersistenceError['reason'];
 }>;
 
 function stickyGenerationFailureCode(
@@ -161,7 +162,7 @@ function stickyGenerationFailureCode(
 
 type ParsedRecord<T> =
   | Readonly<{ status: 'valid'; value: T }>
-  | Readonly<{ status: 'future' }>
+  | Readonly<{ status: 'future'; reason?: PersistenceError['reason'] }>
   | Readonly<{ status: 'migration-failed' }>
   | Readonly<{ status: 'corrupt' }>;
 
@@ -289,6 +290,7 @@ function failure(
   operation: RepositoryOperation,
   code: PersistenceErrorCode,
   projectId?: string,
+  reason?: PersistenceError['reason'],
 ): FailedRepositoryResult {
   return {
     ok: false,
@@ -296,6 +298,7 @@ function failure(
       operation,
       code,
       retry: retryFor(code),
+      ...(reason ? { reason } : {}),
       ...(projectId !== undefined ? { projectId } : {}),
     },
   };
@@ -320,8 +323,12 @@ function storageFailure(
   return failure(operation, fallback, projectId);
 }
 
+function decodeReason(code: ProjectDecodeErrorCode): PersistenceError['reason'] {
+  return code === 'legacy-wave5-format' ? code : undefined;
+}
+
 function decodeErrorCode(code: ProjectDecodeErrorCode): PersistenceErrorCode {
-  if (code === 'future-schema-version') return 'unsupported-version';
+  if (code === 'future-schema-version' || code === 'legacy-wave5-format') return 'unsupported-version';
   if (code === 'migration-failed' || code === 'migration-unavailable') return 'migration-failed';
   return 'corrupt-data';
 }
@@ -469,10 +476,11 @@ function generationFailure(
   ordinal: number,
   code: PersistenceErrorCode = 'corrupt-data',
   isFutureStorageVersion = false,
+  reason?: PersistenceError['reason'],
 ): { ok: false; failure: GenerationFailure } {
   return {
     ok: false,
-    failure: { key, ordinal, code, futureStorageVersion: isFutureStorageVersion },
+    failure: { key, ordinal, code, futureStorageVersion: isFutureStorageVersion, reason },
   };
 }
 
@@ -543,7 +551,8 @@ function parseGeneration(
     }
     const decoded = decodeProjectJson(content.projectJson);
     if (!decoded.ok) {
-      return generationFailure(key, keyParts.ordinal, decodeErrorCode(decoded.error.code));
+      const code = decoded.error.code;
+      return generationFailure(key, keyParts.ordinal, decodeErrorCode(code), false, decodeReason(code));
     }
     if (decoded.project.id !== expectedId) {
       return generationFailure(key, keyParts.ordinal);
@@ -764,7 +773,9 @@ function parseRecoveryJournal(
     const decoded = decodeProjectJson(content.projectJson);
     if (!decoded.ok) {
       const code = decodeErrorCode(decoded.error.code);
-      if (code === 'unsupported-version') return { status: 'future' };
+      if (code === 'unsupported-version') {
+        return { status: 'future', reason: decodeReason(decoded.error.code) };
+      }
       if (code === 'migration-failed') return { status: 'migration-failed' };
       return { status: 'corrupt' };
     }
@@ -945,6 +956,7 @@ export class LocalStorageProjectRepository
         ok: true;
         raw: string | null;
         status: 'missing' | ReturnType<typeof parseRecoveryJournal>['status'];
+        reason?: PersistenceError['reason'];
         recovery: { key: string; journal: RecoveryJournal; project: Project } | null;
         recoveries: Array<{ key: string; journal: RecoveryJournal; project: Project }>;
         keys: string[];
@@ -958,6 +970,7 @@ export class LocalStorageProjectRepository
     let firstRaw: string | null = null;
     let sawCorrupt = false;
     let sawFuture = false;
+    let reason: PersistenceError['reason'];
     let sawMigrationFailure = false;
     try {
       for (const key of keys) {
@@ -972,6 +985,7 @@ export class LocalStorageProjectRepository
           recoveries.push({ key, ...parsed.value });
         } else if (parsed.status === 'future') {
           sawFuture = true;
+          reason ??= parsed.reason;
         } else if (parsed.status === 'migration-failed') {
           sawMigrationFailure = true;
         } else {
@@ -1000,6 +1014,7 @@ export class LocalStorageProjectRepository
       ok: true,
       raw: firstRaw,
       status,
+      reason,
       recovery: recoveries[0] ?? null,
       recoveries,
       keys,
@@ -1181,7 +1196,12 @@ export class LocalStorageProjectRepository
       recoveryRead.status === 'future' ||
       stickyGenerationFailure === 'unsupported-version'
     ) {
-      return failure('load', 'unsupported-version', projectId);
+      return failure(
+        'load',
+        'unsupported-version',
+        projectId,
+        recoveryRead.reason ?? scan.failures.find((entry) => entry.reason)?.reason,
+      );
     }
     if (
       headRead.status === 'migration-failed' ||
@@ -1202,7 +1222,12 @@ export class LocalStorageProjectRepository
       if (!decoded.ok) {
         const code = decodeErrorCode(decoded.error.code);
         if (code === 'unsupported-version' || code === 'migration-failed') {
-          return failure('load', code, projectId);
+          return failure(
+            'load',
+            code,
+            projectId,
+            decodeReason(decoded.error.code),
+          );
         }
       }
     }
@@ -1781,7 +1806,13 @@ export class LocalStorageProjectRepository
         loaded.error.code === 'migration-failed' ||
         loaded.error.code === 'conflict'
       ) {
-        summaries.push({ status: 'unreadable', id, errorCode: loaded.error.code, branches });
+        summaries.push({
+          status: 'unreadable',
+          id,
+          errorCode: loaded.error.code,
+          ...(loaded.error.reason ? { reason: loaded.error.reason } : {}),
+          branches,
+        });
       } else {
         return Promise.resolve({ ok: false, error: { ...loaded.error, operation: 'list' } });
       }
@@ -1801,7 +1832,7 @@ export class LocalStorageProjectRepository
     if (ready?.status === 'ready') return this.load(ready.id);
     const unreadable = listed.value.find((entry) => entry.status === 'unreadable');
     return unreadable?.status === 'unreadable'
-      ? failure('load', unreadable.errorCode, unreadable.id)
+      ? failure('load', unreadable.errorCode, unreadable.id, unreadable.reason)
       : { ok: true, value: null };
   }
 
@@ -1974,7 +2005,12 @@ export class LocalStorageProjectRepository
       recoveryRead.status === 'future' ||
       stickyGenerationFailure === 'unsupported-version'
     ) {
-      return failure('save', 'unsupported-version', projectId);
+      return failure(
+        'save',
+        'unsupported-version',
+        projectId,
+        recoveryRead.reason ?? scan.failures.find((entry) => entry.reason)?.reason,
+      );
     }
     if (
       headRead.status === 'migration-failed' ||
@@ -1995,7 +2031,12 @@ export class LocalStorageProjectRepository
       if (!decoded.ok) {
         const code = decodeErrorCode(decoded.error.code);
         if (code === 'unsupported-version' || code === 'migration-failed') {
-          return failure('save', code, projectId);
+          return failure(
+            'save',
+            code,
+            projectId,
+            decodeReason(decoded.error.code),
+          );
         }
       }
     }
@@ -2262,7 +2303,12 @@ export class LocalStorageProjectRepository
       existing.status === 'future' ||
       stickyGenerationFailure === 'unsupported-version'
     ) {
-      return failure('save', 'unsupported-version', projectId);
+      return failure(
+        'save',
+        'unsupported-version',
+        projectId,
+        existing.reason ?? scan.failures.find((entry) => entry.reason)?.reason,
+      );
     }
     if (
       headRead.status === 'migration-failed' ||
@@ -2283,7 +2329,12 @@ export class LocalStorageProjectRepository
       if (!decoded.ok) {
         const code = decodeErrorCode(decoded.error.code);
         if (code === 'unsupported-version' || code === 'migration-failed') {
-          return failure('save', code, projectId);
+          return failure(
+            'save',
+            code,
+            projectId,
+            decodeReason(decoded.error.code),
+          );
         }
       }
     }
@@ -2476,7 +2527,12 @@ export class LocalStorageProjectRepository
       recoveryRead.status === 'future' ||
       stickyGenerationFailure === 'unsupported-version'
     ) {
-      return failure('remove', 'unsupported-version', projectId);
+      return failure(
+        'remove',
+        'unsupported-version',
+        projectId,
+        recoveryRead.reason ?? scan.failures.find((entry) => entry.reason)?.reason,
+      );
     }
     if (
       headRead.status === 'migration-failed' ||
@@ -2508,7 +2564,12 @@ export class LocalStorageProjectRepository
       if (!decoded.ok) {
         const code = decodeErrorCode(decoded.error.code);
         if (code === 'unsupported-version' || code === 'migration-failed') {
-          return failure('remove', code, projectId);
+          return failure(
+            'remove',
+            code,
+            projectId,
+            decodeReason(decoded.error.code),
+          );
         }
       }
     }

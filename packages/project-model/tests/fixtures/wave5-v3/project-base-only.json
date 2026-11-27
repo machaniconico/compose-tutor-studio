@@ -1,0 +1,23 @@
+{
+  "id": "wave5-base-only",
+  "schemaVersion": 3,
+  "title": "Wave5 minimal",
+  "bpm": 120,
+  "timeSignature": [4, 4],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 4,
+  "tracks": [
+    {
+      "id": "w5-t1", "name": "Piano", "type": "instrument",
+      "volume": 1, "pan": 0, "mute": false, "solo": false,
+      "instrument": { "type": "synth", "preset": "piano" },
+      "effects": [],
+      "clips": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-06-01T00:00:00.000Z",
+  "updatedAt": "2026-06-01T00:00:00.000Z"
+}

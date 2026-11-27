@@ -512,6 +512,10 @@ exact snapshotから特定projectらしいbytesだけを抜くと、snapshot che
 - Lesson DSL も `lesson_schema_version` を持つ
 - Export時に `app_version` と `created_with` を記録する
 
+### 4.1 wave5 v3 の形式判定
+
+`schemaVersion: 3` の Project は、ルート自身にある `lengthBeats`、`tempoMap`、`timeSignatureMap`、`audioAssets`、`automationLanes` の5キーで判定する。5個そろっていれば通常の v3、0個なら未公開版 wave5 の v3、1〜4個なら `invalid-project` とする。wave5 v3 は `legacy-wave5-format` を返し、通常の移行には進まない。
+
 ## 5. Validationルール
 
 | 対象 | ルール |
