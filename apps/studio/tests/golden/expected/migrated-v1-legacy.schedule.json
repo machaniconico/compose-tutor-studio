@@ -1,0 +1,244 @@
+{
+ "schedule": [
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "drum",
+    "trackId": "lt2",
+    "clipId": "ld1",
+    "eventId": "le1",
+    "lane": "kick",
+    "velocity": 100,
+    "sourceStepIndex": 0,
+    "clipEndBeat": 16,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "note",
+    "trackId": "lt1",
+    "preset": "warmPad",
+    "pitch": 67,
+    "durationBeats": 2,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 2,
+   "payload": {
+    "kind": "drum",
+    "trackId": "lt2",
+    "clipId": "ld1",
+    "eventId": "le2",
+    "lane": "snare",
+    "velocity": 100,
+    "sourceStepIndex": 8,
+    "clipEndBeat": 16,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 2,
+   "payload": {
+    "kind": "note",
+    "trackId": "lt1",
+    "preset": "warmPad",
+    "pitch": 71,
+    "durationBeats": 2,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 8,
+   "payload": {
+    "kind": "note",
+    "trackId": "lt1",
+    "preset": "warmPad",
+    "pitch": 62,
+    "durationBeats": 4,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 12,
+   "payload": {
+    "kind": "note",
+    "trackId": "lt1",
+    "preset": "warmPad",
+    "pitch": 62,
+    "durationBeats": 4,
+    "velocity": 90
+   }
+  }
+ ],
+ "sound": {
+  "seconds": [
+   [
+    0,
+    0
+   ],
+   [
+    16,
+    8.727272727272727
+   ]
+  ],
+  "automation": [],
+  "automationCommands": []
+ },
+ "timing": {
+  "notes": [
+   {
+    "trackId": "lt1",
+    "pitch": 67,
+    "startBeat": 0,
+    "endBeat": 2,
+    "startSeconds": 0,
+    "endSeconds": 1.0909090909090908,
+    "noteOnTime": 0,
+    "noteOnDuration": 1.0909090909090908
+   },
+   {
+    "trackId": "lt1",
+    "pitch": 71,
+    "startBeat": 2,
+    "endBeat": 4,
+    "startSeconds": 1.0909090909090908,
+    "endSeconds": 2.1818181818181817,
+    "noteOnTime": 1.0909090909090908,
+    "noteOnDuration": 1.0909090909090908
+   },
+   {
+    "trackId": "lt1",
+    "pitch": 62,
+    "startBeat": 8,
+    "endBeat": 12,
+    "startSeconds": 4.363636363636363,
+    "endSeconds": 6.545454545454545,
+    "noteOnTime": 4.363636363636363,
+    "noteOnDuration": 2.1818181818181817
+   },
+   {
+    "trackId": "lt1",
+    "pitch": 62,
+    "startBeat": 12,
+    "endBeat": 16,
+    "startSeconds": 6.545454545454545,
+    "endSeconds": 8.727272727272727,
+    "noteOnTime": 6.545454545454545,
+    "noteOnDuration": 2.1818181818181817
+   }
+  ],
+  "resolvedDrums": [
+   {
+    "trackId": "lt2",
+    "clipId": "ld1",
+    "eventId": "le1",
+    "lane": "kick",
+    "velocity": 100,
+    "voiceSeed": 3824991231,
+    "beat": 0,
+    "seconds": 0
+   },
+   {
+    "trackId": "lt2",
+    "clipId": "ld1",
+    "eventId": "le2",
+    "lane": "snare",
+    "velocity": 100,
+    "voiceSeed": 1250149823,
+    "beat": 2,
+    "seconds": 1.0909090909090908
+   }
+  ]
+ },
+ "routing": {
+  "topologicalTrackIds": [
+   "lt1",
+   "lt2"
+  ],
+  "edges": [
+   {
+    "key": "output:lt1",
+    "kind": "output",
+    "source": "lt1",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     0.8,
+     0.8,
+     0.8,
+     0.8,
+     0.8,
+     0.8
+    ],
+    "effectiveGainAtBeats": [
+     0.8,
+     0.8,
+     0.8,
+     0.8,
+     0.8,
+     0.8
+    ]
+   },
+   {
+    "key": "output:lt2",
+    "kind": "output",
+    "source": "lt2",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  ]
+ }
+}

@@ -1,0 +1,471 @@
+{
+ "schedule": [
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "drum",
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d1",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 0,
+    "clipEndBeat": 8,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 0.8,
+    "swing": 0.5,
+    "humanizeVelocity": 10,
+    "seed": 42
+   }
+  },
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "note",
+    "trackId": "keys",
+    "preset": "warmPad",
+    "pitch": 60,
+    "durationBeats": 1,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 0.25,
+   "payload": {
+    "kind": "drum",
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d2",
+    "lane": "closedHat",
+    "velocity": 70,
+    "sourceStepIndex": 1,
+    "clipEndBeat": 8,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 0.8,
+    "swing": 0.5,
+    "humanizeVelocity": 10,
+    "seed": 42
+   }
+  },
+  {
+   "beat": 0.75,
+   "payload": {
+    "kind": "drum",
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d4",
+    "lane": "closedHat",
+    "velocity": 60,
+    "sourceStepIndex": 3,
+    "clipEndBeat": 8,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 0.8,
+    "swing": 0.5,
+    "humanizeVelocity": 10,
+    "seed": 42
+   }
+  },
+  {
+   "beat": 1,
+   "payload": {
+    "kind": "drum",
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d3",
+    "lane": "snare",
+    "velocity": 100,
+    "sourceStepIndex": 4,
+    "clipEndBeat": 8,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 0.5,
+    "swing": 0.5,
+    "humanizeVelocity": 10,
+    "seed": 42
+   }
+  },
+  {
+   "beat": 1.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d5",
+    "lane": "openHat",
+    "velocity": 80,
+    "sourceStepIndex": 6,
+    "clipEndBeat": 8,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 0.8,
+    "swing": 0.5,
+    "humanizeVelocity": 10,
+    "seed": 42
+   }
+  },
+  {
+   "beat": 1.5,
+   "payload": {
+    "kind": "note",
+    "trackId": "keys",
+    "preset": "warmPad",
+    "pitch": 62,
+    "durationBeats": 1,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 3,
+   "payload": {
+    "kind": "note",
+    "trackId": "keys",
+    "preset": "warmPad",
+    "pitch": 64,
+    "durationBeats": 2,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d6",
+    "lane": "kick",
+    "velocity": 105,
+    "sourceStepIndex": 20,
+    "clipEndBeat": 8,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 0.8,
+    "swing": 0.5,
+    "humanizeVelocity": 10,
+    "seed": 42
+   }
+  },
+  {
+   "beat": 5,
+   "payload": {
+    "kind": "note",
+    "trackId": "keys",
+    "preset": "warmPad",
+    "pitch": 60,
+    "durationBeats": 1,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 8,
+   "payload": {
+    "kind": "note",
+    "trackId": "keys",
+    "preset": "warmPad",
+    "pitch": 60,
+    "durationBeats": 1,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 9,
+   "payload": {
+    "kind": "drum",
+    "trackId": "drums",
+    "clipId": "dc2",
+    "eventId": "d7",
+    "lane": "clap",
+    "velocity": 90,
+    "sourceStepIndex": 2,
+    "clipEndBeat": 12,
+    "stepsPerBar": 8,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 9.5,
+   "payload": {
+    "kind": "note",
+    "trackId": "keys",
+    "preset": "warmPad",
+    "pitch": 62,
+    "durationBeats": 1,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 10.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "drums",
+    "clipId": "dc2",
+    "eventId": "d8",
+    "lane": "perc",
+    "velocity": 85,
+    "sourceStepIndex": 5,
+    "clipEndBeat": 12,
+    "stepsPerBar": 8,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 11,
+   "payload": {
+    "kind": "note",
+    "trackId": "keys",
+    "preset": "warmPad",
+    "pitch": 64,
+    "durationBeats": 2,
+    "velocity": 90
+   }
+  }
+ ],
+ "sound": {
+  "seconds": [
+   [
+    0,
+    0
+   ],
+   [
+    16,
+    8
+   ]
+  ],
+  "automation": [],
+  "automationCommands": []
+ },
+ "timing": {
+  "notes": [
+   {
+    "trackId": "keys",
+    "pitch": 60,
+    "startBeat": 0,
+    "endBeat": 1,
+    "startSeconds": 0,
+    "endSeconds": 0.5,
+    "noteOnTime": 0,
+    "noteOnDuration": 0.5
+   },
+   {
+    "trackId": "keys",
+    "pitch": 62,
+    "startBeat": 1.5,
+    "endBeat": 2.5,
+    "startSeconds": 0.75,
+    "endSeconds": 1.25,
+    "noteOnTime": 0.75,
+    "noteOnDuration": 0.5
+   },
+   {
+    "trackId": "keys",
+    "pitch": 64,
+    "startBeat": 3,
+    "endBeat": 5,
+    "startSeconds": 1.5,
+    "endSeconds": 2.5,
+    "noteOnTime": 1.5,
+    "noteOnDuration": 1
+   },
+   {
+    "trackId": "keys",
+    "pitch": 60,
+    "startBeat": 5,
+    "endBeat": 6,
+    "startSeconds": 2.5,
+    "endSeconds": 3,
+    "noteOnTime": 2.5,
+    "noteOnDuration": 0.5
+   },
+   {
+    "trackId": "keys",
+    "pitch": 60,
+    "startBeat": 8,
+    "endBeat": 9,
+    "startSeconds": 4,
+    "endSeconds": 4.5,
+    "noteOnTime": 4,
+    "noteOnDuration": 0.5
+   },
+   {
+    "trackId": "keys",
+    "pitch": 62,
+    "startBeat": 9.5,
+    "endBeat": 10.5,
+    "startSeconds": 4.75,
+    "endSeconds": 5.25,
+    "noteOnTime": 4.75,
+    "noteOnDuration": 0.5
+   },
+   {
+    "trackId": "keys",
+    "pitch": 64,
+    "startBeat": 11,
+    "endBeat": 13,
+    "startSeconds": 5.5,
+    "endSeconds": 6.5,
+    "noteOnTime": 5.5,
+    "noteOnDuration": 1
+   }
+  ],
+  "resolvedDrums": [
+   {
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d2",
+    "lane": "closedHat",
+    "velocity": 69,
+    "voiceSeed": 282567135,
+    "beat": 0.3125,
+    "seconds": 0.15625
+   },
+   {
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d4",
+    "lane": "closedHat",
+    "velocity": 56,
+    "voiceSeed": 2334757452,
+    "beat": 0.8125,
+    "seconds": 0.40625
+   },
+   {
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d3",
+    "lane": "snare",
+    "velocity": 109,
+    "voiceSeed": 1822378303,
+    "beat": 1,
+    "seconds": 0.5
+   },
+   {
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d5",
+    "lane": "openHat",
+    "velocity": 81,
+    "voiceSeed": 1338712220,
+    "beat": 1.5,
+    "seconds": 0.75
+   },
+   {
+    "trackId": "drums",
+    "clipId": "dc1",
+    "eventId": "d6",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 1471879001,
+    "beat": 5,
+    "seconds": 2.5
+   },
+   {
+    "trackId": "drums",
+    "clipId": "dc2",
+    "eventId": "d7",
+    "lane": "clap",
+    "velocity": 90,
+    "voiceSeed": 777743360,
+    "beat": 9,
+    "seconds": 4.5
+   },
+   {
+    "trackId": "drums",
+    "clipId": "dc2",
+    "eventId": "d8",
+    "lane": "perc",
+    "velocity": 85,
+    "voiceSeed": 401292423,
+    "beat": 10.5,
+    "seconds": 5.25
+   }
+  ]
+ },
+ "routing": {
+  "topologicalTrackIds": [
+   "keys",
+   "drums"
+  ],
+  "edges": [
+   {
+    "key": "output:keys",
+    "kind": "output",
+    "source": "keys",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   },
+   {
+    "key": "output:drums",
+    "kind": "output",
+    "source": "drums",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  ]
+ }
+}

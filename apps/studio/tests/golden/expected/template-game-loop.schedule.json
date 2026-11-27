@@ -1,0 +1,3694 @@
+{
+ "schedule": [
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-l",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 0,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-q",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 0,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 57,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 60,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 64,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 0.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-r",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 2,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 1,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-o",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 4,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 1,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-s",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 4,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 1.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-m",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 6,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 1.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-t",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 6,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 2,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-n",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 8,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 2,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-u",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 8,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 2.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-v",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 10,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 3,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-p",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 12,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 3,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-w",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 12,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 3.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-x",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 14,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 4,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-13",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 16,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 4,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-y",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 16,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 4,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 53,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 4,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 57,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 4,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 60,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 4.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-14",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 18,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-11",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 20,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-15",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 20,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 5.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-16",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 22,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 5.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-z",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 22,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 6,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-10",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 24,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 6,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-17",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 24,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 6.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-18",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 26,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 7,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-12",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 28,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 7,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-19",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 28,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 7.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1a",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 30,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 8,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1b",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 32,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 8,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1g",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 32,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 8,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 48,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 8,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 52,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 8,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 55,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 8.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1h",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 34,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 9,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1e",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 36,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 9,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1i",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 36,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 9.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1c",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 38,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 9.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1j",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 38,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 10,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1d",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 40,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 10,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1k",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 40,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 10.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1l",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 42,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 11,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1f",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 44,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 11,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1m",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 44,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 11.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1n",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 46,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 12,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1o",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 48,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 12,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1t",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 48,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 12,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 55,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 12,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 59,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 12,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 62,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 12.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1u",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 50,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 13,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1r",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 52,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 13,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1v",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 52,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 13.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1p",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 54,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 13.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1w",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 54,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 14,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1q",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 56,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 14,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1x",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 56,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 14.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1y",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 58,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 15,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1s",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 60,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 15,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1z",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 60,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 15.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-20",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 62,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 16,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-21",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 64,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 16,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-26",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 64,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 16,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 57,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 16,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 60,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 16,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 64,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 16.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-27",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 66,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 17,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-24",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 68,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 17,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-28",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 68,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 17.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-22",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 70,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 17.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-29",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 70,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 18,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-23",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 72,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 18,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2a",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 72,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 18.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2b",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 74,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 19,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-25",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 76,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 19,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2c",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 76,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 19.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2d",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 78,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 20,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2e",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 80,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 20,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2j",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 80,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 20,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 53,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 20,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 57,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 20,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 60,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 20.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2k",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 82,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 21,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2h",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 84,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 21,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2l",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 84,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 21.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2f",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 86,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 21.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2m",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 86,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 22,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2g",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 88,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 22,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2n",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 88,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 22.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2o",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 90,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 23,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2i",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 92,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 23,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2p",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 92,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 23.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2q",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 94,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 24,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2r",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 96,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 24,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2w",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 96,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 24,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 48,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 24,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 52,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 24,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 55,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 24.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2x",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 98,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 25,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2u",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 100,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 25,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2y",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 100,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 25.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2s",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 102,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 25.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2z",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 102,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 26,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2t",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 104,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 26,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-30",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 104,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 26.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-31",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 106,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 27,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2v",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 108,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 27,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-32",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 108,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 27.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-33",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 110,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 28,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-34",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 112,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 28,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-39",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 112,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 28,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 55,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 28,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 59,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 28,
+   "payload": {
+    "kind": "note",
+    "trackId": "track-00000000000040008000000000000000-1",
+    "preset": "pad",
+    "pitch": 62,
+    "durationBeats": 4,
+    "velocity": 80
+   }
+  },
+  {
+   "beat": 28.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3a",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 114,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 29,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-37",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 116,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 29,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3b",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 116,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 29.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-35",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 118,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 29.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3c",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 118,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 30,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-36",
+    "lane": "kick",
+    "velocity": 110,
+    "sourceStepIndex": 120,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 30,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3d",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 120,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 30.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3e",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 122,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 31,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-38",
+    "lane": "snare",
+    "velocity": 110,
+    "sourceStepIndex": 124,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 31,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3f",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 124,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  },
+  {
+   "beat": 31.5,
+   "payload": {
+    "kind": "drum",
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3g",
+    "lane": "closedHat",
+    "velocity": 90,
+    "sourceStepIndex": 126,
+    "clipEndBeat": 32,
+    "stepsPerBar": 16,
+    "beatsPerBar": 4,
+    "probability": 1,
+    "swing": 0,
+    "humanizeVelocity": 0,
+    "seed": 1
+   }
+  }
+ ],
+ "sound": {
+  "seconds": [
+   [
+    0,
+    0
+   ],
+   [
+    32,
+    13.714285714285714
+   ]
+  ],
+  "automation": [],
+  "automationCommands": []
+ },
+ "timing": {
+  "notes": [
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 57,
+    "startBeat": 0,
+    "endBeat": 4,
+    "startSeconds": 0,
+    "endSeconds": 1.7142857142857142,
+    "noteOnTime": 0,
+    "noteOnDuration": 1.7142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 60,
+    "startBeat": 0,
+    "endBeat": 4,
+    "startSeconds": 0,
+    "endSeconds": 1.7142857142857142,
+    "noteOnTime": 0,
+    "noteOnDuration": 1.7142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 64,
+    "startBeat": 0,
+    "endBeat": 4,
+    "startSeconds": 0,
+    "endSeconds": 1.7142857142857142,
+    "noteOnTime": 0,
+    "noteOnDuration": 1.7142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 53,
+    "startBeat": 4,
+    "endBeat": 8,
+    "startSeconds": 1.7142857142857142,
+    "endSeconds": 3.4285714285714284,
+    "noteOnTime": 1.7142857142857142,
+    "noteOnDuration": 1.7142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 57,
+    "startBeat": 4,
+    "endBeat": 8,
+    "startSeconds": 1.7142857142857142,
+    "endSeconds": 3.4285714285714284,
+    "noteOnTime": 1.7142857142857142,
+    "noteOnDuration": 1.7142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 60,
+    "startBeat": 4,
+    "endBeat": 8,
+    "startSeconds": 1.7142857142857142,
+    "endSeconds": 3.4285714285714284,
+    "noteOnTime": 1.7142857142857142,
+    "noteOnDuration": 1.7142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 48,
+    "startBeat": 8,
+    "endBeat": 12,
+    "startSeconds": 3.4285714285714284,
+    "endSeconds": 5.142857142857142,
+    "noteOnTime": 3.4285714285714284,
+    "noteOnDuration": 1.714285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 52,
+    "startBeat": 8,
+    "endBeat": 12,
+    "startSeconds": 3.4285714285714284,
+    "endSeconds": 5.142857142857142,
+    "noteOnTime": 3.4285714285714284,
+    "noteOnDuration": 1.714285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 55,
+    "startBeat": 8,
+    "endBeat": 12,
+    "startSeconds": 3.4285714285714284,
+    "endSeconds": 5.142857142857142,
+    "noteOnTime": 3.4285714285714284,
+    "noteOnDuration": 1.714285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 55,
+    "startBeat": 12,
+    "endBeat": 16,
+    "startSeconds": 5.142857142857142,
+    "endSeconds": 6.857142857142857,
+    "noteOnTime": 5.142857142857142,
+    "noteOnDuration": 1.7142857142857144
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 59,
+    "startBeat": 12,
+    "endBeat": 16,
+    "startSeconds": 5.142857142857142,
+    "endSeconds": 6.857142857142857,
+    "noteOnTime": 5.142857142857142,
+    "noteOnDuration": 1.7142857142857144
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 62,
+    "startBeat": 12,
+    "endBeat": 16,
+    "startSeconds": 5.142857142857142,
+    "endSeconds": 6.857142857142857,
+    "noteOnTime": 5.142857142857142,
+    "noteOnDuration": 1.7142857142857144
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 57,
+    "startBeat": 16,
+    "endBeat": 20,
+    "startSeconds": 6.857142857142857,
+    "endSeconds": 8.571428571428571,
+    "noteOnTime": 6.857142857142857,
+    "noteOnDuration": 1.7142857142857144
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 60,
+    "startBeat": 16,
+    "endBeat": 20,
+    "startSeconds": 6.857142857142857,
+    "endSeconds": 8.571428571428571,
+    "noteOnTime": 6.857142857142857,
+    "noteOnDuration": 1.7142857142857144
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 64,
+    "startBeat": 16,
+    "endBeat": 20,
+    "startSeconds": 6.857142857142857,
+    "endSeconds": 8.571428571428571,
+    "noteOnTime": 6.857142857142857,
+    "noteOnDuration": 1.7142857142857144
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 53,
+    "startBeat": 20,
+    "endBeat": 24,
+    "startSeconds": 8.571428571428571,
+    "endSeconds": 10.285714285714285,
+    "noteOnTime": 8.571428571428571,
+    "noteOnDuration": 1.7142857142857135
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 57,
+    "startBeat": 20,
+    "endBeat": 24,
+    "startSeconds": 8.571428571428571,
+    "endSeconds": 10.285714285714285,
+    "noteOnTime": 8.571428571428571,
+    "noteOnDuration": 1.7142857142857135
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 60,
+    "startBeat": 20,
+    "endBeat": 24,
+    "startSeconds": 8.571428571428571,
+    "endSeconds": 10.285714285714285,
+    "noteOnTime": 8.571428571428571,
+    "noteOnDuration": 1.7142857142857135
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 48,
+    "startBeat": 24,
+    "endBeat": 28,
+    "startSeconds": 10.285714285714285,
+    "endSeconds": 12,
+    "noteOnTime": 10.285714285714285,
+    "noteOnDuration": 1.7142857142857153
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 52,
+    "startBeat": 24,
+    "endBeat": 28,
+    "startSeconds": 10.285714285714285,
+    "endSeconds": 12,
+    "noteOnTime": 10.285714285714285,
+    "noteOnDuration": 1.7142857142857153
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 55,
+    "startBeat": 24,
+    "endBeat": 28,
+    "startSeconds": 10.285714285714285,
+    "endSeconds": 12,
+    "noteOnTime": 10.285714285714285,
+    "noteOnDuration": 1.7142857142857153
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 55,
+    "startBeat": 28,
+    "endBeat": 32,
+    "startSeconds": 12,
+    "endSeconds": 13.714285714285714,
+    "noteOnTime": 12,
+    "noteOnDuration": 1.7142857142857135
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 59,
+    "startBeat": 28,
+    "endBeat": 32,
+    "startSeconds": 12,
+    "endSeconds": 13.714285714285714,
+    "noteOnTime": 12,
+    "noteOnDuration": 1.7142857142857135
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-1",
+    "pitch": 62,
+    "startBeat": 28,
+    "endBeat": 32,
+    "startSeconds": 12,
+    "endSeconds": 13.714285714285714,
+    "noteOnTime": 12,
+    "noteOnDuration": 1.7142857142857135
+   }
+  ],
+  "resolvedDrums": [
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-l",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 4095809618,
+    "beat": 0,
+    "seconds": 0
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-q",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1760450780,
+    "beat": 0,
+    "seconds": 0
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-r",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2184862988,
+    "beat": 0.5,
+    "seconds": 0.21428571428571427
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-o",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 1621200471,
+    "beat": 1,
+    "seconds": 0.42857142857142855
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-s",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2715035387,
+    "beat": 1,
+    "seconds": 0.42857142857142855
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-m",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 574400207,
+    "beat": 1.5,
+    "seconds": 0.6428571428571428
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-t",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2801797935,
+    "beat": 1.5,
+    "seconds": 0.6428571428571428
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-n",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 1431496770,
+    "beat": 2,
+    "seconds": 0.8571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-u",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3632989894,
+    "beat": 2,
+    "seconds": 0.8571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-v",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 644017839,
+    "beat": 2.5,
+    "seconds": 1.0714285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-p",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 3400746861,
+    "beat": 3,
+    "seconds": 1.2857142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-w",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 698091414,
+    "beat": 3,
+    "seconds": 1.2857142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-x",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4204041756,
+    "beat": 3.5,
+    "seconds": 1.5
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-13",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2793365640,
+    "beat": 4,
+    "seconds": 1.7142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-y",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 2550855250,
+    "beat": 4,
+    "seconds": 1.7142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-14",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3055564026,
+    "beat": 4.5,
+    "seconds": 1.9285714285714284
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-11",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 1247810600,
+    "beat": 5,
+    "seconds": 2.142857142857143
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-15",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1732930784,
+    "beat": 5,
+    "seconds": 2.142857142857143
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-16",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3440945238,
+    "beat": 5.5,
+    "seconds": 2.357142857142857
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-z",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 4098653520,
+    "beat": 5.5,
+    "seconds": 2.357142857142857
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-10",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 657629691,
+    "beat": 6,
+    "seconds": 2.571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-17",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2170726969,
+    "beat": 6,
+    "seconds": 2.571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-18",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1301314647,
+    "beat": 6.5,
+    "seconds": 2.7857142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-12",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 3026152125,
+    "beat": 7,
+    "seconds": 3
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-19",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3932980618,
+    "beat": 7,
+    "seconds": 3
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1a",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1442409562,
+    "beat": 7.5,
+    "seconds": 3.214285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1b",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 171899562,
+    "beat": 8,
+    "seconds": 3.4285714285714284
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1g",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1093718194,
+    "beat": 8,
+    "seconds": 3.4285714285714284
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1h",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3070400860,
+    "beat": 8.5,
+    "seconds": 3.642857142857143
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1e",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 2883609549,
+    "beat": 9,
+    "seconds": 3.8571428571428568
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1i",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3174702285,
+    "beat": 9,
+    "seconds": 3.8571428571428568
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1c",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 2236245197,
+    "beat": 9.5,
+    "seconds": 4.071428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1j",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4133819395,
+    "beat": 9.5,
+    "seconds": 4.071428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1d",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 1008931836,
+    "beat": 10,
+    "seconds": 4.285714285714286
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1k",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1177260550,
+    "beat": 10,
+    "seconds": 4.285714285714286
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1l",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 851387226,
+    "beat": 10.5,
+    "seconds": 4.5
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1f",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 3367497708,
+    "beat": 11,
+    "seconds": 4.714285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1m",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2223814645,
+    "beat": 11,
+    "seconds": 4.714285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1n",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3023677141,
+    "beat": 11.5,
+    "seconds": 4.928571428571428
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1o",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 2315180629,
+    "beat": 12,
+    "seconds": 5.142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1t",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1053025713,
+    "beat": 12,
+    "seconds": 5.142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1u",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 455592044,
+    "beat": 12.5,
+    "seconds": 5.357142857142857
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1r",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 4173885637,
+    "beat": 13,
+    "seconds": 5.571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1v",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3351534833,
+    "beat": 13,
+    "seconds": 5.571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1p",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 2575003557,
+    "beat": 13.5,
+    "seconds": 5.785714285714286
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1w",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1471334071,
+    "beat": 13.5,
+    "seconds": 5.785714285714286
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1q",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 3476206562,
+    "beat": 14,
+    "seconds": 6
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1x",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3349255556,
+    "beat": 14,
+    "seconds": 6
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1y",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 417215322,
+    "beat": 14.5,
+    "seconds": 6.2142857142857135
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1s",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 2100861929,
+    "beat": 15,
+    "seconds": 6.428571428571428
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-1z",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1274538474,
+    "beat": 15,
+    "seconds": 6.428571428571428
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-20",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 513542234,
+    "beat": 15.5,
+    "seconds": 6.642857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-21",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 1287019836,
+    "beat": 16,
+    "seconds": 6.857142857142857
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-26",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1513167342,
+    "beat": 16,
+    "seconds": 6.857142857142857
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-27",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1236500724,
+    "beat": 16.5,
+    "seconds": 7.071428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-24",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 3950624173,
+    "beat": 17,
+    "seconds": 7.285714285714286
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-28",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 376957533,
+    "beat": 17,
+    "seconds": 7.285714285714286
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-22",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 839296540,
+    "beat": 17.5,
+    "seconds": 7.5
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-29",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3986452848,
+    "beat": 17.5,
+    "seconds": 7.5
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-23",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 2818988235,
+    "beat": 18,
+    "seconds": 7.7142857142857135
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2a",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2516901750,
+    "beat": 18,
+    "seconds": 7.7142857142857135
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2b",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3605886766,
+    "beat": 18.5,
+    "seconds": 7.928571428571428
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-25",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 3632732275,
+    "beat": 19,
+    "seconds": 8.142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2c",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4066922709,
+    "beat": 19,
+    "seconds": 8.142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2d",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2551846833,
+    "beat": 19.5,
+    "seconds": 8.357142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2e",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 220391849,
+    "beat": 20,
+    "seconds": 8.571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2j",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 492917063,
+    "beat": 20,
+    "seconds": 8.571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2k",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1261530017,
+    "beat": 20.5,
+    "seconds": 8.785714285714285
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2h",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 2926520056,
+    "beat": 21,
+    "seconds": 9
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2l",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2910766640,
+    "beat": 21,
+    "seconds": 9
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2f",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 1779923770,
+    "beat": 21.5,
+    "seconds": 9.214285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2m",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4190437478,
+    "beat": 21.5,
+    "seconds": 9.214285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2g",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 3545938001,
+    "beat": 22,
+    "seconds": 9.428571428571429
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2n",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3294248397,
+    "beat": 22,
+    "seconds": 9.428571428571429
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2o",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3610796336,
+    "beat": 22.5,
+    "seconds": 9.642857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2i",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 2152905522,
+    "beat": 23,
+    "seconds": 9.857142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2p",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3575639041,
+    "beat": 23,
+    "seconds": 9.857142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2q",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2618065943,
+    "beat": 23.5,
+    "seconds": 10.071428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2r",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 2026800989,
+    "beat": 24,
+    "seconds": 10.285714285714285
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2w",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4083280179,
+    "beat": 24,
+    "seconds": 10.285714285714285
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2x",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4007435819,
+    "beat": 24.5,
+    "seconds": 10.5
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2u",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 1066992738,
+    "beat": 25,
+    "seconds": 10.714285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2y",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4123270790,
+    "beat": 25,
+    "seconds": 10.714285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2s",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 445950644,
+    "beat": 25.5,
+    "seconds": 10.928571428571429
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2z",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 684664672,
+    "beat": 25.5,
+    "seconds": 10.928571428571429
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2t",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 1126288803,
+    "beat": 26,
+    "seconds": 11.142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-30",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 168207295,
+    "beat": 26,
+    "seconds": 11.142857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-31",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2319203911,
+    "beat": 26.5,
+    "seconds": 11.357142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-2v",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 4102772111,
+    "beat": 27,
+    "seconds": 11.571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-32",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 502428164,
+    "beat": 27,
+    "seconds": 11.571428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-33",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4216283403,
+    "beat": 27.5,
+    "seconds": 11.785714285714285
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-34",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 543259735,
+    "beat": 28,
+    "seconds": 12
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-39",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 658697255,
+    "beat": 28,
+    "seconds": 12
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3a",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 1609152078,
+    "beat": 28.5,
+    "seconds": 12.214285714285714
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-37",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 410771084,
+    "beat": 29,
+    "seconds": 12.428571428571427
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3b",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2876284565,
+    "beat": 29,
+    "seconds": 12.428571428571427
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-35",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 1922126144,
+    "beat": 29.5,
+    "seconds": 12.642857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3c",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2264977401,
+    "beat": 29.5,
+    "seconds": 12.642857142857142
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-36",
+    "lane": "kick",
+    "velocity": 110,
+    "voiceSeed": 2781490511,
+    "beat": 30,
+    "seconds": 12.857142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3d",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 2827582768,
+    "beat": 30,
+    "seconds": 12.857142857142856
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3e",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 4292700924,
+    "beat": 30.5,
+    "seconds": 13.071428571428571
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-38",
+    "lane": "snare",
+    "velocity": 110,
+    "voiceSeed": 34761205,
+    "beat": 31,
+    "seconds": 13.285714285714285
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3f",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 3359575735,
+    "beat": 31,
+    "seconds": 13.285714285714285
+   },
+   {
+    "trackId": "track-00000000000040008000000000000000-4",
+    "clipId": "clip-00000000000040008000000000000000-9",
+    "eventId": "drum-00000000000040008000000000000000-3g",
+    "lane": "closedHat",
+    "velocity": 90,
+    "voiceSeed": 239579319,
+    "beat": 31.5,
+    "seconds": 13.5
+   }
+  ]
+ },
+ "routing": {
+  "topologicalTrackIds": [
+   "track-00000000000040008000000000000000-1",
+   "track-00000000000040008000000000000000-2",
+   "track-00000000000040008000000000000000-3",
+   "track-00000000000040008000000000000000-4"
+  ],
+  "edges": [
+   {
+    "key": "output:track-00000000000040008000000000000000-1",
+    "kind": "output",
+    "source": "track-00000000000040008000000000000000-1",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     32
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   },
+   {
+    "key": "output:track-00000000000040008000000000000000-2",
+    "kind": "output",
+    "source": "track-00000000000040008000000000000000-2",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     32
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   },
+   {
+    "key": "output:track-00000000000040008000000000000000-3",
+    "kind": "output",
+    "source": "track-00000000000040008000000000000000-3",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     32
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   },
+   {
+    "key": "output:track-00000000000040008000000000000000-4",
+    "kind": "output",
+    "source": "track-00000000000040008000000000000000-4",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     32
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  ]
+ }
+}

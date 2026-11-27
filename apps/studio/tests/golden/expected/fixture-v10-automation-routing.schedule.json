@@ -1,0 +1,686 @@
+{
+ "schedule": [
+  {
+   "beat": 0,
+   "payload": {
+    "kind": "note",
+    "trackId": "lead",
+    "preset": "warmPad",
+    "pitch": 60,
+    "durationBeats": 1,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 1,
+   "payload": {
+    "kind": "note",
+    "trackId": "lead",
+    "preset": "warmPad",
+    "pitch": 64,
+    "durationBeats": 1,
+    "velocity": 90
+   }
+  },
+  {
+   "beat": 2,
+   "payload": {
+    "kind": "note",
+    "trackId": "lead",
+    "preset": "warmPad",
+    "pitch": 67,
+    "durationBeats": 2,
+    "velocity": 100
+   }
+  },
+  {
+   "beat": 4,
+   "payload": {
+    "kind": "note",
+    "trackId": "pad",
+    "preset": "softPad",
+    "pitch": 48,
+    "durationBeats": 4,
+    "velocity": 70
+   }
+  },
+  {
+   "beat": 8,
+   "payload": {
+    "kind": "note",
+    "trackId": "pad",
+    "preset": "softPad",
+    "pitch": 55,
+    "durationBeats": 4,
+    "velocity": 70
+   }
+  }
+ ],
+ "sound": {
+  "seconds": [
+   [
+    0,
+    0
+   ],
+   [
+    16,
+    8
+   ]
+  ],
+  "automation": [
+   {
+    "laneId": "lane-vol",
+    "target": {
+     "type": "track-volume",
+     "trackId": "lead"
+    },
+    "base": 0.8,
+    "readEnabled": true,
+    "samples": [
+     0.2,
+     0.30000000000000004,
+     0.4,
+     0.5,
+     0.6000000000000001,
+     0.7,
+     0.8,
+     0.9000000000000001,
+     1,
+     0.9375,
+     0.875,
+     0.8125,
+     0.75,
+     0.6875,
+     0.625,
+     0.5625,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "laneId": "lane-pan",
+    "target": {
+     "type": "track-pan",
+     "trackId": "pad"
+    },
+    "base": 0.4,
+    "readEnabled": false,
+    "samples": [
+     -1,
+     -0.875,
+     -0.75,
+     -0.625,
+     -0.5,
+     -0.375,
+     -0.25,
+     -0.125,
+     0,
+     0.125,
+     0.25,
+     0.375,
+     0.5,
+     0.625,
+     0.75,
+     0.875,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   },
+   {
+    "laneId": "lane-pan-bypass",
+    "target": {
+     "type": "track-pan",
+     "trackId": "lead"
+    },
+    "base": -0.25,
+    "readEnabled": false,
+    "samples": [
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "laneId": "lane-master",
+    "target": {
+     "type": "track-volume",
+     "trackId": "m"
+    },
+    "base": 0.9,
+    "readEnabled": true,
+    "samples": [
+     1,
+     0.96875,
+     0.9375,
+     0.90625,
+     0.875,
+     0.84375,
+     0.8125,
+     0.78125,
+     0.75,
+     0.71875,
+     0.6875,
+     0.65625,
+     0.625,
+     0.59375,
+     0.5625,
+     0.53125,
+     0.5,
+     0.46875,
+     0.4375,
+     0.40625,
+     0.375,
+     0.34375,
+     0.3125,
+     0.28125,
+     0.25,
+     0.21875,
+     0.1875,
+     0.15625,
+     0.125,
+     0.09375,
+     0.0625,
+     0.03125,
+     0
+    ]
+   },
+   {
+    "laneId": "lane-vol-read-off",
+    "target": {
+     "type": "track-volume",
+     "trackId": "pad"
+    },
+    "base": 1,
+    "readEnabled": false,
+    "samples": [
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3,
+     0.3
+    ]
+   }
+  ],
+  "automationCommands": [
+   {
+    "laneId": "lane-vol",
+    "target": {
+     "type": "track-volume",
+     "trackId": "lead"
+    },
+    "readEnabled": true,
+    "commands": [
+     {
+      "type": "hold",
+      "beat": 0,
+      "time": 0,
+      "value": 0.2
+     },
+     {
+      "type": "linear",
+      "beat": 4,
+      "time": 2,
+      "value": 1
+     },
+     {
+      "type": "linear",
+      "beat": 8,
+      "time": 4,
+      "value": 0.5
+     }
+    ]
+   },
+   {
+    "laneId": "lane-pan",
+    "target": {
+     "type": "track-pan",
+     "trackId": "pad"
+    },
+    "readEnabled": false,
+    "commands": []
+   },
+   {
+    "laneId": "lane-pan-bypass",
+    "target": {
+     "type": "track-pan",
+     "trackId": "lead"
+    },
+    "readEnabled": false,
+    "commands": []
+   },
+   {
+    "laneId": "lane-master",
+    "target": {
+     "type": "track-volume",
+     "trackId": "m"
+    },
+    "readEnabled": true,
+    "commands": [
+     {
+      "type": "hold",
+      "beat": 0,
+      "time": 0,
+      "value": 1
+     },
+     {
+      "type": "linear",
+      "beat": 16,
+      "time": 8,
+      "value": 0
+     }
+    ]
+   },
+   {
+    "laneId": "lane-vol-read-off",
+    "target": {
+     "type": "track-volume",
+     "trackId": "pad"
+    },
+    "readEnabled": false,
+    "commands": []
+   }
+  ]
+ },
+ "timing": {
+  "notes": [
+   {
+    "trackId": "lead",
+    "pitch": 60,
+    "startBeat": 0,
+    "endBeat": 1,
+    "startSeconds": 0,
+    "endSeconds": 0.5,
+    "noteOnTime": 0,
+    "noteOnDuration": 0.5
+   },
+   {
+    "trackId": "lead",
+    "pitch": 64,
+    "startBeat": 1,
+    "endBeat": 2,
+    "startSeconds": 0.5,
+    "endSeconds": 1,
+    "noteOnTime": 0.5,
+    "noteOnDuration": 0.5
+   },
+   {
+    "trackId": "lead",
+    "pitch": 67,
+    "startBeat": 2,
+    "endBeat": 4,
+    "startSeconds": 1,
+    "endSeconds": 2,
+    "noteOnTime": 1,
+    "noteOnDuration": 1
+   },
+   {
+    "trackId": "pad",
+    "pitch": 48,
+    "startBeat": 4,
+    "endBeat": 8,
+    "startSeconds": 2,
+    "endSeconds": 4,
+    "noteOnTime": 2,
+    "noteOnDuration": 2
+   },
+   {
+    "trackId": "pad",
+    "pitch": 55,
+    "startBeat": 8,
+    "endBeat": 12,
+    "startSeconds": 4,
+    "endSeconds": 6,
+    "noteOnTime": 4,
+    "noteOnDuration": 2
+   }
+  ],
+  "resolvedDrums": []
+ },
+ "routing": {
+  "topologicalTrackIds": [
+   "lead",
+   "pad",
+   "bus",
+   "bus2"
+  ],
+  "edges": [
+   {
+    "key": "output:lead",
+    "kind": "output",
+    "source": "lead",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     0.2,
+     0.6000000000000001,
+     1,
+     0.75,
+     0.5,
+     0.5
+    ],
+    "effectiveGainAtBeats": [
+     0.2,
+     0.6000000000000001,
+     1,
+     0.75,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "key": "send:send-pre",
+    "kind": "send",
+    "source": "lead",
+    "destination": {
+     "type": "bus",
+     "trackId": "bus"
+    },
+    "tap": "pre-fader",
+    "sendGain": 0.5,
+    "edgeGain": 0.5,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     0.2,
+     0.6000000000000001,
+     1,
+     0.75,
+     0.5,
+     0.5
+    ],
+    "effectiveGainAtBeats": [
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5,
+     0.5
+    ]
+   },
+   {
+    "key": "send:send-post",
+    "kind": "send",
+    "source": "lead",
+    "destination": {
+     "type": "bus",
+     "trackId": "bus2"
+    },
+    "tap": "post-fader",
+    "sendGain": 0.25,
+    "edgeGain": 0.25,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     0.2,
+     0.6000000000000001,
+     1,
+     0.75,
+     0.5,
+     0.5
+    ],
+    "effectiveGainAtBeats": [
+     0.05,
+     0.15000000000000002,
+     0.25,
+     0.1875,
+     0.125,
+     0.125
+    ]
+   },
+   {
+    "key": "output:pad",
+    "kind": "output",
+    "source": "pad",
+    "destination": {
+     "type": "bus",
+     "trackId": "bus2"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   },
+   {
+    "key": "send:send-off",
+    "kind": "send",
+    "source": "pad",
+    "destination": {
+     "type": "bus",
+     "trackId": "bus"
+    },
+    "tap": "pre-fader",
+    "sendGain": 1,
+    "edgeGain": 0,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "key": "output:bus",
+    "kind": "output",
+    "source": "bus",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   },
+   {
+    "key": "output:bus2",
+    "kind": "output",
+    "source": "bus2",
+    "destination": {
+     "type": "master"
+    },
+    "tap": "post-fader",
+    "sendGain": null,
+    "edgeGain": 1,
+    "probeBeats": [
+     0,
+     2,
+     4,
+     6,
+     8,
+     16
+    ],
+    "faderAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "effectiveGainAtBeats": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  ]
+ }
+}
