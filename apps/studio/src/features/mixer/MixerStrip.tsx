@@ -1,4 +1,4 @@
-import type { EffectConfig, Track } from '@cts/project-model';
+import { sendLevel, type EffectConfig, type Track } from '@cts/project-model';
 import { useCallback, useMemo, useState } from 'react';
 import {
   DEFAULT_EFFECT_PARAMS,
@@ -49,6 +49,7 @@ function effectLabel(effect: EffectConfig | undefined, key: string, fallback: nu
 export function MixerStrip() {
   const tracks = useStore((s) => s.project.tracks);
   const channels = tracks.filter((t) => t.type !== 'master');
+  const returns = tracks.filter((t) => t.type === 'bus');
   const master = tracks.find((t) => t.type === 'master') ?? null;
   const [meterLevels, setMeterLevels] = useState<Record<string, LevelMeterReading>>({});
   const updateMeterLevel = useCallback((trackId: string, reading: LevelMeterReading) => {
@@ -74,14 +75,22 @@ export function MixerStrip() {
 
   return (
     <footer className="mixer-strip" aria-label="ミキサー">
-      <div className="mixer-strip__row">
-        {channels.map((track) => (
-          <ChannelStrip
-            key={track.id}
-            track={track}
-            onLevelChange={updateMeterLevel}
-          />
-        ))}
+      <div className="mixer-strip__channels">
+        {returns.length > 0 ? (
+          <p id="mixer-send-help" className="mixer-strip__send-help">
+            1 つの響きを共有すると、同じ部屋で演奏しているように聞こえます
+          </p>
+        ) : null}
+        <div className="mixer-strip__row">
+          {channels.map((track) => (
+            <ChannelStrip
+              key={track.id}
+              track={track}
+              sendTargets={track.type === 'bus' ? undefined : returns}
+              onLevelChange={updateMeterLevel}
+            />
+          ))}
+        </div>
       </div>
       {master ? (
         <div className="mixer-strip__master">
@@ -106,9 +115,10 @@ export function MixerStrip() {
 function ChannelStrip(props: {
   track: Track;
   isMaster?: boolean;
+  sendTargets?: readonly Track[];
   onLevelChange: (trackId: string, reading: LevelMeterReading) => void;
 }) {
-  const { track, isMaster = false, onLevelChange } = props;
+  const { track, isMaster = false, sendTargets, onLevelChange } = props;
   const setTrackVolume = useStore((s) => s.setTrackVolume);
   const setTrackPan = useStore((s) => s.setTrackPan);
   const toggleMute = useStore((s) => s.toggleMute);
@@ -137,7 +147,12 @@ function ChannelStrip(props: {
   };
 
   const setEffectEnabled = (type: SupportedEffectType, enabled: boolean) => {
-    updateEffect(type, (effect) => ({ ...effect, enabled }));
+    const sharedDelay = enabled && track.type === 'bus' && type === 'delay' && !findEffect(track.effects, type);
+    updateEffect(type, (effect) => ({
+      ...effect,
+      enabled,
+      params: sharedDelay ? { ...effect.params, mix: 1 } : effect.params,
+    }));
   };
 
   const setEffectParam = (type: SupportedEffectType, key: string, value: number) => {
@@ -225,6 +240,10 @@ function ChannelStrip(props: {
         </div>
       ) : null}
 
+      {sendTargets?.map((target) => (
+        <SendKnob key={target.id} track={track} target={target} />
+      ))}
+
       {!isMaster ? (
         <EffectControls
           track={track}
@@ -233,6 +252,36 @@ function ChannelStrip(props: {
         />
       ) : null}
     </div>
+  );
+}
+
+function SendKnob({ track, target }: { track: Track; target: Track }) {
+  const setTrackSend = useStore((s) => s.setTrackSend);
+  const level = sendLevel(track, target.id);
+  return (
+    <label className="mix-ch__send">
+      <span className="mix-ch__send-label" title={target.name}>{target.name} へ送る量</span>
+      <span className="mix-ch__send-dial">
+        <span
+          className="mix-ch__send-needle"
+          style={{ transform: `rotate(${-135 + level * 270}deg)` }}
+          aria-hidden="true"
+        />
+        <input
+          type="range"
+          {...sliderUndoProps}
+          min={0}
+          max={1}
+          step={0.01}
+          value={level}
+          aria-label={`${track.name} から ${target.name} へ送る量`}
+          aria-describedby="mixer-send-help"
+          aria-valuetext={percentLabel(level)}
+          onChange={(e) => setTrackSend(track.id, target.id, Number(e.target.value))}
+        />
+      </span>
+      <span aria-hidden="true">{percentLabel(level)}</span>
+    </label>
   );
 }
 
@@ -479,7 +528,7 @@ function EffectControls(props: {
           type="range"
           {...sliderUndoProps}
           min={0}
-          max={0.8}
+          max={track.type === 'bus' ? 1 : 0.8}
           step={0.01}
           value={reverbMix}
           disabled={!reverbOn}

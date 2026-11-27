@@ -174,7 +174,8 @@ function buildInstrumentTrack(
  * Track layout:
  *   - Track 0 (tempo track): track name, tempo, time and key signatures, and chord
  *     symbols as marker meta events (FF 06) at each chord's startBeat.
- *   - One track per instrument/drum track, with CC7 (volume) and CC10 (pan)
+ *   - One track per instrument/drum track. Shared returns do not use a track or
+ *     reserve a MIDI channel. Each playable track has CC7 (volume) and CC10 (pan)
  *     at the track start and a program change for instrument tracks. If the full layout exceeds the SMF track limit,
  *     only instrument/drum tracks with sounding events are written.
  *

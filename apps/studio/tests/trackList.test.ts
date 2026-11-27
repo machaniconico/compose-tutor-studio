@@ -5,6 +5,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { useStore } from '../src/state/store';
 import { TrackList } from '../src/features/tracklist/TrackList';
+import { getBridgeSnapshot } from '../src/state/tutorialBridge';
 
 vi.mock('../src/audio/playback', () => ({ initAudioBridge: () => () => undefined }));
 
@@ -112,4 +113,20 @@ describe('TrackList track management', () => {
     expect(values('Drums の役割')).toEqual(['', 'drums']);
     expect(values('Bass の役割')).toEqual(['', 'chords', 'bass', 'melody']);
   });
+});
+
+it('adds a shared reverb in one step and shows a Japanese reason for the third', () => {
+  render(createElement(TrackList));
+  const add = screen.getByRole('button', { name: '共有リバーブを追加' });
+  fireEvent.click(add);
+  const { project, past } = useStore.getState();
+  expect(past).toHaveLength(1);
+  const room = project.tracks.find((track) => track.type === 'bus');
+  expect(room).toMatchObject({ clips: [], effects: [{ type: 'reverb', enabled: true, params: { mix: 1 } }] });
+  fireEvent.click(add);
+  const before = useStore.getState();
+  fireEvent.click(add);
+  expect(useStore.getState().project).toBe(before.project);
+  expect(useStore.getState().past).toBe(before.past);
+  expect(getBridgeSnapshot().toasts.at(-1)?.message).toContain('2 つまで');
 });

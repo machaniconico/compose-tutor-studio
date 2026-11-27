@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   createEmptyProject,
+  addClip,
+  addReverbReturn,
+  createMidiClip,
+  duplicateClip,
   addChordEvent,
   updateChordEvent,
   removeChordEvent,
@@ -207,4 +211,15 @@ describe('instrument preset and macro mutations', () => {
     expect(setTrackInstrumentMacros(project, id, { ...macros, width: Number.NaN }, t1)).toBe(project);
     expect(setTrackInstrumentMacros(project, id, { ...macros }, t1)).toBe(project);
   });
+});
+
+it('refuses clip and note creation on return tracks', () => {
+  const project = addReverbReturn(createEmptyProject());
+  const room = project.tracks.find((track) => track.type === 'bus')!;
+  const clip = createMidiClip(room.id, 0, 4);
+  expect(addClip(project, room.id, clip)).toBe(project);
+  const invalid = { ...project, tracks: project.tracks.map((track) =>
+    track === room ? { ...track, clips: [clip] } : track) };
+  expect(addNoteToClip(invalid, clip.id, { pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 })).toBe(invalid);
+  expect(duplicateClip(invalid, clip.id, { mode: 'copy' })).toBe(invalid);
 });

@@ -1,7 +1,9 @@
 // Project validation. Enforces docs/06_data_model.md section 5 plus structural
 // integrity checks (unique ids, clip.trackId references an existing track).
 
-import type { InstrumentMacros, Project, TrackRole } from './types';
+import { MAX_AUTOMATION_POINTS } from './automation';
+import { MAX_RETURN_TRACKS } from './types';
+import type { InstrumentMacros, Project, Track, TrackRole } from './types';
 import { findProjectSoundingLimitProblem, MAX_SONG_BARS, maxSongBars, MIN_LOOP_PERIOD_BEATS } from './sounding';
 import { clipTickSpan, tickSpansOverlap } from './time';
 
@@ -59,6 +61,89 @@ function describeValue(value: unknown): string {
   return value === null ? 'null' : typeof value;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validateSends(
+  track: Track,
+  path: string,
+  returns: Record<string, Track>,
+  push: (path: string, message: string) => void,
+): void {
+  try {
+    const sends: unknown = track.sends;
+    if (sends === undefined) return;
+    if (!isRecord(sends)) {
+      push(path, `送り先と送る量を指定してください (現在: ${describeValue(sends)})`);
+      return;
+    }
+    for (const [id, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(sends))) {
+      const sendPath = `${path}.${id}`;
+      const value: unknown = descriptor.value;
+      if (typeof value !== 'number' || !inRange(value, 0, 1)) {
+        push(sendPath, `送る量は 0〜1 の数値にしてください (現在: ${describeValue(value)})`);
+      }
+      if (id === track.id) {
+        push(sendPath, '自分自身には音を送れません。');
+      } else if (!Object.hasOwn(returns, id)) {
+        push(sendPath, '送り先のリターントラックが見つかりません。');
+      } else if (track.type === 'bus' || track.type === 'master') {
+        push(sendPath, 'リターンやマスターからリターンへ音を送れません。');
+      }
+    }
+  } catch {
+    push(path, '送り先と送る量を読み取れません。');
+  }
+}
+
+function validateAutomation(
+  automation: unknown,
+  path: string,
+  push: (path: string, message: string) => void,
+): void {
+  if (automation === undefined) return;
+  if (!isRecord(automation)) {
+    push(path, `音量の変化はオブジェクトで保存してください (現在: ${describeValue(automation)})`);
+    return;
+  }
+  const lane = automation.volume;
+  if (lane === undefined) return;
+  const lanePath = `${path}.volume`;
+  if (!isRecord(lane)) {
+    push(lanePath, `音量の変化はオブジェクトで保存してください (現在: ${describeValue(lane)})`);
+    return;
+  }
+  const { points } = lane;
+  const pointsPath = `${lanePath}.points`;
+  if (!Array.isArray(points)) {
+    push(pointsPath, `音量の点は配列で保存してください (現在: ${describeValue(points)})`);
+    return;
+  }
+  if (points.length > MAX_AUTOMATION_POINTS) {
+    push(pointsPath, `音量の点は ${MAX_AUTOMATION_POINTS} 個までです`);
+    return;
+  }
+  let previousBeat = 0;
+  for (const [index, point] of points.entries()) {
+    const pointPath = `${pointsPath}[${index}]`;
+    if (!isRecord(point)) {
+      push(pointPath, `音量の点には拍と音量を入れてください (現在: ${describeValue(point)})`);
+      continue;
+    }
+    const { beat, value } = point;
+    if (typeof beat !== 'number' || !Number.isFinite(beat) || beat < 0) {
+      push(`${pointPath}.beat`, `拍は 0 以上の有限な数にしてください (現在: ${describeValue(beat)})`);
+    } else {
+      if (beat < previousBeat) push(`${pointPath}.beat`, '音量の点は拍の早い順に並べてください');
+      previousBeat = beat;
+    }
+    if (typeof value !== 'number' || !inRange(value, 0, 1)) {
+      push(`${pointPath}.value`, `音量は 0〜1 の数にしてください (現在: ${describeValue(value)})`);
+    }
+  }
+}
+
 export function validateProject(project: Project): ValidationResult {
   const errors: ValidationError[] = [];
   const push = (path: string, message: string): void => {
@@ -110,10 +195,26 @@ export function validateProject(project: Project): ValidationResult {
   };
   markId(project.id, 'id');
 
+  const returns = project.tracks.filter((track) => track.type === 'bus');
+  if (returns.length > MAX_RETURN_TRACKS) {
+    push('tracks', `共有の響き（リターン）は ${MAX_RETURN_TRACKS} つまで追加できます。`);
+  }
+  const returnsById = Object.fromEntries(returns.map((track) => [track.id, track] as const));
   const trackIds = new Set<string>();
   project.tracks.forEach((track, ti) => {
     markId(track.id, `tracks[${ti}].id`);
     trackIds.add(track.id);
+    const trackPath = `tracks[${ti}]`;
+    validateSends(track, `${trackPath}.sends`, returnsById, push);
+    // The v2 migration converts legacy buses carrying notes into instruments.
+    if (project.schemaVersion >= 3 && track.type === 'bus' && track.clips.length > 0) {
+      push(`${trackPath}.clips`, 'リターンにはクリップやノートを置けません。');
+    }
+    if (track.type === 'master' && track.automation?.volume !== undefined) {
+      push(`tracks[${ti}].automation.volume`, 'マスタートラックには音量の変化を設定できません。');
+    } else {
+      validateAutomation(track.automation, `tracks[${ti}].automation`, push);
+    }
 
     if (typeof track.name !== 'string') {
       push(`tracks[${ti}].name`, 'track name must be a string');

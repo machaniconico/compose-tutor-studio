@@ -1686,6 +1686,18 @@ input[type='range'] {
   flex: 1;
 }
 
+.mixer-strip__channels {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.mixer-strip__send-help {
+  margin: var(--sp-2) var(--sp-3) 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 .mixer-strip__master {
   display: flex;
   padding: var(--sp-3);
@@ -1764,6 +1776,57 @@ input[type='range'] {
   font-size: 10px;
   color: var(--text-faint);
   text-align: center;
+}
+
+.mix-ch__send {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.mix-ch__send-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.mix-ch__send-dial {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+}
+
+.mix-ch__send-dial:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mix-ch__send-needle {
+  position: absolute;
+  top: 6px;
+  width: 2px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--accent-strong);
+  transform-origin: center 15px;
+  pointer-events: none;
+}
+
+.mix-ch__send-dial input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
 }
 
 .mix-ch__buttons {
@@ -2763,19 +2826,20 @@ input[type='range'] {
 }
 
 .arrange__scroll {
+  --arrange-name-width: 96px;
   overflow-x: auto;
 }
 
 .arrange__ruler-row,
-.arrange__rows {
+.arrange__track {
   display: flex;
   width: max-content;
 }
 
 .arrange__corner,
-.arrange__names {
-  flex: 0 0 96px;
-  width: 96px;
+.arrange__name {
+  flex: 0 0 var(--arrange-name-width);
+  width: var(--arrange-name-width);
 }
 
 .arrange__name {
@@ -2789,9 +2853,15 @@ input[type='range'] {
   font-size: 12px;
 }
 
-.arrange__lanes {
+.arrange__rows {
   position: relative;
-  flex: none;
+  width: max-content;
+}
+
+.arrange__playhead {
+  position: absolute;
+  inset: 0 0 0 var(--arrange-name-width);
+  pointer-events: none;
 }
 
 .arrange__lane {
@@ -2863,4 +2933,81 @@ input[type='range'] {
 
 .arrange__menu button {
   text-align: left;
+}
+
+.automation {
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.automation summary {
+  width: fit-content;
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.automation__controls {
+  width: min(100%, 30rem);
+  padding: var(--sp-2);
+}
+
+.automation__controls > div {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.automation__controls p {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-dim);
+}
+
+.automation__plot {
+  position: relative;
+  box-shadow: inset 0 1px var(--border);
+  background-color: var(--bg-input);
+  background-image: linear-gradient(to right, var(--border) 1px, transparent 1px);
+  cursor: crosshair;
+}
+
+.automation__line {
+  position: absolute;
+  height: 2px;
+  background: var(--accent);
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.automation__point {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.automation__point::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--bg-input);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.automation__point:active {
+  cursor: grabbing;
+}
+
+.automation__point:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }

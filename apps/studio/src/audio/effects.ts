@@ -71,6 +71,7 @@ const DELAY_DIVISION_BEATS: Record<DelayDivision, number> = {
  * exceed it (a quarter note below 40 BPM) are clamped by the mixer.
  */
 export const MAX_DELAY_SECONDS = 1.5;
+export const REVERB_IMPULSE_SECONDS = 1.4;
 
 /** Delay time in seconds that lines up with the tempo for a note division. */
 export function delayTimeSeconds(bpm: number, division: DelayDivision): number {
@@ -101,6 +102,7 @@ type EffectInstance = {
 };
 
 export type TrackEffectChain = {
+  readonly entry: AudioNode;
   readonly input: AudioNode;
   readonly output: AudioNode;
   readonly effectTypes: readonly SupportedEffectType[];
@@ -228,13 +230,14 @@ export function buildTrackEffectChain(
   output: AudioNode,
   effects: readonly EffectConfig[] | undefined,
   when: number,
+  initializeMix = false,
 ): TrackEffectChain {
   const enabled = enabledSupportedEffects(effects);
   const instances: EffectInstance[] = [];
   let cursor = input;
 
   for (const effect of enabled) {
-    const instance = createEffectInstance(ctx, effect, when);
+    const instance = createEffectInstance(ctx, effect, when, initializeMix);
     cursor.connect(instance.input);
     cursor = instance.output;
     instances.push(instance);
@@ -243,6 +246,7 @@ export function buildTrackEffectChain(
   cursor.connect(output);
 
   return {
+    entry: instances[0]?.input ?? output,
     input,
     output,
     effectTypes: instances.map((instance) => instance.type),
@@ -269,8 +273,7 @@ export function getCachedReverbImpulse(ctx: BaseAudioContext): AudioBuffer {
   const cached = reverbImpulseCache.get(ctx);
   if (cached) return cached;
 
-  const seconds = 1.4;
-  const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+  const length = Math.max(1, Math.floor(ctx.sampleRate * REVERB_IMPULSE_SECONDS));
   const key = `${ctx.sampleRate}:${length}`;
   let data = reverbImpulseDataCache.get(key);
   if (!data) {
@@ -293,12 +296,13 @@ function createEffectInstance(
   ctx: BaseAudioContext,
   effect: EffectConfig,
   when: number,
+  initializeMix: boolean,
 ): EffectInstance {
   if (effect.type === 'eq') return createEqEffect(ctx, effect, when);
   if (effect.type === 'compressor') return createCompressorEffect(ctx, effect, when);
   if (effect.type === 'filter') return createFilterEffect(ctx, effect, when);
-  if (effect.type === 'delay') return createDelayEffect(ctx, effect, when);
-  return createReverbEffect(ctx, effect, when);
+  if (effect.type === 'delay') return createDelayEffect(ctx, effect, when, initializeMix);
+  return createReverbEffect(ctx, effect, when, initializeMix);
 }
 
 function createEqEffect(
@@ -395,6 +399,7 @@ function createDelayEffect(
   ctx: BaseAudioContext,
   effect: EffectConfig,
   when: number,
+  initializeMix: boolean,
 ): EffectInstance {
   const input = ctx.createGain();
   const dry = ctx.createGain();
@@ -430,6 +435,13 @@ function createDelayEffect(
       disconnect(output);
     },
   };
+  if (initializeMix) {
+    const { mix, timeSeconds, feedback: amount } = delaySettings(effect);
+    delay.delayTime.value = timeSeconds;
+    feedback.gain.value = amount;
+    wet.gain.value = mix;
+    dry.gain.value = 1 - mix;
+  }
   instance.apply(effect, when);
   return instance;
 }
@@ -438,6 +450,7 @@ function createReverbEffect(
   ctx: BaseAudioContext,
   effect: EffectConfig,
   when: number,
+  initializeMix: boolean,
 ): EffectInstance {
   const input = ctx.createGain();
   const dry = ctx.createGain();
@@ -468,6 +481,11 @@ function createReverbEffect(
       disconnect(output);
     },
   };
+  if (initializeMix) {
+    const mix = reverbSettings(effect).mix;
+    wet.gain.value = mix;
+    dry.gain.value = 1 - mix;
+  }
   instance.apply(effect, when);
   return instance;
 }

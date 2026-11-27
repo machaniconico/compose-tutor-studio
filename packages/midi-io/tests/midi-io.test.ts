@@ -9,7 +9,7 @@ import {
 import type { MidiMessage } from '../src/smf.js';
 import { exportProjectToMidi, exportNotesToMidi } from '../src/export.js';
 import { parseMidi } from '../src/import.js';
-import { deserializeProject, expandClip, soundingEvents, serializeProject, setLengthBars, validateProject } from '@cts/project-model';
+import { createTrack, deserializeProject, expandClip, soundingEvents, serializeProject, setLengthBars, validateProject } from '@cts/project-model';
 import type { Clip, Project, NoteEvent } from '@cts/project-model';
 import { makeProject, makeTrack } from '../../project-model/tests/acceptance/helpers';
 import { edgeMismatch, FUZZ_SEEDS, FUZZ_SWINGS, grooveFuzzProject, midiFileEdges, scheduleEdges, shiftOffs } from '../../project-model/tests/grooveFuzz';
@@ -907,4 +907,23 @@ describe('US-018: project.swing=50 の同じクリップでライブのイベン
       }
     }
   });
+});
+
+it('omits interleaved returns without reserving MIDI tracks or channels', () => {
+  const note: NoteEvent = { id: 'n', pitch: 62, startBeat: 0, durationBeats: 1, velocity: 100 };
+  const lead = makeTrack('lead', 'instrument', [{ id: 'lead-clip', trackId: 'lead', type: 'midi', startBeat: 0, lengthBeats: 4, loop: false, notes: [note] }]);
+  const drums = makeTrack('drums', 'drum', [{ id: 'drum-clip', trackId: 'drums', type: 'drum', startBeat: 0, lengthBeats: 4, loop: false, stepsPerBar: 16,
+    drumEvents: [{ id: 'hit', lane: 'kick', stepIndex: 0, velocity: 100 }] }]);
+  const bass = makeTrack('bass', 'instrument', [{ id: 'bass-clip', trackId: 'bass', type: 'midi', startBeat: 0, lengthBeats: 4, loop: false, notes: [{ ...note, id: 'b', pitch: 38 }] }]);
+  const project = makeProject([lead, drums, bass]);
+  const withReturns = { ...project, tracks: [
+    createTrack('Room', 'bus', undefined, undefined, undefined, 'room'),
+    { ...lead, sends: { room: 1 } }, drums,
+    createTrack('Echo', 'bus'), bass,
+  ] };
+  const midi = exportProjectToMidi(withReturns);
+  expect(midi).toEqual(exportProjectToMidi(project));
+  const parsed = parseMidi(midi);
+  expect(parsed.tracks).toHaveLength(4);
+  expect(parsed.tracks.flatMap((track) => track.notes.map((event) => event.channel))).toEqual([0, 9, 1]);
 });

@@ -53,7 +53,21 @@ export type Track = {
   solo: boolean;
   instrument?: InstrumentConfig;
   effects: EffectConfig[];
+  automation?: { volume?: AutomationLane };
+  sends?: Record<string, number>;
 };
+
+export type AutomationLane = { points: { beat: number; value: number }[] };
+
+// 音量の点は曲全体の拍位置とミキサー音量への倍率(0〜1)を記録する。
+// 同じ拍に複数の点がある場合、配列で最後の値を使う。追加・移動した点は同じ拍の末尾に置く。
+// 点の間は直線で補間し、範囲外では最寄りの点の値を保つ。レーンなし・点なしでは倍率 1。
+// 任意の項目として追加するためスキーマ版は据え置き。読み込み時に音量の点を書き換えない。
+
+// sends は送り先のリターン (type: 'bus') の id と送る量 (0〜1) の組。
+// 未指定または 0 なら接続を作らない。読み込みで sends の追加や書き換えは行わず、スキーマ版も据え置く。
+// 接続は音量オートメーションとパンの後、送り元の effects の前からリターンの入力へ分岐する。
+// リターンは最大 2 つで、clips は空。リターンとマスターを送り元にできず、自分自身へも送れない。
 
 // effects の type は 'eq' | 'compressor' | 'filter' | 'delay' | 'reverb'(スキーマ版は上げない)。
 // eq か compressor が有効なら、再生・書き出しの処理順は配列順に関わらず eq → compressor → filter → delay → reverb。
@@ -348,6 +362,9 @@ v2 までのライブ再生と WAV は `lengthBeats` を無視し、各クリッ
 | velocity | 1〜127 |
 | pan | -1.0〜1.0 |
 | volume | 0.0〜2.0 |
+| track automation.volume.points | 配列で最大 10,000 点。各点の beat は 0 以上の有限値で昇順、value は 0〜1 の有限値。構造や数値が不正な場合は日本語で報告する |
+| track sends | 任意のオブジェクト。各キーは実在するリターンの id で、値は 0〜1 の有限数。継承したプロパティは送り先として扱わない |
+| リターントラック | 1 曲に最大 2 つ。クリップやノートを持てず、リターン同士や自分自身には音を送れない |
 | chord duration | 0より大きい |
 | clip start | 0以上 |
 | clip contentLengthBeats | 0 より大きい。ループの実効周期は 1/64 拍以上 |

@@ -31,6 +31,25 @@ export function computeAudibleTracks(tracks: readonly Track[]): Set<string> {
   return new Set((soloed.length > 0 ? soloed : unmuted).map((track) => track.id));
 }
 
+export function sendLevel(track: Track, returnId: string): number {
+  if (track.type === 'bus' || track.type === 'master' || track.id === returnId) return 0;
+  const sends = track.sends;
+  const level = sends && Object.hasOwn(sends, returnId) ? sends[returnId] : 0;
+  return typeof level === 'number' && level > 0 && level <= 1 ? level : 0;
+}
+
+/** Solo keeps the unmuted returns fed by a soloed source audible. */
+export function resolveMuteSolo(tracks: readonly Track[]): Set<string> {
+  const audible = computeAudibleTracks(tracks);
+  const sources = tracks.filter((track) => track.solo && audible.has(track.id));
+  for (const track of tracks) {
+    if (track.type === 'bus' && !track.mute && sources.some((source) => sendLevel(source, track.id) > 0)) {
+      audible.add(track.id);
+    }
+  }
+  return audible;
+}
+
 type SoundingOptions = {
   includeMuted?: boolean;
   clipId?: string;

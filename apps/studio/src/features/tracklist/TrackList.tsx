@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { roleFitsTrackType, sliderUndoProps, textUndoProps, useStore } from '../../state/store';
-import type { Track, TrackRole, TrackType } from '@cts/project-model';
+import { MAX_RETURN_TRACKS, type Track, type TrackRole, type TrackType } from '@cts/project-model';
 import { InstrumentPicker } from './InstrumentPicker';
 
 /** Tiny text label for each track type (no emoji, no SVG — simple shapes). */
@@ -8,7 +8,7 @@ const TYPE_LABEL: Record<TrackType, string> = {
   instrument: '鍵',
   drum: '打',
   audio: '音',
-  bus: '束',
+  bus: '響',
   master: '主',
 };
 
@@ -38,6 +38,7 @@ export function TrackList() {
   const toggleMute = useStore((s) => s.toggleMute);
   const toggleSolo = useStore((s) => s.toggleSolo);
   const addTrack = useStore((s) => s.addTrack);
+  const addReverbReturn = useStore((s) => s.addReverbReturn);
   const removeTrack = useStore((s) => s.removeTrack);
   const duplicateTrack = useStore((s) => s.duplicateTrack);
   const renameTrack = useStore((s) => s.renameTrack);
@@ -46,6 +47,7 @@ export function TrackList() {
   const setTrackRole = useStore((s) => s.setTrackRole);
   const [renaming, setRenaming] = useState<{ trackId: string; draft: string } | null>(null);
 
+  const returnLimitReached = tracks.filter((track) => track.type === 'bus').length >= MAX_RETURN_TRACKS;
   const movableIds = tracks.filter((t) => t.type !== 'master').map((t) => t.id);
 
   const handleRemove = (track: Track): void => {
@@ -67,6 +69,9 @@ export function TrackList() {
         </button>
         <button type="button" className="mini-btn" onClick={() => addTrack('drum')}>
           ドラムトラックを追加
+        </button>
+        <button type="button" className="mini-btn" onClick={addReverbReturn}>
+          共有リバーブを追加
         </button>
       </div>
       {tracks.map((track) => {
@@ -109,7 +114,7 @@ export function TrackList() {
                 <div className="track-row__name">{track.name}</div>
               )}
               <div className="track-row__type">
-                <span className="badge">{TYPE_LABEL[track.type]}</span> {track.type}
+                <span className="badge">{TYPE_LABEL[track.type]}</span> {track.type === 'bus' ? 'リターン' : track.type}
               </div>
             </div>
 
@@ -168,6 +173,7 @@ export function TrackList() {
                   type="button"
                   className="mini-btn"
                   aria-label={`${track.name} を複製`}
+                  disabled={track.type === 'bus' && returnLimitReached}
                   onClick={() => duplicateTrack(track.id)}
                 >
                   複製
