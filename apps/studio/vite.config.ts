@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import studioPackage from './package.json';
@@ -50,6 +50,11 @@ export default defineConfig(({ mode }) => {
         },
       },
     ],
+    test: {
+      // Default stays node; DOM tests opt in with `// @vitest-environment jsdom`.
+      environment: 'node',
+      setupFiles: ['./tests/setupDom.ts'],
+    },
     server: {
       port: 5173,
       strictPort: true,

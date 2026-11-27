@@ -294,10 +294,14 @@ const productionStudioPackageIdentity = Object.freeze({
   },
   devDependencies: {
     '@playwright/test': '1.61.1',
+    '@testing-library/dom': '^10.4.2',
+    '@testing-library/react': '^16.3.3',
+    '@testing-library/user-event': '^14.6.13',
     '@types/node': '^20.19.43',
     '@types/react': '^19.1.0',
     '@types/react-dom': '^19.1.0',
     '@vitejs/plugin-react': '^5.0.0',
+    jsdom: '^30.1.3',
     typescript: '^5.8.0',
     vite: '^7.0.0',
     vitest: '^3.1.0',
@@ -490,7 +494,7 @@ const forbiddenPnpmConfigPaths = Object.freeze([
   }),
 ]);
 const productionViteConfigSha256 =
-  '459066c044ee244af72e720aaca9cbb59d7c90b469e84fee8ac784e9348c841b';
+  '3e05c8d6847a0d3b9de0896a5fe64f04db30d653b7930d5d0a5f9db306b7b49c';
 const productionLocalAudioWarpThreadSha256 =
   'ec3118ff8f45fcbad112f027468aa7a3cf0fa20da5bcf5bff3be32a0e8c1e80f';
 const productionBuildScriptSha256 =
@@ -498,7 +502,7 @@ const productionBuildScriptSha256 =
 const productionPnpmWorkspaceSha256 =
   'e4e2e1627c84ee9d6115222d07c5d3e9dd15c6412196602942cdb7131bdb6b6d';
 const productionPnpmLockSha256 =
-  'c3387aa743db4caa383795a58368c23313949c3f0be6683f8f8bdc2f4666d84f';
+  '52b3ecda5ad446cecf3062952ef026c7a149b76cb758f4d7475ded0ce04456a3';
 const productionInfoPlistSha256 =
   '33fe001fcd59ffb037152843f269503897cf1fad46b22a569dd2e78f96380dbf';
 const productionEntitlementsSha256 =
