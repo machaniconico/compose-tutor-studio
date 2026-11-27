@@ -5,7 +5,14 @@
 // and forwards them to the active TutorialEngine. Keeping this module dependency
 // -free means domain code never has to know whether a lesson is running.
 
+import type { Project } from '@cts/project-model';
 import type { AppEvent } from '@cts/tutorial-engine';
+
+/** Describe the net result of an edit that may be part of a gesture. */
+export type ProjectEditEvent = {
+  key: string;
+  describe: (after: Project) => AppEvent | undefined;
+};
 
 export type AppEventListener = (event: AppEvent) => void;
 

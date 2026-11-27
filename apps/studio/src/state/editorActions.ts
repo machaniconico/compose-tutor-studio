@@ -17,6 +17,7 @@ import type {
   Clip,
   DrumEvent,
   DrumLane,
+  EffectConfig,
   InstrumentMacros,
   NoteEvent,
   Project,
@@ -583,9 +584,15 @@ export function writeRecordingTake(
     id: trackIdAllocator(project)('clip'), trackId: track.id, type: 'midi' as const, loop: false,
     startBeat: target.clipStartBeat, lengthBeats: (beatTick(clipEndBeat) - clipStart) / PPQ,
   };
-  return writeLiveNotes(captured, destination, {
+  const notesWritten = writeLiveNotes(captured, destination, {
     create: !clip, effectiveEnd, loop, mode: options.mode, grid: loop ? 0 : options.grid,
   });
+  if (notesWritten === 0) return false;
+  publishAppEvent({
+    type: 'recording.finished',
+    payload: { trackId: track.id, clipId: destination.id, notesWritten },
+  });
+  return true;
 }
 
 type LiveNoteOptions = {
@@ -599,8 +606,8 @@ type LiveNoteOptions = {
 };
 
 /** Input notes carry song-absolute starts until this shared placement pass. */
-function writeLiveNotes(captured: readonly NoteEvent[], destination: Clip, options: LiveNoteOptions): boolean {
-  if (captured.length === 0) return false;
+function writeLiveNotes(captured: readonly NoteEvent[], destination: Clip, options: LiveNoteOptions): number {
+  if (captured.length === 0) return 0;
   const store = useStore.getState();
   const { project } = store;
   const { id: clipId, trackId } = destination;
@@ -630,7 +637,7 @@ function writeLiveNotes(captured: readonly NoteEvent[], destination: Clip, optio
     const range = loop && options.wholeLengths ? 'クリップやループの範囲外' : 'クリップの外';
     pushToast(`${outside} 音は${range}だったので入れませんでした。`, 'info');
   }
-  if (notes.length === 0) return false;
+  if (notes.length === 0) return 0;
 
   const existingNotes = options.mode === 'replace' ? [] : destination.notes ?? [];
   const songEnd = songEndBeat(project);
@@ -669,7 +676,7 @@ function writeLiveNotes(captured: readonly NoteEvent[], destination: Clip, optio
   if (changedByPlayback) {
     pushToast(`${changedByPlayback} 音はスウィングでクリップやループ、曲の終わりより後ろにずれて鳴らないので入れませんでした。`, 'info');
   }
-  if (playable.length === 0) return false;
+  if (playable.length === 0) return 0;
 
   let countToSave = playable.length;
   let candidate = withNotes(playable);
@@ -684,7 +691,7 @@ function writeLiveNotes(captured: readonly NoteEvent[], destination: Clip, optio
       else fits = count;
     }
     pushToast(`${playable.length - fits} 音は曲に入れられる音の上限に達したので入れませんでした。`, 'info');
-    if (fits === 0) return false;
+    if (fits === 0) return 0;
     countToSave = fits;
     candidate = withNotes(playable.slice(0, fits));
   }
@@ -695,9 +702,9 @@ function writeLiveNotes(captured: readonly NoteEvent[], destination: Clip, optio
       store.applyProjectChange(() => withNotes(playable.slice(0, count)));
     }
   }
-  if (!store.applyProjectChange(() => candidate)) return false;
+  if (!store.applyProjectChange(() => candidate)) return 0;
   if (options.create && useStore.getState().editor.selectedTrackId === trackId) store.selectClip(clipId);
-  return true;
+  return countToSave;
 }
 
 // Tolerate floating-point error in differences between whole-tick beats.
@@ -725,7 +732,7 @@ export function writeLastPerformance(notes: readonly NoteEvent[]): boolean {
   const range = selectedLiveNoteRange('取り込み');
   return !!range && writeLiveNotes(notes, range.clip, {
     ...range, grid: useStore.getState().editor.gridSnap, wholeLengths: true,
-  });
+  }) > 0;
 }
 
 export type StepInputPosition = {
@@ -772,7 +779,7 @@ export function writeStepInputChord(step: StepInputPosition, pitches: ReadonlyMa
   const notes = Array.from(pitches, ([pitch, velocity]) => ({
     id: '', startBeat: step.tick / PPQ, durationBeats: step.lengthTicks / PPQ, pitch, velocity,
   }));
-  return writeLiveNotes(notes, range.clip, { ...range, wholeLengths: true, undoEachNote: true });
+  return writeLiveNotes(notes, range.clip, { ...range, wholeLengths: true, undoEachNote: true }) > 0;
 }
 
 /**
@@ -911,9 +918,22 @@ export function setTrackAutomation(
     pushToast(DRUM_CUTOFF_AUTOMATION_MESSAGE, 'error');
     return false;
   }
+  const previousPoints = expected?.points ?? [];
+  if (lane.points.length === previousPoints.length && lane.points.every((point, index) =>
+    point.beat === previousPoints[index]?.beat && point.value === previousPoints[index]?.value,
+  )) return false;
   return store.applyProjectChange((project) => mapTracks(project, (item) => item === track
     ? { ...track, automation: { ...track.automation, [parameter]: lane } }
-    : item));
+    : item), {
+    key: `automation.pointAdded:${trackId}:${parameter}`,
+    describe: (after) => {
+      const finalPoints = after.tracks.find((item) => item.id === trackId)?.automation?.[parameter]?.points;
+      const pointsAdded = (finalPoints?.length ?? 0) - previousPoints.length;
+      if (pointsAdded > 0) {
+        return { type: 'automation.pointAdded', payload: { trackId, parameter, pointsAdded } };
+      }
+    },
+  });
 }
 
 /** Project swing (0..60%), applied on playback by soundingEvents. Other values are ignored. */
@@ -2669,6 +2689,32 @@ export function setDrumStepsPerBar(clipId: string, to: number): { moved: number;
   return { moved: plan.moved, merged: plan.merged };
 }
 
+/** Add or edit one mixer effect. A slider gesture may make several updates. */
+export function updateTrackEffect(
+  trackId: string,
+  type: SupportedEffectType,
+  update: (effect: EffectConfig) => EffectConfig,
+): void {
+  changeTrackEffects(trackId, (effects) => upsertEffect(effects, type, update));
+}
+
+function changeTrackEffects(trackId: string, edit: (effects: Track['effects']) => Track['effects']): void {
+  const store = useStore.getState();
+  const track = store.project.tracks.find((item) => item.id === trackId);
+  if (!track) return;
+  const effects = edit(track.effects);
+  if (JSON.stringify(effects) === JSON.stringify(track.effects)) return;
+  store.applyProjectChange((project) => mapTracks(project, (item) => item === track ? { ...track, effects } : item), {
+    key: `effect.added:${trackId}`,
+    describe: (after) => {
+      const previous = new Set(track.effects.map((effect) => effect.type));
+      const effectTypes = after.tracks.find((item) => item.id === trackId)?.effects
+        .filter((effect) => !previous.has(effect.type)).map((effect) => effect.type);
+      if (effectTypes?.length) return { type: 'effect.added', payload: { trackId, effectTypes } };
+    },
+  });
+}
+
 /**
  * Apply a channel preset (EQ / compressor / filter values) to one track as a
  * single undo step. The preset's effects are switched on; others are untouched.
@@ -2679,21 +2725,16 @@ export function applyChannelPreset(trackId: string, presetId: string): void {
   if (!preset || !state.project.tracks.some((t) => t.id === trackId)) return;
   // A preset is its own undo step, apart from an open (tap tempo) transaction.
   state.commitTransaction();
-  state.applyProjectChange((project) => ({
-    ...project,
-    tracks: project.tracks.map((track) => {
-      if (track.id !== trackId) return track;
-      let effects = track.effects;
-      for (const [type, params] of Object.entries(preset.effects)) {
-        effects = upsertEffect(effects, type as SupportedEffectType, (effect) => ({
-          ...effect,
-          enabled: true,
-          params: { ...effect.params, ...params },
-        }));
-      }
-      return { ...track, effects };
-    }),
-  }));
+  changeTrackEffects(trackId, (effects) => {
+    for (const [type, params] of Object.entries(preset.effects)) {
+      effects = upsertEffect(effects, type as SupportedEffectType, (effect) => ({
+        ...effect,
+        enabled: true,
+        params: { ...effect.params, ...params },
+      }));
+    }
+    return effects;
+  });
 }
 
 /**
@@ -2729,6 +2770,16 @@ function clipIds(project: Project): Set<string> {
   return new Set(project.tracks.flatMap((t) => t.clips.map((c) => c.id)));
 }
 
+function emitClipCreated(project: Project, clip: Clip): void {
+  publishAppEvent({
+    type: 'clip.created',
+    payload: {
+      clipId: clip.id, trackId: clip.trackId, type: clip.type,
+      bars: clip.lengthBeats / beatsPerBarOf(project.timeSignature),
+    },
+  });
+}
+
 /** The first clip of `after` whose id is not in `before`. */
 function createdClip(before: Project, after: Project): Clip | null {
   const known = clipIds(before);
@@ -2757,7 +2808,7 @@ function songLimitMessage(maxBars: number): string {
 export function duplicateClipInSong(clipId: string, mode: 'copy' | 'link', maxBars: number): string | null {
   const store = useStore.getState();
   store.commitTransaction();
-  const before = store.project;
+  const before = useStore.getState().project;
   const duplicated = duplicateClip(before, clipId, { mode });
   const created = createdClip(before, duplicated);
   if (!created) return null;
@@ -2768,6 +2819,7 @@ export function duplicateClipInSong(clipId: string, mode: 'copy' | 'link', maxBa
   }
   if (!store.applyProjectChange(() => next)) return null;
   selectTrackClip(created);
+  emitClipCreated(next, created);
   return created.id;
 }
 
@@ -2787,12 +2839,19 @@ export function removeClipFromSong(clipId: string): void {
 export function splitClipAtBeat(clipId: string, atBeat: number): boolean {
   const store = useStore.getState();
   store.commitTransaction();
-  const result = splitClip(store.project, clipId, atBeat);
+  const before = useStore.getState().project;
+  const result = splitClip(before, clipId, atBeat);
   if (!result.ok) {
     pushToast(result.reason, 'error');
     return false;
   }
-  return store.applyProjectChange(() => result.project);
+  if (!store.applyProjectChange(() => result.project)) return false;
+  const right = createdClip(before, result.project)!;
+  publishAppEvent({
+    type: 'clip.split',
+    payload: { clipId, rightClipId: right.id, trackId: right.trackId, atBeat: right.startBeat },
+  });
+  return true;
 }
 
 /**
@@ -2804,7 +2863,7 @@ export function splitClipAtBeat(clipId: string, atBeat: number): boolean {
 export function addEmptyClipAt(trackId: string, startBeat: number, maxBars: number): string | null {
   const store = useStore.getState();
   store.commitTransaction();
-  const before = store.project;
+  const before = useStore.getState().project;
   const track = before.tracks.find((t) => t.id === trackId);
   if (!track || (track.type !== 'drum' && track.type !== 'instrument')) return null;
   const bpb = beatsPerBarOf(before.timeSignature);
@@ -2833,6 +2892,7 @@ export function addEmptyClipAt(trackId: string, startBeat: number, maxBars: numb
   }
   if (!store.applyProjectChange(() => placed)) return null;
   selectTrackClip(placedClip);
+  emitClipCreated(placed, placedClip);
   return created.id;
 }
 
@@ -2852,10 +2912,13 @@ export function openClipInEditor(clipId: string): void {
  * Apply a section edit as one undo step, or explain why it failed. Clears the
  * clip selection when the selected clip is gone (deleted or split).
  */
-function applySectionEdit(edit: (project: Project) => SectionEditResult): boolean {
+function applySectionEdit(
+  edit: (project: Project) => SectionEditResult,
+  onApplied?: (before: Project, after: Project) => void,
+): boolean {
   const store = useStore.getState();
   store.commitTransaction();
-  const before = store.project;
+  const before = useStore.getState().project;
   const result = edit(before);
   if (!result.ok) {
     pushToast(result.reason, 'error');
@@ -2866,12 +2929,20 @@ function applySectionEdit(edit: (project: Project) => SectionEditResult): boolea
     store.selectClip(null);
     store.selectNotes([]);
   }
+  onApplied?.(before, result.project);
   return true;
 }
 
 /** Duplicate a section with its clips and chords right after itself (the song grows). */
 export function duplicateSectionInSong(sectionId: string): boolean {
-  return applySectionEdit((project) => duplicateSection(project, sectionId));
+  return applySectionEdit((project) => duplicateSection(project, sectionId), (before, after) => {
+    const ids = new Set(before.sections.map((section) => section.id));
+    const copy = after.sections.find((section) => !ids.has(section.id))!;
+    publishAppEvent({
+      type: 'section.duplicated',
+      payload: { sectionId, newSectionId: copy.id, startBar: copy.startBar, lengthBars: copy.lengthBars },
+    });
+  });
 }
 
 /** Swap a section with the one before (-1) or after (1) it, with their clips and chords. */

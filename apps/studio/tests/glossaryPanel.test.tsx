@@ -79,6 +79,28 @@ describe('TutorialPanel', () => {
     expect(screen.getByRole('tooltip').textContent).toContain('コード');
   });
 
+  it('opens the DAW course with glossary terms and resumes progress saved by older versions', () => {
+    bridge.__resetBridgeForTest();
+    localStorage.clear();
+    setDifficulty('beginner');
+    localStorage.setItem('cts.tutorial.basic-1', JSON.stringify({
+      lessonId: 'basic-1', status: 'inProgress', currentStep: 2, updatedAt: '2025-01-01T00:00:00.000Z',
+    }));
+    render(<TutorialPanel />);
+
+    const course = screen.getByRole('heading', { name: 'DAW 操作コース' }).closest('section')!;
+    fireEvent.click(within(course).getByRole('button', { name: /ミックスを整える/ }));
+    const term = within(document.querySelector<HTMLElement>('.lesson-runner__step-title')!).getByText('EQ');
+    fireEvent.focus(term);
+    expect(screen.getByRole('tooltip').textContent).toContain('音の高い部分や低い部分');
+    fireEvent.click(screen.getByRole('button', { name: '← 中断して一覧へ戻る' }));
+    const savedLesson = screen.getAllByRole('button', { name: /進行中.*再開する/ });
+    fireEvent.click(savedLesson.find((button) => button.textContent?.includes('ステップ 3 /'))!);
+    expect(bridge.getBridgeSnapshot().engineState?.lessonId).toBe('basic-1');
+    expect(bridge.getBridgeSnapshot().engineState?.stepIndex).toBe(2);
+    expect(screen.getAllByRole('radio').length).toBeGreaterThan(0);
+  });
+
   it('keeps a partly answered exercise while the glossary is open', () => {
     openQuizStep();
     render(<TutorialPanel />);

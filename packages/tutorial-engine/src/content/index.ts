@@ -3,15 +3,18 @@
 import type { Course, TutorialLesson } from '../types.js';
 import { BASIC_COURSE, BASIC_LESSONS } from './basic-course.js';
 import { COMPOSE_COURSE, COMPOSE_LESSONS } from './compose-course.js';
+import { DAW_COURSE, DAW_LESSONS } from './daw-course.js';
 import { COURSE0_COURSE, COURSE0_LESSONS } from '../courses.js';
 
 export { BASIC_COURSE, BASIC_LESSONS } from './basic-course.js';
 export { COMPOSE_COURSE, COMPOSE_LESSONS } from './compose-course.js';
 export { COURSE0_COURSE, COURSE0_LESSONS } from '../courses.js';
 
-export const ALL_COURSES: Course[] = [COURSE0_COURSE, BASIC_COURSE, COMPOSE_COURSE];
+export { DAW_COURSE, DAW_LESSONS } from './daw-course.js';
 
-export const ALL_LESSONS: TutorialLesson[] = [...COURSE0_LESSONS, ...BASIC_LESSONS, ...COMPOSE_LESSONS];
+export const ALL_COURSES: Course[] = [COURSE0_COURSE, BASIC_COURSE, COMPOSE_COURSE, DAW_COURSE];
+
+export const ALL_LESSONS: TutorialLesson[] = [...COURSE0_LESSONS, ...BASIC_LESSONS, ...COMPOSE_LESSONS, ...DAW_LESSONS];
 
 const lessonMap = new Map<string, TutorialLesson>(ALL_LESSONS.map((l) => [l.id, l]));
 

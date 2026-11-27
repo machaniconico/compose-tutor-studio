@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { expandClip, validateProject } from '@cts/project-model';
 import { checkGoalOnEvent, evaluateProjectPredicate } from '../src/goals.js';
 import { resolveTrack, resolveTrackByPredicateName, roleForTrackName } from '../src/trackResolve.js';
+import { DAW_LESSONS } from '../src/content/daw-course.js';
 import type { AppEvent } from '../src/types.js';
 import {
   makeDrumEvent,
@@ -641,5 +642,64 @@ describe('linked (aliasOf) clips', () => {
     });
     expect(evaluateProjectPredicate({ type: 'noteCountAtLeast', trackName: 'Melody', value: 2 }, project)).toBe(true);
     expect(evaluateProjectPredicate({ type: 'drumLaneActive', lane: 'kick', minSteps: 2 }, project)).toBe(true);
+  });
+});
+
+describe('DAW course event goals', () => {
+  const events: AppEvent[] = [
+    { type: 'track.added', payload: { trackId: 't', trackName: '楽器', trackType: 'instrument' } },
+    { type: 'clip.created', payload: { trackId: 't', clipId: 'a', type: 'midi', bars: 1 } },
+    { type: 'clip.split', payload: { trackId: 't', clipId: 'a', rightClipId: 'b', atBeat: 2 } },
+    { type: 'section.duplicated', payload: { sectionId: 's', newSectionId: 'copy', startBar: 4, lengthBars: 4 } },
+    { type: 'loop.set', payload: { range: { startBeat: 0, endBeat: 4 } } },
+    { type: 'effect.added', payload: { trackId: 't', effectTypes: ['compressor', 'eq'] } },
+    { type: 'automation.pointAdded', payload: { trackId: 't', parameter: 'volume', pointsAdded: 2 } },
+    { type: 'recording.finished', payload: { trackId: 't', clipId: 'a', notesWritten: 1 } },
+    { type: 'track.volumeChanged', payload: { trackId: 't', trackName: '楽器', volume: 0.5 } },
+    { type: 'export.wav', payload: { format: 'wav' } },
+  ];
+  const steps = DAW_LESSONS.flatMap((lesson) => lesson.steps);
+  const unrelatedEvent = { type: 'project.created', payload: { key: 'C', bpm: 120 } } as const;
+
+  it.each(events)('$type satisfies its DAW course goal', (event) => {
+    const goal = steps.find(({ goal }) => goal.kind === 'event' && goal.eventType === event.type)!.goal;
+    const project = makeProject();
+    expect(checkGoalOnEvent(goal, unrelatedEvent, project, 0)).toEqual({ satisfied: false, newEventCount: 0 });
+    expect(checkGoalOnEvent(goal, event, project, 0)).toEqual({ satisfied: true, newEventCount: 1 });
+  });
+
+  const mismatches: AppEvent[] = [
+    { type: 'track.added', payload: { trackId: 't', trackName: 'ドラム', trackType: 'drum' } },
+    { type: 'loop.set', payload: { range: null } },
+    { type: 'effect.added', payload: { trackId: 't', effectTypes: ['compressor'] } },
+    { type: 'automation.pointAdded', payload: { trackId: 't', parameter: 'pan', pointsAdded: 1 } },
+  ];
+
+  it.each(mismatches)('$type ignores an operation that does not meet the lesson filter', (event) => {
+    const goal = steps.find(({ goal }) => goal.kind === 'event' && goal.eventType === event.type)!.goal;
+    expect(checkGoalOnEvent(goal, event, makeProject(), 0)).toEqual({ satisfied: false, newEventCount: 0 });
+  });
+
+  it('counts audible occurrences in the copied clip, including links and repeats', () => {
+    const track = makeMelodyTrack([makeNote(60)]);
+    const source = { ...track.clips[0]!, trackId: track.id, lengthBeats: 1 };
+    const linked = {
+      ...source, id: 'link', aliasOf: source.id, notes: [], startBeat: 2,
+      lengthBeats: 4, loop: true, contentLengthBeats: 1,
+    };
+    const project = makeProject({ lengthBars: 1, tracks: [{ ...track, clips: [source, linked] }] });
+    const event: AppEvent = {
+      type: 'clip.created', payload: { clipId: linked.id, trackId: track.id, bars: 1, type: 'midi' },
+    };
+    const { goal } = steps.find((step) => step.id === 'daw-arrange-copy-clip')!;
+    expect(checkGoalOnEvent(goal, event, project, 0).satisfied).toBe(true);
+    expect(checkGoalOnEvent(goal, event, { ...project, tracks: [{ ...project.tracks[0]!, mute: true }] }, 0).satisfied)
+      .toBe(false);
+    const atSongEnd = { ...project, tracks: [{ ...track, clips: [source, { ...linked, startBeat: 4, notes: [makeNote(62)] }] }] };
+    expect(checkGoalOnEvent(goal, event, atSongEnd, 0).satisfied).toBe(false);
+    expect(checkGoalOnEvent({ kind: 'event', eventType: 'clip.created', match: { minSoundingEvents: 2 } }, event, project, 0).satisfied)
+      .toBe(true);
+    expect(checkGoalOnEvent({ kind: 'event', eventType: 'clip.created', match: { minSoundingEvents: 3 } }, event, project, 0).satisfied)
+      .toBe(false);
   });
 });

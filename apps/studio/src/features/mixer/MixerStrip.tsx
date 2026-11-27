@@ -6,12 +6,11 @@ import {
   MAX_DELAY_SECONDS,
   effectParam,
   findEffect,
-  upsertEffect,
   type DelayDivision,
   type SupportedEffectType,
 } from '../../audio/effects';
 import { effectParamExplanation, simplifyExplanation } from '../inspector/difficultyText';
-import { applyChannelPreset } from '../../state/editorActions';
+import { applyChannelPreset, updateTrackEffect } from '../../state/editorActions';
 import { CHANNEL_PRESETS } from './channelPresets';
 import { sliderUndoProps, useStore } from '../../state/store';
 import { LevelMeter, type LevelMeterReading } from './LevelMeter';
@@ -123,32 +122,14 @@ function ChannelStrip(props: {
   const setTrackPan = useStore((s) => s.setTrackPan);
   const toggleMute = useStore((s) => s.toggleMute);
   const toggleSolo = useStore((s) => s.toggleSolo);
-  const applyProjectChange = useStore((s) => s.applyProjectChange);
   const handleLevelChange = useCallback(
     (reading: LevelMeterReading) => onLevelChange(track.id, reading),
     [onLevelChange, track.id],
   );
 
-  const updateEffect = (
-    type: SupportedEffectType,
-    update: (effect: EffectConfig) => EffectConfig,
-  ) => {
-    applyProjectChange((project) => ({
-      ...project,
-      tracks: project.tracks.map((candidate) =>
-        candidate.id === track.id
-          ? {
-              ...candidate,
-              effects: upsertEffect(candidate.effects, type, update),
-            }
-          : candidate,
-      ),
-    }));
-  };
-
   const setEffectEnabled = (type: SupportedEffectType, enabled: boolean) => {
     const sharedDelay = enabled && track.type === 'bus' && type === 'delay' && !findEffect(track.effects, type);
-    updateEffect(type, (effect) => ({
+    updateTrackEffect(track.id, type, (effect) => ({
       ...effect,
       enabled,
       params: sharedDelay ? { ...effect.params, mix: 1 } : effect.params,
@@ -156,7 +137,7 @@ function ChannelStrip(props: {
   };
 
   const setEffectParam = (type: SupportedEffectType, key: string, value: number) => {
-    updateEffect(type, (effect) => ({
+    updateTrackEffect(track.id, type, (effect) => ({
       ...effect,
       enabled: true,
       params: { ...effect.params, [key]: value },

@@ -107,6 +107,8 @@ export {
   COMPOSE_LESSONS,
   COURSE0_COURSE,
   COURSE0_LESSONS,
+  DAW_COURSE,
+  DAW_LESSONS,
   getLessonById,
 } from './content/index.js';
 

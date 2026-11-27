@@ -133,6 +133,24 @@ function matchesEventMatch(event: AppEvent, match: EventMatch, project: Project)
     const format = p['format'] as string | undefined;
     if (format !== match.format) return false;
   }
+  if (match.trackType !== undefined && (event.type !== 'track.added' || event.payload.trackType !== match.trackType)) {
+    return false;
+  }
+  if (match.effectType !== undefined && (event.type !== 'effect.added' || !event.payload.effectTypes.includes(match.effectType))) {
+    return false;
+  }
+  if (match.parameter !== undefined && (event.type !== 'automation.pointAdded' || event.payload.parameter !== match.parameter)) {
+    return false;
+  }
+  if (match.loopRangeSet !== undefined && (event.type !== 'loop.set' || (event.payload.range !== null) !== match.loopRangeSet)) {
+    return false;
+  }
+  if (match.minSoundingEvents !== undefined) {
+    const clipId = p['clipId'];
+    if (typeof clipId !== 'string' || soundingEvents(project, { clipId }).events.length < match.minSoundingEvents) {
+      return false;
+    }
+  }
   return true;
 }
 

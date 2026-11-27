@@ -8,21 +8,36 @@ import {
   COMPOSE_LESSONS,
   COURSE0_COURSE,
   COURSE0_LESSONS,
+  DAW_COURSE,
+  DAW_LESSONS,
   getLessonById,
 } from '../src/content/index.js';
-import type { TutorialLesson } from '../src/types.js';
+import type { AppEventType } from '../src/types.js';
 
 describe('content registry', () => {
-  it('ALL_COURSES contains 3 courses (course0, basic, compose)', () => {
-    expect(ALL_COURSES).toHaveLength(3);
-    const ids = ALL_COURSES.map((c) => c.id);
-    expect(ids).toContain('course0');
-    expect(ids).toContain('basic');
-    expect(ids).toContain('compose');
+  it('registers the DAW course alongside the existing courses', () => {
+    expect(ALL_COURSES.map((course) => course.id)).toEqual(['course0', 'basic', 'compose', 'daw-course']);
   });
 
-  it('ALL_LESSONS contains 17 lessons (8 course0 + 4 basic + 5 compose)', () => {
-    expect(ALL_LESSONS).toHaveLength(17);
+  it('registers every lesson under a unique ID', () => {
+    expect(ALL_LESSONS).toEqual([...COURSE0_LESSONS, ...BASIC_LESSONS, ...COMPOSE_LESSONS, ...DAW_LESSONS]);
+    expect(new Set(ALL_LESSONS.map((lesson) => lesson.id)).size).toBe(ALL_LESSONS.length);
+  });
+
+  it('has at least five DAW lessons with goals from the allowed events', () => {
+    const allowed = new Set<AppEventType>([
+      'track.added', 'clip.created', 'clip.split', 'section.duplicated', 'loop.set',
+      'recording.finished', 'effect.added', 'track.volumeChanged', 'automation.pointAdded', 'export.wav',
+    ]);
+    expect(DAW_LESSONS.length).toBeGreaterThanOrEqual(5);
+    expect(DAW_COURSE.lessonIds).toEqual(DAW_LESSONS.map((lesson) => lesson.id));
+    for (const lesson of DAW_LESSONS) {
+      expect(lesson.courseId).toBe(DAW_COURSE.id);
+      expect(getLessonById(lesson.id)).toBe(lesson);
+      for (const { goal } of lesson.steps) {
+        expect(goal.kind === 'event' && allowed.has(goal.eventType)).toBe(true);
+      }
+    }
   });
 
   it('BASIC_LESSONS contains 4 lessons', () => {
@@ -70,8 +85,8 @@ describe('lesson structural validity', () => {
       expect(lesson.schemaVersion).toBeGreaterThan(0);
     });
 
-    it(`${lesson.id}: has 3–6 steps`, () => {
-      expect(lesson.steps.length).toBeGreaterThanOrEqual(3);
+    it(`${lesson.id}: has enough steps for its course`, () => {
+      expect(lesson.steps.length).toBeGreaterThanOrEqual(lesson.courseId === DAW_COURSE.id ? 1 : 3);
       expect(lesson.steps.length).toBeLessThanOrEqual(6);
     });
 

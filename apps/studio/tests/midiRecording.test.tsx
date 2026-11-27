@@ -4,10 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { moveClip } from '@cts/project-model';
 import { MAX_RECORDING_EVENTS, recordingPhase } from '../src/audio/recorder';
 import { captureLiveNote } from '../src/audio/playback';
+import { subscribeAppEvents } from '../src/state/appEvents';
 import { importMidiTracks } from '../src/state/editorActions';
 import { createDefaultProject } from '../src/state/defaultProject';
 import { loadProject, saveProject } from '../src/state/persistence';
-import { getBridgeSnapshot } from '../src/state/tutorialBridge';
+import { getBridgeSnapshot, lessonStatus, startLesson, stopLesson } from '../src/state/tutorialBridge';
 import { LiveInputPanel } from '../src/features/input/LiveInputPanel';
 import { TransportBar } from '../src/features/transport/TransportBar';
 import { useStore } from '../src/state/store';
@@ -252,6 +253,25 @@ describe('MIDI recording from the transport and live inputs', () => {
     expect(getBridgeSnapshot().toasts.at(-1)?.message).toMatch(/クリップの始まり.*目盛り/);
   });
 
+  it('completes the recording lesson using just the PC keyboard', async () => {
+    vi.stubGlobal('navigator', {});
+    render(<><TransportBar /><LiveInputPanel /></>);
+    startLesson('daw-record');
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'PC で演奏' }));
+      await begin();
+      tickAt(2.25);
+      keyDown('KeyA');
+      tickAt(2.5);
+      keyUp('KeyA');
+      await act(async () => fireEvent.click(stopButton()));
+      expect(destinationNotes().at(-1)).toMatchObject({ pitch: 60, startBeat: 0.5 });
+      expect(lessonStatus('daw-record')).toBe('completed');
+    } finally {
+      stopLesson();
+    }
+  });
+
   it.each(['PC', 'MIDI'])('records %s event times even when delivery is late', async (source) => {
     const access = new MockMidiAccess();
     const input = new MockMidiInput('keys');
@@ -332,6 +352,13 @@ describe('MIDI recording from the transport and live inputs', () => {
     keyDown('KeyA');
     tickAt(2.5);
     const committed = vi.fn();
+    const recordingFinished = vi.fn();
+    const unsubscribeEvents = subscribeAppEvents((event) => {
+      if (event.type === 'recording.finished') {
+        const current = useStore.getState();
+        recordingFinished(event.payload, current.project.id, current.projectOpenVersion, destinationNotes().length);
+      }
+    });
     const unsubscribe = useStore.subscribe((next) => {
       if (next.projectOpenVersion === before.projectOpenVersion && next.project !== before.project) committed(next.past.at(-1));
     });
@@ -343,12 +370,16 @@ describe('MIDI recording from the transport and live inputs', () => {
       });
       expect(recordingPhase()).toBe('idle');
       expect(committed).toHaveBeenCalledWith(before.project);
+      expect(recordingFinished).toHaveBeenCalledExactlyOnceWith({
+        trackId: before.project.tracks[0]!.id, clipId: before.project.tracks[0]!.clips[0]!.id, notesWritten: 1,
+      }, before.project.id, before.projectOpenVersion, 2);
       const saved = loadProject(before.project.id)!;
       expect(saved.tracks[0]!.clips[0]!.notes!.at(-1)).toMatchObject({ pitch: 60, startBeat: 0.5, durationBeats: 0.5 });
       if (action === 'reopen') expect(destinationNotes()).toEqual(saved.tracks[0]!.clips[0]!.notes);
       else expect(useStore.getState().project.title).toBe(action === 'create' ? '新しい曲' : other.title);
     } finally {
       unsubscribe();
+      unsubscribeEvents();
     }
   });
 

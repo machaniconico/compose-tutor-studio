@@ -39,7 +39,7 @@ import {
 import { getScalePitchClasses } from '@cts/theory-engine';
 import { createDefaultProject } from './defaultProject';
 import { nowIso, uid } from './ids';
-import { publishAppEvent } from './appEvents';
+import { publishAppEvent, type ProjectEditEvent } from './appEvents';
 import { pushToast } from './tutorialBridge';
 import { DEFAULT_KEYBOARD_OCTAVE } from '../features/input/keyboardMap';
 import type { NoteColorMode } from '../features/pianoRoll/noteColor';
@@ -135,7 +135,7 @@ type StoreState = {
   transactionBase: Project | null;
 
   /** Generic escape hatch: apply an immutable project change (bumps updatedAt, pushes history, saves). */
-  applyProjectChange: (fn: (p: Project) => Project) => boolean;
+  applyProjectChange: (fn: (p: Project) => Project, event?: ProjectEditEvent) => boolean;
 
   // project metadata actions
   setBpm: (bpm: number) => void;
@@ -426,6 +426,13 @@ function trackOfClip(project: Project, clipId: string): Track | undefined {
   return project.tracks.find((t) => t.clips.some((c) => c.id === clipId));
 }
 
+function emitTrackAdded(track: Track): void {
+  publishAppEvent({
+    type: 'track.added',
+    payload: { trackId: track.id, trackName: track.name, trackType: track.type },
+  });
+}
+
 /** Whether a MIDI pitch belongs to the project's key/scale. */
 function pitchInScale(project: Project, pitch: number): boolean {
   try {
@@ -456,10 +463,6 @@ function refuseRecordingEdit(): boolean {
   if (!stopRecording) return false;
   pushToast('録音中は曲を編集できません。録音を止めてから操作してください。', 'info');
   return true;
-}
-
-function prepareProjectSwitch(): void {
-  if (finishRecordingForProjectChange()) flushScheduledSave();
 }
 
 /** Whether a role suits a track type: 'drums' only on drum tracks, the other roles only on instrument tracks. */
@@ -493,8 +496,14 @@ export const useStore = create<StoreState>((set, get) => {
 
   const persistCurrentProject = (): boolean => persistProject(get().project);
 
+  const transactionEvents = new Map<string, (after: Project) => void>();
+
+  const prepareProjectSwitch = (): void => {
+    if (finishRecordingForProjectChange()) flushScheduledSave();
+  };
+
   /** Apply an immutable project change: bump updatedAt, push history, save. */
-  const commitProject = (next: Project): boolean => {
+  const commitProject = (next: Project, event?: ProjectEditEvent): boolean => {
     if (refuseRecordingEdit()) return false;
     const current = get().project;
     if (next.tracks !== current.tracks || next.timeSignature !== current.timeSignature || next.lengthBars !== current.lengthBars) {
@@ -509,7 +518,8 @@ export const useStore = create<StoreState>((set, get) => {
       }
     }
     const stamped: Project = { ...next, updatedAt: nowIso() };
-    const historyUpdate = get().transactionBase
+    const inTransaction = get().transactionBase !== null;
+    const historyUpdate = inTransaction
       ? {}
       : { past: [...get().past, current].slice(-HISTORY_CAP), future: [] };
     set({
@@ -518,6 +528,14 @@ export const useStore = create<StoreState>((set, get) => {
       save: { status: 'saving', lastSavedAt: get().save.lastSavedAt, errorMessage: null },
     });
     scheduleSave(persistCurrentProject);
+    if (event) {
+      const publish = (after: Project) => {
+        const activity = event.describe(after);
+        if (activity) publishAppEvent(activity);
+      };
+      if (!inTransaction) publish(stamped);
+      else if (!transactionEvents.has(event.key)) transactionEvents.set(event.key, publish);
+    }
     return true;
   };
 
@@ -549,6 +567,7 @@ export const useStore = create<StoreState>((set, get) => {
   const restoreTransactionBase = (): void => {
     const { transactionBase, project } = get();
     if (!transactionBase) return;
+    transactionEvents.clear();
     if (project === transactionBase) {
       set({ transactionBase: null });
       return;
@@ -577,7 +596,7 @@ export const useStore = create<StoreState>((set, get) => {
     future: [],
     transactionBase: null,
 
-    applyProjectChange: (fn) => !refuseRecordingEdit() && commitProject(fn(get().project)),
+    applyProjectChange: (fn, event) => !refuseRecordingEdit() && commitProject(fn(get().project), event),
 
     // --- project metadata ---
     setBpm: (bpm) => commitProject({ ...get().project, bpm }),
@@ -699,40 +718,36 @@ export const useStore = create<StoreState>((set, get) => {
       get().updateNotes(clipId, new Map([[noteId, patch]]), options),
     updateNotes: (clipId, patches, options) => {
       const project = get().project;
-      const committed = commitProject(
-        mapTracks(project, (t) => ({
-          ...t,
-          clips: t.clips.map((c) =>
-            c.id === clipId
-              ? fitClipToNotes(
-                  {
-                    ...c,
-                    notes: (c.notes ?? []).map((note) => {
-                      const patch = patches.get(note.id);
-                      return patch ? { ...note, ...patch } : note;
-                    }),
-                  },
-                  options,
-                )
-              : c,
-          ),
-        })),
-      );
-      if (!committed) return;
       const track = trackOfClip(project, clipId);
-      const notes = track?.clips.find((c) => c.id === clipId)?.notes ?? [];
-      for (const [id, patch] of patches) {
-        const moved = notes.find((note) => note.id === id);
-        publishAppEvent({
-          type: 'note.moved',
-          payload: {
-            pitch: patch.pitch ?? moved?.pitch ?? 0,
-            startBeat: patch.startBeat ?? moved?.startBeat ?? 0,
-            trackId: track?.id ?? '',
-            trackName: track?.name ?? '',
-          },
-        });
-      }
+      const clip = track?.clips.find((c) => c.id === clipId);
+      if (!track || !clip?.notes) return;
+      const notes = clip.notes.map((note) => {
+        const patch = patches.get(note.id);
+        if (!patch) return note;
+        const next = { ...note, ...patch };
+        return next.pitch === note.pitch && next.startBeat === note.startBeat &&
+          next.durationBeats === note.durationBeats && next.velocity === note.velocity ? note : next;
+      });
+      if (notes.every((note, index) => note === clip.notes?.[index])) return;
+      const updated = fitClipToNotes({ ...clip, notes }, options);
+      commitProject(mapTracks(project, (t) => t === track
+        ? { ...t, clips: t.clips.map((c) => c === clip ? updated : c) }
+        : t), {
+        key: `note.moved:${clipId}`,
+        describe: (after) => {
+          const original = new Map(clip.notes?.map((note) => [note.id, note]));
+          const finalNotes = trackOfClip(after, clipId)?.clips.find((c) => c.id === clipId)?.notes;
+          const moved = finalNotes?.find((note) => {
+            const prior = original.get(note.id);
+            return prior && (note.pitch !== prior.pitch || note.startBeat !== prior.startBeat);
+          });
+          if (!moved) return;
+          return {
+            type: 'note.moved',
+            payload: { pitch: moved.pitch, startBeat: moved.startBeat, trackId: track.id, trackName: track.name },
+          };
+        },
+      });
     },
     removeNote: (clipId, noteId) => {
       const project = get().project;
@@ -782,11 +797,15 @@ export const useStore = create<StoreState>((set, get) => {
     // --- mixer ---
     setTrackVolume: (trackId, volume) => {
       const project = get().project;
-      if (!commitProject(mapTracks(project, (t) => (t.id === trackId ? { ...t, volume } : t)))) return;
       const track = project.tracks.find((t) => t.id === trackId);
-      publishAppEvent({
-        type: 'track.volumeChanged',
-        payload: { trackId, trackName: track?.name ?? '', volume },
+      if (!track || track.volume === volume) return;
+      commitProject(mapTracks(project, (t) => t === track ? { ...t, volume } : t), {
+        key: `track.volumeChanged:${trackId}`,
+        describe: (after) => {
+          const final = after.tracks.find((t) => t.id === trackId);
+          if (!final || final.volume === track.volume) return;
+          return { type: 'track.volumeChanged', payload: { trackId, trackName: final.name, volume: final.volume } };
+        },
       });
     },
     setTrackPan: (trackId, pan) => {
@@ -804,11 +823,13 @@ export const useStore = create<StoreState>((set, get) => {
 
     // --- track management ---
     addTrack: (type) => {
+      get().commitTransaction();
       const project = get().project;
       const next = addProjectTrack(project, { type, id: uid('track') });
       if (!commitProject(next)) return '';
       const added = next.tracks.find((track, index) => track !== project.tracks[index])!;
       selectTrackAndFirstClip(added.id);
+      emitTrackAdded(added);
       return added.id;
     },
     addReverbReturn: () => {
@@ -822,6 +843,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (!commitProject(next)) return;
       const added = next.tracks.find((track, index) => track !== project.tracks[index])!;
       selectTrackAndFirstClip(added.id);
+      emitTrackAdded(added);
     },
     setTrackSend: (trackId, returnId, level) => {
       const project = get().project;
@@ -851,11 +873,15 @@ export const useStore = create<StoreState>((set, get) => {
       selectTrackAndFirstClip(neighbour ? neighbour.id : null);
     },
     duplicateTrack: (trackId) => {
+      get().commitTransaction();
       const project = get().project;
       const next = duplicateProjectTrack(project, trackId, undefined, uid('track'));
       if (next === project || !commitProject(next)) return;
       const copy = next.tracks[next.tracks.findIndex((t) => t.id === trackId) + 1];
-      if (copy) selectTrackAndFirstClip(copy.id);
+      if (copy) {
+        selectTrackAndFirstClip(copy.id);
+        emitTrackAdded(copy);
+      }
     },
     renameTrack: (trackId, name) => {
       const project = get().project;
@@ -960,12 +986,10 @@ export const useStore = create<StoreState>((set, get) => {
       const loopEnabled = !transport.loopEnabled;
       if (loopEnabled && !project.loopRange) {
         if (refuseRecordingEdit()) return;
-        // The default range is its own undo step, apart from an open (tap tempo) transaction.
-        get().commitTransaction();
         const bpb = beatsPerBarOf(project.timeSignature);
         const lastBar = Math.max(0, project.lengthBars - 1);
         const bar = Math.min(lastBar, Math.max(0, Math.floor(transport.positionBeat / bpb + 1e-9)));
-        commitProject(setProjectLoopRange(project, { startBeat: bar * bpb, endBeat: (bar + 1) * bpb }));
+        get().setLoopRange({ startBeat: bar * bpb, endBeat: (bar + 1) * bpb });
       }
       set((s) => ({ transport: { ...s.transport, loopEnabled } }));
     },
@@ -975,7 +999,12 @@ export const useStore = create<StoreState>((set, get) => {
       if (refuseRecordingEdit()) return;
       // A loop range change is its own undo step, apart from an open (tap tempo) transaction.
       get().commitTransaction();
-      commitProject(setProjectLoopRange(get().project, range));
+      const project = get().project;
+      if (range === null ? !project.loopRange :
+        project.loopRange?.startBeat === range.startBeat && project.loopRange.endBeat === range.endBeat) return;
+      if (commitProject(setProjectLoopRange(project, range))) {
+        publishAppEvent({ type: 'loop.set', payload: { range: range && { ...range } } });
+      }
     },
     loopRangeOn: (range) => {
       const current = get().project.loopRange;
@@ -994,6 +1023,7 @@ export const useStore = create<StoreState>((set, get) => {
         get().commitTransaction();
       }
       transactionOwner = owner;
+      transactionEvents.clear();
       set({ transactionBase: get().project });
     },
     commitTransaction: (owner) => {
@@ -1003,11 +1033,14 @@ export const useStore = create<StoreState>((set, get) => {
         restoreTransactionBase();
         return;
       }
+      const events = [...transactionEvents.values()];
+      transactionEvents.clear();
       set({
         past: [...past, transactionBase].slice(-HISTORY_CAP),
         future: [],
         transactionBase: null,
       });
+      for (const publish of events) publish(project);
     },
     cancelTransaction: (owner) => {
       if (mayClose(owner)) restoreTransactionBase();
@@ -1056,6 +1089,7 @@ export const useStore = create<StoreState>((set, get) => {
     createNewProject: (title) => {
       prepareProjectSwitch();
       clearScheduledSave();
+      transactionEvents.clear();
       const project = createDefaultProject(title);
       set({
         project,
@@ -1078,6 +1112,7 @@ export const useStore = create<StoreState>((set, get) => {
       const loaded = loadStoredProject(id);
       if (!loaded) return false;
       clearScheduledSave();
+      transactionEvents.clear();
       set({
         project: loaded,
         projectOpenVersion: get().projectOpenVersion + 1,
@@ -1093,6 +1128,7 @@ export const useStore = create<StoreState>((set, get) => {
     replaceProject: (project) => {
       prepareProjectSwitch();
       clearScheduledSave();
+      transactionEvents.clear();
       set({
         project,
         projectOpenVersion: get().projectOpenVersion + 1,
@@ -1112,6 +1148,7 @@ export const useStore = create<StoreState>((set, get) => {
     loadProjectForPreview: (project) => {
       prepareProjectSwitch();
       clearScheduledSave();
+      transactionEvents.clear();
       set({
         project,
         projectOpenVersion: get().projectOpenVersion + 1,
@@ -1131,6 +1168,7 @@ export const useStore = create<StoreState>((set, get) => {
       // or a fresh default so the UI always has a project to render.
       if (deletingCurrent) {
         clearScheduledSave();
+        transactionEvents.clear();
         const savedFallback = loadMostRecentProject();
         const fallback = savedFallback ?? createDefaultProject();
         set({

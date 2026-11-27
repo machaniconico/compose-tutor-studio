@@ -51,7 +51,7 @@ export function LessonRunner() {
         <div className="lesson-runner__progress-fill" style={{ width: `${progressPct}%` }} />
       </div>
 
-      <h3 className="lesson-runner__lesson-title">{lesson?.title}</h3>
+      <h3 className="lesson-runner__lesson-title">{lesson ? <TermText text={lesson.title} /> : null}</h3>
 
       {completed ? (
         <div className="lesson-runner__done">
@@ -63,7 +63,7 @@ export function LessonRunner() {
         </div>
       ) : step ? (
         <div className="lesson-runner__step">
-          <p className="lesson-runner__step-title">{step.title}</p>
+          <p className="lesson-runner__step-title"><TermText text={step.title} /></p>
 
           <div className="lesson-runner__block">
             <span className="lesson-runner__label">やること</span>
@@ -122,7 +122,7 @@ export function LessonRunner() {
               >
                 ヒントを見る
               </button>
-              {hint ? <p className="lesson-runner__hint">💡 {hint}</p> : null}
+              {hint ? <p className="lesson-runner__hint">💡 <TermText text={hint} /></p> : null}
             </div>
           ) : null}
         </div>

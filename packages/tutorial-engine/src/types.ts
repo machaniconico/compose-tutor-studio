@@ -6,7 +6,7 @@
 // in the package barrel (index.ts). Engine internals use these names; the public
 // barrel re-exports them with the Tutorial prefix.
 
-import type { DrumLane, Project, SectionType } from '@cts/project-model';
+import type { AutomationParameter, Clip, DrumLane, EffectType, Project, SectionType, Track } from '@cts/project-model';
 
 // Re-export Project so consumers don't need to import it separately
 export type { Project };
@@ -90,23 +90,14 @@ export type EventMatch = Partial<{
   lane: DrumLane;
   trackName: string;
   format: 'midi' | 'wav';
+  trackType: Track['type'];
+  effectType: EffectType;
+  parameter: AutomationParameter;
+  loopRangeSet: boolean;
+  minSoundingEvents: number;
 }>;
 
-export type AppEventType =
-  | 'chord.added'
-  | 'chord.changed'
-  | 'note.added'
-  | 'note.moved'
-  | 'drum.stepToggled'
-  | 'transport.played'
-  | 'project.created'
-  | 'track.volumeChanged'
-  | 'export.midi'
-  | 'export.wav'
-  | 'scale_snap.enabled'
-  | 'clip.created'
-  | 'section.added'
-  | 'bpm.changed';
+export type AppEventType = keyof AppEventPayloadMap;
 
 export type StepGoal =
   | { kind: 'event'; eventType: AppEventType; count?: number; match?: EventMatch }
@@ -176,7 +167,8 @@ export interface ScaleSnapPayload {
 }
 
 export interface ClipCreatedPayload {
-  type: string;
+  clipId: string;
+  type: Clip['type'];
   bars: number;
   trackId: string;
 }
@@ -203,7 +195,14 @@ export type AppEventPayloadMap = {
   'export.midi': ExportPayload;
   'export.wav': ExportPayload;
   'scale_snap.enabled': ScaleSnapPayload;
+  'track.added': { trackId: string; trackName: string; trackType: Track['type'] };
   'clip.created': ClipCreatedPayload;
+  'clip.split': { clipId: string; rightClipId: string; trackId: string; atBeat: number };
+  'section.duplicated': { sectionId: string; newSectionId: string; startBar: number; lengthBars: number };
+  'loop.set': { range: { startBeat: number; endBeat: number } | null };
+  'effect.added': { trackId: string; effectTypes: EffectType[] };
+  'automation.pointAdded': { trackId: string; parameter: AutomationParameter; pointsAdded: number };
+  'recording.finished': { trackId: string; clipId: string; notesWritten: number };
   'section.added': SectionAddedPayload;
   'bpm.changed': BpmChangedPayload;
 };

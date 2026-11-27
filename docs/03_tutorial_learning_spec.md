@@ -63,6 +63,22 @@
 | 3-6 | 盛り上げ | 密度、音域、音色を変える |
 | 3-7 | 仕上げ | 音量、パン、空間系を整える |
 
+### DAW 操作コース
+
+初めて曲を作る人が、演奏の置き場所を作るところから、音をファイルで聴くところまで練習する。レッスンは既存の一覧から選べ、進み具合はレッスンごとに保存する。本文やヒントの用語は用語集の説明を開ける。
+
+| レッスン | 練習 | 達成を判定するイベント |
+|---|---|---|
+| クリップを並べる | 楽器を足してクリップを置く。区切って、音の入ったクリップをもう一度並べる。 | `track.added`、`clip.created`、`clip.split` |
+| セクションを複製する | 曲の一部分をコピーし、その部分をくり返し聴く。 | `section.duplicated`、`loop.set` |
+| キーボードで録音する | 「PC で演奏」をオンにして、A や S を弾いて曲に残す。 | `recording.finished` |
+| ミックスを整える | EQ を入れ、フェーダーを動かし、曲の途中で変わる音量を決める。 | `effect.added`、`track.volumeChanged`、`automation.pointAdded` |
+| 曲をファイルに書き出す | 曲全体を WAV に保存する。 | `export.wav` |
+
+クリップの中身を数える課題は `soundingEvents` を使う（D5）。リンク先で聞こえる音も数え、曲の外やミュートで聞こえない音は数えない。実際に曲が変わった操作だけを数える。ドラッグで複数のノートを動かしても `note.moved` は操作確定時に一度だけ出る。拒否、変更なし、取り消し（Undo）、やり直し（Redo）は数えない。
+
+録音中に別の曲を開いた場合も、元の曲に音を一つでも書き込めば、その曲が開いているうちに `recording.finished` が一度出る。範囲外などで一部の音が落ちた場合も同じで、書き込めた音数を渡す。空のテイクや保存を拒否されたテイクは数えない。
+
 ## 3. Lessonデータ仕様
 
 ```json
@@ -111,7 +127,14 @@
 | `chord.added` | bar, chordSymbol, degree | コード課題判定 |
 | `note.added` | pitch, start, duration, trackId | ピアノロール課題 |
 | `scale_snap.enabled` | key, scale | 操作理解 |
-| `clip.created` | type, bars | パターン作成課題 |
+| `track.added` | trackId, trackName, trackType | トラックを追加・複製したことを確認 |
+| `clip.created` | clipId, trackId, type, bars | 曲全体画面でクリップを追加・複製したことを確認 |
+| `clip.split` | clipId, rightClipId, trackId, atBeat | クリップを分割した位置を確認 |
+| `section.duplicated` | sectionId, newSectionId, startBar, lengthBars | 曲の一部分を複製したことを確認 |
+| `loop.set` | range（解除時は null） | 保存した再生範囲の変更を確認 |
+| `effect.added` | trackId, effectTypes | 新しく入れた効果を確認。複数の効果を一括で追加した場合は一度だけ通知 |
+| `automation.pointAdded` | trackId, parameter, pointsAdded | 設定した点の数が増えたことを確認 |
+| `recording.finished` | trackId, clipId, notesWritten | 書き込めた録音の音数を確認 |
 | `export.completed` | format | 最終課題 |
 
 ### 4.2 判定関数
