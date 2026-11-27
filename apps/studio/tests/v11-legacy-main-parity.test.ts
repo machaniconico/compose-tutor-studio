@@ -206,7 +206,7 @@ function corpusDigests(json: string): Digests {
       const plan = planWavRender(project);
       return [plan.totalSeconds, plan.tailSeconds, plan.frames];
     }),
-    midi: digest(() => Buffer.from(projectToMidi(project)).toString('hex')),
+    midi: digest(() => Buffer.from(projectToMidi(project, { includeProgramAndKey: false })).toString('hex')),
   };
 }
 

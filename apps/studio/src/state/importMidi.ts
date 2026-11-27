@@ -1,6 +1,7 @@
 import {
   DEFAULT_MIDI_PARSE_LIMITS,
   MidiImportError,
+  presetForGmProgram,
   parseMidiFile,
   type ImportedMidiInitialChannel,
   type ImportedMidiNote,
@@ -506,11 +507,18 @@ export function mapParsedMidiToTracks(
       ? exactDrumSteps(group.notes, targetMusicalTime, parsed.ppq)
       : null;
 
-    if (
-      group.initialChannel?.program !== undefined ||
-      group.initialChannel?.bankMsb !== undefined ||
-      group.initialChannel?.bankLsb !== undefined
-    ) {
+    // A single Program Change that maps back to one of our presets loses nothing.
+    const initialProgram = group.initialChannel?.program;
+    const hasBank = group.initialChannel?.bankMsb !== undefined
+      || group.initialChannel?.bankLsb !== undefined;
+    const programPreset = (
+      initialProgram !== undefined
+      && !hasBank
+      && group.initialChannel?.soleProgram === true
+      && group.channel !== MIDI_DRUM_CHANNEL
+      && options.preset === undefined
+    ) ? presetForGmProgram(initialProgram) : undefined;
+    if ((initialProgram !== undefined && programPreset === undefined) || hasBank) {
       unsupportedProgramCount += 1;
     }
 
@@ -568,7 +576,7 @@ export function mapParsedMidiToTracks(
       pan,
       mute: false,
       solo: false,
-      instrument: { type: 'synth', preset: options.preset ?? IMPORT_TRACK_PRESET },
+      instrument: { type: 'synth', preset: programPreset ?? options.preset ?? IMPORT_TRACK_PRESET },
       effects: [],
     });
     clips.push(clip);

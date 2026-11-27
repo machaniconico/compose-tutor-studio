@@ -55,6 +55,8 @@ import {
   concatChunks,
 } from './smf.js';
 import type { MidiMessage } from './smf.js';
+import { gmProgramForPreset } from './gm-program.js';
+import { isKnownKeyAndScale, keySignatureMeta } from './key-signature.js';
 
 /** GM percussion note numbers for each DrumLane (channel 9). */
 const DRUM_NOTE: Record<DrumLane, number> = {
@@ -157,6 +159,12 @@ export type MidiExportOptions = Readonly<{
   ppq?: number;
   /** May lower the hard event ceiling for constrained callers/tests. */
   maxEvents?: number;
+  /**
+   * Write a Program Change per instrument track and a Key Signature meta in
+   * track 0. Default true. When false the bytes match the pre-P54 exporter.
+   * Both kinds of event count toward maxEvents.
+   */
+  includeProgramAndKey?: boolean;
 }>;
 
 export class MidiExportError extends Error {
@@ -232,6 +240,7 @@ function exportFailure(
 function resolveExportOptions(options: MidiExportOptions | undefined): {
   ppq: number;
   maxEvents: number;
+  includeProgramAndKey: boolean;
 } {
   const ppq = options?.ppq ?? PPQ;
   if (!Number.isSafeInteger(ppq) || ppq <= 0 || ppq > MAX_MIDI_PPQ) {
@@ -252,7 +261,7 @@ function resolveExportOptions(options: MidiExportOptions | undefined): {
       { limit: MAX_MIDI_EXPORT_EVENTS, observed: maxEvents },
     );
   }
-  return { ppq, maxEvents };
+  return { ppq, maxEvents, includeProgramAndKey: options?.includeProgramAndKey ?? true };
 }
 
 // --- Meta event builders ---
@@ -1545,6 +1554,7 @@ function buildInstrumentTrack(
   musicalTime: MusicalTimeIndex,
   budget: MidiExportBudget,
   realizedChordNotes: readonly RealizedChordNote[] = [],
+  includeProgram = false,
 ): Uint8Array {
   if (!Number.isSafeInteger(channel) || channel < 0 || channel > 15) {
     exportFailure('invalid-project', `track ${track.id} cannot be assigned a MIDI channel`);
@@ -1559,6 +1569,14 @@ function buildInstrumentTrack(
     { tick: 0, bytes: [0xb0 | channel, 7, volumeCc] },
     { tick: 0, bytes: [0xb0 | channel, 10, panCc] },
   ];
+  // Drum tracks stay on channel 10 without a Program Change.
+  if (includeProgram && track.type === 'instrument') {
+    budget.reserve(1);
+    msgs.push({
+      tick: 0,
+      bytes: [0xc0 | channel, midiDataByte(gmProgramForPreset(track.instrument?.preset), 'program')],
+    });
+  }
 
   // Legacy mode (swing 0, choke off) keeps main's v10 bytes exactly.
   const resolvedProject = isGrooveResolvedMode(project) ? project : null;
@@ -1618,7 +1636,7 @@ export function projectToMidiResult(
     // Resolved mode always writes the shared resolver's 480 PPQ so no two
     // live/WAV onsets collapse onto one MIDI tick. Legacy keeps main's PPQ.
     const ppq = isResolvedModeInput(project) ? GROOVE_RESOLVER_PPQ : resolved.ppq;
-    const bytes = projectToMidiWithinBudget(project, ppq, budget);
+    const bytes = projectToMidiWithinBudget(project, ppq, budget, resolved.includeProgramAndKey);
     return { ok: true, bytes, eventCount: budget.eventCount, effectivePpq: ppq };
   } catch (error) {
     if (error instanceof MidiExportError) return { ok: false, error: error.failure };
@@ -1636,6 +1654,7 @@ function projectToMidiWithinBudget(
   project: Project,
   ppq: number,
   budget: MidiExportBudget,
+  includeProgramAndKey: boolean,
 ): Uint8Array {
   if (typeof project !== 'object' || project === null) {
     exportFailure('invalid-project', 'project must be an object');
@@ -1662,6 +1681,13 @@ function projectToMidiWithinBudget(
   const metaMessages: MidiMessage[] = [
     { tick: 0, bytes: trackNameMeta(project.title) },
   ];
+  if (includeProgramAndKey) {
+    if (!isKnownKeyAndScale(project.key, project.scale)) {
+      exportFailure('invalid-project', 'project key and scale must be supported values');
+    }
+    budget.reserve(1);
+    metaMessages.push({ tick: 0, bytes: keySignatureMeta(project.key, project.scale) });
+  }
   // Keep map order canonical. Distinct beats may quantize to the same tick at
   // a low PPQ; stable insertion makes the later map point the effective value.
   for (const event of tempoMap) {
@@ -1717,6 +1743,7 @@ function projectToMidiWithinBudget(
         musicalTime,
         budget,
         realizedNotes,
+        includeProgramAndKey,
       ),
     );
   }

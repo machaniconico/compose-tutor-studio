@@ -558,7 +558,7 @@ describe('MIDI import mapping', () => {
         tracks: [
           {
             name: 'Lead',
-            initialChannels: [{ channel: 0, program: 81 }],
+            initialChannels: [{ channel: 0, program: 81, soleProgram: true }],
             hasChannelAutomation: true,
             notes: [note({ startBeat: 2 })],
           },
@@ -582,8 +582,118 @@ describe('MIDI import mapping', () => {
       expect.stringContaining('途中の音量'),
       expect.stringContaining('UTF-8'),
       expect.stringContaining('Note On 1件'),
-      expect.stringContaining('音色・バンク指定'),
+      // Program 81 maps back to brightLead exactly, so nothing is lost and it no longer warns.
     ]);
+    expect(mapped.track.instrument?.preset).toBe('brightLead');
+  });
+
+  it('warns for a program with no preset, two programs on one track, or a bank select', () => {
+    const importWith = (initialChannel: Record<string, unknown>) => {
+      const mapped = mapParsedMidiToTracks(
+        {
+          format: 1,
+          ppq: 480,
+          tempoBpm: 120,
+          tracks: [{
+            name: 'Lead',
+            initialChannels: [{ channel: 0, ...initialChannel }],
+            notes: [note({ startBeat: 0 })],
+          }],
+        },
+        { makeId: makeIdFactory(), targetBpm: 120, targetTimeSignature: [4, 4] },
+      );
+      if (!mapped.ok) throw new Error('import failed');
+      return mapped;
+    };
+    const lost = (mapped: { warnings: string[] }) => mapped.warnings.some((w) => w.includes('音色・バンク指定'));
+
+    const unknown = importWith({ program: 100 });
+    expect(lost(unknown)).toBe(true);
+    expect(unknown.track.instrument?.preset).toBe('brightPluck');
+    expect(lost(importWith({ program: 81 }))).toBe(true);
+    expect(lost(importWith({ program: 81, bankMsb: 1 }))).toBe(true);
+    expect(lost(importWith({ program: 81, soleProgram: true }))).toBe(false);
+    expect(lost(importWith({ program: 81 }))).toBe(true);
+  });
+
+  describe('third-party Program Change placement behaves like main (no preset mapping)', () => {
+    const smf = (events: number[]) => {
+      const body = [...events, 0x00, 0xff, 0x2f, 0x00];
+      return Uint8Array.from([
+        0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xe0,
+        0x4d, 0x54, 0x72, 0x6b, 0, 0, 0, body.length, ...body,
+      ]);
+    };
+    const imported = (events: number[]) => {
+      const mapped = mapParsedMidiToTracks(parseMidiFile(smf(events)), {
+        makeId: makeIdFactory(), targetBpm: 120, targetTimeSignature: [4, 4],
+      });
+      if (!mapped.ok) throw new Error('import failed');
+      return mapped;
+    };
+    const lost = (m: { warnings: string[] }) => m.warnings.some((w) => w.includes('音色・バンク指定'));
+    const autom = (m: { warnings: string[] }) => m.warnings.some((w) => w.includes('途中の音量'));
+
+    it('note on before a tick-0 PC change: no mapping, program warning kept', () => {
+      const m = imported([0x00, 0x90, 60, 100, 0x00, 0xc0, 14, 0x60, 0x80, 60, 0]);
+      expect(m.track.instrument?.preset).toBe('brightPluck');
+      expect(lost(m)).toBe(true);
+    });
+
+    it('PC at tick 1 before the first note: no mapping, automation warning', () => {
+      const m = imported([0x01, 0xc0, 14, 0x00, 0x90, 60, 100, 0x60, 0x80, 60, 0]);
+      expect(m.track.instrument?.preset).toBe('brightPluck');
+      expect(autom(m)).toBe(true);
+    });
+
+    it('PC, bank select, PC again at tick 0: no mapping, bank warning kept', () => {
+      const m = imported([
+        0x00, 0xc0, 14, 0x00, 0xb0, 0, 1, 0x00, 0xc0, 14, 0x01, 0x90, 60, 100, 0x60, 0x80, 60, 0,
+      ]);
+      expect(m.track.instrument?.preset).toBe('brightPluck');
+      expect(lost(m)).toBe(true);
+    });
+
+    it('two identical PCs count as more than one: no mapping, warning kept', () => {
+      const m = imported([
+        0x00, 0xc0, 14, 0x00, 0xc0, 14, 0x00, 0x90, 60, 100, 0x60, 0x80, 60, 0,
+      ]);
+      expect(m.track.instrument?.preset).toBe('brightPluck');
+      expect(lost(m)).toBe(true);
+    });
+
+    it('one tick-0 PC before the note maps to the preset without a warning', () => {
+      const m = imported([0x00, 0xc0, 14, 0x00, 0x90, 60, 100, 0x60, 0x80, 60, 0]);
+      expect(m.track.instrument?.preset).toBe('p22:bell');
+      expect(lost(m)).toBe(false);
+    });
+  });
+
+  it('lands each of the 14 canonical presets back on the same preset from our own export', () => {
+    const presets = [
+      'softPad', 'brightPluck', 'warmBass', 'brightLead',
+      'p22:pianoLike', 'p22:bell', 'p22:organLike', 'p22:stringsLike', 'p22:brassLike',
+      'p22:pluck', 'p22:deepSubBass', 'p22:softKeys', 'p22:squareLead', 'p22:glassPad',
+    ];
+    for (const preset of presets) {
+      const source = createDefaultProject('P54 preset');
+      const target = source.tracks.find((track) => track.type === 'instrument')!;
+      target.instrument = { type: 'synth', preset };
+      target.clips = [{
+        ...target.clips[0]!, type: 'midi', startBeat: 0, lengthBeats: 4, loop: false,
+        notes: [{ id: 'n1', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }],
+      }];
+      for (const other of source.tracks) if (other !== target) other.clips = [];
+      const mapped = mapParsedMidiToTracks(parseMidiFile(projectToMidi(source)), {
+        makeId: makeIdFactory(),
+        targetBpm: source.tempoMap[0]!.bpm,
+        targetKey: source.key,
+        targetScale: source.scale,
+      });
+      if (!mapped.ok) throw new Error('import failed');
+      expect(mapped.track.instrument?.preset).toBe(preset);
+      expect(mapped.warnings.some((w) => w.includes('音色・バンク指定'))).toBe(false);
+    }
   });
 
   it('rejects a multi-track import before allocating ids when no project track slots remain', () => {
@@ -940,5 +1050,23 @@ describe('MIDI import mapping', () => {
         (event) => event.beat === 7 && hasTrackId(event.payload, mapped.track.id),
       ),
     ).toBe(true);
+  });
+  it('warns the same for an export with Program Change and Key Signature as for one without', () => {
+    const source = createDefaultProject('P54 roundtrip');
+    const mapWarnings = (includeProgramAndKey: boolean) => {
+      const mapped = mapParsedMidiToTracks(
+        parseMidiFile(projectToMidi(source, { includeProgramAndKey })),
+        {
+          makeId: makeIdFactory(),
+          trackName: 'MIDI: p54',
+          targetBpm: source.tempoMap[0]!.bpm,
+          targetKey: source.key,
+          targetScale: source.scale,
+        },
+      );
+      expect(mapped.ok).toBe(true);
+      return mapped.ok ? mapped.warnings : [];
+    };
+    expect(mapWarnings(true)).toEqual(mapWarnings(false));
   });
 });

@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyProject, decodeProject } from '@cts/project-model';
-import { parseMidiFile, projectToMidi } from '../src/index.js';
+import { parseMidiFile, projectToMidi as projectToMidiRaw } from '../src/index.js';
+import type { MidiExportOptions } from '../src/index.js';
+import type { Project } from '@cts/project-model';
 import { v10DrumGrooveFixtures } from './fixtures/v10-drum-groove';
 import goldenMidi from './fixtures/v10-drum-groove-midi.json';
+
+// P54: these tests pin the pre-P54 bytes, so they run with the option OFF.
+const projectToMidi = (project: Project, options?: MidiExportOptions) =>
+  projectToMidiRaw(project, { ...options, includeProgramAndKey: false });
 
 describe('v11 MIDI drum export', () => {
   // Full SMF bytes captured from origin/main (16607ed7) after decoding each v10 input.

@@ -147,6 +147,12 @@ export type ImportedMidiKeySignature = {
 export type ImportedMidiInitialChannel = {
   channel: number;
   program?: number;
+  /**
+   * True only when the channel has exactly one Program Change, at tick 0 before
+   * any Note On, and no Bank Select anywhere. Only then is the program a safe
+   * whole-track sound choice.
+   */
+  soleProgram?: boolean;
   bankMsb?: number;
   bankLsb?: number;
   volumeCc?: number;
@@ -537,6 +543,7 @@ function parseTrack(
   const keySignatures: RawKeySignatureEvent[] = [];
   const initialChannels = new Map<number, ImportedMidiInitialChannel>();
   const channelAutomation = { value: false };
+  const programStats = new Map<number, ProgramStats>();
   const noteIssues = { orphanNoteOffs: 0 };
   let textEncodingFallbackCount = 0;
   let name = '';
@@ -650,6 +657,7 @@ function parseTrack(
         activeNoteCount,
         notes,
         initialChannels,
+        programStats,
         channelAutomation,
         noteIssues,
         budget,
@@ -659,6 +667,11 @@ function parseTrack(
 
     runningStatus = undefined;
     skipSystemEvent(status, reader);
+  }
+
+  for (const initial of initialChannels.values()) {
+    const stats = programStats.get(initial.channel);
+    if (stats?.count === 1 && stats.atTickZeroBeforeNote && !stats.bank) initial.soleProgram = true;
   }
 
   return {
@@ -683,6 +696,13 @@ function assertMetaLength(label: string, actual: number, expected: number): void
   }
 }
 
+type ProgramStats = {
+  count: number;
+  bank: boolean;
+  noteOn: boolean;
+  atTickZeroBeforeNote: boolean;
+};
+
 function parseChannelEvent(
   status: number,
   firstDataByte: number | undefined,
@@ -692,6 +712,7 @@ function parseChannelEvent(
   activeNoteCount: number,
   notes: RawMidiNote[],
   initialChannels: Map<number, ImportedMidiInitialChannel>,
+  programStats: Map<number, ProgramStats>,
   channelAutomation: { value: boolean },
   noteIssues: { orphanNoteOffs: number },
   budget: MidiParseBudget,
@@ -701,6 +722,19 @@ function parseChannelEvent(
   const dataLength = channelEventDataLength(kind);
   const data1 = firstDataByte ?? reader.readDataByte();
   const data2 = dataLength === 2 ? reader.readDataByte() : undefined;
+
+  const stats = programStats.get(channel) ?? {
+    count: 0, bank: false, noteOn: false, atTickZeroBeforeNote: false,
+  };
+  programStats.set(channel, stats);
+  if (kind === 0xc0) {
+    stats.count += 1;
+    stats.atTickZeroBeforeNote = stats.count === 1 && tick === 0 && !stats.noteOn;
+  } else if (kind === 0xb0 && (data1 === 0 || data1 === 32)) {
+    stats.bank = true;
+  } else if (kind === 0x90 && data2 !== undefined && data2 > 0) {
+    stats.noteOn = true;
+  }
 
   if (tick === 0) {
     const initial = initialChannels.get(channel) ?? { channel };

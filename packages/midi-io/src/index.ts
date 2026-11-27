@@ -30,6 +30,9 @@ export type {
   MidiExportResult,
 } from './export.js';
 
+export { gmProgramForPreset, presetForGmProgram, DEFAULT_GM_PROGRAM } from './gm-program.js';
+export { keySignatureFor, keySignatureMeta } from './key-signature.js';
+
 export { parseMidiFile, MidiImportError, DEFAULT_MIDI_PARSE_LIMITS } from './import.js';
 export type {
   ParsedMidiFile,

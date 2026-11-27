@@ -21,9 +21,16 @@ import {
   concatChunks,
   exportNotesToMidi,
   parseMidiFile,
-  projectToMidi,
-  projectToMidiResult,
+  projectToMidi as projectToMidiRaw,
+  projectToMidiResult as projectToMidiResultRaw,
 } from '../src/index.js';
+import type { MidiExportOptions } from '../src/index.js';
+
+// P54: these tests pin the pre-P54 bytes and event counts, so they run with the option OFF.
+const projectToMidi = (project: Project, options?: MidiExportOptions) =>
+  projectToMidiRaw(project, { ...options, includeProgramAndKey: false });
+const projectToMidiResult = (project: Project, options?: MidiExportOptions) =>
+  projectToMidiResultRaw(project, { ...options, includeProgramAndKey: false });
 
 function rawTrack(data: readonly number[]): Uint8Array {
   const result = new Uint8Array(8 + data.length);
