@@ -172,6 +172,10 @@ export type EditorState = {
   selectedNoteIds: string[];
   scaleSnap: boolean;
   chordToneHighlight: boolean;
+  /** 表示専用: ほかのクリップのノートを薄く重ねる(UI 状態のみ。保存しない)。 */
+  ghostNotes: boolean;
+  /** 表示専用: ノートを音の役割(コードの音・スケールの音・スケール外)で色分けする。 */
+  noteRoleColors: boolean;
   zoomX: number;
 };
 
@@ -401,6 +405,8 @@ export type StoreState = {
   setActiveView: (view: EditorView) => void;
   toggleScaleSnap: () => void;
   toggleChordToneHighlight: () => void;
+  toggleGhostNotes: () => void;
+  toggleNoteRoleColors: () => void;
   setZoomX: (zoomX: number) => void;
   toggleTutorialPanel: () => void;
   setInspectorContent: (content: string | null) => void;
@@ -891,6 +897,8 @@ function makeEditor(project: Project): EditorState {
     selectedNoteIds: [],
     scaleSnap: false,
     chordToneHighlight: true,
+    ghostNotes: true,
+    noteRoleColors: false,
     zoomX: 1,
   };
 }
@@ -3239,6 +3247,10 @@ export function createStudioStore(
     },
     toggleChordToneHighlight: () =>
       set((s) => ({ editor: { ...s.editor, chordToneHighlight: !s.editor.chordToneHighlight } })),
+    toggleGhostNotes: () =>
+      set((s) => ({ editor: { ...s.editor, ghostNotes: !s.editor.ghostNotes } })),
+    toggleNoteRoleColors: () =>
+      set((s) => ({ editor: { ...s.editor, noteRoleColors: !s.editor.noteRoleColors } })),
     setZoomX: (zoomX) => set((s) => ({ editor: { ...s.editor, zoomX } })),
     toggleTutorialPanel: () => set((s) => ({ tutorialPanelOpen: !s.tutorialPanelOpen })),
     setInspectorContent: (content) => set({ inspector: { content } }),

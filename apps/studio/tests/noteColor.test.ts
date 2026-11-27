@@ -136,3 +136,17 @@ describe('保存データの型が壊れていても落ちない', () => {
     }
   });
 });
+
+describe('classifyNote: notes が空のコードは root / quality から和音の音を出す', () => {
+  const fMinor: ChordEvent = { ...cMajor, id: 'f', symbol: 'Fm', root: 'F', quality: 'minor', notes: [] };
+  it('C メジャーで Fm 上の A♭(短 3 度)は、スケール外でも「コードの音」', () => {
+    expect(classifyNote(68, fMinor, 'C', 'major', 'chordTone').category).toBe('chordTone');
+  });
+  it('Fm の構成音でない B(スケール内)は scaleTone のまま', () => {
+    expect(classifyNote(71, fMinor, 'C', 'major', 'chordTone').category).toBe('scaleTone');
+  });
+  it('未知の quality でも throw せず、スケール判定に落ちる', () => {
+    const weird = { ...fMinor, quality: 'zzz' };
+    expect(classifyNote(68, weird, 'C', 'major', 'chordTone').category).toBe('outside');
+  });
+});

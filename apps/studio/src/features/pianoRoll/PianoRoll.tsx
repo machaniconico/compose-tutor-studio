@@ -25,6 +25,8 @@ import { pxPerBeat } from '../timeline';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { canHandleShortcut, matchShortcut } from '../common/keymap';
 import { useScaleInfo } from './useScaleInfo';
+import { collectGhostNotes } from './ghostNotes';
+import { classifyNote, noteColorLabel } from './noteColor';
 import {
   GRID_SNAP_OPTIONS,
   GRID_SNAP_LABELS,
@@ -382,6 +384,8 @@ export function PianoRoll() {
   const selectNotes = useStore((s) => s.selectNotes);
   const addNote = useStore((s) => s.addNote);
   const setZoomX = useStore((s) => s.setZoomX);
+  const toggleGhostNotes = useStore((s) => s.toggleGhostNotes);
+  const toggleNoteRoleColors = useStore((s) => s.toggleNoteRoleColors);
 
   const clip = findClip(project, editor.selectedClipId);
   const scaleInfo = useScaleInfo(project);
@@ -434,6 +438,21 @@ export function PianoRoll() {
         (note) => note.pitch >= PIANO_LOW_MIDI && note.pitch <= PIANO_HIGH_MIDI,
       ),
     [notes],
+  );
+  // 表示専用のゴースト。project / 表示範囲が変わった時だけ作り直す(再生位置では再計算しない)。
+  const ghostNotes = useMemo(
+    () =>
+      editor.ghostNotes && clip
+        ? collectGhostNotes(
+            project,
+            clip.id,
+            clip.startBeat,
+            clip.lengthBeats,
+            PIANO_LOW_MIDI,
+            PIANO_HIGH_MIDI,
+          )
+        : [],
+    [editor.ghostNotes, project, clip?.id, clip?.startBeat, clip?.lengthBeats],
   );
   const visibleNoteIds = useMemo(
     () => new Set(visibleNotes.map((note) => note.id)),
@@ -1217,6 +1236,33 @@ export function PianoRoll() {
         {keyboardAnnouncement}
       </span>
       <div className="pr__toolbar">
+        {/* DOM では先頭(Tab 順がクオンタイズ→ノートのまま変わらない)。見た目は order で最後に出す。 */}
+        <div className="pr__hint-row">
+          <div className="pr__view-opts" role="group" aria-label="表示の補助(表示だけで、曲は変わりません)">
+            <label className="pr__field">
+              <input
+                type="checkbox"
+                aria-label="ゴースト(ほかのノートを薄く重ねる)"
+                checked={editor.ghostNotes}
+                onChange={() => toggleGhostNotes()}
+              />
+              <span title="ほかのクリップ・トラックのノートを薄く重ねて表示します(編集はできません)">ゴースト</span>
+            </label>
+            <label className="pr__field">
+              <input
+                type="checkbox"
+                aria-label="役割色(音の役割で色分け)"
+                checked={editor.noteRoleColors}
+                onChange={() => toggleNoteRoleColors()}
+              />
+              <span title="コードの音・スケールの音・スケールの外の音を色と記号で分けます">役割色</span>
+            </label>
+          </div>
+          <p className="pr__hint">
+            ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 /
+            Alt+ドラッグで複製 / Tabでノートへ移動 / 矢印キーで編集 / Delete=削除
+          </p>
+        </div>
         <label className="pr__field">
           <span>グリッド</span>
           <select
@@ -1269,10 +1315,13 @@ export function PianoRoll() {
         >
           選択ノートをクオンタイズ
         </button>
-        <p className="pr__hint">
-          ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 /
-          Alt+ドラッグで複製 / Tabでノートへ移動 / 矢印キーで編集 / Delete=削除
-        </p>
+        {editor.noteRoleColors ? (
+          <ul className="pr__legend" aria-label="色分けの見かた">
+            <li className="pr__legend-item pr__note--chordTone">● コードの音</li>
+            <li className="pr__legend-item pr__note--scaleTone">○ スケールの音(経過音にも使えます)</li>
+            <li className="pr__legend-item pr__note--outside">◇ スケールの外の音(経過音などで使えます)</li>
+          </ul>
+        ) : null}
       </div>
 
       <div className="pr__scroll">
@@ -1399,6 +1448,26 @@ export function PianoRoll() {
             />
           ) : null}
 
+          {/* ghost notes: 表示専用。クリックも選択もできない(pointer-events: none) */}
+          {ghostNotes.map((ghost) => {
+            const i = PIANO_HIGH_MIDI - ghost.pitch;
+            if (i < 0 || i >= rows.length) return null;
+            return (
+              <div
+                key={ghost.key}
+                className="pr__ghost"
+                data-testid="ghost-note"
+                aria-hidden="true"
+                style={{
+                  top: i * rowHeight + noteInset,
+                  left: ghost.startBeat * ppb,
+                  width: Math.max(4, ghost.durationBeats * ppb - 1),
+                  height: rowHeight - noteInset * 2,
+                }}
+              />
+            );
+          })}
+
           {/* notes */}
           {visibleNotes.map((note) => {
             const displayedNote = previewById.get(note.id) ?? note;
@@ -1407,6 +1476,16 @@ export function PianoRoll() {
             const pc = ((displayedNote.pitch % 12) + 12) % 12;
             const outOfScale = scaleInfo.scalePcs.size > 0 && !scaleInfo.scalePcs.has(pc);
             const isSelected = selected.has(note.id);
+            const role = editor.noteRoleColors
+              ? classifyNote(
+                  displayedNote.pitch,
+                  scaleInfo.chordAtBeat(clip.startBeat + displayedNote.startBeat),
+                  project.key,
+                  project.scale,
+                  'chordTone',
+                )
+              : null;
+            const roleText = role && role.label !== '' ? noteColorLabel(role, 'beginner') : '';
             return (
               <button
                 type="button"
@@ -1415,9 +1494,9 @@ export function PianoRoll() {
                   if (element) noteRefs.current.set(note.id, element);
                   else noteRefs.current.delete(note.id);
                 }}
-                className={`pr__note${isSelected ? ' is-selected' : ''}${outOfScale ? ' is-out' : ''}`}
+                className={`pr__note${isSelected ? ' is-selected' : ''}${role ? (role.className !== '' ? ` pr__note--${role.className}` : '') : outOfScale ? ' is-out' : ''}`}
                 tabIndex={note.id === focusableNoteId ? 0 : -1}
-                aria-label={noteAccessibilityLabel(displayedNote, isSelected, !outOfScale)}
+                aria-label={`${noteAccessibilityLabel(displayedNote, isSelected, !outOfScale)}${roleText ? `、${roleText}` : ''}`}
                 aria-pressed={isSelected}
                 aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight PageUp PageDown Shift+PageUp Shift+PageDown Home End Enter Space Control+A Meta+A Control+D Meta+D Delete Backspace Escape"
                 style={{
@@ -1438,8 +1517,11 @@ export function PianoRoll() {
                   if (event.detail === 0) selectNotes([note.id]);
                 }}
                 onDoubleClick={(event) => event.stopPropagation()}
-                title={`${midiToNoteName(displayedNote.pitch)} / 強さ ${displayedNote.velocity}`}
+                title={`${midiToNoteName(displayedNote.pitch)} / 強さ ${displayedNote.velocity}${roleText ? ` / ${roleText}` : ''}`}
               >
+                {role && role.symbol !== '' ? (
+                  <span className="pr__note-role" aria-hidden="true">{role.symbol}</span>
+                ) : null}
                 <span className="pr__note-resize" />
               </button>
             );
