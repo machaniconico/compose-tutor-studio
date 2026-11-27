@@ -1,3 +1,4 @@
+import { canHandleShortcut } from '../common/keymap';
 import {
   useEffect,
   useRef,
@@ -135,13 +136,13 @@ export function AudioTimingEditor({
   ): void => {
     if (disabled) return;
     if (navigate(event, index)) return;
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && canHandleShortcut(event.nativeEvent ?? event)) {
       event.preventDefault();
       dragStart.current = null;
       setPreviewBeat(null);
       return;
     }
-    if (event.key === 'Delete') {
+    if (event.key === 'Delete' && canHandleShortcut(event.nativeEvent ?? event)) {
       event.preventDefault();
       const result = removeAudioWarpTimingPoint(warp, index);
       if (!result.ok) {

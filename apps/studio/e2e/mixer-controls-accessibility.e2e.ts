@@ -123,3 +123,39 @@ test('TrackList and Mixer volume/pan controls share accessible gesture descripti
   await trackPan.press('ArrowRight');
   await expect(mixerPan).toHaveValue('0.01');
 });
+
+test('commits a native fader drag on window blur and accepts the next keyboard edit', async ({ page }) => {
+  await page.goto('/');
+  await page
+    .getByRole('dialog', { name: 'ようこそ' })
+    .getByRole('button', { name: 'あとで', exact: true })
+    .click();
+
+  const mixer = page.getByRole('region', { name: 'ミキサー', exact: true });
+  const fader = mixer.getByRole('slider', { name: 'Chords 音量', exact: true });
+  const mirroredFader = page.getByRole('navigation', { name: 'トラック一覧' })
+    .getByRole('slider', { name: 'Chords 音量', exact: true });
+  const initial = await fader.inputValue();
+  await fader.scrollIntoViewIfNeeded();
+  const box = await fader.boundingBox();
+  if (box === null) throw new Error('Expected a visible volume fader');
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.5, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.25, y, { steps: 5 });
+  await expect(mirroredFader).not.toHaveValue(initial);
+  const dragged = await mirroredFader.inputValue();
+
+  // End the browser session while the native drag is still active.
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await fader.focus();
+  await fader.press('ArrowRight');
+  await expect(mirroredFader).toHaveValue(String(Math.round((Number(dragged) + 0.01) * 100) / 100));
+  await page.mouse.up();
+
+  const undo = page.getByRole('button', { name: '元に戻す', exact: true });
+  await undo.click();
+  await expect(mirroredFader).toHaveValue(dragged);
+  await undo.click();
+  await expect(mirroredFader).toHaveValue(initial);
+});

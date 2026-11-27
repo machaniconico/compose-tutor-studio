@@ -1,3 +1,4 @@
+import { canHandleShortcut } from './keymap';
 import { useEffect, useRef } from 'react';
 import { registerDialog } from './dialogState';
 
@@ -145,7 +146,7 @@ export function useModalDialog(options: ModalDialogOptions = {}) {
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!registration.isTopmost()) return;
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && canHandleShortcut(event)) {
         event.stopPropagation();
         if (!escapeDisabledRef.current) onEscapeRef.current?.();
         return;

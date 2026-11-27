@@ -101,6 +101,7 @@ MIDIノート編集と同時に、スケール・コード・メロディ作法�
 - 「スケールスナップ」ボタンにフォーカス中のSで切替
 - 「コードトーン」ボタンにフォーカス中のCでChord Tone Highlight切替
 - ノート移動・長さ・ベロシティのドラッグ中はローカルプレビューだけを表示し、主ポインターの`pointerup`で最終値を1回だけ確定する。1ジェスチャーはUndo 1回で全体を戻せる
+- ドラッグ中のEscapeと`pointercancel`はプレビューを捨て、ドラッグ前のまま何も確定しない。ミキサー / Track Listの音量・パンのドラッグもStoreのgesture transactionで1ドラッグをUndo 1回にし、途中値はhistoryにも自動保存にも入れない（`docs/05_technical_architecture.md` 5.1.2）
 - クリップ右端への追加はノート全体が収まる最後の開始位置へ置き、量子化の最近傍グリッドが終端を越える場合は最後の有効グリッドへ戻す
 - `pointercancel`または予期しないpointer capture喪失では、プレビューを破棄し、project・履歴・revision・保存・教材イベントを変更しない
 - 複数ノート移動は掴んだノートを基準に共通デルタを使い、クリップ・音域境界でも相対タイミングを維持する
@@ -354,7 +355,7 @@ Editorの「オートメーション」tabは選択中の対応Trackへ結び付
 
 AutomationLaneは再生session snapshotであり、lane編集またはRead / Bypass切替はactive playbackを停止して有限なplayheadを保持し、natural drainも破棄して次のplayで再構築する。laneが1件以上ある状態でのmixer / effect編集も原則同じ扱いだが、active write pass中に開始時Readだった別Trackのvolume / pan scalarだけを変える場合はpassをexact rebaseする。対象にeffective Read laneがなければAudioParamだけを更新して再生を維持し、laneがあれば最初のpoint前や次loopでscalarが可聴になるため、古い予約値を残さず再生を停止して次回再構築する。改名・ノート編集などmixerに無関係なProject変更では、予約済みAudioParam automationをcancelしない。transport loopと可変tempoでも既存の共通resolverを使うため、ライブ再生とoffline WAVは同じRead / Bypass結果になる。
 
-再生開始時に対応Trackごとのmodeを凍結し、Read以外が1件でもあればruntime-onlyの1 passを開始する。Touchはミキサー / Track Listの対応controlをpointerまたはkeyboardで操作している範囲だけを書き、releaseから100 msで開始前curveへ戻す。Latchは最初の接触からパンチアウトまで最後の操作値を保持する。Writeは確認dialogを通過した時だけ有効になり、接触がなくてもpass開始からnon-Masterの音量 / パン、effective Masterの出力音量だけを開始時scalarで所有して既存curveを置き換え、パンチアウト後はTouchへ戻す。記録は既存laneの`bypassed`とGlobal / TrackまたはMaster Readを暗黙変更しないため、Read gateが無効なまま確定したcurveは再有効化するまで可聴化されない。Track ListとMixerの両Master faderは再生中のRead曲線を表示し、Write所有中はscalar、Touch/Latchのgesture中は操作値を優先する。
+再生開始時に対応Trackごとのmodeを凍結し、Read以外が1件でもあればruntime-onlyの1 passを開始する。記録pass中は全Trackの音量 / パンのpointer dragを拒否し、理由を通知する。Touchはミキサー / Track Listの対応controlをキーボードで操作している範囲だけを書き、releaseから100 msで開始前curveへ戻す。Latchは最初の接触からパンチアウトまで最後の操作値を保持する。Writeは確認dialogを通過した時だけ有効になり、接触がなくてもpass開始からnon-Masterの音量 / パン、effective Masterの出力音量だけを開始時scalarで所有して既存curveを置き換え、パンチアウト後はTouchへ戻す。記録は既存laneの`bypassed`とGlobal / TrackまたはMaster Readを暗黙変更しないため、Read gateが無効なまま確定したcurveは再有効化するまで可聴化されない。Track ListとMixerの両Master faderは再生中のRead曲線を表示し、Write所有中はscalar、Touch/Latchのgesture中は操作値を優先する。
 
 pass中のsampleはProject / history / revisionを変えず、停止、自然終了、seek、transport loop右端、mode / Read / Bypass変更、Undo / Redo、Project切替、native close、pagehideの境界で半開区間をパンチアウトする。確定候補は開始時Project参照とcanonical fingerprintへのCAS、point / lane上限、全Project codecを通過した時だけProject変更・Undo・save revision各1回として採用し、失敗時は部分curveを公開しない。pagehideで確定できない場合はProject no-opでpassを破棄する。確定curveはcurrent schema v10の通常laneとしてlive / full WAV / selected Track WAVの共通resolverへ渡るため、記録時のmode名はoffline bounceへ影響しない。
 

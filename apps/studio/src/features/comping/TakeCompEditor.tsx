@@ -1,3 +1,4 @@
+import { canHandleShortcut } from '../common/keymap';
 import {
   useEffect,
   useRef,
@@ -598,7 +599,10 @@ export function TakeCompEditor() {
                     }}
                     onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
                       const active = dragPreviewRef.current;
-                      if (event.key !== 'Escape' || active?.takeId !== take.id) {
+                      if (
+                        event.key !== 'Escape' || active?.takeId !== take.id
+                        || !canHandleShortcut(event.nativeEvent ?? event)
+                      ) {
                         return;
                       }
                       event.preventDefault();

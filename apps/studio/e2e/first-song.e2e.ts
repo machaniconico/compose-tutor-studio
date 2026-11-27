@@ -538,7 +538,12 @@ test('chord editing is reachable and safe with keyboard and pointer input', asyn
   );
   await expect(popover.getByRole('button', { name: '適用', exact: true })).toBeDisabled();
 
-  await page.keyboard.press('Escape');
+  const closeChordEditor = popover.getByRole('button', { name: 'コード編集を閉じる' });
+  await symbolInput.press('Escape');
+  await expect(popover).toBeVisible();
+  await expect(symbolInput).toBeFocused();
+  await expect(symbolInput).toHaveValue('not-a-chord');
+  await closeChordEditor.press('Escape');
   await expect(popover).toBeHidden();
   await expect(firstTrigger).toBeFocused();
   await expect(firstTrigger).toHaveAttribute('aria-expanded', 'false');
@@ -583,7 +588,7 @@ test('chord editing is reachable and safe with keyboard and pointer input', asyn
   await symbolInput.fill('Fmaj7');
   await secondTrigger.click();
   await expect(symbolInput).toHaveValue(secondSymbol);
-  await page.keyboard.press('Escape');
+  await closeChordEditor.press('Escape');
   await expect(secondTrigger).toBeFocused();
 
   // Number fields provide a keyboard alternative to dragging and resizing.

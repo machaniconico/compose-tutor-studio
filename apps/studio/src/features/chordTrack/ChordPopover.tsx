@@ -1,3 +1,4 @@
+import { canHandleShortcut } from '../common/keymap';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -277,6 +278,7 @@ export function ChordPopover(props: {
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!canHandleShortcut(event)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();

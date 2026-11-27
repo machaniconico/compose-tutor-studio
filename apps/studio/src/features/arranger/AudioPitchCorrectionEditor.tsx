@@ -1,3 +1,4 @@
+import { canHandleShortcut } from '../common/keymap';
 import {
   useEffect,
   useRef,
@@ -431,7 +432,10 @@ export function AudioPitchCorrectionEditor({
         '目標音程を変更しました。',
       );
       return;
-    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+    } else if (
+      (event.key === 'Delete' || event.key === 'Backspace')
+      && canHandleShortcut(event.nativeEvent ?? event)
+    ) {
       event.preventDefault();
       removeSelectedRegion(index);
       return;

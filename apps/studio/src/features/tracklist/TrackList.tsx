@@ -188,9 +188,9 @@ function TrackMixControls(props: Readonly<{
         {accessibleName}、トラックID {track.id}。
         {isMaster
           ? masterVolumeAutomationSupported
-            ? 'Master出力音量。再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。'
+            ? 'Master出力音量。Touch、Latch、Writeの記録中はキーボードで調整できます。ドラッグするには再生を止めてください。'
             : 'この追加Masterの音量はオートメーション記録に対応していません。'
-          : '再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。'}
+          : 'Touch、Latch、Writeの記録中はキーボードで調整できます。ドラッグするには再生を止めてください。'}
       </span>
       {track.type === 'audio' ? (
         <button

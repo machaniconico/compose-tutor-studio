@@ -27,6 +27,7 @@ import {
   updateStudioAutomationPoint,
 } from '../../state/automationActions';
 import { useStore } from '../../state/store';
+import { canHandleShortcut, matchShortcut } from '../common/keymap';
 import {
   AUTOMATION_LANE_HEIGHT,
   AUTOMATION_LANE_MIN_WIDTH,
@@ -323,6 +324,21 @@ export function AutomationLaneEditor() {
     setClearConfirmationOpen(false);
     setWriteConfirmationOpen(false);
   }, [selectedTrack?.type, selectedTrackId]);
+
+  // Escape during a point drag cancels it: the preview is dropped and the
+  // later pointerup commits nothing.
+  const dragging = dragPreview !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const onEscape = (event: globalThis.KeyboardEvent): void => {
+      if (matchShortcut(event, 'gesture') !== 'cancelGesture') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDragPreview(null);
+    };
+    window.addEventListener('keydown', onEscape, true);
+    return () => window.removeEventListener('keydown', onEscape, true);
+  }, [dragging]);
 
   useEffect(() => {
     setClearConfirmationOpen(false);
@@ -648,10 +664,11 @@ export function AutomationLaneEditor() {
     point: AutomationPoint,
     index: number,
   ): void => {
-    if (event.repeat) return;
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+    if (event.repeat || !canHandleShortcut(event.nativeEvent)) return;
+    const action = matchShortcut(event.nativeEvent, 'control');
+    if (action === 'undo' || action === 'redo') {
       event.preventDefault();
-      if (event.shiftKey) {
+      if (action === 'redo') {
         if (canRedo()) {
           redo();
           setNotice({ kind: 'status', message: '変更をやり直しました。' });

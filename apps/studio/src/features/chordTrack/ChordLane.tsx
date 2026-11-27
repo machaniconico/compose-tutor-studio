@@ -1,3 +1,4 @@
+import { canHandleShortcut } from '../common/keymap';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   barToBeatAt,
@@ -499,6 +500,7 @@ export function ChordLane() {
       }
 
       if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (!canHandleShortcut(e.nativeEvent)) return;
       e.preventDefault();
       e.stopPropagation();
       setGridAnnouncement(
@@ -686,6 +688,7 @@ export function ChordLane() {
                 onPointerDown={(e) => onChipPointerDown(e, chord, 'move')}
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'F2') return;
+                  if (!canHandleShortcut(e.nativeEvent)) return;
                   e.preventDefault();
                   e.stopPropagation();
                   if (e.repeat) return;
