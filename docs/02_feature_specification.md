@@ -17,6 +17,7 @@
 | Automation | Track音量/パンとMaster出力音量の時間変化 | Yes | non-Master Trackの音量 / パンとeffective Masterの出力音量について、beat snap付きlane editor、hold / linear、lane Bypass、Global / TrackまたはMaster Readを保存し、再生中はRead / Touch / Latch / Writeで対応操作を記録する。mode自体はruntime-only |
 | Effects | 基本エフェクト | Partial | Filter/Delay/Reverbを最小実装 |
 | Tutorial | 操作・状態連動チュートリアル | Yes | 確定操作イベントと採用済みProject/UI状態を再照合して進行 |
+| Glossary | 用語集 | Yes | チュートリアルタブの「用語集をひらく」で、ひらがな・カタカナ・英字から検索できる。レッスンの「なぜ？」と、ミキサーのセンドの見出しの用語にカーソルかフォーカスを置くと説明が出る(Escで閉じる)。説明は全て初心者向けの1種類 |
 | Exercise | 理論演習 | Yes | コード判定、スケール判定、メロディ添削 |
 | AI Coach | 説明付き改善提案 | Optional | APIキー設定時のみ。MVPではモック可 |
 | Export | MIDI/WAV | Yes | MIDIはFormat 1の正規化projection、WAVは簡易レンダー |
