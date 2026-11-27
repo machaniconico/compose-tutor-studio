@@ -302,3 +302,59 @@ describe('validateProject: project sound limit', () => {
     });
   });
 });
+
+describe('validateProject volume automation', () => {
+  const resultFor = (automation: unknown) => {
+    const project = baseProject();
+    const first = { ...project.tracks[0]!, automation } as Project['tracks'][number];
+    return validateProject({ ...project, tracks: [first, ...project.tracks.slice(1)] });
+  };
+
+  it.each([
+    [null, 'automation'],
+    [42, 'automation'],
+    [{ volume: null }, 'automation.volume'],
+    [{ volume: 'fade' }, 'automation.volume'],
+    [{ volume: { toString: null } }, 'automation.volume.points'],
+    [{ volume: { points: { toString: null } } }, 'automation.volume.points'],
+    [{ volume: { points: [null] } }, 'automation.volume.points[0]'],
+    [{ volume: { points: [false] } }, 'automation.volume.points[0]'],
+    [{ volume: { points: [[0, 1]] } }, 'automation.volume.points[0]'],
+  ])('safely rejects malformed saved structure %#', (automation, path) => {
+    const result = resultFor(automation);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContainEqual({
+      path: `tracks[0].${path}`,
+      message: expect.stringMatching(/[ぁ-ん]/),
+    });
+  });
+
+  it('rejects invalid beats and values with safe Japanese messages', () => {
+    for (const [key, values] of [
+      ['beat', [-1, Infinity, NaN, { toString: null }]],
+      ['value', [-1, 1.01, -Infinity, NaN, { toString: null }]],
+    ] as const) {
+      for (const value of values) {
+        const result = resultFor({ volume: { points: [{ beat: 0, value: 0, [key]: value }] } });
+        expect(result.ok).toBe(false);
+        expect(result.errors).toContainEqual({
+          path: `tracks[0].automation.volume.points[0].${key}`,
+          message: expect.stringMatching(/[ぁ-ん]/),
+        });
+      }
+    }
+  });
+
+  it('accepts ties and the maximum size, and rejects unsorted or oversized lanes', () => {
+    const points = Array.from({ length: 10_000 }, (_, i) => ({ beat: Math.floor(i / 2), value: 0.5 }));
+    expect(resultFor({ volume: { points } }).ok).toBe(true);
+    expect(resultFor({ volume: { points: [{ beat: 10, value: 1 }, ...points] } }).errors).toContainEqual({
+      path: 'tracks[0].automation.volume.points',
+      message: '音量の点は 10000 個までです',
+    });
+    expect(resultFor({ volume: { points: [{ beat: 10, value: 1 }, points[0]] } }).errors).toContainEqual({
+      path: 'tracks[0].automation.volume.points[1].beat',
+      message: '音量の点は拍の早い順に並べてください',
+    });
+  });
+});

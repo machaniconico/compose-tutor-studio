@@ -13,6 +13,7 @@ import {
 import { isAnyDialogOpen } from '../common/dialogState';
 import { pxPerBeat } from '../timeline';
 import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
+import { AutomationLane } from './AutomationLane';
 import { MAX_LENGTH_BARS } from '../transport/TransportBar';
 import {
   barStartAtX,
@@ -71,7 +72,9 @@ export function ArrangeView() {
   const ppb = pxPerBeat(zoomX);
   const barPx = bpb * ppb;
   const clipEnd = Math.max(0, ...project.tracks.flatMap((t) => t.clips.map((c) => c.startBeat + c.lengthBeats)));
-  const laneWidth = Math.max(project.lengthBars * bpb, clipEnd) * ppb;
+  const songEnd = project.lengthBars * bpb;
+  const visibleBeats = Math.max(songEnd, clipEnd);
+  const laneWidth = visibleBeats * ppb;
   const selected = project.tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId) ?? null;
   const splitEnabled = canSplitAt(project, selected?.id ?? null, positionBeat);
   const splitReason = splitBlockedReason(project, selected?.id ?? null);
@@ -239,68 +242,68 @@ export function ArrangeView() {
           <TimelineRuler />
         </div>
         <div className="arrange__rows">
-          <div className="arrange__names">
-            {project.tracks.map((track) => (
-              <div key={track.id} className="arrange__name" title={track.name}>
-                {track.name}
-              </div>
-            ))}
-          </div>
-          <div className="arrange__lanes" style={{ width: laneWidth }}>
-            {project.tracks.map((track) => (
-              <div
-                key={track.id}
-                className="arrange__lane"
-                data-testid={`arrange-lane-${track.id}`}
-                style={{ backgroundSize: `${barPx}px 100%` }}
-                onDoubleClick={(e) => onLaneDoubleClick(e, track)}
-              >
-                {track.clips.map((clip) => (
-                  <div
-                    key={clip.id}
-                    role="button"
-                    tabIndex={0}
-                    data-testid={`clip-${clip.id}`}
-                    aria-label={clipLabel(track, clip, bpb)}
-                    aria-pressed={clip.id === selectedClipId}
-                    className={`arrange__clip is-${clip.type}${clip.id === selectedClipId ? ' is-selected' : ''}${
-                      clip.aliasOf ? ' is-linked' : ''
-                    }`}
-                    style={{ left: clip.startBeat * ppb, width: clip.lengthBeats * ppb }}
-                    onPointerDown={(e) => startDrag(e, clip, 'move')}
-                    onPointerMove={onDragMove}
-                    onPointerUp={endDrag}
-                    onPointerCancel={endDrag}
-                    onLostPointerCapture={endDrag}
-                    onKeyDown={(e) => {
-                      if (e.key !== 'Enter' && e.key !== ' ') return;
-                      e.preventDefault();
-                      select(clip);
-                    }}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      openClipInEditor(clip.id);
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      select(clip);
-                      setMenu({ clipId: clip.id, x: e.clientX, y: e.clientY });
-                    }}
-                  >
-                    <span className="arrange__clip-name">{clip.aliasOf ? 'リンク' : track.name}</span>
-                    <span
-                      className="arrange__clip-resize"
-                      aria-hidden="true"
-                      onPointerDown={(e) => startDrag(e, clip, 'resize')}
+          {project.tracks.map((track) => (
+            <div key={track.id} className="arrange__track">
+              <div className="arrange__name" title={track.name}>{track.name}</div>
+              <div style={{ width: laneWidth }}>
+                <div
+                  className="arrange__lane"
+                  data-testid={`arrange-lane-${track.id}`}
+                  style={{ backgroundSize: `${barPx}px 100%` }}
+                  onDoubleClick={(e) => onLaneDoubleClick(e, track)}
+                >
+                  {track.clips.map((clip) => (
+                    <div
+                      key={clip.id}
+                      role="button"
+                      tabIndex={0}
+                      data-testid={`clip-${clip.id}`}
+                      aria-label={clipLabel(track, clip, bpb)}
+                      aria-pressed={clip.id === selectedClipId}
+                      className={`arrange__clip is-${clip.type}${clip.id === selectedClipId ? ' is-selected' : ''}${
+                        clip.aliasOf ? ' is-linked' : ''
+                      }`}
+                      style={{ left: clip.startBeat * ppb, width: clip.lengthBeats * ppb }}
+                      onPointerDown={(e) => startDrag(e, clip, 'move')}
                       onPointerMove={onDragMove}
                       onPointerUp={endDrag}
                       onPointerCancel={endDrag}
                       onLostPointerCapture={endDrag}
-                    />
-                  </div>
-                ))}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        e.preventDefault();
+                        select(clip);
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        openClipInEditor(clip.id);
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        select(clip);
+                        setMenu({ clipId: clip.id, x: e.clientX, y: e.clientY });
+                      }}
+                    >
+                      <span className="arrange__clip-name">{clip.aliasOf ? 'リンク' : track.name}</span>
+                      <span
+                        className="arrange__clip-resize"
+                        aria-hidden="true"
+                        onPointerDown={(e) => startDrag(e, clip, 'resize')}
+                        onPointerMove={onDragMove}
+                        onPointerUp={endDrag}
+                        onPointerCancel={endDrag}
+                        onLostPointerCapture={endDrag}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {track.type !== 'master' && <AutomationLane
+                  track={track} ppb={ppb} barBeats={bpb} songEnd={songEnd} visibleBeats={visibleBeats}
+                />}
               </div>
-            ))}
+            </div>
+          ))}
+          <div className="arrange__playhead">
             <Playhead ppb={ppb} />
           </div>
         </div>

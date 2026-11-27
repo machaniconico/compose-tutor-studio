@@ -2752,19 +2752,20 @@ input[type='range'] {
 }
 
 .arrange__scroll {
+  --arrange-name-width: 96px;
   overflow-x: auto;
 }
 
 .arrange__ruler-row,
-.arrange__rows {
+.arrange__track {
   display: flex;
   width: max-content;
 }
 
 .arrange__corner,
-.arrange__names {
-  flex: 0 0 96px;
-  width: 96px;
+.arrange__name {
+  flex: 0 0 var(--arrange-name-width);
+  width: var(--arrange-name-width);
 }
 
 .arrange__name {
@@ -2778,9 +2779,15 @@ input[type='range'] {
   font-size: 12px;
 }
 
-.arrange__lanes {
+.arrange__rows {
   position: relative;
-  flex: none;
+  width: max-content;
+}
+
+.arrange__playhead {
+  position: absolute;
+  inset: 0 0 0 var(--arrange-name-width);
+  pointer-events: none;
 }
 
 .arrange__lane {
@@ -2852,4 +2859,81 @@ input[type='range'] {
 
 .arrange__menu button {
   text-align: left;
+}
+
+.automation {
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.automation summary {
+  width: fit-content;
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.automation__controls {
+  width: min(100%, 30rem);
+  padding: var(--sp-2);
+}
+
+.automation__controls > div {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.automation__controls p {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-dim);
+}
+
+.automation__plot {
+  position: relative;
+  box-shadow: inset 0 1px var(--border);
+  background-color: var(--bg-input);
+  background-image: linear-gradient(to right, var(--border) 1px, transparent 1px);
+  cursor: crosshair;
+}
+
+.automation__line {
+  position: absolute;
+  height: 2px;
+  background: var(--accent);
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.automation__point {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.automation__point::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--bg-input);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.automation__point:active {
+  cursor: grabbing;
+}
+
+.automation__point:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }

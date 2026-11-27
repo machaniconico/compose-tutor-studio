@@ -1,19 +1,20 @@
 // Per-track audio routing graph and mute/solo resolution.
 //
 // Each non-master track gets:
-// trackGain (volume) -> panner (pan) -> FX -> meter tap -> master bus.
+// trackGain (volume) -> automation gain (when present) -> panner (pan) -> FX -> meter tap -> master bus.
 // The master bus + soft limiter live on the AudioEngine. Mute/solo is resolved
 // by the pure `computeAudibleTracks` so the rule ("any solo => only solos; mute
 // always wins") is unit-testable without any audio nodes, then applied to the
 // live gain nodes.
 
-import { computeAudibleTracks, type Track } from '@cts/project-model';
+import { computeAudibleTracks, type AutomationLane, type Track } from '@cts/project-model';
 import {
   buildTrackEffectChain,
   effectSignature,
   type SupportedEffectType,
   type TrackEffectChain,
 } from './effects';
+import { buildParamSchedule, type AutomationPlayback } from './automationSchedule';
 import { METER_ANALYSER_FFT_SIZE } from './metering';
 
 const liveTrackAnalysers = new Map<string, AnalyserNode>();
@@ -40,6 +41,8 @@ export class TrackGraph {
   private readonly ctx: BaseAudioContext;
   private readonly master: AudioNode;
   private readonly gain: GainNode;
+  private readonly automationGain: GainNode | undefined;
+  private readonly volumeLane: AutomationLane | undefined;
   private readonly panner: StereoPannerNode;
   private readonly meterTap: GainNode;
   private effects: TrackEffectChain | null = null;
@@ -49,6 +52,8 @@ export class TrackGraph {
     this.master = master;
     this.trackId = track.id;
     this.gain = ctx.createGain();
+    this.volumeLane = track.automation?.volume;
+    this.automationGain = this.volumeLane?.points.length ? ctx.createGain() : undefined;
     this.panner = ctx.createStereoPanner();
     this.meterTap = ctx.createGain();
     this.analyser = ctx.createAnalyser();
@@ -59,14 +64,25 @@ export class TrackGraph {
     this.meterTap.connect(this.master);
     this.meterTap.connect(this.analyser);
     registerLiveTrackAnalyser(ctx, this.trackId, this.analyser);
-    // Voices connect to `input` (the gain node); gain -> panner -> FX -> meter tap.
     this.input = this.gain;
-    this.gain.connect(this.panner);
+    this.gain.connect(this.automationGain ?? this.panner);
+    this.automationGain?.connect(this.panner);
     this.rebuildEffects(track, ctx.currentTime);
   }
 
   get effectTypes(): readonly SupportedEffectType[] {
     return this.effects?.effectTypes ?? [];
+  }
+
+  scheduleAutomation(playback: AutomationPlayback, firstPass = 0, passes = 1): void {
+    const gain = this.automationGain?.gain;
+    if (!gain) return;
+    const { startBeat, loop, bpm, startTime, endBeat } = playback;
+    for (const { method, time, value } of buildParamSchedule(
+      this.volumeLane, startBeat, loop, bpm, { startTime, endBeat, firstPass, passes },
+    )) {
+      gain[method](value, time);
+    }
   }
 
   /** Apply volume/pan/mute/solo state to the live nodes. */
@@ -85,6 +101,7 @@ export class TrackGraph {
     } catch {
       // already disconnected
     }
+    this.automationGain?.disconnect();
     try {
       this.panner.disconnect();
     } catch {

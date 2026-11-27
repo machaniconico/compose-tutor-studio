@@ -12,6 +12,7 @@ import {
   type Track,
 } from '@cts/project-model';
 import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
+import { buildParamSchedule } from '../src/audio/automationSchedule';
 import { buildScheduleEvents, type SchedulePayload } from '../src/audio/events';
 import { nextEventsInWindow } from '../src/audio/scheduler';
 import { applyMacros } from '../src/audio/macros';
@@ -35,9 +36,10 @@ vi.mock('../src/audio/macros', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/audio/macros')>();
   return { ...actual, applyMacros: vi.fn(actual.applyMacros) };
 });
+const { scheduleAutomation } = vi.hoisted(() => ({ scheduleAutomation: vi.fn() }));
 vi.mock('../src/audio/graph', () => ({
   buildTrackGraphs: (_ctx: unknown, _master: unknown, tracks: ReadonlyArray<{ id: string }>) =>
-    new Map(tracks.map((t) => [t.id, { input: {}, dispose: () => {} }])),
+    new Map(tracks.map((t) => [t.id, { input: {}, dispose: () => {}, scheduleAutomation }])),
 }));
 vi.mock('../src/audio/masterChain', () => ({ createMasterChain: () => ({ input: {} }) }));
 
@@ -391,6 +393,7 @@ describe('renderProjectToWav', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.mocked(applyMacros).mockClear();
+    scheduleAutomation.mockClear();
   });
 
   /** Records synth automation and writes an impulse at each oscillator onset. */
@@ -487,8 +490,26 @@ describe('renderProjectToWav', () => {
     const wav = await renderProjectToWav(project);
     const digest = createHash('sha256').update(new Uint8Array(await wav.arrayBuffer())).digest('hex');
     expect(digest).toBe('8b4937feb17ba5c0abd6617b3650151257106ecb5799475f37ac0e23f09ad0e7');
+    expect(scheduleAutomation).not.toHaveBeenCalled();
     expect(await (await renderProjectToWav(project, { sampleRate: 44100, range: 'full' })).arrayBuffer())
       .toEqual(await wav.arrayBuffer());
+  });
+
+  it('uses the shared volume schedule from the loop export start through its end', async () => {
+    stubOfflineContext([]);
+    const project = { ...keysProject(), bpm: 120, loopRange: { startBeat: 1, endBeat: 3 } };
+    const lane = { points: [{ beat: 0, value: 0 }, { beat: 4, value: 1 }] };
+    project.tracks[0]!.automation = { volume: lane };
+    await renderProjectToWav(project, { range: 'loop' });
+
+    expect(scheduleAutomation).toHaveBeenCalledExactlyOnceWith({
+      bpm: 120, startBeat: 1, endBeat: 3, loop: null, startTime: 0,
+    });
+    const { startBeat, loop, bpm, ...options } = scheduleAutomation.mock.lastCall![0];
+    expect(buildParamSchedule(lane, startBeat, loop, bpm, options)).toEqual([
+      { method: 'setValueAtTime', value: 0.25, time: 0 },
+      { method: 'linearRampToValueAtTime', value: 0.75, time: 1 },
+    ]);
   });
 
   it('writes 48 kHz stereo PCM with the rounded song length plus a one-second tail', async () => {

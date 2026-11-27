@@ -20,6 +20,7 @@ import { beatTick, beatsPerBar as beatsPerBarOf, computeAudibleTracks, songEndBe
 import { activeLoopRange, useStore } from '../state/store';
 import { recordDiagnostic } from '../platform/diagnostics';
 import { pushToast } from '../state/tutorialBridge';
+import { automationLoopOffset } from './automationSchedule';
 import { getAudioEngine } from './engine';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import { applyMixState, buildTrackGraphs, type TrackGraph } from './graph';
@@ -39,6 +40,8 @@ import { songTailSeconds } from './wav';
 
 /** Position update rate while playing (ms ~= 30fps). */
 const POSITION_TICK_MS = 33;
+// At 300 BPM and the minimum loop period, one lookahead spans fewer than 40 repeats.
+const MAX_AUTOMATION_PASSES_PER_TICK = 64;
 
 /**
  * Ledger entry: a note or drum hit actually handed to a voice in this run
@@ -160,7 +163,9 @@ export function initAudioBridge(): () => void {
       if (track.mute !== playingTrack.mute || track.solo !== playingTrack.solo) {
         previousAudible ??= computeAudibleTracks([...state.playbackTracks.values()]);
       }
-      state.playbackTracks.set(track.id, track);
+      // Keep the lane captured at play time, including across internal restarts.
+      state.playbackTracks.set(track.id, track.automation === playingTrack.automation
+        ? track : { ...track, automation: playingTrack.automation });
     }
     const engine = getAudioEngine();
     if (!state.scheduler?.isRunning) {
@@ -169,12 +174,14 @@ export function initAudioBridge(): () => void {
       }
       return;
     }
-    if (tempoOrMeterChanged(s.project, prev.project)) {
+    const lengthChanged = s.project.lengthBars !== prev.project.lengthBars;
+    if (tempoOrMeterChanged(s.project, prev.project) ||
+      (lengthChanged && !state.loop && [...state.playbackTracks.values()].some(hasVolumeAutomation))) {
       restartPlayback();
       return;
     }
     if (
-      (clipsChanged || s.project.lengthBars !== prev.project.lengthBars) &&
+      (clipsChanged || lengthChanged) &&
       !applyLiveEdit(playbackProject(s.project))
     ) {
       restartPlayback();
@@ -459,6 +466,10 @@ function handlePlaybackStartFailure(error: unknown): void {
   pushToast(audioPlaybackFailureMessage(error), 'error');
 }
 
+function hasVolumeAutomation(track: Track): boolean {
+  return track.type !== 'master' && Boolean(track.automation?.volume?.points.length);
+}
+
 /** Build (or rebuild) the per-track graph + voice managers for a render pass. */
 function buildVoices(
   ctx: AudioContext,
@@ -515,6 +526,9 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
 
   const startBeat = transport.positionBeat;
   const now = engine.now();
+  const automation = { bpm: project.bpm, startBeat, loop: state.loop, endBeat: state.songEnd, startTime: now };
+  const hasAutomation = project.tracks.some(hasVolumeAutomation);
+  let nextAutomationPass = 0;
 
   silenceRinging();
   buildVoices(context, master, project.tracks, now);
@@ -537,6 +551,30 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
     clock: () => engine.now(),
     fire: fireEvents,
     onWindow: (fromBeat, toBeat) => {
+      if (hasAutomation) {
+        automation.startTime = scheduler.timeAt(startBeat);
+        const schedule = (pass: number) => {
+          for (const graph of state.graphs.values()) graph.scheduleAutomation(automation, pass);
+        };
+        if (nextAutomationPass === 0) {
+          schedule(0);
+          nextAutomationPass = 1;
+        }
+        const { loop } = automation;
+        if (loop) {
+          // Jump past completed passes after a stalled timer. A normal lookahead
+          // schedules each repeat shortly before its first sample.
+          const firstRepeat = automationLoopOffset(startBeat, loop, 1);
+          const period = loop.endBeat - loop.startBeat;
+          const through = 1 + Math.floor((toBeat - startBeat - firstRepeat) / period);
+          const current = 1 + Math.floor((scheduler.playheadBeat() - startBeat - firstRepeat) / period);
+          nextAutomationPass = Math.max(nextAutomationPass, current);
+          // Even a pathological tempo/range cannot create an unbounded batch.
+          const first = Math.max(nextAutomationPass, through - MAX_AUTOMATION_PASSES_PER_TICK + 1);
+          for (let pass = first; Number.isSafeInteger(pass) && pass <= through; pass++) schedule(pass);
+          nextAutomationPass = Math.max(nextAutomationPass, through + 1);
+        }
+      }
       if (!transport.metronome) return;
       const clickNow = engine.now();
       state.clicks = state.clicks.filter((click) => click.time >= clickNow);

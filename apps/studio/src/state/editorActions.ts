@@ -11,6 +11,7 @@
 // may have chords lacking degree/function, but anything WE write is complete.
 
 import type {
+  AutomationLane,
   ChordEvent,
   Clip,
   DrumEvent,
@@ -568,6 +569,16 @@ function shortenedOrMissingNotes(before: NotePlayback, after: NotePlayback): Set
 
 function keepsSoundingAndLength(before: NotePlayback, after: NotePlayback): boolean {
   return shortenedOrMissingNotes(before, after).size === 0;
+}
+
+/** Commit one lane edit. The expected lane protects a drag from replacing newer edits. */
+export function setVolumeAutomation(trackId: string, expected: AutomationLane | undefined, lane: AutomationLane): boolean {
+  const store = useStore.getState();
+  const track = store.project.tracks.find((item) => item.id === trackId);
+  if (!track || track.type === 'master' || track.automation?.volume !== expected || expected === lane) return false;
+  return store.applyProjectChange((project) => mapTracks(project, (item) => item === track
+    ? { ...track, automation: { ...track.automation, volume: lane } }
+    : item));
 }
 
 /** Project swing (0..60%), applied on playback by soundingEvents. Other values are ignored. */

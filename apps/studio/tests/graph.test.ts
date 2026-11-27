@@ -7,6 +7,7 @@ import {
   clampVolume,
   computeAudibleTracks,
 } from '../src/audio/graph';
+import type { ParamEvent } from '../src/audio/automationSchedule';
 import { delayTimeSeconds } from '../src/audio/effects';
 
 /** Minimal Track factory for mute/solo tests. */
@@ -28,7 +29,16 @@ function track(
 }
 
 class FakeAudioParam {
+  readonly events: ParamEvent[] = [];
   constructor(public value: number) {}
+
+  setValueAtTime(value: number, time: number): void {
+    this.events.push({ method: 'setValueAtTime', value, time });
+  }
+
+  linearRampToValueAtTime(value: number, time: number): void {
+    this.events.push({ method: 'linearRampToValueAtTime', value, time });
+  }
 
   setTargetAtTime(value: number): FakeAudioParam {
     this.value = value;
@@ -453,5 +463,46 @@ describe('TrackGraph effects', () => {
       ['Gain', 0.35],
       ['Gain', 1],
     ]);
+  });
+});
+
+describe('volume automation graph', () => {
+  it('places automation after the track gain and keeps its ramp independent of mix updates', () => {
+    const ctx = new FakeAudioContext();
+    const master = ctx.createGain();
+    const trackWithLane: Track = {
+      ...track('keys'),
+      automation: { volume: { points: [{ beat: 0, value: 0 }, { beat: 4, value: 1 }] } },
+    };
+    const graph = new TrackGraph(ctx as unknown as BaseAudioContext, master, trackWithLane);
+    const [trackGain, automationGain] = ctx.created.filter((node) => node.kind === 'Gain').slice(1) as FakeGainNode[];
+    const panner = ctx.created.find((node) => node.kind === 'StereoPanner');
+    expect(graph.input).toBe(trackGain);
+    expect(trackGain!.connections).toEqual([automationGain]);
+    expect(automationGain!.connections).toEqual([panner]);
+
+    graph.scheduleAutomation({ bpm: 120, loop: null, startBeat: 2, startTime: 1, endBeat: 4 });
+    applyMixState(new Map([['keys', graph]]), [{ ...trackWithLane, volume: 0.4, mute: true }], 2);
+    expect(trackGain!.gain.value).toBe(0);
+    expect(trackGain!.gain.events).toEqual([]);
+    expect(automationGain!.gain.value).toBe(1);
+    expect(automationGain!.gain.events).toEqual([
+      { method: 'setValueAtTime', value: 0.5, time: 1 },
+      { method: 'linearRampToValueAtTime', value: 1, time: 2 },
+    ]);
+    graph.dispose();
+    expect(automationGain!.connections).toEqual([]);
+  });
+
+  it('keeps the original signal path for absent and empty lanes', () => {
+    for (const automation of [undefined, { volume: { points: [] } }]) {
+      const ctx = new FakeAudioContext();
+      const graph = new TrackGraph(ctx as unknown as BaseAudioContext, ctx.createGain(), { ...track('keys'), automation });
+      graph.scheduleAutomation({ bpm: 120, loop: null, startBeat: 0, startTime: 0, endBeat: 4 });
+      expect(ctx.created.filter((node) => node.kind === 'Gain')).toHaveLength(3);
+      const input = graph.input as unknown as FakeGainNode;
+      expect(input.connections.map((node) => node.kind)).toEqual(['StereoPanner']);
+      expect(input.gain.events).toEqual([]);
+    }
   });
 });

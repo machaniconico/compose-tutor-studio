@@ -213,11 +213,16 @@ export async function renderProjectToWav(project: Project, options: WavExportOpt
 
   // Per-track graphs + voice managers.
   const graphs = buildTrackGraphs(ctx, master, project.tracks, 0);
+  const automation = {
+    bpm: project.bpm, startBeat: window?.startBeat ?? 0, loop: null, startTime: 0,
+    endBeat: window?.endBeat ?? songEndBeat(project),
+  };
   const synths = new Map<string, SynthVoiceManager>();
   const drums = new Map<string, DrumVoiceManager>();
   for (const track of project.tracks) {
     const graph = graphs.get(track.id);
     if (!graph) continue;
+    if (track.automation?.volume?.points.length) graph.scheduleAutomation(automation);
     if (track.type === 'drum') {
       drums.set(track.id, new DrumVoiceManager(ctx, graph.input));
     } else {

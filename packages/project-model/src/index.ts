@@ -26,3 +26,4 @@ export * from './sounding';
 export * from './groove';
 export { songEndBeat as projectLengthBeats } from './sounding';
 export * from './sections';
+export * from './automation';
