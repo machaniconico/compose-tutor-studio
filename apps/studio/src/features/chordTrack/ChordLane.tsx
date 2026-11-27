@@ -5,6 +5,7 @@ import {
   PROGRESSION_TEMPLATES,
   getDiatonicChords,
   suggestNextChords,
+  type CompingPattern,
   type HarmonicFunction,
 } from '@cts/theory-engine';
 import { useStore, watchDragEnd } from '../../state/store';
@@ -12,14 +13,22 @@ import { pxPerBeat, timelineWidth } from '../timeline';
 import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
 import {
   addChordWithAnalysis,
+  applyCompingToTrack,
   applyProgressionTemplate,
   chordNotesTargetTrackId,
-  chordsToNotes,
   hasChordsInNotesTarget,
   projectBeatsPerBar,
 } from '../../state/editorActions';
 import { ChordPopover } from './ChordPopover';
 import { auditionChord } from './paletteData';
+
+const COMPING_PATTERNS = {
+  whole: { label: '全音符', description: 'コードが続く間、すべての音を一緒に伸ばします。' },
+  eighths: { label: '8分刻み', description: '半拍ごとに、コードの音を一緒に鳴らします。' },
+  arpUp: { label: '上行アルペジオ', description: 'コードの音を、1拍ごとに低い音から順に鳴らします。' },
+  arpUpDown: { label: '上下アルペジオ', description: 'コードの音を、1拍ごとに上ってから下ります。' },
+  stab: { label: 'スタブ', description: '各拍の頭で、コードの音を短く鳴らします。' },
+} satisfies Record<CompingPattern, { label: string; description: string }>;
 
 /** CSS class suffix per harmonic function (drives chip accent color). */
 function functionClass(fn: HarmonicFunction | undefined): string {
@@ -63,6 +72,7 @@ export function ChordLane() {
   const setInspectorContent = useStore((s) => s.setInspectorContent);
 
   const [popoverChordId, setPopoverChordId] = useState<string | null>(null);
+  const [pattern, setPattern] = useState<CompingPattern>('whole');
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<ChordDrag | null>(null);
   const movedRef = useRef(false);
@@ -176,6 +186,8 @@ export function ChordLane() {
   const overlapsTarget = notesTarget ? hasChordsInNotesTarget(project, notesTarget) : false;
   const showOverlapHint = notesTarget !== undefined && !overlapsTarget;
   const overlapHintId = useId();
+  const patternId = useId();
+  const patternDescriptionId = useId();
 
   const popoverChord = popoverChordId
     ? project.chordTrack.find((c) => c.id === popoverChordId) ?? null
@@ -187,12 +199,23 @@ export function ChordLane() {
         <strong>コードトラック</strong>
         <span className="chord-lane__count">{project.chordTrack.length} 個</span>
         <TemplatePicker />
+        <label htmlFor={patternId}>伴奏パターン</label>
+        <select
+          id={patternId}
+          aria-describedby={patternDescriptionId}
+          value={pattern}
+          onChange={(e) => setPattern(e.currentTarget.value as CompingPattern)}
+        >
+          {Object.entries(COMPING_PATTERNS).map(([value, { label }]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
         <button
           type="button"
           disabled={!overlapsTarget}
           aria-describedby={showOverlapHint ? overlapHintId : undefined}
           onClick={() => {
-            if (notesTargetId) chordsToNotes(notesTargetId, { style: 'close', voiceLeading: true });
+            if (notesTargetId) applyCompingToTrack(notesTargetId, pattern);
           }}
           title={
             notesTarget
@@ -202,6 +225,7 @@ export function ChordLane() {
         >
           コードをノートにする
         </button>
+        <span id={patternDescriptionId}>{COMPING_PATTERNS[pattern].description}</span>
         {showOverlapHint && (
           <span id={overlapHintId}>書き込み先のクリップに重なるコードがありません。</span>
         )}

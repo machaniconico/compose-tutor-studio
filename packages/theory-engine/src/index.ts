@@ -135,6 +135,7 @@ export {
   type VoicingStyle,
   type VoicingOptions,
 } from './voicing';
+export { compingNoteCount, compingPattern, type CompingPattern } from './comping';
 
 // 7. ベースライン生成
 export { generateBassLine, type BassOptions } from './bass';

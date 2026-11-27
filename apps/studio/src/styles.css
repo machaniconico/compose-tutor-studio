@@ -407,6 +407,7 @@ input[type='range'] {
 
 .chord-lane__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--sp-2);
   margin-bottom: var(--sp-2);

@@ -35,6 +35,8 @@ import {
   findProjectSoundingLimitProblem,
   humanize,
   type HumanizeOptions,
+  MAX_CLIP_END_BEATS,
+  MAX_SOUNDING_EVENTS,
   MAX_SWING_PERCENT,
   moveClip,
   removeClip,
@@ -70,6 +72,8 @@ import {
 } from '@cts/project-model';
 import {
   analyzeChord,
+  compingNoteCount,
+  compingPattern,
   parseChord,
   realizeDegrees,
   generateBassLine,
@@ -82,6 +86,7 @@ import {
   type BassMode,
   type GeneratedNote,
   type ChordEventInput,
+  type CompingPattern,
   type HarmonicFunction,
 } from '@cts/theory-engine';
 import {
@@ -1405,6 +1410,7 @@ export function generatedToNoteEvents(generated: readonly GeneratedNote[]): Note
 export const CHORD_VOICING_REGISTER = 60;
 
 const CHORD_NOTE_VELOCITY = 90;
+const confirmChordNotes = (message: string) => window.confirm(message);
 
 /**
  * Default track for "コードをノートにする": the instrument track with role 'chords',
@@ -1419,21 +1425,22 @@ export function chordNotesTargetTrackId(project: Project, selectedTrackId: strin
 
 type ChordNotesSpan = Pick<Clip, 'startBeat' | 'lengthBeats'>;
 
+function wholeSongChordNotesSpan(project: Project): ChordNotesSpan {
+  return { startBeat: 0, lengthBeats: project.lengthBars * projectBeatsPerBar(project) };
+}
+
 function chordNotesDestination(project: Project, track: Track) {
   const existing = track.clips.find((c) => c.type === 'midi');
-  const span: ChordNotesSpan = existing ?? {
-    startBeat: 0,
-    lengthBeats: project.lengthBars * projectBeatsPerBar(project),
-  };
+  const span = existing ?? wholeSongChordNotesSpan(project);
   return { existing, span };
 }
 
-function chordNoteTiming(chord: ChordEvent, clip: ChordNotesSpan) {
+function chordNoteTiming(chord: ChordEvent, clip: ChordNotesSpan, clipEnd = clip.startBeat + clip.lengthBeats) {
   const start = Math.max(chord.startBeat, clip.startBeat);
   const startBeat = start - clip.startBeat;
-  if (beatTick(start) >= beatTick(clip.startBeat + clip.lengthBeats)) return undefined;
+  if (beatTick(start) >= beatTick(clipEnd)) return undefined;
 
-  const end = Math.min(chord.startBeat + chord.durationBeats, clip.startBeat + clip.lengthBeats);
+  const end = Math.min(chord.startBeat + chord.durationBeats, clipEnd);
   if (end <= start) return undefined;
   return { startBeat, durationBeats: end - start };
 }
@@ -1490,14 +1497,112 @@ function chordTrackNotes(
 export function chordsToNotes(
   targetTrackId: string,
   opts: { style: VoicingStyle; voiceLeading: boolean },
-  confirm: (message: string) => boolean = (message) => window.confirm(message),
+  confirm = confirmChordNotes,
 ): boolean {
   const project = useStore.getState().project;
   const track = project.tracks.find((t) => t.id === targetTrackId);
   if (!track || track.type !== 'instrument') return false;
   const { existing, span } = chordNotesDestination(project, track);
   const notes = chordTrackNotes(project, span, opts);
+  return writeChordNotes(project, track, existing, notes, confirm);
+}
+
+/** Apply a pattern to the requested MIDI clip, regardless of its position on the track. */
+export function applyCompingToClip(
+  clipId: string,
+  pattern: CompingPattern,
+  confirm = confirmChordNotes,
+): boolean {
+  const project = useStore.getState().project;
+  const track = project.tracks.find((t) => t.clips.some((clip) => clip.id === clipId));
+  const clip = track?.clips.find((c) => c.id === clipId && c.type === 'midi');
+  if (track?.type !== 'instrument' || !clip) return false;
+  return writeComping(project, track, clip, pattern, confirm);
+}
+
+/** Toolbar entry point, which also handles instrument tracks without a MIDI clip. */
+export function applyCompingToTrack(targetTrackId: string, pattern: CompingPattern): boolean {
+  const project = useStore.getState().project;
+  const track = project.tracks.find((t) => t.id === targetTrackId);
+  if (track?.type !== 'instrument') return false;
+  const { existing } = chordNotesDestination(project, track);
+  return writeComping(project, track, existing, pattern, confirmChordNotes);
+}
+
+function writeComping(
+  project: Project,
+  track: Track,
+  clip: Clip | undefined,
+  pattern: CompingPattern,
+  confirm: typeof confirmChordNotes,
+): boolean {
+  const span = clip ?? wholeSongChordNotesSpan(project);
+  const clipEnd = span.startBeat + span.lengthBeats;
+  if (clipEnd > MAX_CLIP_END_BEATS) {
+    pushToast(`クリップの終わりが上限（${MAX_CLIP_END_BEATS} 拍）を超えています。クリップを短くするか、曲の先頭に近づけてください。`, 'error');
+    return false;
+  }
+  const end = Math.min(clipEnd, songEndBeat(project));
+  const chords: ChordEventInput[] = [];
+  let noteCount = 0;
+  for (const chord of project.chordTrack) {
+    const timing = chordNoteTiming(chord, span, end);
+    if (!timing) continue;
+    const input = { symbol: chord.symbol, ...timing };
+    const count = compingNoteCount(input, pattern);
+    if (count === 0) continue;
+    noteCount += count;
+    if (noteCount > MAX_SOUNDING_EVENTS) {
+      pushToast(`伴奏の音の数が上限（${MAX_SOUNDING_EVENTS} 個）を超えます。クリップを短くするか、別の伴奏パターンを選んでください。`, 'error');
+      return false;
+    }
+    chords.push(input);
+  }
+  const notes = compingPattern(chords, pattern, { register: CHORD_VOICING_REGISTER, voiceLeading: true })
+    .map((note) => ({ id: uid('note'), ...note }));
+  return writeChordNotes(project, track, clip, notes, confirm, true);
+}
+
+function compingSoundsInsideClip(project: Project, clip: Clip, notes: readonly NoteEvent[]): boolean {
+  const { events, problems } = soundingEvents(project, { clipId: clip.id, includeMuted: true });
+  const end = Math.min(clip.startBeat + clip.lengthBeats, songEndBeat(project));
+  const epsilon = 1e-9; // Floating-point slack for adding clip offsets and note lengths.
+  return problems.length === 0 && events.length === notes.length && events.every((event) =>
+    event.kind === 'note' &&
+    event.startBeat >= clip.startBeat - epsilon &&
+    event.startBeat + event.durationBeats <= end + epsilon &&
+    Math.abs(event.durationBeats - (notes[event.sourceIndex]?.durationBeats ?? Infinity)) <= epsilon,
+  );
+}
+
+function writeChordNotes(
+  project: Project,
+  track: Track,
+  existing: Clip | undefined,
+  notes: NoteEvent[],
+  confirm: typeof confirmChordNotes,
+  checkPlayback = false,
+): boolean {
   if (notes.length === 0) return false;
+
+  const written: Clip = existing
+    ? { ...withoutLinkOrLoop(existing), notes }
+    : {
+        id: uid('clip'),
+        trackId: track.id,
+        type: 'midi',
+        ...wholeSongChordNotesSpan(project),
+        loop: false,
+        notes,
+      };
+  const candidate = mapTracks(project, (t) => t.id !== track.id ? t : {
+    ...t,
+    clips: existing ? t.clips.map((c) => c.id === existing.id ? written : c) : [...t.clips, written],
+  });
+  if (checkPlayback && !compingSoundsInsideClip(candidate, written, notes)) {
+    pushToast('伴奏の音がクリップの範囲に収まらないため、書き込めません。', 'error');
+    return false;
+  }
 
   const source = existing?.aliasOf !== undefined
     ? resolveLinkSource(existing, project.tracks.flatMap((t) => t.clips))
@@ -1522,30 +1627,8 @@ export function chordsToNotes(
     return false;
   }
 
-  return useStore.getState().applyProjectChange((current) => {
-    const target = current.tracks.find((t) => t.id === targetTrackId);
-    if (!target) return current;
-    const clip = target.clips.find((c) => c.type === 'midi');
-    const written: Clip = clip
-      ? { ...withoutLinkOrLoop(clip), notes }
-      : {
-          id: uid('clip'),
-          trackId: target.id,
-          type: 'midi',
-          startBeat: span.startBeat,
-          lengthBeats: span.lengthBeats,
-          loop: false,
-          notes,
-        };
-    return mapTracks(current, (t) =>
-      t.id !== target.id
-        ? t
-        : {
-            ...t,
-            clips: clip ? t.clips.map((c) => (c.id === clip.id ? written : c)) : [...t.clips, written],
-          },
-    );
-  });
+  const store = useStore.getState();
+  return store.project === project && store.applyProjectChange(() => candidate);
 }
 
 /** The clip as an independent, non-looping clip (its own notes play once). */

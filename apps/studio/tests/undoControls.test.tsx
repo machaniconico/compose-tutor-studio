@@ -620,6 +620,31 @@ describe('drag undo steps', () => {
 });
 
 describe('chord lane conversion', () => {
+  it('describes the chosen pattern and writes it to a new clip when needed', () => {
+    const project = createDefaultProject();
+    const track = project.tracks.find((candidate) => candidate.role === 'chords');
+    if (!track) throw new Error('default project has no chords track');
+    track.clips = [];
+    project.chordTrack = [];
+    useStore.getState().replaceProject(project);
+    useStore.getState().addChord('C', 0, 4);
+    render(<ChordLane />);
+
+    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: '伴奏パターン' });
+    expect(select.value).toBe('whole');
+    expect(within(select).getAllByRole('option')).toHaveLength(5);
+    fireEvent.change(select, { target: { value: 'stab' } });
+    const description = screen.getByText('各拍の頭で、コードの音を短く鳴らします。');
+    expect(select.getAttribute('aria-describedby')).toBe(description.id);
+    fireEvent.click(screen.getByRole('button', { name: 'コードをノートにする' }));
+
+    const clips = useStore.getState().project.tracks.find((candidate) => candidate.id === track.id)?.clips;
+    expect(clips).toHaveLength(1);
+    expect(clips?.[0]?.notes?.map((note) => [note.startBeat, note.durationBeats])).toEqual(
+      [0, 1, 2, 3].flatMap((beat) => Array.from({ length: 3 }, () => [beat, 0.25])),
+    );
+  });
+
   it('explains why conversion is disabled until a chord overlaps the target clip', () => {
     const project = createDefaultProject();
     const clip = project.tracks.find((track) => track.role === 'chords')?.clips[0];
