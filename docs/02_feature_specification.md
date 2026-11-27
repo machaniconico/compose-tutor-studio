@@ -21,7 +21,7 @@
 | Glossary | 用語集 | Yes | チュートリアルタブの「用語集をひらく」で、ひらがな・カタカナ・英字から検索できる。レッスンの「なぜ？」と、ミキサーのセンドの見出しの用語にカーソルかフォーカスを置くと説明が出る(Escで閉じる)。説明は全て初心者向けの1種類 |
 | Exercise | 理論演習 | Yes | コード判定、スケール判定、メロディ添削 |
 | AI Coach | 説明付き改善提案 | Optional | APIキー設定時のみ。MVPではモック可 |
-| Export | MIDI/WAV | Yes | MIDIはFormat 1の正規化projection、WAVは簡易レンダー |
+| Export | MIDI/WAV | Yes | MIDIはFormat 1の正規化projection、WAVは簡易レンダー。WAV書き出し後に統合ラウドネス(BS.1770 / EBU R128、約 −14 LUFS の目安つき)を表示し、任意(既定OFF)で曲全体を−14 LUFSへ1つのgainでそろえる(gainは−1.1 dBTP(−1.0 dBTP + 0.1 dB余裕)を上限に計算し、エンコード後に4倍true peakを再測定して−1.0 dBTP超なら超過分だけ下げて最大2回やり直す。リミッターは使わない。400 ms未満など完全なblockがなく測れない場合は音量をそろえず、normalize OFFと同じbytesを出す。表示するのは、gain適用後に測り直した値。normalize OFFでは統合ラウドネスだけを表示し、ピーク値は表示しない) |
 | Export | ステムZIP | Yes | 鳴るInstrument / Drum / Audio Trackごとに1つのWAVを書き出し、STOREのZIP 1つにまとめる。mixerのmute / solo / Bus経路で鳴らないTrack(soloされたBusの入力源は含み、muteされたBusだけに流れるTrackは除く)とMaster / Busは含めず、mix.wavも含めない。全ステムは同じ長さ(最長のtail込みrenderにそろえ、各ステムが自分のtailを含む)で、WAV形式(サンプルレート・ビット数・ディザ)は書き出しダイアログの選択に従い、ノーマライズはしない(ステム間の音量差を保つ)。合計1 GiB超は書き出す前に拒否する。ファイル名は`01_Melody.wav`の形式 |
 | Import | MIDI import | Yes | `.mid` / `.midi`を検証し、MTrkとchannelに応じた複数トラックを現在の曲へ追加する |
 | Vocal Cut | カラオケ作成 | Yes | ステレオ中央定位をローカル軽減し、A/B試聴後にPCM 16-bit WAVへ書き出す。ML stem分離ではない |

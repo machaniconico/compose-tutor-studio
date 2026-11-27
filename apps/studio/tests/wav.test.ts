@@ -1,3 +1,4 @@
+import { integratedLoudness, truePeak } from '../src/audio/loudness';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   compileAudioRouting,
@@ -2242,6 +2243,155 @@ describe('renderProjectToWav graph ownership', () => {
     expect(await sha256Hex(bytes)).toBe(
       'aca24651856ecbfcb63cafa9d1f5f17a410730ae09c64e19ea15aa9f910a2083',
     );
+  });
+
+  it('keeps the same bytes when only measuring loudness, and reports silence as unmeasurable', async () => {
+    const audioBuffer = {
+      numberOfChannels: 2,
+      sampleRate: 44_100,
+      getChannelData: vi.fn(() => new Float32Array([0])),
+    } as unknown as AudioBuffer;
+    installOfflineContext(() => Promise.resolve(audioBuffer));
+
+    const rendered = await renderProjectToWav(projectWithMasterOnly(), { measureLoudness: true });
+    const bytes = new Uint8Array(await rendered.blob.arrayBuffer());
+    rendered.release();
+
+    expect(await sha256Hex(bytes)).toBe(
+      'aca24651856ecbfcb63cafa9d1f5f17a410730ae09c64e19ea15aa9f910a2083',
+    );
+    expect(rendered.levels).toEqual({
+      loudness: -Infinity, outputLoudness: -Infinity, appliedGainDb: 0, limitedByPeak: false, normalized: false,
+    });
+  });
+
+  async function renderSignal(
+    signal: Float32Array,
+    options: Parameters<typeof renderProjectToWav>[1],
+  ) {
+    const channels = [signal, Float32Array.from(signal)];
+    const audioBuffer = {
+      numberOfChannels: 2,
+      sampleRate: 44_100,
+      getChannelData: (channel: number) => channels[channel]!,
+    } as unknown as AudioBuffer;
+    installOfflineContext(() => Promise.resolve(audioBuffer));
+    const rendered = await renderProjectToWav(projectWithMasterOnly(), options);
+    const view = new DataView(await rendered.blob.arrayBuffer());
+    rendered.release();
+    let peak = 0;
+    for (let offset = 44; offset + 1 < view.byteLength; offset += 2) {
+      peak = Math.max(peak, Math.abs(view.getInt16(offset, true)));
+    }
+    return { levels: rendered.levels, peak, view };
+  }
+
+  function sineSignal(db: number, seconds = 3): Float32Array {
+    const gain = 10 ** (db / 20);
+    return Float32Array.from({ length: 44_100 * seconds }, (_, i) =>
+      gain * Math.sin(2 * Math.PI * 1000 * i / 44_100));
+  }
+
+  async function renderNormalized(
+    signal: Float32Array,
+    rate: number,
+    options: Parameters<typeof renderProjectToWav>[1],
+  ) {
+    const channels = [Float32Array.from(signal), Float32Array.from(signal)];
+    const audioBuffer = {
+      numberOfChannels: 2,
+      sampleRate: rate,
+      getChannelData: (channel: number) => channels[channel]!,
+    } as unknown as AudioBuffer;
+    installOfflineContext(() => Promise.resolve(audioBuffer));
+    const rendered = await renderProjectToWav(projectWithMasterOnly(), { sampleRate: rate as 48000, ...options });
+    const bytes = new Uint8Array(await rendered.blob.arrayBuffer());
+    rendered.release();
+    const view = new DataView(bytes.buffer);
+    const depth = view.getUint16(34, true);
+    const step = depth / 8;
+    const frames = (bytes.byteLength - 44) / (2 * step);
+    const decoded = [0, 1].map((ch) => Float32Array.from({ length: frames }, (_, i) => {
+      const at = 44 + (i * 2 + ch) * step;
+      if (depth === 16) {
+        const v = view.getInt16(at, true);
+        return v < 0 ? v / 32768 : v / 32767;
+      }
+      const v = (view.getInt8(at + 2) << 16) | (view.getUint8(at + 1) << 8) | view.getUint8(at);
+      return v < 0 ? v / 8388608 : v / 8388607;
+    }));
+    return { levels: rendered.levels, decoded, sha: await sha256Hex(bytes) };
+  }
+
+  it('normalizes a quiet render to −14 LUFS with one gain', async () => {
+    const result = await renderSignal(sineSignal(-20), { normalize: true });
+    expect(result.levels?.normalized).toBe(true);
+    expect(result.levels?.loudness).toBeCloseTo(-20, 1);
+    expect(result.levels?.appliedGainDb).toBeCloseTo(6, 1);
+    expect(result.levels?.limitedByPeak).toBe(false);
+    // 0.1 amplitude doubled.
+    expect(result.peak / 32767).toBeCloseTo(0.2, 2);
+  });
+
+  it('reduces the gain to keep −1 dBTP instead of limiting', async () => {
+    const signal = sineSignal(-20);
+    signal[44_100] = 0.9;
+    const result = await renderSignal(signal, { normalize: true });
+    expect(result.levels?.limitedByPeak).toBe(true);
+    expect(result.levels!.appliedGainDb).toBeLessThan(0);
+    expect(result.peak / 32767).toBeLessThanOrEqual(10 ** (-1 / 20) + 1e-3);
+  });
+
+  it('leaves silence untouched when normalizing and dithers after the gain', async () => {
+    const silent = await renderSignal(new Float32Array(44_100), { normalize: true });
+    expect(silent.levels).toEqual({
+      loudness: -Infinity, outputLoudness: -Infinity, appliedGainDb: 0, limitedByPeak: false, normalized: true,
+    });
+    expect(silent.peak).toBe(0);
+
+    const plain = await renderSignal(sineSignal(-20), { normalize: true });
+    const dithered = await renderSignal(sineSignal(-20), { normalize: true, dither: true });
+    expect(dithered.peak / 32767).toBeCloseTo(0.2, 2);
+    expect(new Uint8Array(dithered.view.buffer)).not.toEqual(new Uint8Array(plain.view.buffer));
+  });
+
+  describe.each([
+    { bitDepth: 16, dither: false },
+    { bitDepth: 16, dither: true },
+    { bitDepth: 24, dither: false },
+    { bitDepth: 24, dither: true },
+  ] as const)('normalize ceiling at $bitDepth bit, dither $dither', ({ bitDepth, dither }) => {
+    it('keeps the encoded true peak at or below −1.0 dBTP', async () => {
+      const rate = 48_000;
+      const signal = new Float32Array(Math.round(rate * 0.45));
+      signal.set(sineSignal(-30, 1).subarray(0, Math.round(rate * 0.4)));
+      signal[1000] = -1;
+      const { decoded } = await renderNormalized(signal, rate, { normalize: true, bitDepth, dither });
+      expect(truePeak(decoded)).toBeLessThanOrEqual(-1);
+    });
+  });
+
+  it('applies no gain and matches normalize-off bytes when loudness is unmeasurable', async () => {
+    const rate = 48_000;
+    // The impulse sits in the discarded trailing block (after the last complete 400 ms block).
+    const signal = new Float32Array(Math.round(rate * 0.45));
+    signal[Math.round(rate * 0.43)] = 0.5;
+    const off = await renderNormalized(signal, rate, {});
+    const on = await renderNormalized(signal, rate, { normalize: true });
+    expect(on.sha).toBe(off.sha);
+    expect(on.levels).toMatchObject({ normalized: true, appliedGainDb: 0, loudness: -Infinity });
+  });
+
+  it('reports the loudness measured on the normalized output, not original plus gain', async () => {
+    const rate = 48_000;
+    const signal = new Float32Array(rate * 2);
+    signal.set(sineSignal(-65, 1).subarray(0, rate));
+    signal.set(sineSignal(-75, 1).subarray(0, rate), rate);
+    const { levels, decoded } = await renderNormalized(signal, rate, { normalize: true });
+    const actual = integratedLoudness(decoded, 48_000);
+    expect(levels?.outputLoudness).toBeCloseTo(actual, 1);
+    expect(Math.abs(levels!.outputLoudness - (levels!.loudness + levels!.appliedGainDb)))
+      .toBeGreaterThan(1);
   });
 
   it('transfers the shared reservation to the encoded Blob lease', async () => {

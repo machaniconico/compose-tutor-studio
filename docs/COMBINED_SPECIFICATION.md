@@ -279,7 +279,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | Glossary | 用語集 | Yes | チュートリアルタブの「用語集をひらく」で、ひらがな・カタカナ・英字から検索できる。レッスンの「なぜ？」と、ミキサーのセンドの見出しの用語にカーソルかフォーカスを置くと説明が出る(Escで閉じる)。説明は全て初心者向けの1種類 |
 | Exercise | 理論演習 | Yes | コード判定、スケール判定、メロディ添削 |
 | AI Coach | 説明付き改善提案 | Optional | APIキー設定時のみ。MVPではモック可 |
-| Export | MIDI/WAV | Yes | MIDIはFormat 1の正規化projection、WAVは簡易レンダー |
+| Export | MIDI/WAV | Yes | MIDIはFormat 1の正規化projection、WAVは簡易レンダー。WAV書き出し後に統合ラウドネス(BS.1770 / EBU R128、約 −14 LUFS の目安つき)を表示し、任意(既定OFF)で曲全体を−14 LUFSへ1つのgainでそろえる(gainは−1.1 dBTP(−1.0 dBTP + 0.1 dB余裕)を上限に計算し、エンコード後に4倍true peakを再測定して−1.0 dBTP超なら超過分だけ下げて最大2回やり直す。リミッターは使わない。400 ms未満など完全なblockがなく測れない場合は音量をそろえず、normalize OFFと同じbytesを出す。表示するのは、gain適用後に測り直した値。normalize OFFでは統合ラウドネスだけを表示し、ピーク値は表示しない) |
 | Export | ステムZIP | Yes | 鳴るInstrument / Drum / Audio Trackごとに1つのWAVを書き出し、STOREのZIP 1つにまとめる。mixerのmute / solo / Bus経路で鳴らないTrack(soloされたBusの入力源は含み、muteされたBusだけに流れるTrackは除く)とMaster / Busは含めず、mix.wavも含めない。全ステムは同じ長さ(最長のtail込みrenderにそろえ、各ステムが自分のtailを含む)で、WAV形式(サンプルレート・ビット数・ディザ)は書き出しダイアログの選択に従い、ノーマライズはしない(ステム間の音量差を保つ)。合計1 GiB超は書き出す前に拒否する。ファイル名は`01_Melody.wav`の形式 |
 | Import | MIDI import | Yes | `.mid` / `.midi`を検証し、MTrkとchannelに応じた複数トラックを現在の曲へ追加する |
 | Vocal Cut | カラオケ作成 | Yes | ステレオ中央定位をローカル軽減し、A/B試聴後にPCM 16-bit WAVへ書き出す。ML stem分離ではない |
@@ -1361,6 +1361,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Exportダイアログの「音源として書き出す」にWAV形式の1行(サンプルレート 44.1 / 48 kHz、ビット数 16 / 24 bit、ディザ checkbox)を置く。既定は44.1 kHz・16 bit・ディザOFFで、以前と同じファイルが出る。ディザは16 bitのときだけ選べ、24 bitではdisabledにする。書き出し中は3つとも無効化する。選択はダイアログを開いている間のUI状態でProjectには保存しない
 - MIDI書き出しは既定でGM音色(Program Change)と調号を含める。書き出しメニューには専用の切替UIを追加せず、`projectToMidi`の`includeProgramAndKey`オプションだけで切り替える。ユーザー向け文言は「音色と調号つき」のような初心者向けの短い説明に限る
 - 同じセクションのWAV形式の1行の上に「書き出す範囲」(曲全体 / ループ範囲だけ)を1行で置き、MIDI・WAV・選択トラックWAVの3つに共通で効かせる。既定は曲全体。ループが有効でない、または長さがない時は「ループ範囲だけ」を選べず(disabled)、隣に「ループ範囲がまだ決まっていません。ルーラーをドラッグしてループ範囲を決めると、その部分だけを書き出せます。」などの理由を表示する(最小ウィンドウでは折り返す)。選択はダイアログ内のUI状態でProjectには保存しない
+- 同じ行に「音量をそろえる(−14 LUFS)」checkboxを置く(既定OFF)。WAV書き出し後は「音の大きさ: 約 −14 LUFS。配信サービスはだいたい −14 LUFS に合わせます」を成功toastと行下の`role=status`に表示する。ONの時は曲全体へ1つのgainをかけ、−1 dBTPを超える場合はgainを下げて「目標の −14 LUFS より小さい音になっています」と伝える(リミッターは使わない)。測れない時(400 ms未満・無音)は「短すぎる・静かすぎるため測れず、音量はそろえていません」と表示しgainをかけない。そろえた後の値はgain適用後に測り直した実測値を表示する。OFFの時はWAVのbytesを変えない(測定は読み取り専用)。この設定もUI状態でProjectには保存しない。ループ範囲の書き出しと併用した時は、その範囲だけを測ってそろえる。ステムZIPはそろえない
 - MIDI書き出しで量子化後の同一Track・同一音程が重なる場合はfile dialog / browser downloadへ進まず、「同じ音程のノートが重なっているためMIDIを書き出せません。重なりを短くするか、1つのノートにまとめてください。」とerror alertで案内する
 - MIDI importは現在の曲へ加算し、BPM / 拍子 / key / scaleを変更しない。完了statusは単数のTrack名ではなく、`Nトラック・M音を追加しました`を読み上げる
 - 成功後は先頭の追加Track / Clipを選択し、drumならDrum Editor、instrumentならPiano Rollを表示する。C2〜C6外のnoteは保持するが画面外であることを件数付きで知らせる
@@ -1693,6 +1694,7 @@ Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/R
 - Basic effects
 - Offline render(`renderProjectToWav`の`sampleRate` 44.1 / 48 kHz・`bitDepth` 16 / 24・`dither`。既定の16-bit・ディザOFFは従来とバイト一致、計画・予算は`WavRenderPlan.sampleRate / bitDepth`で拡縮する)
 - ループ範囲の書き出し: `resolveExportRange`(project-model `export-range.ts`)がWAV・MIDI共通の範囲規則(整数tick、曲長で切り詰め、空は不可)を持つ。WAVは`WavRenderOptions.range`で`lengthBeats = loopEnd`のProjectを0拍からレンダーし先頭frameを切り捨てる。MIDIは`MidiExportOptions.range`(PPQ 480のtick。出力PPQが480以外なら`invalid-options`で拒否)で各MTrkのmessageを範囲へclipしてずらす。範囲はUI stateでschema変更なし。境界規則は`02_feature_specification.md`の10.1 / 10.2
+- WAVのラウドネス(`apps/studio/src/audio/loudness.ts`、ITU-R BS.1770-4 / EBU R128): K-weighting、400 ms block・75% overlap、絶対gate −70 LUFS、相対gate −10 LU の統合ラウドネスと、4倍オーバーサンプリングの**true peak**(sample peakではない)。`renderProjectToWav`の`measureLoudness`は読み取り専用でbytesを変えず、`normalize`(既定OFF)は−14 LUFSへ向けた1つのgainを render済みchannelへin-placeで掛け、gainは−1.1 dBTPを上限に計算し、encode後のPCMを1チャンネルずつ復号して4倍true peakを測り直し、−1.0 dBTPを超えれば超過分だけ下げて最大2回再encodeする(limiterなし)。完全な400 ms blockがない・無音で測れない場合はgain 0でnormalize OFFとbytes一致。表示用`outputLoudness`はgain適用後のsampleを測り直した値(元+gainでは計算しない)。ディザは`encodeWav`内でgainの後に適用する。測定は約40 ms単位でevent loopへyieldし、`AbortSignal`で中断でき、追加のPCMコピーを確保しない(上限は2チャンネル・2^24 frame)。結果は`WavRenderLease.levels`で返り、設定はUI状態でProject schemaは変えない。`range`と併用した時は先頭を切り捨てた後のchannelを測定・gain・encodeするので、測定値は書き出す範囲だけのもの。ステム(`minFrames`)は`normalize`を使わない
 - Audio Assetのchecksum付きresolve / decode cacheとAudio Clip window plan
 - Audio Clipのpitch解析、versioned WSOLA派生PCM Worker、content-addressed single-flight LRU
 - Transient center-vocal reduction and PCM 16-bit WAV encode

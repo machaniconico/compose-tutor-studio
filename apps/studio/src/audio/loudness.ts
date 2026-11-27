@@ -85,9 +85,10 @@ function* loudnessSteps(
   if (frames === 0) return -Infinity;
   const hop = Math.round(rate * 0.1);
   const block = 4 * hop;
-  // For sub-400 ms clips use their available duration. For longer clips discard
-  // the incomplete block at the end, per Annex 1.
-  const blockSize = Math.min(block, frames);
+  // BS.1770-4: no complete 400 ms block means no measurement. Incomplete trailing
+  // blocks are discarded.
+  if (frames < block) return -Infinity;
+  const blockSize = block;
   const blockCount = 1 + Math.floor((frames - blockSize) / hop);
   const measuredFrames = (blockCount - 1) * hop + blockSize;
   const hops = new Float64Array(Math.ceil(measuredFrames / hop));
@@ -225,4 +226,49 @@ async function runSampleSteps<T>(
     step = steps.next();
   }
   return step.value;
+}
+
+export const NORMALIZE_TARGET_LUFS = -14;
+export const NORMALIZE_TRUE_PEAK_CEILING_DBTP = -1;
+/** Gain is computed against this, 0.1 dB under the ceiling, so PCM rounding stays below it. */
+export const NORMALIZE_GAIN_CEILING_DBTP = NORMALIZE_TRUE_PEAK_CEILING_DBTP - 0.1;
+
+export type NormalizeGain = Readonly<{
+  /** Single linear gain to apply to the whole render, in dB. 0 when nothing can be measured. */
+  gainDb: number;
+  /** True when the −1 dBTP ceiling reduced the gain, so the result is quieter than the target. */
+  limitedByPeak: boolean;
+}>;
+
+/**
+ * One gain toward the target loudness, reduced so the true peak stays at or
+ * below the ceiling. No limiter: if the ceiling wins, the result is quieter.
+ */
+export function normalizeGain(
+  loudness: number,
+  peak: number,
+  target = NORMALIZE_TARGET_LUFS,
+  ceiling = NORMALIZE_GAIN_CEILING_DBTP,
+): NormalizeGain {
+  if (!Number.isFinite(loudness) || !Number.isFinite(peak)) return { gainDb: 0, limitedByPeak: false };
+  const wanted = target - loudness;
+  const allowed = ceiling - peak;
+  return allowed < wanted ? { gainDb: allowed, limitedByPeak: true } : { gainDb: wanted, limitedByPeak: false };
+}
+
+/** Integrated loudness only (no true peak), chunked like `measureAudioLevels`. */
+export function measureIntegratedLoudness(
+  channels: readonly Float32Array[],
+  rate: WavSampleRate,
+  { signal }: Pick<MeasurementOptions, 'signal'> = {},
+): Promise<number> {
+  return runSampleSteps(loudnessSteps(channels, rate), { signal });
+}
+
+/** True peak (dBTP) only, chunked and abortable. */
+export function measureTruePeak(
+  channels: readonly Float32Array[],
+  { signal }: Pick<MeasurementOptions, 'signal'> = {},
+): Promise<number> {
+  return runSampleSteps(truePeakSteps(channels), { signal });
 }

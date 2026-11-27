@@ -18,6 +18,13 @@ import {
   type Project,
 } from '@cts/project-model';
 import {
+  measureAudioLevels,
+  measureIntegratedLoudness,
+  measureTruePeak,
+  normalizeGain,
+  NORMALIZE_TRUE_PEAK_CEILING_DBTP,
+} from './loudness';
+import {
   activeFilterCutoffLanes,
   automationBaseValue,
   automationCommandsInWindow,
@@ -570,6 +577,23 @@ export type WavRenderOptions = WavFormatOptions & Readonly<{
   signal?: AbortSignal;
   /** Pad the output with silence to at least this many frames (stem alignment). */
   minFrames?: number;
+  /** Measure integrated loudness after rendering (read-only; bytes are unchanged). */
+  measureLoudness?: boolean;
+  /** Apply one gain toward −14 LUFS, capped at −1 dBTP, before encoding. Default off. */
+  normalize?: boolean;
+}>;
+
+/** What the render measured; `appliedGainDb` is 0 unless `normalize` was on. */
+export type WavRenderLevels = Readonly<{
+  /** Integrated loudness of the render before any gain; -Infinity when too short or quiet to measure. */
+  loudness: number;
+  /** Loudness measured again on the final (gained) samples; equals `loudness` when not normalized. */
+  outputLoudness: number;
+  /** Encoded true peak in dBTP; only measured when normalizing. */
+  outputPeak?: number;
+  appliedGainDb: number;
+  limitedByPeak: boolean;
+  normalized: boolean;
 }>;
 
 export type WavRenderScope =
@@ -723,6 +747,7 @@ export function resolveSelectedTrackRoutingMix(
  */
 export type WavRenderLease = Readonly<{
   blob: Blob;
+  levels?: WavRenderLevels;
   readonly released: boolean;
   release: () => void;
 }>;
@@ -1059,21 +1084,71 @@ async function renderWavWithRouting(
       }
 
       const rendered = await ctx.startRendering();
-      const wav = encodeWav(
-        range ? trimLeadingFrames(
+      // Range exports trim first, so measurement and gain see only the exported range.
+      let source: AudioBuffer | Float32Array[] = range
+        ? trimLeadingFrames(
             rendered,
             tempo.beatToSeconds(range.startBeat),
             range.startTick > 0,
-          ) : rendered,
-        plan.sampleRate,
-        {
-          bitDepth: plan.bitDepth,
-          dither: options.dither === true,
-        },
-      );
+          )
+        : rendered;
+      let levels: WavRenderLevels | undefined;
+      let normalizedWav: ArrayBuffer | undefined;
+      if (options.normalize === true || options.measureLoudness === true) {
+        // One channel list serves measurement, in-place gain and encoding.
+        const channels = Array.isArray(source)
+          ? source
+          : Array.from({ length: rendered.numberOfChannels }, (_, ch) => rendered.getChannelData(ch));
+        if (options.normalize === true) {
+          const measured = await measureAudioLevels(channels, plan.sampleRate, { signal: options.signal });
+          if (!Number.isFinite(measured.loudness)) {
+            // Unmeasurable: export exactly as with normalize off.
+            levels = {
+              loudness: measured.loudness, outputLoudness: measured.loudness,
+              appliedGainDb: 0, limitedByPeak: false, normalized: true,
+            };
+          } else {
+            const first = normalizeGain(measured.loudness, measured.peak);
+            let gainDb = first.gainDb;
+            let limitedByPeak = first.limitedByPeak;
+            scaleInPlace(channels, gainDb);
+            source = channels;
+            const encodeOptions = { bitDepth: plan.bitDepth, dither: options.dither === true };
+            normalizedWav = encodeWav(channels, plan.sampleRate, encodeOptions);
+            let outputPeak = await encodedPeakDbtp(normalizedWav, options.signal);
+            // PCM rounding or dither can still cross the ceiling: lower by the excess, at most twice.
+            for (let retry = 0; retry < 2 && outputPeak > NORMALIZE_TRUE_PEAK_CEILING_DBTP; retry += 1) {
+              const drop = outputPeak - NORMALIZE_TRUE_PEAK_CEILING_DBTP + 0.005;
+              scaleInPlace(channels, -drop);
+              gainDb -= drop;
+              limitedByPeak = true;
+              normalizedWav = encodeWav(channels, plan.sampleRate, encodeOptions);
+              outputPeak = await encodedPeakDbtp(normalizedWav, options.signal);
+            }
+            const outputLoudness = await measureIntegratedLoudness(channels, plan.sampleRate, {
+              signal: options.signal,
+            });
+            levels = {
+              loudness: measured.loudness, outputLoudness, outputPeak,
+              appliedGainDb: gainDb, limitedByPeak, normalized: true,
+            };
+          }
+        } else {
+          const loudness = await measureIntegratedLoudness(channels, plan.sampleRate, {
+            signal: options.signal,
+          });
+          levels = { loudness, outputLoudness: loudness, appliedGainDb: 0, limitedByPeak: false, normalized: false };
+        }
+      }
+      // Dither runs inside the encoder, after any gain above.
+      const wav = normalizedWav ?? encodeWav(source, plan.sampleRate, {
+        bitDepth: plan.bitDepth,
+        dither: options.dither === true,
+      });
       const blob = new Blob([wav], { type: 'audio/wav' });
       const lease: WavRenderLease = {
         blob,
+        ...(levels ? { levels } : {}),
         get released() {
           return resourceReservation.released;
         },
@@ -1142,6 +1217,37 @@ function trimLeadingFrames(
     }
   }
   return trimmed;
+
+function scaleInPlace(channels: readonly Float32Array[], gainDb: number): void {
+  if (gainDb === 0) return;
+  const gain = 10 ** (gainDb / 20);
+  for (const channel of channels) {
+    for (let frame = 0; frame < channel.length; frame += 1) channel[frame] = channel[frame]! * gain;
+  }
+}
+
+/** True peak of an encoded PCM WAV, one channel at a time to cap memory. */
+async function encodedPeakDbtp(wav: ArrayBuffer, signal?: AbortSignal): Promise<number> {
+  const view = new DataView(wav);
+  const channelCount = view.getUint16(22, true);
+  const bytes = view.getUint16(34, true) / 8;
+  const frames = Math.floor((view.byteLength - 44) / (channelCount * bytes));
+  let peak = -Infinity;
+  for (let ch = 0; ch < channelCount; ch += 1) {
+    const samples = new Float32Array(frames);
+    for (let i = 0; i < frames; i += 1) {
+      const at = 44 + (i * channelCount + ch) * bytes;
+      if (bytes === 2) {
+        const v = view.getInt16(at, true);
+        samples[i] = v < 0 ? v / 0x8000 : v / 0x7fff;
+      } else {
+        const v = (view.getInt8(at + 2) << 16) | (view.getUint8(at + 1) << 8) | view.getUint8(at);
+        samples[i] = v < 0 ? v / 0x800000 : v / 0x7fffff;
+      }
+    }
+    peak = Math.max(peak, await measureTruePeak([samples], { signal }));
+  }
+  return peak;
 }
 
 function audioTailSources(
