@@ -59,6 +59,7 @@ export {
   isPitchClassInScale,
   scaleDegreeToPitchClass,
   SCALE_NAMES,
+  isScaleName,
 } from './scales';
 
 // 3. コードシンボルパーサ (内部 parseChord 系。chordIntervals は parse-chord 側を採用)
@@ -120,3 +121,11 @@ export {
 
 // PRNG (決定論的乱数)
 export { mulberry32, createPrng, randomInt, pick, type RandomFn } from './prng';
+
+export * from './voicing';
+export * from './transpose';
+export * from './note-role';
+export * from './chord-detect';
+export { compingNoteCount, compingPattern, type CompingPattern } from './comping';
+export * from './drum-patterns';
+export * from './accompaniment';
