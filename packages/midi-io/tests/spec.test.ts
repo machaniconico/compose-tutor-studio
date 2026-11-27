@@ -1,13 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { writeVarLen, midiNoteName, PPQ } from '../src/smf.js';
 import {
-  projectToMidi,
-  projectToMidiResult,
+  projectToMidi as projectToMidiRaw,
+  projectToMidiResult as projectToMidiResultRaw,
   volumeToCc,
   panToCc,
 } from '../src/export.js';
+import type { MidiExportOptions } from '../src/export.js';
 import { CURRENT_SCHEMA_VERSION, createEmptyProject } from '@cts/project-model';
 import type { Project } from '@cts/project-model';
+
+// P54: these tests pin the pre-P54 bytes, so they run with the option OFF.
+const projectToMidi = (project: Project, options?: MidiExportOptions) =>
+  projectToMidiRaw(project, { ...options, includeProgramAndKey: false });
+const projectToMidiResult = (project: Project, options?: MidiExportOptions) =>
+  projectToMidiResultRaw(project, { ...options, includeProgramAndKey: false });
 
 // ---------------------------------------------------------------------------
 // Minimal SMF parser (test-only). Parses MThd + MTrk chunks into structured
