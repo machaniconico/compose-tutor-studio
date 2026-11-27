@@ -10,6 +10,7 @@ import { SongLengthPanel } from '../tempoMap/SongLengthPanel';
 import { TakeCompEditor } from '../comping/TakeCompEditor';
 import { TimelineRuler } from '../transport/TimelineRuler';
 import { handleTabKeyDown } from '../common/tabs';
+import { isPcKeyboardPlaying } from '../input/pcKeyboardMode';
 
 function isUnmodifiedCharacterKey(event: React.KeyboardEvent, key: string): boolean {
   return (
@@ -18,7 +19,9 @@ function isUnmodifiedCharacterKey(event: React.KeyboardEvent, key: string): bool
     !event.altKey &&
     !event.ctrlKey &&
     !event.metaKey &&
-    !event.shiftKey
+    !event.shiftKey &&
+    // PC鍵盤で弾くモード中は、フォーカスにかかわらず S(スケールスナップ)と C(コードトーン)を止める。
+    !isPcKeyboardPlaying()
   );
 }
 

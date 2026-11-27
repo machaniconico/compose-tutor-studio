@@ -4,6 +4,9 @@ const NOTE_OFFSETS: Readonly<Record<string, number>> = {
   KeyU: 10, KeyJ: 11, KeyK: 12, KeyL: 14,
 };
 
+/** The playable keys from low to high (the order their semitone offsets ascend). */
+export const PLAYING_CODES: readonly string[] = Object.keys(NOTE_OFFSETS);
+
 const SEMITONES_PER_OCTAVE = 12;
 const pitches = Object.values(NOTE_OFFSETS);
 export const DEFAULT_KEYBOARD_OCTAVE = 4;

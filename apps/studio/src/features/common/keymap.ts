@@ -2,8 +2,12 @@
 // through `matchShortcut`, so the bindings live here and nowhere else.
 // Focused controls can reuse these bindings for their local actions.
 
-/** `gesture` is consulted only while a drag is active. */
-export type ShortcutScope = 'global' | 'pianoRoll' | 'gesture' | 'control';
+/**
+ * `gesture` is consulted only while a drag is active. `playing` is consulted
+ * only while PC-keyboard playing mode is on; its letters are matched by
+ * physical key (`code`) so they stay put on any keyboard layout.
+ */
+export type ShortcutScope = 'global' | 'pianoRoll' | 'gesture' | 'control' | 'playing';
 
 export type ShortcutAction =
   | 'togglePlayback'
@@ -15,7 +19,11 @@ export type ShortcutAction =
   | 'cutNotes'
   | 'pasteNotes'
   | 'pasteNotesAtOriginal'
-  | 'cancelGesture';
+  | 'cancelGesture'
+  | 'playNote'
+  | 'octaveDown'
+  | 'octaveUp'
+  | 'exitPlayingMode';
 
 /**
  * `mod` is Cmd on macOS and Ctrl elsewhere, and the other modifiers must match
@@ -56,6 +64,13 @@ export const KEYMAP: readonly ShortcutEntry[] = [
   { scope: 'control', key: 'z', modifiers: ['ctrlOrMetaNoAlt'], action: 'undo', labelJa: '元に戻す' },
   { scope: 'control', key: 'z', modifiers: ['ctrlOrMetaNoAlt', 'shift'], action: 'redo', labelJa: 'やり直す' },
   { scope: 'gesture', key: 'escape', modifiers: ['any'], action: 'cancelGesture', labelJa: 'ドラッグを取り消す' },
+  // PC 鍵盤で弾くモード(オンの間だけ)。装飾キー無しの文字キーだけ。
+  ...[...'awsedftgyhujkl'].map((key): ShortcutEntry => (
+    { scope: 'playing', key, modifiers: [], action: 'playNote', labelJa: '音を鳴らす' }
+  )),
+  { scope: 'playing', key: 'z', modifiers: [], action: 'octaveDown', labelJa: 'オクターブを下げる' },
+  { scope: 'playing', key: 'x', modifiers: [], action: 'octaveUp', labelJa: 'オクターブを上げる' },
+  { scope: 'playing', key: 'escape', modifiers: ['any'], action: 'exitPlayingMode', labelJa: 'PC鍵盤で弾くをやめる' },
 ];
 
 export function isMacPlatform(
@@ -69,12 +84,22 @@ export function isMacPlatform(
   return /mac|iphone|ipad|ipod/i.test(platform || nav.userAgent);
 }
 
-/** IME composition owns every key until it ends (keyCode 229 covers older engines). */
+/**
+ * IME composition owns every key until it ends. keyCode 229 covers older
+ * engines; key "Process" / "Unidentified" mark IME keydowns that report
+ * isComposing=false and keyCode 0.
+ */
 export function isImeComposing(event: ShortcutEventLike): boolean {
-  return event.isComposing === true || event.keyCode === 229;
+  return event.isComposing === true
+    || event.keyCode === 229
+    || event.key === 'Process'
+    || event.key === 'Unidentified';
 }
 
-function normalizedKey(event: ShortcutEventLike): string {
+function normalizedKey(event: ShortcutEventLike, scope: ShortcutScope): string {
+  if (scope === 'playing' && typeof event.code === 'string' && /^Key[A-Z]$/.test(event.code)) {
+    return event.code.slice(3).toLowerCase();
+  }
   if (event.key === ' ' || event.code === 'Space') return 'space';
   return event.key.toLowerCase();
 }
@@ -108,13 +133,14 @@ export function matchShortcut(
   scope: ShortcutScope,
   mac: boolean = isMacPlatform(),
 ): ShortcutAction | null {
-  if (scope === 'gesture') {
+  // gesture / playing: a focused checkbox or slider is not a text field (the lock checkbox keeps Esc and the keys working).
+  if (scope === 'gesture' || scope === 'playing') {
     if (event.defaultPrevented || isImeComposing(event)) return null;
     const target = event.target ?? null;
     if (typeof Element !== 'undefined' && target instanceof Element
       && (isTextEntryField(target.closest('input, textarea, select')) || isEditableTarget(target))) return null;
   } else if (!canHandleShortcut(event)) return null;
-  const key = normalizedKey(event);
+  const key = normalizedKey(event, scope);
   const entry = KEYMAP.find(
     (candidate) =>
       candidate.scope === scope
