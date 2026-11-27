@@ -14,6 +14,7 @@ import {
   type HarmonicFunction,
 } from '@cts/theory-engine';
 import { useStore } from '../../state/store';
+import { previewChord } from '../../audio/livePreview';
 import { pxPerBeat, timelineWidth } from '../timeline';
 import {
   addChordWithAnalysis,
@@ -698,6 +699,7 @@ export function ChordLane() {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (movedRef.current) return;
+                  previewChord(project, chord);
                   openChordPopover(chord.id, e.currentTarget);
                 }}
                 title={`${chord.symbol}${chord.degree ? `（${chord.degree}）` : ''}を編集`}

@@ -20,6 +20,7 @@ import {
 } from '@cts/theory-engine';
 import { updateChordSymbol } from '../../state/editorActions';
 import { useStore } from '../../state/store';
+import { previewChord } from '../../audio/livePreview';
 
 const SUGGESTION_GROUPS: {
   tag: ChordSuggestionTag;
@@ -530,6 +531,13 @@ export function ChordPopover(props: {
       ) : null}
 
       <div className="chord-pop__foot">
+        <button
+          type="button"
+          className="chord-pop__listen"
+          onClick={() => previewChord(project, chord)}
+        >
+          このコードを鳴らす
+        </button>
         <button
           type="button"
           className="chord-pop__delete"

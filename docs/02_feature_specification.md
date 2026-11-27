@@ -539,3 +539,12 @@ channel 9の1候補は、全noteが次の条件をすべて満たす場合だけ
 - source projectionは全Track identityを保ち、未選択clipを除外する。選択Trackのlinked canonical sourceとAudioTakeFolder全体を保持し、他Track folderは除外する。選択clip／takeの素材metadataが欠落またはunresolvedならresource reservationとOfflineAudioContextより前に失敗し、無音／部分WAVを成功扱いしない
 - original routingを1回compileし、選択sourceからenabledかつpositive-gainのoutput/sendで到達するBus closureを、graph、automation scheduler、tail plannerへ同一値で渡す
 - full mixの既定契約とPCM bytesは変更しない
+
+## 15. 試聴（音を鳴らして確かめる）
+
+- ピアノロールの鍵盤を押す、ノートを追加する（ダブルクリック・キーボードのEnter/Space）、コードトラックのコードをクリックする、コード編集ポップオーバーの「このコードを鳴らす」を押すと、短い音がすぐ鳴る。
+- 試聴は音だけで、Projectを変更せず、Undo履歴にも積まず、保存形式も変えない。
+- 音は対象Trackの楽器・音色（マクロ設定を含む）を使い、再生と同じ音になる。コードはコードトラックの再生と同じ構成音（`realizeChordPitches`）を鳴らす。
+- 同時に鳴る試聴音は最大16音で、超えると古い音から止める。各音は最長2秒で必ず止まり、新しいコードを鳴らすと前のコードは止まる。
+- 再生中でも鳴らせる。試聴は専用の出力経路を使い、再生のスケジュールには触れない。再生開始・停止、Project切替、ウィンドウのフォーカス喪失・非表示、画面の終了で試聴音はすべて止まる。
+- 録音中（Audio録音・オートメーション録音）は、入力モニタリングを持たないため試聴しない。
