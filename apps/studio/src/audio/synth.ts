@@ -191,6 +191,7 @@ export class SynthVoiceManager {
     duration: number,
     velocity: number,
     options?: SynthNoteOptions,
+    scheduleFilterDetune?: (detune: AudioParam, stopTime: number) => void,
   ): void {
     if (this.disposed) return;
     this.reap(startTime);
@@ -218,6 +219,8 @@ export class SynthVoiceManager {
       gain = this.ctx.createGain();
       const curve = createAdsrCurve(p.env, startTime, duration, peak);
       scheduleAdsr(gain.gain, curve);
+      const stopAt = curve[4].time + SYNTH_OSCILLATOR_STOP_PAD_SECONDS;
+      scheduleFilterDetune?.(filter.detune, stopAt);
 
       for (const layer of oscillatorPlan) {
         const osc = this.ctx.createOscillator();
@@ -236,7 +239,7 @@ export class SynthVoiceManager {
         filter,
         gain,
         curve,
-        stopAt: curve[4].time + SYNTH_OSCILLATOR_STOP_PAD_SECONDS,
+        stopAt,
         remainingEnded: oscillators.length,
         disposed: false,
       };

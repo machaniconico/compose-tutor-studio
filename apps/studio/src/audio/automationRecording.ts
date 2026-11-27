@@ -2,6 +2,7 @@ import {
   beginAutomationPass,
   cancelAutomationPass,
   automationTargetTypesForTrack,
+  automationWriteTargetTypesForTrack,
   punchOutAutomationPass,
   rebaseAutomationPass,
   releaseAutomationPass,
@@ -364,7 +365,7 @@ export class AutomationRecordingCoordinator {
     try {
       for (const trackMode of tracks) {
         if (trackMode.mode !== 'write') continue;
-        for (const type of automationTargetTypesForTrack(
+        for (const type of automationWriteTargetTypesForTrack(
           input.project,
           trackMode.trackId,
         )) {

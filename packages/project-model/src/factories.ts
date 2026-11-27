@@ -16,7 +16,7 @@ import type {
   TrackType,
 } from './types';
 
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 export type CreateProjectOptions = {
   title?: string;

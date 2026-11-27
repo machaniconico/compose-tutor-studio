@@ -43,7 +43,7 @@ const AUDIO_ASSET_STAGING_DIRECTORY: &str = ".staging";
 const ERASE_MARKER_VERSION: u64 = 1;
 const MAX_ERASE_MARKER_BYTES: u64 = 4 * 1024;
 const DATABASE_SCHEMA_VERSION: i64 = 2;
-const PROJECT_SCHEMA_VERSION: u64 = 11;
+const PROJECT_SCHEMA_VERSION: u64 = 12;
 const MIN_PROJECT_SCHEMA_VERSION: u64 = 1;
 const V3_PROJECT_FIELDS: &[&str] = &[
     "lengthBeats",
@@ -3492,6 +3492,13 @@ fn migrate_project_for_legacy_proof(mut project: Value, target_version: u64) -> 
                 record.insert("schemaVersion".to_owned(), Value::from(11));
                 record.insert("swing".to_owned(), Value::from(0));
                 record.insert("hiHatChoke".to_owned(), Value::Bool(false));
+                project
+            }
+            11 => {
+                validate_project(&project).ok()?;
+                project
+                    .as_object_mut()?
+                    .insert("schemaVersion".to_owned(), Value::from(12));
                 project
             }
             _ => return None,
@@ -8169,13 +8176,21 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
             .ok_or(GenerationIssue::Corrupt)?;
         let mut automation_targets = HashSet::new();
         for lane in automation_lanes {
+            let target_track_kind = track_kinds_by_id.get(lane.target.track_id.as_str());
+            let valid_target = match lane.target.kind.as_str() {
+                "track-volume" | "track-pan" => true,
+                "track-filter-cutoff" => {
+                    project.schema_version >= 12 && target_track_kind == Some(&"instrument")
+                }
+                _ => false,
+            };
             if !valid_project_string(&lane.id, MAX_STRING_CHARS, false)
                 || !ids.insert(lane.id.as_str())
                 || lane.bypassed.is_some() != (project.schema_version >= 6)
                 || !valid_project_string(&lane.target.track_id, MAX_STRING_CHARS, false)
                 || !track_ids.contains(lane.target.track_id.as_str())
-                || !matches!(lane.target.kind.as_str(), "track-volume" | "track-pan")
-                || (track_kinds_by_id.get(lane.target.track_id.as_str()) == Some(&"master")
+                || !valid_target
+                || (target_track_kind == Some(&"master")
                     && (project.schema_version < 8
                         || lane.target.kind != "track-volume"
                         || effective_master_id != Some(lane.target.track_id.as_str())))
@@ -8193,6 +8208,10 @@ fn validate_project(value: &Value) -> Result<(), GenerationIssue> {
                 let valid_value = match lane.target.kind.as_str() {
                     "track-volume" => (0.0..=2.0).contains(&point.value),
                     "track-pan" => (-1.0..=1.0).contains(&point.value),
+                    "track-filter-cutoff" => {
+                        let max_octaves = std::f64::consts::LOG2_10;
+                        (-max_octaves..=max_octaves).contains(&point.value)
+                    }
                     _ => false,
                 };
                 if !valid_project_string(&point.id, MAX_STRING_CHARS, false)

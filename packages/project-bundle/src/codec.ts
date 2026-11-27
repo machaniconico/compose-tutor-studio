@@ -588,8 +588,8 @@ export async function decodePortableProjectBundle(
   const normalizedProject = canonicalProject(decodedProject.project);
   if (decodedProject.migrated) {
     // A bundle exported by an older build holds the canonical JSON of its own
-    // schema. Only schema v10 bundles exist (bundles shipped with v10), so the
-    // decoded original must re-encode to exactly the same v10 bytes.
+    // schema. The legacy bundle exception applies only to schema v10, whose
+    // decoded project must re-encode to exactly the same v10 bytes.
     if (
       decodedProject.sourceSchemaVersion !== 10
       || serializeV10PortableProject(normalizedProject) !== projectText

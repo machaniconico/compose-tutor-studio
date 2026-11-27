@@ -16,15 +16,15 @@ import { checkGolden } from './golden-io';
 
 const cases = goldenCases();
 
-describe('golden: v11 encodeProjectJson bytes', () => {
+describe('golden: v12 encodeProjectJson bytes', () => {
   beforeAll(() => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(11);
+    expect(CURRENT_SCHEMA_VERSION).toBe(12);
   });
 
   it.each(cases.map((c) => [c.name, c] as const))('%s: encoded bytes are pinned', (name, c) => {
     const encoded = encodeProjectJson(buildCase(c));
     if (!encoded.ok) throw new Error(`encode failed: ${JSON.stringify(encoded.error)}`);
-    expect(JSON.parse(encoded.json).schemaVersion).toBe(11);
+    expect(JSON.parse(encoded.json).schemaVersion).toBe(12);
     checkGolden(join(EXPECTED_DIR, `${name}.json`), `${encoded.json}\n`);
     const sha = createHash('sha256').update(encoded.json).digest('hex');
     checkGolden(join(EXPECTED_DIR, `${name}.sha256`), `${sha}\n`);

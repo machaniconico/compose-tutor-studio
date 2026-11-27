@@ -21,6 +21,8 @@ import {
 } from './validation';
 import {
   automationTargetTypesForTrack,
+  automationValueRange,
+  isAutomationTargetType,
   isSupportedAutomationTarget,
 } from './automation-targets';
 
@@ -265,12 +267,8 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function hasOwn(record: Readonly<Record<string, unknown>>, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
 function validateTarget(project: Project, value: unknown): TargetValidationResult {
-  if (!isRecord(value)) {
+  if (!isRecord(value) || !Object.hasOwn(value, 'type') || !Object.hasOwn(value, 'trackId')) {
     return {
       ok: false,
       result: failure('invalid-target', 'Automation target must be an object.'),
@@ -279,7 +277,7 @@ function validateTarget(project: Project, value: unknown): TargetValidationResul
   const type = value.type;
   const trackId = value.trackId;
   if (
-    (type !== 'track-volume' && type !== 'track-pan')
+    !isAutomationTargetType(type)
     || typeof trackId !== 'string'
     || trackId.length === 0
     || trackId.length > MAX_PROJECT_STRING_LENGTH
@@ -288,7 +286,7 @@ function validateTarget(project: Project, value: unknown): TargetValidationResul
       ok: false,
       result: failure(
         'invalid-target',
-        'Automation target must identify track-volume or track-pan on a bounded track id.',
+        'Automation target must identify a supported control on a bounded track id.',
       ),
     };
   }
@@ -304,7 +302,7 @@ function validateTarget(project: Project, value: unknown): TargetValidationResul
     return {
       ok: false,
       result: failure(
-        track.type === 'master' ? 'master-protected' : 'invalid-target',
+        track.type === 'master' && type !== 'track-filter-cutoff' ? 'master-protected' : 'invalid-target',
         track.type === 'master'
           ? 'Only the effective Master volume can be automated.'
           : 'Automation target is not supported for this Track.',
@@ -339,8 +337,7 @@ function validateValue(
   target: AutomationTarget,
   value: unknown,
 ): AutomationMutationFailure | null {
-  const minimum = target.type === 'track-volume' ? 0 : -1;
-  const maximum = target.type === 'track-volume' ? 2 : 1;
+  const [minimum, maximum] = automationValueRange(target.type);
   if (
     typeof value !== 'number'
     || !Number.isFinite(value)
@@ -499,7 +496,7 @@ export function addAutomationPoint(
     if (laneId === undefined) {
       const allocatedLane = allocateId(
         'lane',
-        hasOwn(options, 'laneId') ? options.laneId : undefined,
+        Object.hasOwn(options, 'laneId') ? options.laneId : undefined,
         (options.idFactory as AutomationIdFactory | undefined) ?? defaultIdFactory,
         reserved,
       );
@@ -508,7 +505,7 @@ export function addAutomationPoint(
     }
     const allocatedPoint = allocateId(
       'point',
-      hasOwn(options, 'pointId') ? options.pointId : undefined,
+      Object.hasOwn(options, 'pointId') ? options.pointId : undefined,
       (options.idFactory as AutomationIdFactory | undefined) ?? defaultIdFactory,
       reserved,
     );
@@ -598,9 +595,9 @@ export function updateAutomationPoint(
       return failure('unexpected', 'Automation point patch must be an object.');
     }
 
-    const beat = hasOwn(patch, 'beat') ? patch.beat : current.beat;
-    const value = hasOwn(patch, 'value') ? patch.value : current.value;
-    const interpolation = hasOwn(patch, 'interpolation')
+    const beat = Object.hasOwn(patch, 'beat') ? patch.beat : current.beat;
+    const value = Object.hasOwn(patch, 'value') ? patch.value : current.value;
+    const interpolation = Object.hasOwn(patch, 'interpolation')
       ? patch.interpolation
       : current.interpolation;
     const beatFailure = validateBeat(project, beat);

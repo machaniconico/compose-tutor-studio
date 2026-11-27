@@ -15,7 +15,7 @@ import {
   type AutomationTarget,
   type AutomationWriteMode,
 } from '@cts/project-model';
-import { automationValueAt } from '../../audio/automation';
+import { automationBaseValue, automationValueAt } from '../../audio/automation';
 import {
   addStudioAutomationPoint,
   clearStudioAutomationLane,
@@ -128,14 +128,6 @@ function projectGridBeats(lengthBeats: number): readonly number[] {
   return beats;
 }
 
-function targetBaseValue(
-  targetType: AutomationTargetType,
-  volume: number,
-  pan: number,
-): number {
-  return targetType === 'track-volume' ? volume : pan;
-}
-
 function AutomationPlayhead({
   lengthBeats,
   innerWidth,
@@ -230,11 +222,7 @@ export function AutomationLaneEditor() {
   const baseValue =
     selectedTrack === null
       ? targetPresentation.min
-      : targetBaseValue(
-          targetType,
-          selectedTrack.volume,
-          selectedTrack.pan,
-        );
+      : automationBaseValue(selectedTrack, { type: targetType, trackId: selectedTrack.id });
   const disabled =
     projectOperationBusy || audioRecordingOperationId !== null;
   const globalReadEnabled = project.automationReadState.globalEnabled;
@@ -412,7 +400,9 @@ export function AutomationLaneEditor() {
   ): void => {
     setNotice({
       kind: 'error',
-      message: studioAutomationErrorMessage(result.code),
+      message: result.code === 'invalid-value' && targetType === 'track-filter-cutoff'
+        ? '明るさの値が範囲外です。0に近い値を入力してください（目安は−3.32〜+3.32オクターブ）。'
+        : studioAutomationErrorMessage(result.code),
     });
   };
 
@@ -829,6 +819,9 @@ export function AutomationLaneEditor() {
           )}
         </div>
       </header>
+      {targetType === 'track-filter-cutoff' && (
+        <p>音の明るさを時間に合わせて変えます。0は元の音色、プラスは明るく、マイナスはやわらかくなります。</p>
+      )}
 
       <div
         className="automation-lane__automation-controls"

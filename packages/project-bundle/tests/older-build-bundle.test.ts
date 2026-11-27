@@ -1,7 +1,7 @@
 // P20 regression: a .ctsbundle exported by an older build (origin/main, schema v10) must import.
 //
 // fixtures/main-v10-two-assets.ctsbundle was written by origin/main's encodePortableProjectBundle.
-// Its Project JSON is canonical for schema v10; decoding migrates it to v11 (swing 0, choke off).
+// Its Project JSON is canonical for schema v10; decoding migrates it to v12 (swing 0, choke off).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -53,7 +53,7 @@ describe('portable bundle from an older build', () => {
     expect(JSON.parse(parts(bundle).projectText).schemaVersion).toBe(10);
 
     const decoded = await decodePortableProjectBundle(bundle);
-    expect(decoded.project.schemaVersion).toBe(11);
+    expect(decoded.project.schemaVersion).toBe(12);
     expect(decoded.project.swing).toBe(0);
     expect(decoded.project.hiHatChoke).toBe(false);
     expect(decoded.project.title).toBe('main v10 bundle');
@@ -98,7 +98,7 @@ describe('portable bundle from an older build', () => {
     expect(new TextEncoder().encode(exact).byteLength).toBe(LIMIT);
 
     const decoded = await decodePortableProjectBundle(await withProjectText(bundle, exact));
-    expect(decoded.project.schemaVersion).toBe(11);
+    expect(decoded.project.schemaVersion).toBe(12);
     // Control: one byte over the source limit is still too large.
     const over = sized(count, 1001 + LIMIT - base);
     await expect(decodePortableProjectBundle(await withProjectText(bundle, over))).rejects.toMatchObject(

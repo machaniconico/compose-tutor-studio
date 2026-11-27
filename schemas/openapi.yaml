@@ -303,7 +303,7 @@ components:
           maxLength: 4096
         schemaVersion:
           type: integer
-          const: 11
+          const: 12
         swing:
           type: number
           minimum: 0
@@ -678,7 +678,7 @@ components:
           minLength: 1
           maxLength: 4096
           description: >-
-            Linked-clip source id retained by current schema v11. MIDI/drum only;
+            Linked-clip source id retained by current schema v12. MIDI/drum only;
             the source must be
             a direct same-track, same-type non-alias clip of identical length.
             Linked clips omit notes, drumEvents, stepsPerBar, drumGroove, and
@@ -1110,15 +1110,16 @@ components:
       required: [type, trackId]
       properties:
         type:
-          enum: [track-volume, track-pan]
+          enum: [track-volume, track-pan, track-filter-cutoff]
         trackId:
           type: string
           minLength: 1
           maxLength: 4096
           description: >-
             Must reference an existing non-Master Track, except track-volume may
-            reference only the first (effective) Master. Master pan and later
-            Master targets are invalid. Only one lane is allowed per target.
+            reference only the first (effective) Master. Track-filter-cutoff is
+            valid only on instrument tracks and only from schema v12. Only one
+            lane is allowed for each (type, trackId) pair.
     AutomationPoint:
       type: object
       additionalProperties: false
@@ -1134,9 +1135,13 @@ components:
           maximum: 8192
         value:
           type: number
-          minimum: -1
-          maximum: 2
-          description: Track volume uses 0..2; Track pan uses -1..1.
+          minimum: -3.321928094887362
+          maximum: 3.321928094887362
+          description: >-
+            Track volume uses 0..2 and track pan uses -1..1. Track-filter-cutoff
+            uses finite octave offsets within ±log2(10), inclusive. Zero keeps
+            the instrument preset's cutoff. Linear interpolation operates on
+            the stored octave offsets.
         interpolation:
           enum: [hold, linear]
     NoteEvent:

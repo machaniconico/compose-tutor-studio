@@ -69,7 +69,7 @@ describe('schema-v10 formantMode', () => {
     const before = structuredClone(v9);
 
     const migrated = migrateProject(v9);
-    expect(CURRENT_SCHEMA_VERSION).toBe(11);
+    expect(CURRENT_SCHEMA_VERSION).toBe(12);
     expect(v9).toEqual(before);
     expect(warpRecord(migrated as unknown as ReturnType<typeof currentProject>).formantMode)
       .toBe('off');

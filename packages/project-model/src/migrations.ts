@@ -338,6 +338,7 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 10, to: 11, migrate: (project) => ({
     ...project, schemaVersion: 11, swing: 0, hiHatChoke: false,
   }) },
+  { from: 11, to: 12, migrate: (project) => ({ ...project, schemaVersion: 12 }) },
 ]);
 
 export type ProjectMigrationErrorCode =
@@ -395,6 +396,31 @@ function assertMigrationRegistry(): void {
  * Master automation was not part of any legacy schema. Reject it before a
  * schema-only v7 -> v8 migration could make the same payload appear valid.
  */
+/**
+ * `track-filter-cutoff` targets exist only from schema v12. A schema-only
+ * migration would otherwise promote an invalid older project into a valid one.
+ */
+function assertNoPreV12CutoffAutomation(
+  project: Readonly<Record<string, unknown>>,
+  schemaVersion: number,
+): void {
+  if (schemaVersion >= 12 || !Array.isArray(project.automationLanes)) return;
+  for (const lane of project.automationLanes) {
+    if (typeof lane !== 'object' || lane === null || Array.isArray(lane)) continue;
+    const target = (lane as Readonly<Record<string, unknown>>).target;
+    if (
+      typeof target === 'object'
+      && target !== null
+      && (target as Readonly<Record<string, unknown>>).type === 'track-filter-cutoff'
+    ) {
+      throw new ProjectMigrationError(
+        'migration-failed',
+        `Project schemaVersion ${schemaVersion} cannot contain a track-filter-cutoff automation lane`,
+      );
+    }
+  }
+}
+
 function assertNoLegacyMasterAutomation(
   project: Readonly<Record<string, unknown>>,
   schemaVersion: number,
@@ -485,6 +511,7 @@ export function migrateProject(raw: Readonly<Record<string, unknown>>): Record<s
   }
 
   assertNoLegacyMasterAutomation(current, version);
+  assertNoPreV12CutoffAutomation(current, version);
 
   while (version < CURRENT_SCHEMA_VERSION) {
     const migration = MIGRATIONS.find((candidate) => candidate.from === version);

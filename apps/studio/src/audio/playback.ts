@@ -27,11 +27,13 @@ import {
   type AudioIssue,
 } from '../state/store';
 import {
+  activeFilterCutoffLanes,
   automationBaseValue,
   automationCommandsInWindow,
   automationLaneForTrack,
   automationValueAt,
   isAutomationReadEnabled,
+  scheduleFilterCutoff,
 } from './automation';
 import {
   acquireProjectAudioBuffers,
@@ -149,6 +151,7 @@ type RuntimeSession = PlaybackSession & {
   readonly tempo: BeatTimeMapping;
   readonly transportTempo: BeatTimeMapping;
   readonly tempoChangeBeats: readonly number[];
+  readonly cutoffLanes: ReturnType<typeof activeFilterCutoffLanes>;
   readonly anchorBeat: number;
   readonly anchorTime: number;
   readonly loop: LoopRegion | null;
@@ -2054,6 +2057,7 @@ async function createRuntimeSessionImpl(
       tempo,
       transportTempo,
       tempoChangeBeats,
+      cutoffLanes: activeFilterCutoffLanes(project),
       anchorBeat: startBeat,
       anchorTime,
       loop,
@@ -2282,20 +2286,20 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
     const payload = event.payload as SchedulePayload;
     if (payload.kind === 'note') {
       const synth = session.synths.get(payload.trackId);
-      synth?.noteOn(
+      if (!synth) continue;
+      const { transportTempo, anchorBeat, anchorTime, loop, tempoChangeBeats } = session;
+      const startBeat = timeToBeat(event.time, transportTempo, anchorBeat, anchorTime);
+      const cutoff = session.cutoffLanes.get(payload.trackId);
+      synth.noteOn(
         payload.pitch,
         event.time,
-        mappedBeatDurationSeconds(
-          session.transportTempo,
-          timeToBeat(
-            event.time,
-            session.transportTempo,
-            session.anchorBeat,
-            session.anchorTime,
-          ),
-          payload.durationBeats,
-        ),
+        mappedBeatDurationSeconds(transportTempo, startBeat, payload.durationBeats),
         payload.velocity,
+        undefined,
+        cutoff ? (detune, stopTime) => scheduleFilterCutoff(
+            detune, cutoff, startBeat, event.time, stopTime, transportTempo,
+            session.projectSnapshot.lengthBeats, loop, tempoChangeBeats,
+          ) : undefined,
       );
     } else {
       const { anchorBeat, anchorTime, transportTempo } = session;
@@ -2344,7 +2348,7 @@ function scheduleAutomationTargetForWindow(
   windowStartBeat: number,
   windowEndBeat: number,
 ): void {
-  if (!(windowEndBeat > windowStartBeat)) return;
+  if (target.type === 'track-filter-cutoff' || !(windowEndBeat > windowStartBeat)) return;
   const lane = automationLaneForTrack(
     session.projectSnapshot.automationLanes,
     target.trackId,
@@ -2422,6 +2426,7 @@ function scheduleAutomationForWindow(
     .audibleChannelIds;
 
   for (const lane of session.projectSnapshot.automationLanes) {
+    if (lane.target.type === 'track-filter-cutoff') continue;
     if (!isAutomationReadEnabled(session.projectSnapshot.automationReadState, lane)) continue;
     const track = tracks.get(lane.target.trackId);
     const isMasterTarget = isEffectiveMasterVolumeTarget(

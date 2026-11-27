@@ -99,6 +99,17 @@ describe('AutomationLaneEditor accessibility rendering', () => {
     expect(automationReadToggle(html)).toBeNull();
   });
 
+  it('offers brightness only for instrument tracks', () => {
+    const state = useStore.getState();
+    for (const [type, available] of [['instrument', true], ['drum', false], ['master', false]] as const) {
+      const track = state.project.tracks.find((candidate) => candidate.type === type)!;
+      state.selectTrack(track.id);
+      syncServerSnapshot();
+      const html = renderToStaticMarkup(<AutomationLaneEditor />);
+      expect(html.includes('>明るさ(フィルター)</button>'), type).toBe(available);
+    }
+  });
+
   it('computes 44px Read and mode controls covered by the global focus-visible style', () => {
     selectedEditableTrackId();
     syncServerSnapshot();
