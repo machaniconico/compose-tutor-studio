@@ -148,4 +148,33 @@ describe('loop-range MIDI export', () => {
     expect(lead.notes[0]).toMatchObject({ pitch: 62, startTick: 0 });
     expect(lead.notes[0]!.durationTick).toBe(Math.round(3.1 * 480));
   });
+
+  it('writes the key signature and program change at tick 0 in a range export', () => {
+    const parsed = parseMidiFile(projectToMidi(songProject(), { range: rangeOf(8, 16) }));
+    expect(parsed.keySignatures?.map((k) => k.tick)).toEqual([0]);
+    const lead = parsed.tracks.find((track) => track.name === 'Lead')!;
+    expect(lead.initialChannels?.[0]?.program).toBeDefined();
+    expect(lead.notes[0]).toMatchObject({ pitch: 64, startTick: 0 });
+  });
+
+  it('leaves them out when includeProgramAndKey is off, changing nothing else', () => {
+    const project = songProject();
+    const off = projectToMidi(project, { range: rangeOf(8, 16), includeProgramAndKey: false });
+    const on = projectToMidi(project, { range: rangeOf(8, 16) });
+    const parsedOff = parseMidiFile(off);
+    const parsedOn = parseMidiFile(on);
+    expect(parsedOff.keySignatures ?? []).toEqual([]);
+    expect(parsedOff.tracks.find((t) => t.name === 'Lead')!.initialChannels?.[0]?.program).toBeUndefined();
+    expect(parsedOff.tracks.map((t) => t.notes)).toEqual(parsedOn.tracks.map((t) => t.notes));
+    expect(parsedOff.tempoEvents).toEqual(parsedOn.tempoEvents);
+    expect(off.length).toBeLessThan(on.length);
+  });
+
+  it('matches the full export byte for byte when the range covers the song, with and without program/key', () => {
+    const project = songProject();
+    for (const includeProgramAndKey of [true, false]) {
+      expect(projectToMidi(project, { range: rangeOf(0, 32), includeProgramAndKey }))
+        .toEqual(projectToMidi(project, { includeProgramAndKey }));
+    }
+  });
 });
