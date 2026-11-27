@@ -23,7 +23,7 @@
 | Export | MIDI/WAV | Yes | MIDIはFormat 1の正規化projection、WAVは簡易レンダー |
 | Import | MIDI import | Yes | `.mid` / `.midi`を検証し、MTrkとchannelに応じた複数トラックを現在の曲へ追加する |
 | Vocal Cut | カラオケ作成 | Yes | ステレオ中央定位をローカル軽減し、A/B試聴後にPCM 16-bit WAVへ書き出す。ML stem分離ではない |
-| Track Management | Track追加・整理・音色 | Partial | production UIはinstrument / drum / stereo Busと音源fileからのAudio Trackを追加し、non-masterの複製・並べ替え、一般Trackの削除・改名、synth 4音色を扱う。schema v4では学習role Trackも改名可能でroleを保持し、削除だけを保護する。Folder / Stackは未実装 |
+| Track Management | Track追加・整理・音色 | Partial | production UIはinstrument / drum / stereo Busと音源fileからのAudio Trackを追加し、non-masterの複製・並べ替え、一般Trackの削除・改名、内蔵シンセ14音色と4つの音色調整を扱う。schema v4では学習role Trackも改名可能でroleを保持し、削除だけを保護する。Folder / Stackは未実装 |
 | Audio Track | Audio file配置 / マイク録音 | Yes | fileまたは0.5〜60秒の単一マイク入力をapp-owned 48 kHz mono/stereo PCM16 WAVへ正規化する。loop / punch OFFは1 Clip、明示loop ONは2〜128固定pass、punch ONは既存の録音待機Trackへpre/post-roll付きbounded Auto Punchを行う。content-addressed保存、非破壊編集、live/WAV再生、欠落・変更診断を行い、Project JSON単体にはbinaryを同梱しない |
 | Audio Take Comp | 既存Audio Clip、固定pass録音、Auto Punchからテイク編集 | Yes | 同一Track・同一時間窓のClipを手動でまとめるか、明示loopを完走した各passから自動take folderを作る。Auto Punchは範囲を覆う旧素材を残して新takeを全域採用し、範囲ごとの採用takeをlive/WAVへ反映する。再生中の任意Quick Punch / MIDI compingは未実装 |
 | Elastic Audio | Audio Clipのタイミング / 単音pitch補正 | Partial | 60秒以内のready・非loop Clipでmanual timing point、単音pitch region、補正量、`formantMode: off / preserve`を非破壊編集し、解析波形 / pitch trace、A/B、Undo / Redo、保存、live / full / selected WAVへ接続する。manual formant / vibrato編集、polyphonic、極端なrate / shift品質、take folder / loop-cycle、phase-coherent multitrack、自動クオンタイズ / grooveは未実装 |
@@ -260,7 +260,13 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - 複製・並べ替えの対象はnon-master Track、削除の対象は後述の学習Trackを除く一般non-master Trackとする。Masterは改名、複製、並べ替え、削除、音色選択の全対象から外し、legacy Projectに複数のMasterがあってもUIのTrack管理操作でそのidentityや相対順を変えない
 - Track複製ではTrack、全Clip、全Note / DrumEvent、全Effectへfresh IDを発行する。複製元Track内の`aliasOf`は旧Clip ID→新Clip IDの対応で複製先内へ張り替え、元Track参照やdangling参照を残さない。main outputと複製元がsourceであるsendも値として複製し、send IDをProject全体でfreshにするが、複製元Busへのincoming output / sendは複製しない。音量、pan、mute / solo、instrument、effect parameter、配置と素材内容は値として複製し、複製先roleは`general`にする
 - Track削除では自身のmain outputとsource / targetいずれかが自身であるsendを同じtransactionで除去する。Bus削除ではそのBusへmain outputを向けていた生存TrackだけをMasterへ戻し、途中のdangling routeをProject / historyへ公開しない
-- synth音色のproduction選択肢はcanonicalな`softPad` / `brightPluck` / `warmBass` / `brightLead`の4つとする。既存aliasは表示時に対応するcanonical音色へ解決しても、選択操作までは保存値を書き換えない。drum kit選択はこのBatchの対象外とする
+- 楽器トラックの追加画面とインスペクターの「内蔵音色」から14種を選べる。やわらかいパッド、明るいプラック、あたたかいベース、明るいリード、ピアノ風、ベル、オルガン風、弦楽器の合奏風、金管楽器風、はじく弦の音、深い低音、やさしい鍵盤、ピコピコした主旋律、すきとおるパッド。既存の別名は対応する内蔵音色として表示し、選択するまで保存値を保持する。追加した10種のIDには`p22:`を付け、旧ファイルにある接頭辞なしの未登録名は従来どおり既定の音色で鳴る。音色の変更は1回のUndoで戻せる。ドラムキットの選択は対象外。
+- インスペクターの「かんたん音色調整」では、4つのスライダーで好みの響きに近づけられる。音色を切り替えても調整値は引き継ぎ、「音色調整をリセット」で4つをまとめて初期値に戻せる。調整の変更は再生位置を保持したまま再生を停止し、次の再生とWAV書き出しに反映する。
+  - **明るさ**（`macroBrightness`）はローパスフィルターのカットオフ周波数。右に動かすと音がくっきりする。初期値50%、40〜16,000 Hz。
+  - **余韻**（`macroRelease`）は音が消えるまでの長さ。初期値50%、0.01〜4秒。
+  - **広がり**（`macroWidth`）は重ねた発音層のピッチ差。初期値0%、最大で各重ね音のずれを24セント広げる（合計±100セント以内）。既存の発音層を使って音に厚みを出す。左右の定位はミキサーのパンで調整する。
+  - **立ち上がり**（`macroAttack`）は音が鳴り始めて最大の強さになるまでの長さ。右に動かすとゆっくり立ち上がる。初期値50%、0.002〜2秒。
+- 明るさ、余韻、立ち上がりは元の音色の設定を50%で保ち、0〜100%で原則0.25〜4倍に調整する。値は既存の`InstrumentConfig.params`へ保存し、使用時にだけ0〜1に収める。未設定時は初期値で鳴る。WAVの長さは曲末の短い音でも立ち上がり、減衰、余韻が収まるよう決める。
 - schema v4では`Track.role`が教材と伴奏支援の正本であり、runtimeで名前から推測しない。学習role Trackもlocal draftから改名でき、確定後もroleを保持する。一般Trackが`Chords` / `Bass` / `Melody`を名乗っても学習roleにはならない。学習role Trackの削除はdomain境界で保護し、trim後の有効名を明示確定した時だけ1回のProject changeとしてcommitする
 - instrument TrackのInspectorでは`general` / Chords / Bass / Melody roleを選べる。同じ学習roleを別Trackへ割り当てた場合は旧ownerを`general`へ戻し、候補Project全体を1 commandとして検証・採用する
 - 各commandは候補Project全体をcanonical codec / validationへ1回通し、128 Track上限、Clip / event予算、文字列上限などに違反する場合はProject、history、revision、autosave queue、選択、再生sessionを変えずatomicに拒否する。no-opも履歴や保存を進めない

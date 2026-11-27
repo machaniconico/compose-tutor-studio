@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { applyInstrumentMacros, NEUTRAL_MACROS, readInstrumentMacro } from '../src/audio/macros';
 import {
   BEGINNER_SYNTH_PRESETS,
   SynthVoiceManager,
@@ -192,6 +193,8 @@ describe('synth presets', () => {
     const names = listSynthPresets().map((preset) => preset.name);
 
     expect(names).toEqual(expect.arrayContaining([...BEGINNER_SYNTH_PRESETS]));
+    expect(new Set(names).size).toBe(14);
+    for (const name of names) expect(canonicalSynthPresetName(name)).toBe(name);
     expect(new Set(BEGINNER_SYNTH_PRESETS).size).toBe(3);
   });
 
@@ -202,6 +205,8 @@ describe('synth presets', () => {
     expect(resolvePreset('bass').label).toBe('Warm Bass');
     expect(resolvePreset('leadSine').label).toBe('Bright Lead');
     expect(resolvePreset('lead').label).toBe('Bright Lead');
+    expect(resolvePreset('bell')).toEqual(resolvePreset('warmPad'));
+    expect(resolvePreset('p22:bell')).not.toEqual(resolvePreset('warmPad'));
     expect(resolvePreset('missing-preset').label).toBe(resolvePreset('warmPad').label);
     expect(canonicalSynthPresetName('pad')).toBe('softPad');
     expect(canonicalSynthPresetName('bass')).toBe('warmBass');
@@ -211,6 +216,12 @@ describe('synth presets', () => {
       expect(canonicalSynthPresetName(inheritedKey)).toBeNull();
       expect(resolvePreset(inheritedKey).label).toBe('Soft Pad');
     }
+  });
+
+  it('falls back for malformed preset values without coercion', () => {
+    const malformed = { toString: null };
+    expect(canonicalSynthPresetName(malformed)).toBeNull();
+    expect(resolvePreset(malformed)).toEqual(resolvePreset('softPad'));
   });
 
   it('returns independent preset copies', () => {
@@ -248,6 +259,51 @@ describe('buildOscillatorPlan', () => {
     expect(plan.some((layer) => layer.role === 'unison' && layer.detuneCents < 0)).toBe(true);
     expect(plan.some((layer) => layer.role === 'sub')).toBe(true);
     expect(plan.find((layer) => layer.role === 'sub')?.frequencyHz).toBeCloseTo(midiToFreq(48), 10);
+  });
+});
+
+describe('instrument macros', () => {
+  it('preserves the base patch for absent, malformed, unrelated or neutral params', () => {
+    const base = resolvePreset('softPad');
+    const invalid = { macroBrightness: { toString: null }, macroAttack: Number.NaN };
+    for (const params of [undefined, null, 42, 'invalid', invalid, { cutoff: 123 }, NEUTRAL_MACROS]) {
+      expect(applyInstrumentMacros(base, params)).toBe(base);
+    }
+    expect(readInstrumentMacro(invalid, 'macroBrightness')).toBe(0.5);
+    expect(applyInstrumentMacros(base, Object.create({ macroWidth: 1 }))).toBe(base);
+  });
+
+  it('clamps at use and changes only the corresponding parameters and unison detune', () => {
+    const base = resolvePreset('softPad');
+    const raw = { macroBrightness: 3, macroRelease: 2, macroWidth: 9, macroAttack: -1 };
+    const adjusted = applyInstrumentMacros(base, raw);
+    expect(raw).toEqual({ macroBrightness: 3, macroRelease: 2, macroWidth: 9, macroAttack: -1 });
+    expect(adjusted.filter).toEqual({ cutoffHz: 5_000, resonance: base.filter.resonance });
+    expect(adjusted.env).toEqual({ ...base.env, release: 3.2, attack: 0.07 });
+    expect(adjusted.oscillators.map((layer) => layer.detuneCents)).toEqual([0, -31, 31, 0]);
+    expect(base.oscillators.map((layer) => layer.detuneCents)).toEqual([0, -7, 7, 0]);
+    expect(resolveSynthPatch({ preset: 'softPad', params: raw })).toEqual(adjusted);
+  });
+
+  it('schedules an adjusted voice using the existing node counts', () => {
+    const fake = new FakeSynthContext();
+    const manager = new SynthVoiceManager(
+      fake as unknown as BaseAudioContext,
+      new FakeAudioNode() as unknown as AudioNode,
+      {
+        preset: 'softPad',
+        params: { macroBrightness: 1, macroRelease: 1, macroWidth: 1, macroAttack: 1 },
+      },
+    );
+    manager.noteOn(60, 1, 0.05, 100);
+    expect(fake.filters).toHaveLength(1);
+    expect(fake.filters[0]?.frequency.setEvents).toEqual([{ time: 1, value: 5_000 }]);
+    expect(fake.gains).toHaveLength(5);
+    expect(fake.oscillators).toHaveLength(4);
+    expect(fake.oscillators.map((osc) => osc.detune.value)).toEqual([0, -31, 31, 0]);
+    for (const osc of fake.oscillators) {
+      expect(osc.stops[0]).toBeCloseTo(1 + 1.12 + 0.42 + 3.2 + 0.02, 12);
+    }
   });
 });
 

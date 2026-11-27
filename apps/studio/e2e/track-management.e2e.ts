@@ -123,6 +123,39 @@ test('manages a track atomically, restores focus, and persists its sound and ord
   expect(pageErrors).toEqual([]);
 });
 
+test('selects a ported sound in one undo step and edits macros with the keyboard', async ({ page }) => {
+  await page.goto('/');
+  await dismissWelcome(page);
+
+  const preset = page.getByRole('combobox', { name: 'Chords 音色', exact: true });
+  await expect(preset).toHaveValue('softPad');
+  await expect(preset.getByRole('option')).toHaveCount(14);
+  await preset.selectOption('p22:bell');
+  await expect(preset).toHaveValue('p22:bell');
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
+  await expect(preset).toHaveValue('softPad');
+  await page.getByRole('button', { name: 'やり直す', exact: true }).click();
+  await expect(preset).toHaveValue('p22:bell');
+
+  await page.getByText('かんたん音色調整', { exact: true }).click();
+  const brightness = page.getByRole('slider', { name: '明るさ', exact: true });
+  await expect(brightness).toHaveValue('0.5');
+  await brightness.press('End');
+  await expect(brightness).toHaveValue('1');
+  await page.getByRole('button', { name: '音色調整をリセット', exact: true }).click();
+  await expect(brightness).toHaveValue('0.5');
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
+  await expect(brightness).toHaveValue('1');
+
+  await page.keyboard.press('Control+S');
+  await expect(page.locator('#project-save-status')).toContainText('保存済み');
+  await page.reload();
+  await dismissWelcome(page);
+  await expect(preset).toHaveValue('p22:bell');
+  await page.getByText('かんたん音色調整', { exact: true }).click();
+  await expect(brightness).toHaveValue('1');
+});
+
 test('keeps the track list and add dialog usable on a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto('/');

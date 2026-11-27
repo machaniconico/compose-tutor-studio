@@ -7,15 +7,24 @@
 // Works with any BaseAudioContext so the same code drives live playback and the
 // OfflineAudioContext used for WAV render.
 
+import type { InstrumentConfig } from '@cts/project-model';
+import { applyInstrumentMacros } from './macros';
+import { resolvePreset, type Envelope, type FilterSettings, type OscillatorLayer, type SynthPreset } from './presets';
 import { SYNTH_OSCILLATOR_STOP_PAD_SECONDS } from './voiceTiming';
 
-/** ADSR envelope, seconds for A/D/R, 0..1 for sustain. */
-export type Envelope = {
-  attack: number;
-  decay: number;
-  sustain: number;
-  release: number;
-};
+export {
+  BEGINNER_SYNTH_PRESETS,
+  DEFAULT_PRESET,
+  SYNTH_PRESETS,
+  canonicalSynthPresetName,
+  listSynthPresets,
+  resolvePreset,
+  type Envelope,
+  type FilterSettings,
+  type OscillatorLayer,
+  type SynthPreset,
+  type SynthPresetSummary,
+} from './presets';
 
 export type AdsrPoint = {
   time: number;
@@ -24,39 +33,13 @@ export type AdsrPoint = {
 
 export type AdsrCurve = readonly [AdsrPoint, AdsrPoint, AdsrPoint, AdsrPoint, AdsrPoint];
 
-export type OscillatorLayer = {
-  role: 'primary' | 'unison' | 'sub';
-  wave: OscillatorType;
-  /** Octave offset from the played MIDI note. -1 is a sub oscillator. */
-  octave: number;
-  /** Fine pitch offset, cents. */
-  detuneCents: number;
-  /** Layer gain before the filter, 0..1. */
-  gain: number;
-};
-
 export type OscillatorPlan = OscillatorLayer & {
   frequencyHz: number;
 };
 
-export type FilterSettings = {
-  cutoffHz: number;
-  resonance: number;
-};
-
-/** Subtractive-synth preset definition. */
-export type SynthPreset = {
-  label: string;
-  description: string;
-  oscillators: readonly OscillatorLayer[];
-  filter: FilterSettings;
-  /** Per-note gain trim so presets sit at similar loudness. */
-  gain: number;
-  env: Envelope;
-};
-
 export type SynthPatchOptions = {
   preset?: string;
+  params?: InstrumentConfig['params'];
   oscillators?: readonly OscillatorLayer[];
   envelope?: Partial<Envelope>;
   filter?: Partial<FilterSettings>;
@@ -67,12 +50,6 @@ export type SynthNoteOptions = SynthPatchOptions;
 
 export type SynthOptions = SynthPatchOptions & {
   maxVoices?: number;
-};
-
-export type SynthPresetSummary = {
-  name: string;
-  label: string;
-  description: string;
 };
 
 export const DEFAULT_ENVELOPE: Envelope = {
@@ -92,116 +69,6 @@ const DEFAULT_FILTER: FilterSettings = {
 const DEFAULT_OSCILLATORS: readonly OscillatorLayer[] = [
   { role: 'primary', wave: 'triangle', octave: 0, detuneCents: 0, gain: 1 },
 ];
-
-const softPadPreset: SynthPreset = {
-  label: 'Soft Pad',
-  description: 'Slow, mellow chords for gentle harmony practice.',
-  oscillators: [
-    { role: 'primary', wave: 'triangle', octave: 0, detuneCents: 0, gain: 0.22 },
-    { role: 'unison', wave: 'sawtooth', octave: 0, detuneCents: -7, gain: 0.34 },
-    { role: 'unison', wave: 'sawtooth', octave: 0, detuneCents: 7, gain: 0.34 },
-    { role: 'sub', wave: 'sine', octave: -1, detuneCents: 0, gain: 0.1 },
-  ],
-  filter: { cutoffHz: 1250, resonance: 0.55 },
-  gain: 0.24,
-  env: { attack: 0.28, decay: 0.42, sustain: 0.72, release: 0.8 },
-};
-
-const brightPluckPreset: SynthPreset = {
-  label: 'Bright Pluck',
-  description: 'Short, clear notes for simple melodies and arpeggios.',
-  oscillators: [
-    { role: 'primary', wave: 'sawtooth', octave: 0, detuneCents: 0, gain: 0.55 },
-    { role: 'unison', wave: 'square', octave: 0, detuneCents: 9, gain: 0.25 },
-    { role: 'sub', wave: 'triangle', octave: -1, detuneCents: 0, gain: 0.2 },
-  ],
-  filter: { cutoffHz: 4200, resonance: 0.9 },
-  gain: 0.23,
-  env: { attack: 0.003, decay: 0.16, sustain: 0.18, release: 0.12 },
-};
-
-const warmBassPreset: SynthPreset = {
-  label: 'Warm Bass',
-  description: 'Rounded low notes that support a beginner chord loop.',
-  oscillators: [
-    { role: 'primary', wave: 'sine', octave: 0, detuneCents: 0, gain: 0.52 },
-    { role: 'unison', wave: 'triangle', octave: 0, detuneCents: -4, gain: 0.23 },
-    { role: 'sub', wave: 'sine', octave: -1, detuneCents: 0, gain: 0.35 },
-  ],
-  filter: { cutoffHz: 720, resonance: 0.65 },
-  gain: 0.32,
-  env: { attack: 0.006, decay: 0.13, sustain: 0.82, release: 0.15 },
-};
-
-const brightLeadPreset: SynthPreset = {
-  label: 'Bright Lead',
-  description: 'Focused lead tone for practicing memorable hooks.',
-  oscillators: [
-    { role: 'primary', wave: 'sawtooth', octave: 0, detuneCents: -9, gain: 0.42 },
-    { role: 'unison', wave: 'sawtooth', octave: 0, detuneCents: 9, gain: 0.42 },
-    { role: 'unison', wave: 'square', octave: 0, detuneCents: 0, gain: 0.12 },
-    { role: 'sub', wave: 'triangle', octave: -1, detuneCents: 0, gain: 0.04 },
-  ],
-  filter: { cutoffHz: 3400, resonance: 0.85 },
-  gain: 0.24,
-  env: { attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.18 },
-};
-
-type CanonicalSynthPresetName = 'softPad' | 'brightPluck' | 'warmBass' | 'brightLead';
-
-const CANONICAL_SYNTH_PRESETS: Readonly<Record<CanonicalSynthPresetName, SynthPreset>> = {
-  softPad: softPadPreset,
-  brightPluck: brightPluckPreset,
-  warmBass: warmBassPreset,
-  brightLead: brightLeadPreset,
-};
-
-/** One alias registry drives both playback and inspector presentation. */
-const SYNTH_PRESET_ALIASES = new Map<string, CanonicalSynthPresetName>([
-  ['softPad', 'softPad'],
-  ['warmPad', 'softPad'],
-  ['pad', 'softPad'],
-  ['brightPluck', 'brightPluck'],
-  ['warmBass', 'warmBass'],
-  ['roundBass', 'warmBass'],
-  ['subBass', 'warmBass'],
-  ['bass', 'warmBass'],
-  ['brightLead', 'brightLead'],
-  ['leadSine', 'brightLead'],
-  ['lead', 'brightLead'],
-]);
-
-/** Playback table includes every persisted legacy alias. */
-const synthPresetTable = Object.create(null) as Record<string, SynthPreset>;
-for (const [alias, canonical] of SYNTH_PRESET_ALIASES) {
-  synthPresetTable[alias] = CANONICAL_SYNTH_PRESETS[canonical];
-}
-export const SYNTH_PRESETS: Readonly<Record<string, SynthPreset>> = Object.freeze(synthPresetTable);
-
-export const BEGINNER_SYNTH_PRESETS = ['softPad', 'brightPluck', 'warmBass'] as const;
-
-/** Default preset when an unknown name is requested. */
-export const DEFAULT_PRESET = 'warmPad';
-
-/** Resolve a preset by name, falling back to the default. */
-export function resolvePreset(preset: string | undefined): SynthPreset {
-  const canonical = preset ? SYNTH_PRESET_ALIASES.get(preset) : undefined;
-  return clonePreset(canonical ? CANONICAL_SYNTH_PRESETS[canonical] : softPadPreset);
-}
-
-/** Resolve saved aliases for UI display without rewriting the project. */
-export function canonicalSynthPresetName(value: string): string | null {
-  return SYNTH_PRESET_ALIASES.get(value) ?? null;
-}
-
-export function listSynthPresets(): readonly SynthPresetSummary[] {
-  return [
-    summary('softPad', softPadPreset),
-    summary('brightPluck', brightPluckPreset),
-    summary('warmBass', warmBassPreset),
-    summary('brightLead', brightLeadPreset),
-  ];
-}
 
 export function normalizeEnvelope(envelope: Partial<Envelope> = {}): Envelope {
   return {
@@ -491,7 +358,7 @@ export class SynthVoiceManager {
 }
 
 function applyPatchOptions(base: SynthPreset, options: SynthPatchOptions = {}): SynthPreset {
-  return {
+  return applyInstrumentMacros({
     ...base,
     oscillators: options.oscillators
       ? normalizeOscillatorLayers(options.oscillators)
@@ -499,7 +366,7 @@ function applyPatchOptions(base: SynthPreset, options: SynthPatchOptions = {}): 
     filter: normalizeFilter({ ...base.filter, ...options.filter }),
     gain: clamp(finiteOr(options.gain, base.gain), 0, 1),
     env: normalizeEnvelope({ ...base.env, ...options.envelope }),
-  };
+  }, options.params);
 }
 
 function normalizeFilter(filter: Partial<FilterSettings> = {}): FilterSettings {
@@ -583,23 +450,6 @@ function disconnectNode(node: AudioNode): void {
   } catch {
     // Cleanup is idempotent and must continue across already-disconnected nodes.
   }
-}
-
-function summary(name: string, preset: SynthPreset): SynthPresetSummary {
-  return {
-    name,
-    label: preset.label,
-    description: preset.description,
-  };
-}
-
-function clonePreset(preset: SynthPreset): SynthPreset {
-  return {
-    ...preset,
-    oscillators: normalizeOscillatorLayers(preset.oscillators),
-    filter: normalizeFilter(preset.filter),
-    env: normalizeEnvelope(preset.env),
-  };
 }
 
 function clamp(value: number, min: number, max: number): number {

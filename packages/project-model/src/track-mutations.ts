@@ -697,14 +697,14 @@ export function setTrackSynthPreset(
     const index = project.tracks.findIndex((track) => track.id === trackId);
     if (index === -1) return failure('track-not-found', `Track not found: ${trackId}`);
     const track = project.tracks[index]!;
-    if (track.type !== 'instrument' || track.instrument?.type !== 'synth') {
+    if (track.type !== 'instrument' || (track.instrument && track.instrument.type !== 'synth')) {
       return failure('unsupported-track-type', 'Synth presets can only be set on synth instrument tracks.');
     }
     if (preset.length === 0 || !allowedPresets.includes(preset)) {
       return failure('invalid-preset', `Unsupported synth preset: ${preset}`);
     }
-    if (track.instrument.preset === preset) return success(project, trackId, false);
-    const instrument = { ...track.instrument, preset };
+    if (track.instrument?.preset === preset) return success(project, trackId, false);
+    const instrument = { ...track.instrument, type: 'synth' as const, preset };
     const tracks = project.tracks.map((candidate, trackIndex) => (
       trackIndex === index
         ? { ...candidate, instrument }

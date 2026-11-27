@@ -207,6 +207,33 @@ describe('studio track commands', () => {
     expect(useStore.getState().saveState.revision).toBe(before.saveState.revision);
   });
 
+  it('keeps saved macro values through preset changes and clears only macro keys on reset', () => {
+    const original = useStore.getState().project.tracks.find((track) => track.type === 'instrument')!;
+    const stored = { macroBrightness: 3, macroRelease: -1, custom: 42 };
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id === original.id
+        ? { ...track, instrument: { type: 'synth', preset: 'pad', params: stored } }
+        : track),
+    }))).toBe(true);
+
+    const instrument = () => useStore.getState().project.tracks.find(
+      (track) => track.id === original.id,
+    )?.instrument;
+    expect(trackActions.setStudioTrackPreset(original.id, 'p22:bell')).toMatchObject({
+      ok: true, changed: true,
+    });
+    expect(instrument()).toEqual({ type: 'synth', preset: 'p22:bell', params: stored });
+    expect(trackActions.setStudioTrackMacro(original.id, { key: 'macroWidth', value: 0.75 })).toMatchObject({
+      ok: true, changed: true,
+    });
+    expect(instrument()?.params).toEqual({ ...stored, macroWidth: 0.75 });
+    expect(trackActions.setStudioTrackMacro(original.id, null)).toMatchObject({ ok: true, changed: true });
+    expect(instrument()?.params).toEqual({ custom: 42 });
+    useStore.getState().undo();
+    expect(instrument()?.params).toEqual({ ...stored, macroWidth: 0.75 });
+  });
+
   it('renames an added track once and restores the name with one Undo', () => {
     const created = trackActions.addStudioTrack({ kind: 'instrument', name: 'Lead' });
     if (!created.ok) throw new Error('fixture track was not added');

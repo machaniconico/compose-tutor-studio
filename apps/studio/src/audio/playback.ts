@@ -1826,7 +1826,7 @@ async function createRuntimeSessionImpl(
       } else if (track.type === 'instrument') {
         synths.set(
           track.id,
-          new SynthVoiceManager(context, graph.input, track.instrument?.preset),
+          new SynthVoiceManager(context, graph.input, track.instrument),
         );
       } else if (track.type === 'audio') {
         audioVoices.set(track.id, new AudioClipVoiceManager(context, graph.input));

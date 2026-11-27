@@ -26,7 +26,8 @@ import {
 } from './graph';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from './masterBus';
 import type { ScheduledEvent } from './scheduler';
-import { resolvePreset } from './synth';
+import { applyInstrumentMacros } from './macros';
+import { resolvePreset, type Envelope } from './presets';
 import {
   DRUM_SOURCE_STOP_SECONDS,
   DYNAMICS_COMPRESSOR_LOOKAHEAD_SECONDS,
@@ -247,6 +248,7 @@ export function planAudioTail(
       activeEdgeIds: mix.activeEdgeIds,
     };
   }
+  const synthTails = new Map<string, SynthTail>();
   const sourceEndByTrack = new Map<string, number>();
 
   for (const event of resolvedEvents) {
@@ -262,11 +264,24 @@ export function planAudioTail(
     const track = tracks.get(payload.trackId);
     if (!track) continue;
 
+    let synthTail = synthTails.get(track.id);
+    if (payload.kind === 'note' && synthTail === undefined) {
+      const preset = resolvePreset(payload.preset);
+      const envelope = applyInstrumentMacros(preset, track.instrument?.params).env;
+      const timingAdjusted = envelope.attack !== preset.env.attack || envelope.release !== preset.env.release;
+      synthTail = {
+        envelope,
+        // Keep the final output fade after the adjusted envelope reaches zero.
+        stopPadding: timingAdjusted ? FINAL_TAIL_FADE_SECONDS : SYNTH_OSCILLATOR_STOP_PAD_SECONDS,
+      };
+      synthTails.set(track.id, synthTail);
+    }
     const sourceEnd = sourceEndSeconds(
       event,
       payload,
       safeStartBeat,
       musicalTime,
+      synthTail,
     );
     if (sourceEnd === null) continue;
     sourceEndByTrack.set(
@@ -400,11 +415,14 @@ function schedulePayload(payload: unknown): SchedulePayload | null {
   return candidate as SchedulePayload;
 }
 
+type SynthTail = { envelope: Envelope; stopPadding: number };
+
 function sourceEndSeconds(
   event: ScheduledEvent,
   payload: SchedulePayload,
   startBeat: number,
   musicalTime: MusicalTimeIndex,
+  synthTail: SynthTail | undefined,
 ): number | null {
   if (!Number.isFinite(event.beat)) return null;
   const onsetSeconds = Math.max(
@@ -416,7 +434,8 @@ function sourceEndSeconds(
     return onsetSeconds + DRUM_SOURCE_STOP_SECONDS[payload.lane];
   }
 
-  const patch = resolvePreset(payload.preset);
+  if (!synthTail) return null;
+  const { envelope, stopPadding } = synthTail;
   const durationBeats = finiteNonNegative(payload.durationBeats);
   const durationSeconds = Math.max(
     0,
@@ -424,9 +443,9 @@ function sourceEndSeconds(
   );
   return (
     onsetSeconds +
-    Math.max(durationSeconds, patch.env.attack + patch.env.decay) +
-    patch.env.release +
-    SYNTH_OSCILLATOR_STOP_PAD_SECONDS
+    Math.max(durationSeconds, envelope.attack + envelope.decay) +
+    envelope.release +
+    stopPadding
   );
 }
 

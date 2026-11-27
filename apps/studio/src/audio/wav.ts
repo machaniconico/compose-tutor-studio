@@ -842,7 +842,7 @@ async function renderWavWithRouting(
             new DrumVoiceManager(ctx, graph.input, sharedDrumNoise),
           );
         } else if (track.type === 'instrument') {
-          synths.set(track.id, new SynthVoiceManager(ctx, graph.input, track.instrument?.preset));
+          synths.set(track.id, new SynthVoiceManager(ctx, graph.input, track.instrument));
         } else if (track.type === 'audio') {
           audioVoices.set(track.id, new AudioClipVoiceManager(ctx, graph.input));
         }
