@@ -11,6 +11,10 @@ export type ShortcutAction =
   | 'undo'
   | 'redo'
   | 'deleteSelectedNotes'
+  | 'copyNotes'
+  | 'cutNotes'
+  | 'pasteNotes'
+  | 'pasteNotesAtOriginal'
   | 'cancelGesture';
 
 /**
@@ -43,6 +47,11 @@ export const KEYMAP: readonly ShortcutEntry[] = [
   { scope: 'global', key: 'z', modifiers: ['mod', 'shift'], action: 'redo', labelJa: 'やり直す' },
   { scope: 'pianoRoll', key: 'delete', modifiers: ['any'], action: 'deleteSelectedNotes', labelJa: '選んだ音を消す' },
   { scope: 'pianoRoll', key: 'backspace', modifiers: ['any'], action: 'deleteSelectedNotes', labelJa: '選んだ音を消す' },
+  // ノートのクリップボード(アプリ内だけ。OS のクリップボードは使わない)。
+  { scope: 'pianoRoll', key: 'c', modifiers: ['mod'], action: 'copyNotes', labelJa: '選んだ音をコピー' },
+  { scope: 'pianoRoll', key: 'x', modifiers: ['mod'], action: 'cutNotes', labelJa: '選んだ音を切り取り' },
+  { scope: 'pianoRoll', key: 'v', modifiers: ['mod'], action: 'pasteNotes', labelJa: '貼り付け(再生ヘッドがクリップ内ならその位置、外ならコピーした位置)' },
+  { scope: 'pianoRoll', key: 'v', modifiers: ['mod', 'shift'], action: 'pasteNotesAtOriginal', labelJa: 'コピーした時と同じ位置に貼り付け' },
   // 点やハミングの区間にフォーカスがあるときの Undo / Redo。従来どおり Ctrl と Cmd のどちらでも効く(Alt 付き = AltGr は除く)。
   { scope: 'control', key: 'z', modifiers: ['ctrlOrMetaNoAlt'], action: 'undo', labelJa: '元に戻す' },
   { scope: 'control', key: 'z', modifiers: ['ctrlOrMetaNoAlt', 'shift'], action: 'redo', labelJa: 'やり直す' },
