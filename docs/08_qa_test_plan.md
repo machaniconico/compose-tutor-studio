@@ -42,6 +42,14 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 
 ## 4. E2Eシナリオ
 
+`pnpm test:e2e` で Playwright の主要操作フローを確認する。
+
+| スペック | 確認する操作と結果 |
+|---|---|
+| `apps/studio/e2e/chords-to-song.spec.ts` | 進行テンプレートを適用し、コードをノートに変換して伴奏パターンを変更する。再生位置が進むことと、ダウンロードした WAV・MIDI のヘッダーを確認する |
+| `apps/studio/e2e/record-and-edit.spec.ts` | PC キーボードで録音し、カウントイン中の入力が録音されないこと、クオンタイズでノートの位置がそろい、元に戻す操作で録音時の位置に戻ることを確認する |
+| `apps/studio/e2e/mix-and-export.spec.ts` | イコライザーを有効にしてフェードインを設定し、WAV ヘッダーのサンプルレートが 48 kHz で、ファイル名と設定が書き出し履歴に残ることを確認する |
+
 ### E2E-001: 最初の1曲
 
 1. アプリ起動
@@ -93,6 +101,8 @@ it('completes I-V-vi-IV lesson when user places C-G-Am-F in C major', () => {
 - AI Coach mock response parsing
 
 ## 8. 手動QAチェックリスト
+
+機能追加の聴感・手動チェックは [docs/12 §8「機能追加の聴感・手動QA」](12_release_qa_log.md#8-機能追加の聴感手動qa) を使い、各行のメモ欄に確認環境・手順・観察結果を書く。
 
 配布前の Windows インストーラ確認は `docs/11_release_gate.md` を正とし、候補ビルドごとの結果は `docs/12_release_qa_log.md` をコピーして記録する。手動 QA 記入後は `pnpm release:qa-log:verify -- --path <qa-log-path>` で未記入や未承認のまま配布しないことを確認する。ユーザー向け配布ページまたはリリースノートは `docs/13_distribution_release_notes.md` を元に作成し、公開前に `pnpm release:notes:verify -- --path <release-notes-path>` で草稿文や空欄が残っていないことを確認する。インストーラメタデータは `pnpm release:installers:verify` で生成・検証し、製品名、バージョン、MSI UpgradeCode が候補ビルドと一致していることを確認する。インストーラ手動QAの実施時は `pnpm release:installers:smoke:plan` と `pnpm release:installers:smoke:verify` で生成・検証した `release-installer-smoke-plan.md` を使い、クリーンな Windows 環境で NSIS/MSI のインストール、起動、アンインストール結果を QA ログへ記録する。署名状態は `pnpm release:signing` と `pnpm release:signing:verify` で生成・検証し、`release-signing-report.json` と配布ページの説明を一致させる。サードパーティ NOTICE は `pnpm release:notices` と `pnpm release:notices:verify` で生成・検証する。隠れた通信や自動送信がないことは `docs/15_privacy_network_policy.md` と `pnpm check:privacy` で確認する。署名鍵や証明書secretの混入がないことは `pnpm check:secrets` で確認する。許可済みアプリアイコン以外の画像、音声、動画、archive、署名素材ファイルが source tree に混入していないことは `pnpm check:assets` で確認する。署名または updater を有効化したリリースでは `docs/14_signing_and_update_plan.md` の追加チェックも実施する。
 

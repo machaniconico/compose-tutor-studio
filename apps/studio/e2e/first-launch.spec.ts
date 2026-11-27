@@ -1,38 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
+import { expectValidMidiFile, expectValidWavFile } from './exportAssertions';
 
 const LOCAL_NETWORK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
-
-function ascii(bytes: Uint8Array, offset: number, length = 4): string {
-  return String.fromCharCode(...bytes.subarray(offset, offset + length));
-}
-
-async function expectValidMidiFile(path: string): Promise<void> {
-  const bytes = await readFile(path);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-
-  expect(bytes.byteLength).toBeGreaterThan(22);
-  expect(ascii(bytes, 0)).toBe('MThd');
-  expect(view.getUint32(4, false)).toBe(6);
-  expect(view.getUint16(10, false)).toBeGreaterThan(0);
-  expect(ascii(bytes, 14)).toBe('MTrk');
-}
-
-async function expectValidWavFile(path: string): Promise<void> {
-  const bytes = await readFile(path);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-
-  expect(bytes.byteLength).toBeGreaterThan(44);
-  expect(ascii(bytes, 0)).toBe('RIFF');
-  expect(ascii(bytes, 8)).toBe('WAVE');
-  expect(ascii(bytes, 12)).toBe('fmt ');
-  expect(view.getUint16(20, true)).toBe(1);
-  expect(view.getUint16(22, true)).toBeGreaterThan(0);
-  expect(view.getUint32(24, true)).toBeGreaterThan(0);
-  expect(ascii(bytes, 36)).toBe('data');
-  expect(view.getUint32(4, true) + 8).toBe(bytes.byteLength);
-  expect(view.getUint32(40, true)).toBeGreaterThan(0);
-}
 
 function isUnexpectedNetworkUrl(value: string): boolean {
   try {
