@@ -6689,8 +6689,15 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
   display: none;
 }
 
+/* BPM 欄はトランスポート 1 行目の末尾にあり、余りは 25px ほどしかない(CI の書体で計測)。
+   タップぶん欄が広がると BPM 以降が折り返し、「カラオケ」が 3 行目へ落ちて中央ペインが縮む。
+   ボタンの左右余白と BPM 入力を詰め、増える幅を 1 行目に収める */
 .transport-bar__tap {
   flex: 0 0 auto;
   min-width: 0;
-  padding: 0 var(--sp-2);
+  padding: 0 var(--sp-1);
+}
+
+.field #bpm-input {
+  width: 56px;
 }
