@@ -985,10 +985,11 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
         <button
           type="button"
           disabled={recordingControlsLocked}
-          title="ノートとコードをまとめて高く・低くします(ドラムと録音した音声は動きません)"
+          aria-label="曲全体を移調"
+          title="曲全体を移調: ノートとコードをまとめて高く・低くします(ドラムと録音した音声は動きません)"
           onClick={() => setTransposeOpen(true)}
         >
-          曲全体を移調
+          ±
         </button>
 
         <button type="button" disabled={!canUndo} onClick={() => undo()}>
