@@ -80,6 +80,14 @@ export function parseChord(symbol: string, key?: string): ParsedChord {
   };
 }
 
+/** Bound text passed to the parser by the voicing, transposition and generation APIs. */
+export function parseBoundedChord(symbol: string): ParsedChord {
+  if (typeof symbol !== 'string' || symbol.length > 1024) {
+    throw new RangeError('コード名は1024文字以内の文字列で指定してください。');
+  }
+  return parseChord(symbol);
+}
+
 /** 品質 -> シンボルのサフィックス (buildChordSymbol 用)。 */
 const QUALITY_SYMBOL_SUFFIX: Record<ChordQuality, string> = {
   major: '',
