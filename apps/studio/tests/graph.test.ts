@@ -79,6 +79,15 @@ class FakeGainNode extends FakeNode {
   readonly gain = new FakeAudioParam(1);
 }
 
+class FakeConstantSourceNode extends FakeNode {
+  readonly offset = new FakeAudioParam(1);
+  readonly starts: number[] = [];
+  stopped = false;
+
+  start(time: number): void { this.starts.push(time); }
+  stop(): void { this.stopped = true; }
+}
+
 class FakeStereoPannerNode extends FakeNode {
   readonly pan = new FakeAudioParam(0);
 }
@@ -139,6 +148,12 @@ class FakeAudioContext {
 
   createGain(): GainNode {
     return this.node(new FakeGainNode('Gain', this.name('Gain'), this.connections)) as unknown as GainNode;
+  }
+
+  createConstantSource(): ConstantSourceNode {
+    return this.node(
+      new FakeConstantSourceNode('ConstantSource', this.name('ConstantSource'), this.connections),
+    ) as unknown as ConstantSourceNode;
   }
 
   createStereoPanner(): StereoPannerNode {
@@ -536,6 +551,9 @@ describe('shared return routing', () => {
     const bus = track('return', { type: 'bus', effects: [effect('reverb')] });
     const legacyRouting = routing([source, bus]);
     expect(routing([{ ...source, sends: { return: 0 } }, bus])).toEqual(legacyRouting);
+    const empty = { points: [] };
+    expect(routing([{ ...source, automation: { ...source.automation, pan: empty, cutoff: empty } }, bus]))
+      .toEqual(legacyRouting);
     expect(legacyRouting).toMatchInlineSnapshot(`
       {
         "connections": [
@@ -641,5 +659,64 @@ describe('shared return routing', () => {
       project.tracks[0] = { ...sources[0]!, sends: malformed[i % malformed.length] as Track['sends'] };
       expect(validateProject(project).ok).toBe(false);
     }
+  });
+});
+
+describe('pan and cutoff automation graph', () => {
+  it('schedules the series panner and a shared cutoff source at graph start', () => {
+    const source: Track = {
+      ...track('keys'),
+      pan: 0.25,
+      instrument: { type: 'synth', preset: 'brightLead', macros: { brightness: 1, width: 0, attack: 0.5, release: 0.5 } },
+      automation: {
+        pan: { points: [{ beat: 0, value: -1 }, { beat: 4, value: 0.5 }] },
+        cutoff: { points: [{ beat: 0, value: 0.1 }, { beat: 4, value: 10 }] },
+      },
+      effects: [effect('filter')],
+      sends: { room: 0.5 },
+    };
+    const ctx = fakeContext();
+    const room = track('room', { type: 'bus' });
+    const graphs = buildTrackGraphs(ctx, ctx.createGain(), [source, room], 1);
+    const graph = graphs.get('keys')!;
+    const input = graph.input as unknown as FakeGainNode;
+    const cutoff = graph.cutoffSource as unknown as FakeConstantSourceNode;
+    const automatedPan = input.connections[0] as FakeStereoPannerNode;
+    const originalPan = automatedPan.connections[0] as FakeStereoPannerNode;
+    const [fx, send] = originalPan.connections as [FakeBiquadFilterNode, FakeGainNode];
+    expect(ctx.created.filter(({ kind }) => kind === 'BiquadFilter')).toEqual([fx]);
+    expect(ctx.created.filter(({ kind }) => kind === 'ConstantSource')).toEqual([cutoff]);
+    expect(cutoff.starts).toEqual([1]);
+    expect(cutoff.offset.value).toBe(0);
+    expect(automatedPan.kind).toBe('StereoPanner');
+    expect(originalPan.kind).toBe('StereoPanner');
+    expect(originalPan.pan.value).toBe(0);
+    expect(fx.kind).toBe('BiquadFilter');
+    expect(send.connections).toEqual([graphs.get('room')!.input]);
+
+    graph.scheduleAutomation({ bpm: 120, loop: null, startBeat: 2, startTime: 1, endBeat: 4 });
+    expect(automatedPan.pan.events).toEqual([
+      { method: 'setValueAtTime', value: 0, time: 1 },
+      { method: 'linearRampToValueAtTime', value: 0.75, time: 2 },
+    ]);
+    expect(cutoff.offset.events[0]).toEqual({ method: 'setValueAtTime', value: 0, time: 1 });
+    expect(cutoff.offset.events.at(-1)).toEqual({
+      method: 'linearRampToValueAtTime', value: 1200 * Math.log2(19845 / 12800), time: 2,
+    });
+    expect(fx.frequency.events).toEqual([]);
+    graph.dispose();
+    expect(cutoff.stopped).toBe(true);
+    expect(automatedPan.connections).toEqual([]);
+  });
+
+  it('ignores all automation when directly constructing a master graph', () => {
+    const ctx = fakeContext();
+    const lane = { points: [{ beat: 0, value: 0.5 }] };
+    const master = ctx.createGain();
+    const graph = new TrackGraph(ctx, master, { ...track('master', { type: 'master' }),
+      automation: { volume: lane, pan: lane, cutoff: lane } });
+    graph.scheduleAutomation({ bpm: 120, loop: null, startBeat: 0, startTime: 0 });
+    expect(ctx.created.map(({ kind }) => kind)).toEqual(['Gain', 'Gain', 'StereoPanner', 'Gain', 'Analyser']);
+    expect((ctx.created[2] as FakeStereoPannerNode).pan.events).toEqual([]);
   });
 });

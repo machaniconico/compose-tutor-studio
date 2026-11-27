@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDrumClip } from '@cts/project-model';
+import type { AutomationPlayback } from '../src/audio/automationSchedule';
 import type { SchedulePayload } from '../src/audio/events';
 import { renderScheduleEvents } from '../src/audio/wav';
 import { installLocalStorage } from './localStorageStub';
@@ -13,6 +14,7 @@ const synths = vi.hoisted(
   () => [] as Array<{ noteOn: ReturnType<typeof vi.fn>; releaseAll: ReturnType<typeof vi.fn> }>,
 );
 const drumTrigger = vi.hoisted(() => vi.fn());
+const scheduleAutomation = vi.hoisted(() => vi.fn());
 
 vi.mock('../src/audio/engine', () => ({
   getAudioEngine: () => ({
@@ -25,8 +27,12 @@ vi.mock('../src/audio/engine', () => ({
 vi.mock('../src/audio/graph', () => ({
   applyMixState: vi.fn(),
   // One stub graph per track so the bridge builds a voice manager for each.
-  buildTrackGraphs: (_ctx: unknown, _master: unknown, tracks: ReadonlyArray<{ id: string }>) =>
-    new Map(tracks.map((t) => [t.id, { input: {}, dispose: () => {} }])),
+  buildTrackGraphs: (_ctx: unknown, _master: unknown, tracks: ReadonlyArray<{ id: string; pan: number }>) =>
+    new Map(tracks.map((t) => [t.id, {
+      input: {}, dispose: () => {},
+      scheduleAutomation: (playback: AutomationPlayback, pass: number) =>
+        scheduleAutomation(t.id, t.pan, { ...playback }, pass),
+    }])),
 }));
 vi.mock('../src/audio/masterChain', () => ({ applyMasterVolume: vi.fn() }));
 vi.mock('../src/audio/synth', () => ({
@@ -73,6 +79,7 @@ describe('project changes during playback', () => {
     clock.now = 0;
     synths.length = 0;
     drumTrigger.mockClear();
+    scheduleAutomation.mockClear();
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     useStore.getState().createNewProject('テスト');
     teardown = initAudioBridge();
@@ -97,6 +104,28 @@ describe('project changes during playback', () => {
     clock.now = (beat - startBeat) * SECONDS_PER_BEAT;
     vi.advanceTimersByTime(TICK_MS);
   }
+
+  it('schedules pan and cutoff without volume and rebuilds from the playhead after a mixer pan change', async () => {
+    const trackId = useStore.getState().project.tracks.find((track) => track.type === 'instrument')!.id;
+    useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id !== trackId ? track : {
+        ...track, pan: 0, automation: {
+          pan: { points: [{ beat: 0, value: -0.25 }] },
+          cutoff: { points: [{ beat: 0, value: 1 }] },
+        },
+      }),
+    }));
+    await playFrom(0);
+    expect(scheduleAutomation).toHaveBeenCalledWith(trackId, 0, expect.objectContaining({ startBeat: 0 }), 0);
+
+    clock.now = 1;
+    useStore.getState().setTrackPan(trackId, 0.5);
+    await vi.waitFor(() => expect(scheduleAutomation).toHaveBeenCalledWith(
+      trackId, 0.5, expect.objectContaining({ startBeat: 2, startTime: 1 }), 0,
+    ));
+    expect(useStore.getState().transport.positionBeat).toBe(2);
+  });
 
   it('matches the WAV drum hits after deleting a clip without changing the song length', async () => {
     useStore.getState().applyProjectChange((project) => ({

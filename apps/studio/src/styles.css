@@ -2954,8 +2954,15 @@ input[type='range'] {
 
 .automation__controls > div {
   display: flex;
+  align-items: center;
   gap: var(--sp-1);
   flex-wrap: wrap;
+}
+
+.automation__parameter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
 }
 
 .automation__controls p {

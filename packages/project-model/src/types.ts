@@ -117,6 +117,7 @@ export type TrackRole = 'chords' | 'bass' | 'melody' | 'drums';
 
 export type AutomationPoint = { beat: number; value: number };
 export type AutomationLane = { points: AutomationPoint[] };
+export type AutomationParameter = 'volume' | 'pan' | 'cutoff';
 
 export type Track = {
   id: string;
@@ -131,7 +132,7 @@ export type Track = {
   solo: boolean;
   instrument?: InstrumentConfig;
   effects: EffectConfig[];
-  automation?: { volume?: AutomationLane };
+  automation?: Partial<Record<AutomationParameter, AutomationLane>>;
   /** Post-fader send levels (0–1), keyed by return track id. */
   sends?: Record<string, number>;
 };

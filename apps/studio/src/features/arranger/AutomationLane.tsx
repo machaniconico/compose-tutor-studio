@@ -1,15 +1,28 @@
 import { memo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import {
-  addPoint, beatTick, evaluateAutomation, MAX_AUTOMATION_POINTS, movePoint, PPQ, removePoint,
-  type AutomationLane as Lane, type AutomationPoint, type Track,
+  addPoint, AUTOMATION_PARAMETERS, AUTOMATION_PARAMETER_INFO, beatTick, evaluateAutomation,
+  MAX_AUTOMATION_POINTS, movePoint, PPQ, removePoint,
+  type AutomationLane as Lane, type AutomationParameter, type AutomationPoint, type Track,
 } from '@cts/project-model';
-import { setVolumeAutomation } from '../../state/editorActions';
+import { setTrackAutomation } from '../../state/editorActions';
 import { useStore } from '../../state/store';
 
 const EMPTY_LANE: Lane = { points: [] };
 const PLOT_HEIGHT = 80;
-const GAIN_PADDING = 12;
-const GAIN_HEIGHT = PLOT_HEIGHT - 2 * GAIN_PADDING;
+const PLOT_PADDING = 12;
+const VALUE_HEIGHT = PLOT_HEIGHT - 2 * PLOT_PADDING;
+const PARAMETER_HELP = {
+  volume: '上ほど音が大きく、下端は無音です。',
+  pan: '上ほど右、下ほど左から聞こえます。真ん中ではミキサーの位置を保ちます。',
+  cutoff: '上ほど音が明るく、下ほどこもった音になります。',
+};
+
+function pointValueLabel(parameter: AutomationParameter, value: number): string {
+  if (parameter === 'cutoff') return `明るさ ${+value.toFixed(2)} 倍`;
+  if (parameter === 'pan') return value === 0 ? '左右 ミキサーの位置'
+    : `${value < 0 ? '左' : '右'}へ ${Math.round(Math.abs(value) * 100)}%`;
+  return `音量 ${Math.round(value * 100)}%`;
+}
 
 type Drag = {
   index: number;
@@ -27,20 +40,28 @@ export const AutomationLane = memo(function AutomationLane({ track, ppb, barBeat
   visibleBeats: number;
 }) {
   const [open, setOpen] = useState(false);
+  const [parameter, setParameter] = useState<AutomationParameter>('volume');
   const [preview, setPreview] = useState<AutomationPoint | null>(null);
   const drag = useRef<Drag | null>(null);
-  const saved = track.automation?.volume;
+  const saved = track.automation?.[parameter];
   const lane = saved ?? EMPTY_LANE;
-  const chartLane = preview && drag.current?.lane === lane ? movePoint(lane, drag.current.index, preview) : lane;
+  const chartLane = preview && drag.current?.lane === lane ? movePoint(lane, drag.current.index, preview, parameter) : lane;
   const atLimit = lane.points.length >= MAX_AUTOMATION_POINTS;
   const put = (next: Lane) => {
-    if (next !== lane) setVolumeAutomation(track.id, saved, next);
+    if (next !== lane) setTrackAutomation(track.id, parameter, saved, next);
   };
-  const pointAt = (beat: number, value: number): AutomationPoint => ({
-    beat: Math.max(0, Math.min(visibleBeats, beatTick(beat) / PPQ)),
-    value: Math.max(0, Math.min(1, Math.round(value * 100) / 100)),
-  });
-  const yAt = (value: number) => GAIN_PADDING + (1 - value) * GAIN_HEIGHT;
+  const { min, max } = AUTOMATION_PARAMETER_INFO[parameter];
+  const snapBeat = (beat: number) => Math.max(0, Math.min(visibleBeats, beatTick(beat) / PPQ));
+  const toHeight = (value: number) => parameter === 'cutoff' ? (1 + Math.log10(value)) / 2 : (value - min) / (max - min);
+  const pointAt = (beat: number, height: number): AutomationPoint => {
+    const value = parameter === 'cutoff' ? 10 ** (height * 2 - 1) : min + height * (max - min);
+    return {
+      beat: snapBeat(beat),
+      value: Math.max(min, Math.min(max, Math.round(value * 100) / 100)),
+    };
+  };
+  const yAt = (value: number) => PLOT_PADDING + (1 - toHeight(value)) * VALUE_HEIGHT;
+  const add = (point: AutomationPoint) => put(addPoint(lane, point, parameter));
   const fade = (fadeIn: boolean) => {
     const bar = Math.min(barBeats, songEnd);
     put({ points: fadeIn
@@ -50,12 +71,13 @@ export const AutomationLane = memo(function AutomationLane({ track, ppb, barBeat
 
   const handleKeys = (event: KeyboardEvent<HTMLButtonElement>, index: number, point: AutomationPoint) => {
     const step = event.shiftKey ? 1 : 0.25;
+    const height = toHeight(point.value);
     let next: Lane;
     switch (event.key) {
-      case 'ArrowLeft': next = movePoint(lane, index, pointAt(point.beat - step, point.value)); break;
-      case 'ArrowRight': next = movePoint(lane, index, pointAt(point.beat + step, point.value)); break;
-      case 'ArrowDown': next = movePoint(lane, index, pointAt(point.beat, point.value - 0.05)); break;
-      case 'ArrowUp': next = movePoint(lane, index, pointAt(point.beat, point.value + 0.05)); break;
+      case 'ArrowLeft': next = movePoint(lane, index, { beat: snapBeat(point.beat - step), value: point.value }, parameter); break;
+      case 'ArrowRight': next = movePoint(lane, index, { beat: snapBeat(point.beat + step), value: point.value }, parameter); break;
+      case 'ArrowDown': next = movePoint(lane, index, pointAt(point.beat, height - 0.05), parameter); break;
+      case 'ArrowUp': next = movePoint(lane, index, pointAt(point.beat, height + 0.05), parameter); break;
       case 'Delete':
       case 'Backspace': next = removePoint(lane, index); break;
       default: return;
@@ -70,7 +92,8 @@ export const AutomationLane = memo(function AutomationLane({ track, ppb, barBeat
     const y = event.clientY - current.clientY;
     if (current.lane !== lane || Math.hypot(x, y) <= 3) return null;
     const point = lane.points[current.index]!;
-    return pointAt(point.beat + x / ppb, point.value - y / GAIN_HEIGHT);
+    const next = pointAt(point.beat + x / ppb, toHeight(point.value) - y / VALUE_HEIGHT);
+    return y === 0 ? { ...next, value: point.value } : next;
   };
 
   const stopDrag = () => {
@@ -80,29 +103,40 @@ export const AutomationLane = memo(function AutomationLane({ track, ppb, barBeat
 
   // Duplicates are drawn at the effective (last saved) value, as in playback.
   const curve = !open ? [] : [
-    { beat: 0, value: evaluateAutomation(chartLane, 0) },
+    { beat: 0, value: evaluateAutomation(chartLane, 0, parameter) },
     ...chartLane.points.filter((point, index, points) =>
       point.beat > 0 && point.beat < visibleBeats && point.beat !== points[index + 1]?.beat),
-    { beat: visibleBeats, value: evaluateAutomation(chartLane, visibleBeats) },
+    { beat: visibleBeats, value: evaluateAutomation(chartLane, visibleBeats, parameter) },
   ];
 
   return (
     <details className="automation" onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary aria-label={`${track.name}の音量の変化`}>音量の変化</summary>
+      <summary aria-label={`${track.name}の音の変化`}>音の変化</summary>
       {open && <>
         <div className="automation__controls">
           <div>
-            <button type="button" onClick={() => fade(true)}>フェードイン</button>
-            <button type="button" onClick={() => fade(false)}>フェードアウト</button>
+            <label className="automation__parameter">
+              変えるもの
+              <select value={parameter} onChange={(event) => {
+                stopDrag();
+                setParameter(event.currentTarget.value as AutomationParameter);
+              }}>
+                {AUTOMATION_PARAMETERS.map((key) => <option key={key} value={key}>{AUTOMATION_PARAMETER_INFO[key].label}</option>)}
+              </select>
+            </label>
+            {parameter === 'volume' && <>
+              <button type="button" onClick={() => fade(true)}>フェードイン</button>
+              <button type="button" onClick={() => fade(false)}>フェードアウト</button>
+            </>}
             <button type="button" disabled={atLimit} onClick={() => {
               const beat = useStore.getState().transport.positionBeat;
-              put(addPoint(lane, pointAt(beat, evaluateAutomation(lane, beat))));
+              add(pointAt(beat, toHeight(evaluateAutomation(lane, beat, parameter))));
             }}>再生位置に点を追加</button>
           </div>
-          <p>少しずつ音量を上げて、曲の始まりをやわらかくします。フェードを選ぶと今ある点を置き換えます。</p>
+          {parameter === 'volume' && <p>フェードを選ぶと音量の点を置き換えます。</p>}
           <p>クリックで点を追加、ドラッグや矢印キーで移動、ダブルクリックや Delete キーで削除できます。</p>
-          <p>上ほど音が大きく、下端は無音です。変更は次の再生から聞けます。</p>
-          {atLimit && <p role="status">このトラックには点を {MAX_AUTOMATION_POINTS} 個まで置けます。</p>}
+          <p>{PARAMETER_HELP[parameter]}変更は次の再生から聞けます。</p>
+          {atLimit && <p role="status">この項目には点を {MAX_AUTOMATION_POINTS} 個まで置けます。</p>}
         </div>
         <div
           className="automation__plot"
@@ -111,8 +145,8 @@ export const AutomationLane = memo(function AutomationLane({ track, ppb, barBeat
           onClick={(event) => {
             if (event.target !== event.currentTarget || atLimit) return;
             const rect = event.currentTarget.getBoundingClientRect();
-            put(addPoint(lane, pointAt((event.clientX - rect.left) / ppb,
-              1 - (event.clientY - rect.top - GAIN_PADDING) / GAIN_HEIGHT)));
+            add(pointAt((event.clientX - rect.left) / ppb,
+              1 - (event.clientY - rect.top - PLOT_PADDING) / VALUE_HEIGHT));
           }}
         >
           {curve.slice(1).map((point, index) => {
@@ -127,7 +161,7 @@ export const AutomationLane = memo(function AutomationLane({ track, ppb, barBeat
           {lane.points.map((point, index) => {
             const displayed = drag.current?.index === index && preview ? preview : point;
             if (displayed.beat > visibleBeats) return null;
-            const label = `曲の始まりから ${+displayed.beat.toFixed(3)} 拍、音量 ${Math.round(displayed.value * 100)}%`;
+            const label = `曲の始まりから ${+displayed.beat.toFixed(3)} 拍、${pointValueLabel(parameter, displayed.value)}`;
             return <button
               key={index}
               type="button"
@@ -151,7 +185,7 @@ export const AutomationLane = memo(function AutomationLane({ track, ppb, barBeat
                 if (current?.pointerId !== event.pointerId) return;
                 const next = dragPoint(event, current);
                 stopDrag();
-                if (next) put(movePoint(lane, current.index, next));
+                if (next) put(movePoint(lane, current.index, next, parameter));
               }}
               onLostPointerCapture={stopDrag}
               onPointerCancel={stopDrag}

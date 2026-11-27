@@ -12,6 +12,7 @@
 
 import type {
   AutomationLane,
+  AutomationParameter,
   ChordEvent,
   Clip,
   DrumEvent,
@@ -32,6 +33,7 @@ import {
   createDrumClip,
   createMidiClip,
   drumStepsPerBar,
+  DRUM_CUTOFF_AUTOMATION_MESSAGE,
   duplicateClip,
   findProjectSoundingLimitProblem,
   eventsToNotes,
@@ -899,12 +901,18 @@ function keepsSoundingAndLength(before: NotePlayback, after: NotePlayback): bool
 }
 
 /** Commit one lane edit. The expected lane protects a drag from replacing newer edits. */
-export function setVolumeAutomation(trackId: string, expected: AutomationLane | undefined, lane: AutomationLane): boolean {
+export function setTrackAutomation(
+  trackId: string, parameter: AutomationParameter, expected: AutomationLane | undefined, lane: AutomationLane,
+): boolean {
   const store = useStore.getState();
   const track = store.project.tracks.find((item) => item.id === trackId);
-  if (!track || track.type === 'master' || track.automation?.volume !== expected || expected === lane) return false;
+  if (!track || track.type === 'master' || track.automation?.[parameter] !== expected || expected === lane) return false;
+  if (track.type === 'drum' && parameter === 'cutoff') {
+    pushToast(DRUM_CUTOFF_AUTOMATION_MESSAGE, 'error');
+    return false;
+  }
   return store.applyProjectChange((project) => mapTracks(project, (item) => item === track
-    ? { ...track, automation: { ...track.automation, volume: lane } }
+    ? { ...track, automation: { ...track.automation, [parameter]: lane } }
     : item));
 }
 
