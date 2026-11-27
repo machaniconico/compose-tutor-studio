@@ -16,17 +16,22 @@ import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
 import { buildParamSchedule } from '../src/audio/automationSchedule';
 import { buildScheduleEvents, type SchedulePayload } from '../src/audio/events';
 import { nextEventsInWindow } from '../src/audio/scheduler';
+import { integratedLoudness, truePeak } from '../src/audio/loudness';
 import { applyMacros } from '../src/audio/macros';
 import { PRESET_LIST } from '../src/audio/presets';
 import {
+  assertWavRenderFits,
   encodeWav,
   floatToInt16,
+  normalizePeak,
+  normalizePeakInChunks,
   RENDER_TAIL_SECONDS,
   renderLengthSeconds,
   renderProjectToWav,
   renderScheduleEvents,
   songTailSeconds,
   wavLoopWindow,
+  WavSizeLimitError,
   type WavSampleRate,
 } from '../src/audio/wav';
 
@@ -484,16 +489,35 @@ describe('renderProjectToWav', () => {
     ],
   });
 
-  it('matches the full 44.1 kHz WAV bytes captured from HEAD (07113994)', async () => {
+  // Captured using the unmodified renderer at HEAD (227d8fb) at a fractional-frame tempo.
+  it.each([
+    [44100, 'full', '8b4937feb17ba5c0abd6617b3650151257106ecb5799475f37ac0e23f09ad0e7'],
+    [44100, 'loop', '67d9f40f4a2f7b804eb55dd695200c8ba2a115e8b7db77c105f42a6c48e0d245'],
+    [48000, 'full', 'e31324f9026d1707755156fd0e92e27687824bb445c7f857221b6302a7768764'],
+    [48000, 'loop', '32e06162358319275d165b9cc7fa84bb4320df2babafbff778dcef46c52dcc5c'],
+  ] as const)('preserves HEAD WAV bytes at %i Hz (%s)', async (sampleRate, range, digest) => {
     stubOfflineContext([]);
-    // This tempo hits a fractional frame where rounding would change the old WAV.
-    const project = { ...keysProject(), bpm: 137 };
-    const wav = await renderProjectToWav(project);
-    const digest = createHash('sha256').update(new Uint8Array(await wav.arrayBuffer())).digest('hex');
-    expect(digest).toBe('8b4937feb17ba5c0abd6617b3650151257106ecb5799475f37ac0e23f09ad0e7');
-    expect(scheduleAutomation).not.toHaveBeenCalled();
-    expect(await (await renderProjectToWav(project, { sampleRate: 44100, range: 'full' })).arrayBuffer())
+    const project = { ...keysProject(), bpm: 137, loopRange: { startBeat: 0, endBeat: 1.25 } };
+    const wav = await renderProjectToWav(project, { sampleRate, range, bitDepth: 16, dither: false });
+    expect(createHash('sha256').update(new Uint8Array(await wav.arrayBuffer())).digest('hex')).toBe(digest);
+    expect(await (await renderProjectToWav(project, { sampleRate, range })).arrayBuffer())
       .toEqual(await wav.arrayBuffer());
+    expect(scheduleAutomation).not.toHaveBeenCalled();
+  });
+
+  it('checks the outer RIFF size and the 4 GiB data limit', () => {
+    const firstRiffOverflow = (2 ** 32 - 36) / 4;
+    expect(() => assertWavRenderFits(firstRiffOverflow - 1, 16)).not.toThrow();
+    expect(() => assertWavRenderFits(firstRiffOverflow, 16)).toThrow(WavSizeLimitError);
+    expect(() => assertWavRenderFits(2 ** 32 / 4, 16)).toThrow(WavSizeLimitError);
+  });
+
+  it('refuses an oversized 24-bit WAV before constructing an offline context', async () => {
+    const project = { ...createEmptyProject({ bpm: 120, lengthBars: 7500 }), tracks: [] };
+    const context = vi.fn();
+    vi.stubGlobal('OfflineAudioContext', context);
+    await expect(renderProjectToWav(project, { sampleRate: 48000, bitDepth: 24 })).rejects.toThrow(/WAV ファイル.*約 4 GB/);
+    expect(context).not.toHaveBeenCalled();
   });
 
   it('uses the shared volume schedule from the loop export start through its end', async () => {
@@ -676,5 +700,101 @@ describe('songTailSeconds: shared returns', () => {
 
   it('includes the full tail of serial effects on a reachable return', () => {
     expect(tail([{ ...source, sends }, { ...room, effects: [...echo.effects, ...room.effects] }])).toBeCloseTo(7.4);
+  });
+});
+
+function pcm24(view: DataView, offset: number): number {
+  return (view.getInt8(offset + 2) << 16) | view.getUint16(offset, true);
+}
+
+describe('WAV encoding options', () => {
+  it('writes interleaved little-endian 24-bit PCM with asymmetric clamping', () => {
+    const view = new DataView(encodeWav([
+      Float32Array.of(-2, 0.5, -0.5),
+      Float32Array.of(2, 1, -1),
+    ], 48000, { bitDepth: 24 }));
+    expect(view.getUint16(34, true)).toBe(24);
+    expect(view.getUint16(32, true)).toBe(6);
+    expect(view.getUint32(28, true)).toBe(48000 * 6);
+    expect(view.getUint32(40, true)).toBe(18);
+    expect(view.byteLength).toBe(62);
+    expect(Array.from({ length: 6 }, (_, i) => pcm24(view, 44 + i * 3)))
+      .toEqual([-8388608, 8388607, 4194304, 8388607, -4194304, -8388608]);
+    expect([...new Uint8Array(view.buffer, 44, 6)]).toEqual([0, 0, 128, 255, 255, 127]);
+  });
+
+  it('pads an odd 24-bit mono data chunk without changing its size field', () => {
+    const view = new DataView(encodeWav([Float32Array.of(0.5)], 44100, { bitDepth: 24 }));
+    expect(view.getUint32(40, true)).toBe(3);
+    expect(view.getUint32(4, true)).toBe(40);
+    expect(view.byteLength).toBe(48);
+    expect(view.getUint8(47)).toBe(0);
+  });
+
+  it('adds deterministic 16-bit TPDF dither, with no effect in 24-bit mode', () => {
+    const silence = [new Float32Array(4096)];
+    const dithered = encodeWav(silence, 44100, { dither: true });
+    expect(dithered).toEqual(encodeWav(silence, 44100, { dither: true }));
+    const samples = new Int16Array(dithered, 44);
+    expect([...new Set(samples)].sort()).toEqual([-1, 0, 1]);
+    expect(encodeWav(silence, 44100, { bitDepth: 24, dither: true }))
+      .toEqual(encodeWav(silence, 44100, { bitDepth: 24 }));
+  });
+
+  it('leaves silence untouched and adjusts both channels to one unclipped peak before dither', () => {
+    const silence = [new Float32Array(8)];
+    expect(normalizePeak(silence)).toBe(silence);
+    expect(encodeWav(silence, 44100, { normalize: true })).toEqual(encodeWav(silence, 44100));
+    const signal = [Float32Array.of(-2, 0.5), Float32Array.of(1, 0.25)];
+    const normalized = normalizePeak(signal);
+    const target = 10 ** (-1 / 20);
+    expect(normalized[0]![0]).toBeCloseTo(-target, 7);
+    expect(normalized[1]![0]).toBeCloseTo(target / 2, 7);
+    expect(signal[0]![0]).toBe(-2);
+    const settings = { normalize: true, dither: true };
+    expect(encodeWav(signal, 44100, settings)).toEqual(encodeWav(normalized, 44100, { dither: true }));
+    expect(new DataView(encodeWav(signal, 44100, settings)).getInt16(44, true)).toBeGreaterThan(-32768);
+  });
+
+  it('preserves exact Float32 normalization across sample chunks', async () => {
+    const left = new Float32Array(20_000).fill(0.123);
+    const right = new Float32Array(18_000).fill(-0.456);
+    right[right.length - 1] = -2;
+    const gain = 10 ** (-1 / 20) / 2;
+    const channels = [left, right];
+    expect(await normalizePeakInChunks(channels, {}))
+      .toEqual(channels.map((channel) => channel.map((sample) => sample * gain)));
+  });
+
+  it('round-trips PCM within 1 LSB and produces defined meter values for 200 signals (seed 0x035)', () => {
+    let state = 0x035;
+    const random = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 2 ** 32;
+    };
+    for (let i = 0; i < 200; i += 1) {
+      const rate = i % 2 === 0 ? 44100 : 48000;
+      const frames = i % 20 === 0 ? Math.round(rate * 0.55) : Math.floor(random() * 512);
+      const amplitude = i % 11 === 0 ? 0 : 1.25 * 10 ** (-6 * random());
+      const channel = () => Float32Array.from({ length: frames }, () => (2 * random() - 1) * amplitude);
+      const channels = i % 3 === 0 ? [channel()] : [channel(), channel()];
+      for (const bitDepth of [16, 24] as const) {
+        const wav = new DataView(encodeWav(channels, rate, { bitDepth }));
+        const negativeScale = 2 ** (bitDepth - 1);
+        for (let index = 0; index < frames * channels.length; index += 1) {
+          const sample = channels[index % channels.length]![Math.floor(index / channels.length)]!;
+          const offset = 44 + index * bitDepth / 8;
+          const pcm = bitDepth === 16 ? wav.getInt16(offset, true) : pcm24(wav, offset);
+          const scale = pcm < 0 ? negativeScale : negativeScale - 1;
+          const expected = Math.max(-1, Math.min(1, sample));
+          if (Math.abs(pcm / scale - expected) > 1 / (negativeScale - 1)) {
+            throw new Error(`signal ${i}, ${bitDepth}-bit sample ${index} exceeds 1 LSB`);
+          }
+        }
+      }
+      for (const value of [integratedLoudness(channels, rate), truePeak(channels)]) {
+        expect(Number.isFinite(value) || value === -Infinity).toBe(true);
+      }
+    }
   });
 });

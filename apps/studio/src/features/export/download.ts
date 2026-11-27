@@ -3,7 +3,7 @@
 const FALLBACK_FILE_STEM = 'project';
 const MAX_FILE_STEM_LENGTH = 80;
 const WINDOWS_RESERVED_FILE_STEMS = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
-const UNSAFE_FILE_STEM_CHARS = /[\x00-\x1f\x7f-\x9f\\/:*?"<>|\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]+/g;
+const UNSAFE_FILE_STEM_CHARS = /[\x00-\x1f\x7f-\x9f\\/:*?"<>|\u061c\u200b\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g;
 
 function normalizeFileStemEdges(stem: string): string {
   return stem.replace(/^[._\s]+/g, '').replace(/[._\s]+$/g, '');
@@ -28,7 +28,8 @@ export function safeFileStem(title: string): string {
     .replace(/_+/g, '_');
 
   cleaned = normalizeFileStemEdges(cleaned);
-  if (cleaned.length === 0) return FALLBACK_FILE_STEM;
+  // ZWJ や結合文字だけの名前は見えないファイル名になるので既定名にする。
+  if (cleaned.length === 0 || !/[^\p{Cf}\p{M}\s_]/u.test(cleaned)) return FALLBACK_FILE_STEM;
 
   if (isWindowsReservedFileStem(cleaned)) {
     cleaned = `${FALLBACK_FILE_STEM}_${cleaned}`;

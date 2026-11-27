@@ -22,7 +22,18 @@ describe('export history', () => {
     const entries = loadExportHistory(storage);
     expect(entries[0]).toMatchObject({ sampleRate: 48000, range: 'loop' });
     expect(entries[1]).toEqual(legacy);
-    expect(entries.map(formatWavExportSettingsJa)).toEqual(['48 kHz / ループ範囲', '44.1 kHz / 全体']);
+    expect(entries.map(formatWavExportSettingsJa)).toEqual(['48 kHz / ループ範囲 / 16ビット / 曲をまとめた WAV', '44.1 kHz / 全体 / 16ビット / 曲をまとめた WAV']);
+  });
+
+  it('persists the new WAV options, including the effective dither setting for 24-bit', () => {
+    const storage = new MemoryStorage();
+    const settings = { kind: 'wav', projectId: 'p', dither: true, normalize: true, stems: true } as const;
+    recordExportHistory({ ...settings, fileName: '16.zip', bitDepth: 16, exportedAt: '2026-01-01' }, storage);
+    recordExportHistory({ ...settings, fileName: '24.zip', bitDepth: 24, exportedAt: '2026-01-02' }, storage);
+    const [high, low] = loadExportHistory(storage);
+    expect(high).toMatchObject({ bitDepth: 24, dither: false, normalize: true, stems: true });
+    expect(low).toMatchObject({ bitDepth: 16, dither: true, normalize: true, stems: true });
+    expect(formatWavExportSettingsJa(low!)).toContain('ステム ZIP / ディザあり / ピーク調整あり');
   });
 
   it('records successful exports newest first in localStorage', () => {

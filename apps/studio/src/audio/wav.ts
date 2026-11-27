@@ -1,4 +1,4 @@
-// Offline render to 16-bit PCM WAV.
+// Offline render to 16- or 24-bit PCM WAV.
 //
 // `renderProjectToWav` builds the same schedule used for live playback into an
 // OfflineAudioContext, renders it, and encodes the result. `encodeWav` is a pure
@@ -16,13 +16,16 @@ import { beatToTime, secondsPerBeat, type DueEvent, type LoopRegion } from './sc
 import { DrumVoiceManager } from './drums';
 import { applyMacros } from './macros';
 import { resolvePreset, type Envelope } from './presets';
+import { finishSampleSteps, runSampleSteps, type SampleStepOptions } from './sampleSteps';
 import { SynthVoiceManager } from './synth';
 
 /** Render sample rate (Hz). */
 export const RENDER_SAMPLE_RATE = 44100;
 export type WavSampleRate = 44100 | 48000;
 export type WavExportRange = 'full' | 'loop';
-export type WavExportOptions = { sampleRate?: WavSampleRate; range?: WavExportRange };
+export type WavBitDepth = 16 | 24;
+export type WavEncodingOptions = { bitDepth?: WavBitDepth; dither?: boolean; normalize?: boolean };
+export type WavExportOptions = WavEncodingOptions & { sampleRate?: WavSampleRate; range?: WavExportRange };
 /** Render channel count. */
 export const RENDER_CHANNELS = 2;
 /** Minimum time reserved for release after the render window, in seconds. */
@@ -133,8 +136,73 @@ export function floatToInt16(sample: number): number {
   return clamped < 0 ? Math.round(clamped * 0x8000) : Math.round(clamped * 0x7fff);
 }
 
+const PCM_HEADROOM = 10 ** (-1 / 20);
+const NORMALIZE_CHUNK_FRAMES = 16_384;
+
+/** Apply one gain across all channels to preserve their relative levels. */
+export function normalizePeak(channels: Float32Array[]): Float32Array[] {
+  return finishSampleSteps(normalizePeakSteps(channels));
+}
+
+export function normalizePeakInChunks(channels: Float32Array[], options: SampleStepOptions): Promise<Float32Array[]> {
+  return runSampleSteps(normalizePeakSteps(channels), options);
+}
+
+function* normalizePeakSteps(channels: Float32Array[]): Generator<number, Float32Array[], void> {
+  const totalSamples = 2 * channels.reduce((sum, channel) => sum + channel.length, 0);
+  let processedSamples = 0;
+  let peak = 0;
+  for (const channel of channels) {
+    for (let start = 0; start < channel.length; start += NORMALIZE_CHUNK_FRAMES) {
+      const end = Math.min(start + NORMALIZE_CHUNK_FRAMES, channel.length);
+      for (let frame = start; frame < end; frame += 1) peak = Math.max(peak, Math.abs(channel[frame]!));
+      processedSamples += end - start;
+      yield processedSamples / totalSamples;
+    }
+  }
+  if (peak === 0 || !Number.isFinite(peak)) return channels;
+  const gain = PCM_HEADROOM / peak;
+  const normalized: Float32Array[] = [];
+  for (const channel of channels) {
+    const output = new Float32Array(channel.length);
+    for (let start = 0; start < channel.length; start += NORMALIZE_CHUNK_FRAMES) {
+      const end = Math.min(start + NORMALIZE_CHUNK_FRAMES, channel.length);
+      for (let frame = start; frame < end; frame += 1) output[frame] = channel[frame]! * gain;
+      processedSamples += end - start;
+      yield processedSamples / totalSamples;
+    }
+    normalized.push(output);
+  }
+  return normalized;
+}
+
+function wavByteLength(dataSize: number): number {
+  return 44 + dataSize + dataSize % 2;
+}
+
+export class WavSizeLimitError extends RangeError {
+  constructor() {
+    super('WAV ファイルのサイズが上限（約 4 GB）を超えます。書き出す範囲を短くするか、サンプルレートやビット数を下げてください。');
+  }
+}
+
+function assertRiffSize(byteLength: number): void {
+  // The outer RIFF chunk also has a 32-bit size field, including header and padding.
+  if (byteLength - 8 >= 2 ** 32) throw new WavSizeLimitError();
+}
+
+function tpdfDither(): () => number {
+  let seed = 0x43545335;
+  const uniform = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  // The difference of two uniform values gives triangular noise of ±1 LSB.
+  return () => uniform() - uniform();
+}
+
 /**
- * Encode interleaved/planar channel data to a 16-bit PCM WAV.
+ * Encode planar channel data to PCM WAV.
  *
  * Accepts either an AudioBuffer or an array of per-channel Float32Arrays. Pure:
  * no Web Audio dependency beyond reading the buffer, no I/O. Returns an
@@ -143,27 +211,30 @@ export function floatToInt16(sample: number): number {
 export function encodeWav(
   source: AudioBuffer | Float32Array[],
   sampleRate?: number,
+  options: WavEncodingOptions = {},
 ): ArrayBuffer {
   const rate = sampleRate === undefined
     ? (Array.isArray(source) ? RENDER_SAMPLE_RATE : source.sampleRate)
     : sampleRate;
   assertSampleRate(rate);
-  const channels: Float32Array[] = Array.isArray(source)
-    ? source
-    : collectChannels(source);
-
-  const numChannels = channels.length;
-  const numFrames = channels.reduce((max, ch) => Math.max(max, ch.length), 0);
-  const bytesPerSample = 2;
+  const { bitDepth = 16, dither = false, normalize = false } = options;
+  const input = Array.isArray(source) ? source : collectChannels(source);
+  const numChannels = input.length;
+  const numFrames = input.reduce((max, ch) => Math.max(max, ch.length), 0);
+  const bytesPerSample = bitDepth / 8;
   const blockAlign = numChannels * bytesPerSample;
   const byteRate = rate * blockAlign;
   const dataSize = numFrames * blockAlign;
-  const buffer = new ArrayBuffer(44 + dataSize);
+  const byteLength = wavByteLength(dataSize);
+  assertRiffSize(byteLength);
+  const channels = normalize ? normalizePeak(input) : input;
+  const nextNoise = bitDepth === 16 && dither ? tpdfDither() : undefined;
+  const buffer = new ArrayBuffer(byteLength);
   const view = new DataView(buffer);
 
   // RIFF header.
   writeAscii(view, 0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true); // chunk size = file size - 8
+  view.setUint32(4, buffer.byteLength - 8, true); // chunk size = file size - 8
   writeAscii(view, 8, 'WAVE');
 
   // fmt subchunk.
@@ -174,7 +245,7 @@ export function encodeWav(
   view.setUint32(24, rate, true);
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true); // bits per sample
+  view.setUint16(34, bitDepth, true); // bits per sample
 
   // data subchunk.
   writeAscii(view, 36, 'data');
@@ -186,8 +257,19 @@ export function encodeWav(
     for (let ch = 0; ch < numChannels; ch += 1) {
       const channel = channels[ch];
       const sample = channel && frame < channel.length ? (channel[frame] ?? 0) : 0;
-      view.setInt16(offset, floatToInt16(sample), true);
-      offset += 2;
+      if (bitDepth === 24) {
+        const clamped = Math.max(-1, Math.min(1, sample));
+        const pcm = Math.round(clamped * (clamped < 0 ? 0x800000 : 0x7fffff));
+        view.setUint16(offset, pcm, true);
+        view.setUint8(offset + 2, pcm >> 16);
+      } else if (nextNoise) {
+        const clamped = Math.max(-1, Math.min(1, sample));
+        const pcm = Math.round(clamped * (clamped < 0 ? 0x8000 : 0x7fff) + nextNoise());
+        view.setInt16(offset, Math.max(-0x8000, Math.min(0x7fff, pcm)), true);
+      } else {
+        view.setInt16(offset, floatToInt16(sample), true);
+      }
+      offset += bytesPerSample;
     }
   }
 
@@ -195,7 +277,7 @@ export function encodeWav(
 }
 
 /** Read all channels of an AudioBuffer into Float32Arrays. */
-function collectChannels(buffer: AudioBuffer): Float32Array[] {
+export function collectChannels(buffer: AudioBuffer): Float32Array[] {
   const channels: Float32Array[] = [];
   for (let ch = 0; ch < buffer.numberOfChannels; ch += 1) {
     channels.push(buffer.getChannelData(ch));
@@ -210,29 +292,79 @@ function writeAscii(view: DataView, offset: number, text: string): void {
   }
 }
 
-/**
- * Render a project to a WAV Blob via an OfflineAudioContext.
- *
- * Builds the per-track graph + voices, schedules every note/drum event at its
- * resolved offline time, renders, and encodes. A selected loop plays one pass
- * without a metronome click.
- */
-export async function renderProjectToWav(project: Project, options: WavExportOptions = {}): Promise<Blob> {
-  const { sampleRate = RENDER_SAMPLE_RATE } = options;
-  assertSampleRate(sampleRate);
+export type WavRenderPlan = {
+  project: Project;
+  sampleRate: WavSampleRate;
+  window?: LoopRegion;
+  events: readonly RenderEvent[];
+  frames: number;
+  outputTrackId?: string;
+};
+
+function exportWindow(project: Project, options: WavExportOptions): LoopRegion | undefined {
   const loop = options.range === 'loop' ? wavLoopWindow(project) : undefined;
   if (loop && 'reason' in loop) throw new RangeError(loop.reason);
-  const window = loop?.window;
-  const events = renderScheduleEvents(project, window);
-  const frames = renderFrameCount(project, events, sampleRate, window);
+  return loop?.window;
+}
 
+export function planWavRender(project: Project, options: WavExportOptions = {}): WavRenderPlan {
+  const { sampleRate = RENDER_SAMPLE_RATE } = options;
+  assertSampleRate(sampleRate);
+  const window = exportWindow(project, options);
+  const events = renderScheduleEvents(project, window);
+  return { project, sampleRate, window, events, frames: renderFrameCount(project, events, sampleRate, window) };
+}
+
+/** Keep the selected output and any source tracks that feed its return. */
+export function planStemRender(mix: WavRenderPlan, trackId: string): WavRenderPlan {
+  const { project, sampleRate, window } = mix;
+  const target = project.tracks.find((track) => track.id === trackId);
+  const audible = resolveMuteSolo(project.tracks);
+  if (!target || !audible.has(trackId)) throw new RangeError('書き出せるトラックを選んでください。');
+  const tracks = project.tracks
+    .filter((track) => track.type === 'master' || track.id === trackId ||
+      (target.type === 'bus' && audible.has(track.id) && sendLevel(track, trackId) > 0))
+    .map((track) => ({ ...track, solo: false }));
+  const stem = { ...project, tracks };
+  const sources = new Set(tracks.map((track) => track.id));
+  // The mix schedule has already resolved linked clips and cut notes at the range end.
+  const events = mix.events.filter(({ payload }) => sources.has(payload.trackId));
+  return {
+    project: stem, sampleRate, window, events, outputTrackId: trackId,
+    frames: renderFrameCount(stem, events, sampleRate, window),
+  };
+}
+
+export function wavRenderByteLength(frames: number, bitDepth: WavBitDepth = 16): number {
+  return wavByteLength(frames * RENDER_CHANNELS * (bitDepth / 8));
+}
+
+export function assertWavRenderFits(frames: number, bitDepth?: WavBitDepth): void {
+  assertRiffSize(wavRenderByteLength(frames, bitDepth));
+}
+
+/** The selected range plus the minimum tail, before adding any track's effects. */
+export function minimumStemFrames({ project, sampleRate, window }: WavRenderPlan): number {
+  return renderFrameCount({ ...project, tracks: [] }, [], sampleRate, window);
+}
+
+export async function renderProjectToWav(project: Project, options: WavExportOptions = {}): Promise<Blob> {
+  const plan = planWavRender(project, options);
+  assertWavRenderFits(plan.frames, options.bitDepth);
+  const rendered = await renderWavAudio(plan);
+  return new Blob([encodeWav(rendered, plan.sampleRate, options)], { type: 'audio/wav' });
+}
+
+/** Render the shared graph and schedule. Loop exports play one pass without a click. */
+export async function renderWavAudio(plan: WavRenderPlan): Promise<AudioBuffer> {
+  const { project, sampleRate, window, events, frames, outputTrackId } = plan;
   const ctx = new OfflineAudioContext(RENDER_CHANNELS, frames, sampleRate);
 
   // Master bus + soft limiter (shared with AudioEngine).
   const master = createMasterChain(ctx, project.tracks).input;
 
   // Per-track graphs + voice managers.
-  const graphs = buildTrackGraphs(ctx, master, project.tracks, 0);
+  const graphs = buildTrackGraphs(ctx, master, project.tracks, 0, outputTrackId);
   const automation = {
     bpm: project.bpm, startBeat: window?.startBeat ?? 0, loop: null, startTime: 0,
     endBeat: window?.endBeat ?? songEndBeat(project),
@@ -276,9 +408,7 @@ export async function renderProjectToWav(project: Project, options: WavExportOpt
     }
   }
 
-  const rendered = await ctx.startRendering();
-  const wav = encodeWav(rendered, sampleRate);
-  return new Blob([wav], { type: 'audio/wav' });
+  return ctx.startRendering();
 }
 
 function renderFrameCount(
