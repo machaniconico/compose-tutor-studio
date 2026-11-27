@@ -60,6 +60,12 @@ sudo apt install -y \
 
 その後、Windows と同じように `pnpm install`、`pnpm dev:desktop`、`pnpm build:desktop` を実行します。
 
+## Web MIDI 鍵盤 (任意)
+
+MIDI 鍵盤は WebView の `navigator.requestMIDIAccess({ sysex: false })` を使い、「MIDI 鍵盤を使う」を押したときだけ利用許可を求めます。Tauri コマンドを経由しないため、capabilities や CSP の変更は不要です。Web MIDI API がない環境 (Linux の WebKitGTK など) では、PC キーボードで演奏できることを画面に表示します。[Web MIDI API 仕様](https://www.w3.org/TR/webmidi/)・[Tauri capabilities の説明](https://v2.tauri.app/security/capabilities/)
+
+Windows WebView2 で要実機確認。配布用ビルドで MIDI 鍵盤を接続し、許可、機器一覧、発音と停止、切断時の動作を `FEAT-MAN-008` の手順で確認してください。
+
 ## 既知のビルド注意点
 
 Tauri 2.11 系の依存で、yank 済みの `time 0.3.48` が `Cargo.lock` に残っていると Rust 1.96 系で `cookie` / `tauri-utils` の trait 実装衝突が起きることがあります。その場合は次を実行してから再ビルドしてください。

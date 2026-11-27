@@ -185,6 +185,18 @@ input[type='range'] {
   margin: 4px 0 0;
 }
 
+.live-input__midi {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.live-input__midi ul {
+  margin: 4px 0 0;
+  padding-inline-start: 1.5em;
+  max-height: 5em;
+  overflow-y: auto;
+}
+
 .inspector-panel {
   grid-area: inspector;
   background: var(--bg-panel);
