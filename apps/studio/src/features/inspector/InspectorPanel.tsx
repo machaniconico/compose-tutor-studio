@@ -16,6 +16,7 @@ import {
 } from '../common/DeferredFeature';
 import { handleTabKeyDown } from '../common/tabs';
 import { TrackInspector } from '../tracklist/TrackInspector';
+import { GroovePanel } from './GroovePanel';
 
 type EmptyProps = Record<string, never>;
 
@@ -155,6 +156,7 @@ function InspectorContent() {
   return (
     <>
       <TrackInspector />
+      <GroovePanel />
       {chord ? <ChordInspector key={chord.id} /> : null}
       {!chord && note ? <NoteInspector note={note.note} startBeat={note.startBeat} /> : null}
       {!chord && !note ? (

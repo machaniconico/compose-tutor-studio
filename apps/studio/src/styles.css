@@ -6760,3 +6760,27 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
 .field #bpm-input {
   width: 56px;
 }
+
+.groove-panel summary {
+  cursor: pointer;
+}
+
+.groove-panel > :not(summary) {
+  display: block;
+  margin-top: var(--sp-2);
+}
+
+.groove-panel__check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.groove-panel input[type='range'] {
+  width: 100%;
+  margin: 0;
+}
+
+.pr__popover input[type='range'] {
+  width: 100%;
+}

@@ -47,6 +47,7 @@ import {
   quantizeNotes,
   removeNotes,
 } from '../../state/editorActions';
+import { NoteGroovePopover } from './NoteGroovePopover';
 import {
   FIT_TO_SCALE_HELP,
   copySelectedNotes,
@@ -1381,6 +1382,12 @@ export function PianoRoll() {
             📋↺
           </button>
         </div>
+        <NoteGroovePopover
+          clipId={clip.id}
+          noteIds={liveSelectedNoteIds}
+          gridSnap={gridSnap}
+          onAnnounce={setEditMessage}
+        />
         <div className="pr__zoom" role="group" aria-label="選んだ音の高さ">
           <button
             type="button"
