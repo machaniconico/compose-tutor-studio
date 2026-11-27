@@ -308,6 +308,18 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - active playback中の採用はsession snapshotを停止して有限なplayheadを保持する。次の再生、metronome、live / WAV / MIDI、Arranger / Piano Roll / Drum / Chord timelineは保存済みmapを既存の共通musical-time compilerから読む
 - 320px幅ではdocument全体を横overflowさせず時間軸だけを内部scrollする。eventはnative controlで選択・keyboard操作でき、anchor保護、入力error、成功、再生停止を日本語のalert / statusで伝える。連続tempo ramp、audio follow / Smart Tempo、tempo automationはこのincrementに含めない
 
+### 7.8.1 曲全体の移調
+
+- トランスポートバーの「曲全体を移調」から、半音数（整数、-12〜+12）を指定して全曲を移調する。ダイアログは移調後のキーを先に表示する
+- 移調するのは、ドラム以外のinstrument Trackの全MIDIノート（ミュート中のTrackを含む）、Chord Trackの全コード名、`Project.key`。ドラムはTrack type `drum`またはinstrument type `drumkit`から導き、ドラムTrack・ドラムClip・drumkit楽器のノートは動かさない。Audio Clipも動かさず、ダイアログに「録音した音声の高さは変わりません」と表示する
+- pitch class、MIDIノート番号、スケール度数を混同しない。コードの`degree` / `function` / `tags`は新しいキーに対する値として変えず、`symbol` / `root` / `notes`だけを動かす。読み取れないコード名があれば全体を拒否する
+- 新しいキー名はキー選択（C / G / D / A / E / B / F / Bb / Eb / Ab / Db / F#）に用意されたものから、移調後の主音に合う綴りを選ぶ。該当がなければ全体を拒否する。±12（オクターブ）ではキー名とすべてのコード名を一切変えず、ノートだけが動く
+- コード名の綴りは移調後のキーと実際のスケールに従い、度数ごとの文字を使う（例: Eb minorではCb、F# majorではE#、harmonic / melodic minorの上げた6度・7度はその度数の文字のまま。A harmonic minorの`E7/G#`を+5するとD harmonic minorの`A7/C#`）。pentatonic / bluesなど7音でないスケールは、親のmajor / minorの調号どおりに綴る。スラッシュのベースも同じ規則で綴り、`root`は常にコード名のルートの綴りと一致し、±12でも全コードのrootをコード名から読み直す（例: `Db`と入力されたコードのrootが`C#`で保存されていても`Db`になる）。コードを鳴らすトラック（Chordsトラック）がdrumkit楽器の場合は、先に楽器の音色へ切り替えるよう案内して全体を拒否する
+- コードの`notes`は、全値が0〜11ならpitch class（12で割った余りで移調）、11を超える値があれば絶対MIDIノート（移調量どおりに動かし、0〜127を外れるなら全体を拒否）として扱う。pitch classのコードの伴奏音域はmainのボイシング（ルートのpitch class + 48）が決めるため、オクターブ移調では伴奏の音域は変わらない。絶対MIDIノートが移調で全値0〜11になる場合は、pitch classとして読み直されて音域が跳ぶため、該当コードの小節と名前を示して全体を拒否する（「低すぎて音の高さが保てません」）
+- 1つでもノートがMIDI 0〜127を外れるなら全体を拒否し、最も低い（または高い）該当ノートの音名を日本語の理由に含める。部分適用はしない。録音中・プロジェクト操作中も拒否する
+- 適用は`buildScheduleEvents`の前後比較（拍位置・長さ・強さ・ドラムが不変、音程は移調ノートと絶対コード音が移調量ちょうど、pitch classコードの伴奏がボイシング規則どおり）を通った場合に限り、Undo 1回で戻る
+
+
 ### 7.9 Audio Take / Comp Editor
 
 - 同じAudio Trackにあり、`startBeat / lengthBeats`が一致する非loop Audio Clipを2件以上選べる時、Audio Clip Editorから「テイクにまとめる」を実行する。選択Clipと同じ時間窓の候補を自動検出し、ready asset、source coverage、上限を満たすものだけをschema v5のAudio Take Folderへ変換する

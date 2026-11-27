@@ -26,8 +26,10 @@ import { studioRuntime } from '../../platform/runtime';
 import { pushToast } from '../../state/tutorialBridge';
 import { AudioTrackRecordingDialog } from '../audioTrack/AudioTrackRecordingDialog';
 import { Dialog } from '../common/Dialog';
+import { KEY_OPTIONS } from './keyOptions';
+import { TransposeSongDialog } from './TransposeSongDialog';
 
-const KEYS: MusicalKey[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'F#'];
+const KEYS = KEY_OPTIONS;
 
 const SCALES: { value: ScaleName; label: string }[] = [
   { value: 'major', label: 'メジャー' },
@@ -690,6 +692,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
   const emergencyExportLock = useRef(false);
   const [emergencyExportBusy, setEmergencyExportBusy] = useState(false);
   const [recordingOpen, setRecordingOpen] = useState(false);
+  const [transposeOpen, setTransposeOpen] = useState(false);
   const [loopRangeDraft, setLoopRangeDraft] = useState<{
     startValue: string;
     endValue: string;
@@ -979,6 +982,15 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           </select>
         </div>
 
+        <button
+          type="button"
+          disabled={recordingControlsLocked}
+          title="ノートとコードをまとめて高く・低くします(ドラムと録音した音声は動きません)"
+          onClick={() => setTransposeOpen(true)}
+        >
+          曲全体を移調
+        </button>
+
         <button type="button" disabled={!canUndo} onClick={() => undo()}>
           元に戻す
         </button>
@@ -1005,6 +1017,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
         <VocalCutTool />
         </div>
       </header>
+      {transposeOpen ? <TransposeSongDialog project={project} onClose={() => setTransposeOpen(false)} /> : null}
       {recordingOpen ? (
         <AudioTrackRecordingDialog
           trackName={armedAudioTrack?.name ?? 'マイク録音'}
