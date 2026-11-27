@@ -44,3 +44,4 @@ export * from './groove';
 export * from './ticks';
 export * from './drum-schedule';
 export * from './groove-schedule';
+export * from './export-range';

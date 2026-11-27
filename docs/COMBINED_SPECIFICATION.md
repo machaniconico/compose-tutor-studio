@@ -738,11 +738,14 @@ Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生pass�
 - P54: import時、次をすべて満たすchannelだけProgram Changeをpresetへ戻す。(1) そのMTrkのchannelにProgram Changeがちょうど1件(同じ値の繰り返しも複数扱い)、(2) tick 0で最初のNote Onより前、(3) Bank Select(CC0 / CC32)がどこにも無い、(4) channel 10ではない。さらにプログラム番号が正規preset(エイリアス除く)へ1対1で戻る場合は、そのpresetを適用して警告しない。それ以外は従来どおり対応せず、従来の「音色・バンク指定」または「途中の音量・パン・音色変更」警告を出す。調号は従来どおり現在の曲のkey / scaleと一致するときだけ警告しない
 - MIDIはpitch / start / duration / velocity、先頭volume / pan、tempo / meter event、chord symbol markerを相互運用向けに正規化する形式である。audio / automation、map event ID、clip境界、loop / alias、音源preset、effects、mute / solo、groove、section、chordの機能・構成音などProject固有の意味をexactには復元しない
 - drum MIDIはライブ/WAVのoccurrence resolverを通さず、保存されたstep位置とvelocityをnormalized projectionとして1回出力する。swing、probability、humanize、seed、mute / soloを演奏結果としてbakeせず、drum `Clip.loop`も展開しない。実際に聞こえる演奏を共有する場合はWAVを使う
+- ループ範囲の書き出し(P53): Exportダイアログの「書き出す範囲」で「ループ範囲だけ」を選ぶと、ループの`[loopStart, loopEnd)`だけを書き出す。範囲は`resolveExportRange`(project-model)が1か所で決め、WAVとMIDIで同じ規則を使う。ループが有効でない、または`beatTick`で整数tickにし曲の長さで切り詰めた後に長さが0以下なら範囲なし(UIは選択肢を無効にして理由を表示する)。既定は曲全体で、`range`を渡さない出力は従来とバイト単位で同一(既存golden・特性化テストと、曲全体を覆う範囲との一致テストで守る)
+- MIDIの範囲: 全event(note・tempo・meter・chord marker)を`range.start`が0になるようずらす。範囲の開始をまたぐnoteは**重なる部分だけ残して**tick 0から始める(捨てない)。範囲の終端をまたぐnoteは終端で短縮する。重なりが0のnoteは出さず、残るnoteは必ず1 tick以上でvalidなNote On / Offの対になる。tempoとtime signatureは範囲開始時点で有効な値をtick 0に置き、範囲内の変更をずらして続ける(開始tickちょうどの変更は重複させずtick 0の1件)。範囲開始に鳴っているchord markerもtick 0に置く。ただしドラム(one-shot)のhitは、開始より前に始まったものを**clipせず捨てる**(WAVではそのhitは既に鳴り終わっており、tick 0で鳴らし直すと二重になるため)。clipしてtick 0から始めるのはメロディのnoteだけ。ドラムの終端またぎは終端で短縮する。含めるonsetは、WAVと同じ整数tick規則(`exportRangeIncludesOnset`: `round(beat × 480)`が`[startTick, endTick)`)で決める。範囲書き出しは480 PPQでのみ行い、他の`ppq`と組み合わせた場合は`invalid-options`で拒否する(粗いtickだと範囲の端が範囲外のeventへ丸まるため。Studioは常に480)。拍子の小節位相は範囲開始から数え直す。CC7 / CC10 / port / track nameはtick 0のまま。event数・overlap検査は範囲外も含む曲全体に対して行い、予算(`MAX_MIDI_EXPORT_EVENTS`、resolved時の`assertScheduleEventBudget`)は曲全体と同じ判定にする。P54のkey signature / program changeはこのPRの時点で未マージのため範囲処理に含まない(入れる時は同じtick 0規則に従う)
 
 ### 10.2 WAV
 
 - 既定は44.1kHz stereo・PCM 16-bit・ディザOFF。この既定の出力はP50以前のmainとバイト単位で同一(固定した旧encoderとの一致テストで守る)
 - 書き出しオプション: サンプルレート44.1 / 48 kHz、ビット深度16 / 24 bit、ディザON / OFF。選択はExportダイアログ内のUI状態で、Projectやschemaには保存しない。全体WAVと選択TrackのWAVに同じ設定を使う
+- ループ範囲のWAV(P53): 「書き出す範囲」で「ループ範囲だけ」を選ぶと、曲を0拍目から`loopEnd`までレンダーしてから、`loopStart`の時刻(秒を`round(秒 × sampleRate)`で整数frameにし、最低1 frame残す)より前を切り捨てる。pre-rollとしてレンダーするのでtempo map、volume / pan / filter cutoff(P23)のautomation、効果のstateは絶対時刻で評価され、全体書き出しの該当区間と同じ音になる。**範囲の開始より前に始まり開始後も鳴っているnoteは切らずに含める**(鳴り続ける部分をそのまま残す)。`loopEnd`以降に開始するnote / drum / Audio Clip regionは鳴らさない(MIDIと同じ整数tick規則で、`round(beat × 480) < endTick`のonsetだけをscheduleする。`exportRangeOnsetBeforeEnd`)。範囲の開始が0 tickより後ろの時は、切り出した先頭に5 msの線形fade-inを掛けてクリックノイズを防ぐ(開始が0 tickなら掛けず、全体書き出しとバイト一致)。**終端のtailは全体書き出しと同じ規則**: 範囲内に始まったnoteは元の長さのまま鳴り終え、`planAudioTail`のrelease・Delay・Reverb tailと最後のfadeを`loopEnd`の後ろに足す(終端で切らない)。出力の長さは`loopEnd − loopStart`+tail。5分上限、サイズ予算、`assertScheduleEventBudget`は`loopEnd`までの曲(`lengthBeats = loopEnd`)に対して全体書き出しと同じ判定を使う。全体書き出し(範囲なし)の経路は変えず、既存のWAV特性化テスト(sha256固定)でバイト一致を守る。範囲は「選択TrackをWAV」にも同じ規則で適用する
 - RIFFはword境界に揃える。data sizeが奇数(24-bitのmonoで奇数frame等)の時はdata chunkの後ろに0の1 byte padを置き、RIFF sizeにはpadを含め、data sizeには含めない。RIFF sizeが32-bitに収まらない出力は、確保の前に`RangeError`で拒否する
 - 24-bitはlittle-endian 3 byte PCM(fmt chunkの`bitsPerSample` 24、`blockAlign`、`byteRate`を正しく書く)。full scaleを超える値はwrapせずclampし、+1.0は`0x7FFFFF`、-1.0は`-0x800000`になる。24-bitにはディザをかけない
 - ディザは16-bitへ丸める時だけのTPDF(±1 LSB)。PRNGは固定seed(`0x43545335`)の線形合同法で、Math.randomを使わない。同じ描画結果なら同じbytesになり、テストを再現できる。ディザ後もclampする。値がちょうど0のsample(デジタル無音)にはディザをかけず0のまま出力し、PRNGも進めない
@@ -1285,6 +1288,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Project menuでは、MIDIを「他アプリとの音符中心の交換形式」と説明する。MIDIへclip / loop / alias / preset / effects / mute / solo / groove / section / chord semanticsの完全復元を示唆しない
 - Exportダイアログの「音源として書き出す」にWAV形式の1行(サンプルレート 44.1 / 48 kHz、ビット数 16 / 24 bit、ディザ checkbox)を置く。既定は44.1 kHz・16 bit・ディザOFFで、以前と同じファイルが出る。ディザは16 bitのときだけ選べ、24 bitではdisabledにする。書き出し中は3つとも無効化する。選択はダイアログを開いている間のUI状態でProjectには保存しない
 - MIDI書き出しは既定でGM音色(Program Change)と調号を含める。書き出しメニューには専用の切替UIを追加せず、`projectToMidi`の`includeProgramAndKey`オプションだけで切り替える。ユーザー向け文言は「音色と調号つき」のような初心者向けの短い説明に限る
+- 同じセクションのWAV形式の1行の上に「書き出す範囲」(曲全体 / ループ範囲だけ)を1行で置き、MIDI・WAV・選択トラックWAVの3つに共通で効かせる。既定は曲全体。ループが有効でない、または長さがない時は「ループ範囲だけ」を選べず(disabled)、隣に「ループ範囲がまだ決まっていません。ルーラーをドラッグしてループ範囲を決めると、その部分だけを書き出せます。」などの理由を表示する(最小ウィンドウでは折り返す)。選択はダイアログ内のUI状態でProjectには保存しない
 - MIDI書き出しで量子化後の同一Track・同一音程が重なる場合はfile dialog / browser downloadへ進まず、「同じ音程のノートが重なっているためMIDIを書き出せません。重なりを短くするか、1つのノートにまとめてください。」とerror alertで案内する
 - MIDI importは現在の曲へ加算し、BPM / 拍子 / key / scaleを変更しない。完了statusは単数のTrack名ではなく、`Nトラック・M音を追加しました`を読み上げる
 - 成功後は先頭の追加Track / Clipを選択し、drumならDrum Editor、instrumentならPiano Rollを表示する。C2〜C6外のnoteは保持するが画面外であることを件数付きで知らせる
@@ -1596,6 +1600,7 @@ Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/R
 - Built-in synth/drum playback
 - Basic effects
 - Offline render(`renderProjectToWav`の`sampleRate` 44.1 / 48 kHz・`bitDepth` 16 / 24・`dither`。既定の16-bit・ディザOFFは従来とバイト一致、計画・予算は`WavRenderPlan.sampleRate / bitDepth`で拡縮する)
+- ループ範囲の書き出し: `resolveExportRange`(project-model `export-range.ts`)がWAV・MIDI共通の範囲規則(整数tick、曲長で切り詰め、空は不可)を持つ。WAVは`WavRenderOptions.range`で`lengthBeats = loopEnd`のProjectを0拍からレンダーし先頭frameを切り捨てる。MIDIは`MidiExportOptions.range`(PPQ 480のtick。出力PPQが480以外なら`invalid-options`で拒否)で各MTrkのmessageを範囲へclipしてずらす。範囲はUI stateでschema変更なし。境界規則は`02_feature_specification.md`の10.1 / 10.2
 - Audio Assetのchecksum付きresolve / decode cacheとAudio Clip window plan
 - Audio Clipのpitch解析、versioned WSOLA派生PCM Worker、content-addressed single-flight LRU
 - Transient center-vocal reduction and PCM 16-bit WAV encode

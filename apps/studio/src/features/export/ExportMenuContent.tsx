@@ -8,6 +8,7 @@ import {
   LEGACY_WAVE5_FORMAT_MESSAGE,
   ScheduleEventLimitError,
   decodeProjectJson,
+  resolveExportRange,
   serializeProject,
 } from '@cts/project-model';
 import { useStore } from '../../state/store';
@@ -165,6 +166,41 @@ function WavFormatControls({
   );
 }
 
+/** 「全体」か「ループ範囲だけ」か。ループが無い時は選べず、理由を表示する。 */
+function ExportRangeControl({
+  scopeRef,
+  unavailableReason,
+  disabled,
+}: {
+  scopeRef: MutableRefObject<'song' | 'loop'>;
+  unavailableReason: string | null;
+  disabled: boolean;
+}) {
+  const [scope, setScope] = useState(scopeRef.current);
+  const onChange = (next: 'song' | 'loop') => {
+    scopeRef.current = next;
+    setScope(next);
+  };
+  return (
+    <div className="export-menu__row export-menu__range">
+      <label>
+        書き出す範囲
+        <select
+          value={unavailableReason ? 'song' : scope}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value === 'loop' ? 'loop' : 'song')}
+        >
+          <option value="song">曲全体</option>
+          <option value="loop" disabled={unavailableReason !== null}>ループ範囲だけ</option>
+        </select>
+      </label>
+      {unavailableReason ? (
+        <span className="export-menu__hint" role="note">{unavailableReason}</span>
+      ) : null}
+    </div>
+  );
+}
+
 /** Export/import controls loaded only after their dialog opens. */
 export function ExportMenuContent({
   onDone,
@@ -180,6 +216,18 @@ export function ExportMenuContent({
   const wavFormatRef = useRef<Required<WavFormatOptions>>({ ...DEFAULT_WAV_FORMAT });
 
   const project = useStore((s) => s.project);
+  const loopEnabled = useStore((s) => s.transport.loopEnabled);
+  const loopStartBeat = useStore((s) => s.transport.loopStartBeat);
+  const loopEndBeat = useStore((s) => s.transport.loopEndBeat);
+  // Like the WAV format, the range choice is dialog-local UI state read at click time.
+  const rangeScopeRef = useRef<'song' | 'loop'>('song');
+  const loopRange = resolveExportRange(
+    { enabled: loopEnabled, startBeat: loopStartBeat, endBeat: loopEndBeat },
+    project.lengthBeats,
+  );
+  // The option only applies while a usable loop exists; otherwise export the whole song.
+  const currentRange = () =>
+    rangeScopeRef.current === 'loop' && loopRange.ok ? loopRange.range : undefined;
   const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
   const replaceProject = useStore((s) => s.replaceProject);
 
@@ -194,7 +242,11 @@ export function ExportMenuContent({
     const operation = 'midi-export' satisfies ExportOperation;
     if (!beginOperation(operation)) return;
     try {
-      const bytes = projectToMidi(project);
+      const exportRange = currentRange();
+      const bytes = projectToMidi(
+        project,
+        exportRange ? { range: exportRange } : undefined,
+      );
       const fileName = `${stem}.mid`;
       if (isNative) {
         const result = await nativeFileGateway.exportMidi(bytes, fileName);
@@ -217,7 +269,11 @@ export function ExportMenuContent({
     const operation = 'wav-export' satisfies ExportOperation;
     if (!beginOperation(operation)) return;
     try {
-      const rendered = await renderProjectToWav(project, { ...wavFormatRef.current });
+      const exportRange = currentRange();
+      const rendered = await renderProjectToWav(project, {
+        ...wavFormatRef.current,
+        ...(exportRange ? { range: exportRange } : {}),
+      });
       const fileName = `${stem}.wav`;
       const result = await saveWavRenderLease(rendered, fileName, {
         runtime: isNative ? 'native' : 'web',
@@ -240,8 +296,10 @@ export function ExportMenuContent({
     const operation = 'track-wav-export' satisfies ExportOperation;
     if (!beginOperation(operation)) return;
     try {
+      const exportRange = currentRange();
       const rendered = await renderSelectedTrackToWav(project, selectedWav.track.id, {
         ...wavFormatRef.current,
+        ...(exportRange ? { range: exportRange } : {}),
       });
       const fileName = selectedTrackWavFileName(project.title, selectedWav.track.name);
       const result = await saveWavRenderLease(rendered, fileName, {
@@ -486,6 +544,11 @@ export function ExportMenuContent({
                   {renderingTrack ? '選択トラックを書き出し中…' : '選択トラックをWAV'}
                 </button>
               </div>
+              <ExportRangeControl
+                scopeRef={rangeScopeRef}
+                unavailableReason={loopRange.ok ? null : loopRange.message}
+                disabled={operationBusy}
+              />
               <WavFormatControls formatRef={wavFormatRef} disabled={operationBusy} />
               <p className="export-menu__hint">
                 MIDIは他のアプリで編集でき、WAVはそのまま再生・共有できます。

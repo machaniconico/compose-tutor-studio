@@ -213,6 +213,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Project menuでは、MIDIを「他アプリとの音符中心の交換形式」と説明する。MIDIへclip / loop / alias / preset / effects / mute / solo / groove / section / chord semanticsの完全復元を示唆しない
 - Exportダイアログの「音源として書き出す」にWAV形式の1行(サンプルレート 44.1 / 48 kHz、ビット数 16 / 24 bit、ディザ checkbox)を置く。既定は44.1 kHz・16 bit・ディザOFFで、以前と同じファイルが出る。ディザは16 bitのときだけ選べ、24 bitではdisabledにする。書き出し中は3つとも無効化する。選択はダイアログを開いている間のUI状態でProjectには保存しない
 - MIDI書き出しは既定でGM音色(Program Change)と調号を含める。書き出しメニューには専用の切替UIを追加せず、`projectToMidi`の`includeProgramAndKey`オプションだけで切り替える。ユーザー向け文言は「音色と調号つき」のような初心者向けの短い説明に限る
+- 同じセクションのWAV形式の1行の上に「書き出す範囲」(曲全体 / ループ範囲だけ)を1行で置き、MIDI・WAV・選択トラックWAVの3つに共通で効かせる。既定は曲全体。ループが有効でない、または長さがない時は「ループ範囲だけ」を選べず(disabled)、隣に「ループ範囲がまだ決まっていません。ルーラーをドラッグしてループ範囲を決めると、その部分だけを書き出せます。」などの理由を表示する(最小ウィンドウでは折り返す)。選択はダイアログ内のUI状態でProjectには保存しない
 - MIDI書き出しで量子化後の同一Track・同一音程が重なる場合はfile dialog / browser downloadへ進まず、「同じ音程のノートが重なっているためMIDIを書き出せません。重なりを短くするか、1つのノートにまとめてください。」とerror alertで案内する
 - MIDI importは現在の曲へ加算し、BPM / 拍子 / key / scaleを変更しない。完了statusは単数のTrack名ではなく、`Nトラック・M音を追加しました`を読み上げる
 - 成功後は先頭の追加Track / Clipを選択し、drumならDrum Editor、instrumentならPiano Rollを表示する。C2〜C6外のnoteは保持するが画面外であることを件数付きで知らせる
