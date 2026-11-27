@@ -226,6 +226,11 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - 表示小節はClip開始位置から`timeSignatureMap`をたどって導出する。beat 0だけの固定mapでは`max(1, ceil(clip.lengthBeats / beatsPerBar))`と一致する。小節途中で終わるimported clipでも最終partial barを表示し、map-awareなstep開始beatがclip終端より前のcellだけを編集可能にする。終端と同じまたは後のcellはdisabledにして範囲外と読み上げる
 - 表示のためにclip length、stepsPerBar、DrumEventをpaddingまたは丸めない
 
+### 2.8.1 伴奏パターン（アシスタント）
+
+- アシスタントパネルのベース生成の下に「伴奏パターン」を置く。入力は音色（既定はピアノ風）、はじめ・おわりの小節（1始まり）、音域（低め・ふつう・高め）、パターン5種（`aria-pressed`のトグル）、「前のコードから近い音でつなぐ」。生成先のトラックは選ばせず、常に新しいトラック「伴奏」を作る。
+- 「伴奏を作る」で、新しいトラックと範囲を覆うクリップを作り、結果は`role="status"`で「どのトラックの何小節に何音つくったか、コードがなく空けた小節」を表示する。作れないときは`role="alert"`で理由（範囲外、トラック数の上限、録音中、ほかの操作の最中など）を日本語で出し、曲は変わらない。
+
 ### 2.9 カラオケ作成（ボーカルカット）
 
 - Top Barの常時表示buttonは可視ラベルを「カラオケ」、accessible nameを「カラオケ用音源を作る」とし、Exportの隣に置く。dialog見出しは「カラオケ作成（ボーカルカット）」とする

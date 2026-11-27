@@ -330,6 +330,19 @@ function scheduleProblem(
   return sameCounts(expected, countKeys(b)) ? null : SOUND_CHANGED;
 }
 
+/**
+ * 新しい MIDI クリップを足した後の事後確認(P38 伴奏)。D2・D3 と同じ検査で、
+ * 「編集前の予定 + 新しい音の全配置」と編集後の予定が多重集合として完全に一致し、
+ * 同じトラック・同じ高さの重なりがないことを確かめる。問題がなければ null。
+ */
+export function newClipScheduleProblem(before: Project, after: Project, clipId: string): string | null {
+  const target = locateTarget(after, clipId);
+  if (typeof target === 'string') return SOUND_CHANGED;
+  const addedIds = new Set((target.owner.notes ?? []).map((note) => note.id));
+  return scheduleProblem(before, after, target, new Set(), addedIds, (pitch) =>
+    `新しい伴奏の音(${noteName(pitch)})が同じ高さで重なるため、取りやめました。曲はそのままです。`);
+}
+
 // ---------------------------------------------------------------------------
 // 純粋関数(テストしやすいように Project を受け取って返す)
 // ---------------------------------------------------------------------------
