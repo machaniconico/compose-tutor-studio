@@ -1,0 +1,4 @@
+# P04 ゴールデンは LF 固定(Windows の autocrlf でバイトが変わらないように)
+packages/project-model/tests/golden/expected/** text eol=lf
+packages/project-model/tests/golden/fixtures/** text eol=lf
+apps/studio/tests/golden/expected/** text eol=lf

@@ -1,0 +1,296 @@
+{
+  "id": "fx-maps",
+  "schemaVersion": 10,
+  "title": "Golden Tempo Meter Map",
+  "bpm": 100,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 5,
+  "lengthBeats": 19,
+  "tempoMap": [
+    {
+      "id": "t0",
+      "beat": 0,
+      "bpm": 100
+    },
+    {
+      "id": "t1",
+      "beat": 8,
+      "bpm": 140
+    },
+    {
+      "id": "t2",
+      "beat": 16,
+      "bpm": 90
+    }
+  ],
+  "timeSignatureMap": [
+    {
+      "id": "s0",
+      "beat": 0,
+      "numerator": 4,
+      "denominator": 4
+    },
+    {
+      "id": "s1",
+      "beat": 16,
+      "numerator": 3,
+      "denominator": 4
+    }
+  ],
+  "audioAssets": [],
+  "audioTakeFolders": [],
+  "automationLanes": [
+    {
+      "id": "lane-lead-vol",
+      "bypassed": false,
+      "target": {
+        "type": "track-volume",
+        "trackId": "lead"
+      },
+      "points": [
+        {
+          "id": "av1",
+          "beat": 4,
+          "value": 0.2,
+          "interpolation": "linear"
+        },
+        {
+          "id": "av2",
+          "beat": 18,
+          "value": 1,
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "id": "lane-lead-pan",
+      "bypassed": false,
+      "target": {
+        "type": "track-pan",
+        "trackId": "lead"
+      },
+      "points": [
+        {
+          "id": "ap1",
+          "beat": 0,
+          "value": -0.5,
+          "interpolation": "hold"
+        },
+        {
+          "id": "ap2",
+          "beat": 10,
+          "value": 0.5,
+          "interpolation": "hold"
+        }
+      ]
+    }
+  ],
+  "automationReadState": {
+    "globalEnabled": true,
+    "disabledTrackIds": []
+  },
+  "audioRouting": {
+    "outputs": [
+      {
+        "sourceTrackId": "lead",
+        "destination": {
+          "type": "master"
+        }
+      },
+      {
+        "sourceTrackId": "drums",
+        "destination": {
+          "type": "master"
+        }
+      }
+    ],
+    "sends": []
+  },
+  "tracks": [
+    {
+      "id": "lead",
+      "name": "Lead",
+      "type": "instrument",
+      "role": "general",
+      "clips": [
+        {
+          "id": "lc1",
+          "trackId": "lead",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 19,
+          "loop": false,
+          "notes": [
+            {
+              "id": "a",
+              "pitch": 60,
+              "startBeat": 0,
+              "durationBeats": 1,
+              "velocity": 90
+            },
+            {
+              "id": "b",
+              "pitch": 62,
+              "startBeat": 4,
+              "durationBeats": 1,
+              "velocity": 90
+            },
+            {
+              "id": "c",
+              "pitch": 64,
+              "startBeat": 8,
+              "durationBeats": 1,
+              "velocity": 90
+            },
+            {
+              "id": "d",
+              "pitch": 65,
+              "startBeat": 12,
+              "durationBeats": 1,
+              "velocity": 90
+            },
+            {
+              "id": "e",
+              "pitch": 67,
+              "startBeat": 15,
+              "durationBeats": 1,
+              "velocity": 90
+            },
+            {
+              "id": "f",
+              "pitch": 69,
+              "startBeat": 17,
+              "durationBeats": 1.5,
+              "velocity": 90
+            },
+            {
+              "id": "g",
+              "pitch": 72,
+              "startBeat": 6,
+              "durationBeats": 4,
+              "velocity": 90
+            },
+            {
+              "id": "h",
+              "pitch": 74,
+              "startBeat": 14,
+              "durationBeats": 4,
+              "velocity": 90
+            }
+          ]
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": [],
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      }
+    },
+    {
+      "id": "drums",
+      "name": "Drums",
+      "type": "drum",
+      "role": "general",
+      "clips": [
+        {
+          "id": "dc",
+          "trackId": "drums",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 19,
+          "loop": false,
+          "stepsPerBar": 16,
+          "drumEvents": [
+            {
+              "id": "x1",
+              "lane": "kick",
+              "stepIndex": 0,
+              "velocity": 100
+            },
+            {
+              "id": "x2",
+              "lane": "snare",
+              "stepIndex": 8,
+              "velocity": 100
+            },
+            {
+              "id": "x3",
+              "lane": "kick",
+              "stepIndex": 20,
+              "velocity": 100
+            }
+          ]
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": [],
+      "instrument": {
+        "type": "drumkit",
+        "preset": "standard"
+      }
+    },
+    {
+      "id": "m",
+      "name": "Master",
+      "type": "master",
+      "role": "general",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [
+    {
+      "id": "ch1",
+      "startBeat": 0,
+      "durationBeats": 8,
+      "symbol": "C",
+      "root": "C",
+      "quality": "maj",
+      "notes": [
+        0,
+        4,
+        7
+      ]
+    },
+    {
+      "id": "ch2",
+      "startBeat": 8,
+      "durationBeats": 8,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "min",
+      "notes": [
+        9,
+        0,
+        4
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec1",
+      "name": "A",
+      "type": "verse",
+      "startBar": 0,
+      "lengthBars": 4
+    }
+  ],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

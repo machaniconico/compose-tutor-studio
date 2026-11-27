@@ -1,0 +1,266 @@
+[
+ {
+  "beat": 0,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 48,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 0,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 52,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 0,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 55,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 4,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 55,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 4,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 59,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 4,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 62,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 8,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 57,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 8,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 60,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 8,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 64,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 12,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 53,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 12,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 57,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 12,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 60,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 16,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 48,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 16,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 52,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 16,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 55,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 20,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 55,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 20,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 59,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 20,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 62,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 24,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 57,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 24,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 60,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 24,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 64,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 28,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 53,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 28,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 57,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ },
+ {
+  "beat": 28,
+  "payload": {
+   "kind": "note",
+   "trackId": "track_mjuohs001i",
+   "preset": "warmPad",
+   "pitch": 60,
+   "durationBeats": 4,
+   "velocity": 80
+  }
+ }
+]
