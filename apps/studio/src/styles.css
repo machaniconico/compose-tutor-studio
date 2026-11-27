@@ -2032,6 +2032,23 @@ input[type='range'] {
   gap: var(--sp-1);
 }
 
+.export-menu__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+}
+
+.export-checklist__levels {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.export-checklist__levels p { margin: 0; }
+
 .export-menu [role="status"]:empty { position: absolute; }
 
 .export-menu__hint {

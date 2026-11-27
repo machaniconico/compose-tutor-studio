@@ -1,7 +1,7 @@
 // Export history persistence helpers. The storage-facing functions accept an
 // optional Storage object so the core behavior stays easy to test.
 
-import { RENDER_SAMPLE_RATE, type WavExportRange, type WavSampleRate } from '../../audio/wav';
+import { RENDER_SAMPLE_RATE, type WavBitDepth, type WavExportRange, type WavSampleRate } from '../../audio/wav';
 
 export const EXPORT_HISTORY_STORAGE_KEY = 'cts.exportHistory';
 export const EXPORT_HISTORY_LIMIT = 50;
@@ -15,6 +15,10 @@ export type ExportHistoryEntry = {
   projectId: string;
   sampleRate?: WavSampleRate;
   range?: WavExportRange;
+  bitDepth?: WavBitDepth;
+  dither?: boolean;
+  normalize?: boolean;
+  stems?: boolean;
 };
 
 export type ExportHistoryInput = Omit<ExportHistoryEntry, 'exportedAt'> & { exportedAt?: string };
@@ -45,6 +49,10 @@ export function addExportHistoryEntry(
     ...(input.kind === 'wav' && {
       sampleRate: input.sampleRate ?? RENDER_SAMPLE_RATE,
       range: input.range ?? 'full',
+      bitDepth: input.bitDepth ?? 16,
+      dither: input.bitDepth !== 24 && (input.dither ?? false),
+      normalize: input.normalize ?? false,
+      stems: input.stems ?? false,
     }),
   };
 
@@ -106,8 +114,17 @@ export function formatExportKindJa(kind: ExportHistoryKind): string {
   return KIND_LABELS[kind];
 }
 
-export function formatWavExportSettingsJa({ sampleRate, range }: Pick<ExportHistoryEntry, 'sampleRate' | 'range'>): string {
-  return `${sampleRate === 48000 ? '48 kHz' : '44.1 kHz'} / ${range === 'loop' ? 'ループ範囲' : '全体'}`;
+export function formatWavExportSettingsJa({
+  sampleRate, range, bitDepth, dither, normalize, stems,
+}: Pick<ExportHistoryEntry, 'sampleRate' | 'range' | 'bitDepth' | 'dither' | 'normalize' | 'stems'>): string {
+  return [
+    sampleRate === 48000 ? '48 kHz' : '44.1 kHz',
+    range === 'loop' ? 'ループ範囲' : '全体',
+    bitDepth === 24 ? '24ビット' : '16ビット',
+    stems ? 'ステム ZIP' : '曲をまとめた WAV',
+    dither && 'ディザあり',
+    normalize && 'ピーク調整あり',
+  ].filter(Boolean).join(' / ');
 }
 
 /** Compact visual marker for the export kind. */

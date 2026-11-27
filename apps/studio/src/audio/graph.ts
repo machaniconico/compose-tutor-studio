@@ -51,7 +51,14 @@ export class TrackGraph {
   private effects: TrackEffectChain | null = null;
   private readonly sends = new Map<string, GainNode>();
 
-  constructor(ctx: BaseAudioContext, master: AudioNode, track: Track, audible = true, startTime = ctx.currentTime) {
+  constructor(
+    ctx: BaseAudioContext,
+    master: AudioNode,
+    track: Track,
+    audible = true,
+    startTime = ctx.currentTime,
+    connectToMaster = true,
+  ) {
     this.ctx = ctx;
     this.master = master;
     this.trackId = track.id;
@@ -78,7 +85,7 @@ export class TrackGraph {
     // Apply the sum once. Two non-zero stereo pans in series pan the signal twice.
     if (this.automationPanner) this.automationPanner.pan.value = this.mixerPan;
     else this.panner.pan.value = this.mixerPan;
-    this.meterTap.connect(this.master);
+    if (connectToMaster) this.meterTap.connect(this.master);
     this.meterTap.connect(this.analyser);
     registerLiveTrackAnalyser(ctx, this.trackId, this.analyser);
     this.input = this.gain;
@@ -205,13 +212,14 @@ export function buildTrackGraphs(
   master: AudioNode,
   tracks: readonly Track[],
   when: number,
+  outputTrackId?: string,
 ): Map<string, TrackGraph> {
   const graphs = new Map<string, TrackGraph>();
   const audible = resolveMuteSolo(tracks);
   for (const track of tracks) {
     if (track.type === 'master') continue;
     const isAudible = audible.has(track.id);
-    const graph = new TrackGraph(ctx, master, track, isAudible, when);
+    const graph = new TrackGraph(ctx, master, track, isAudible, when, outputTrackId === undefined || track.id === outputTrackId);
     graph.apply(track, isAudible, when);
     graphs.set(track.id, graph);
   }

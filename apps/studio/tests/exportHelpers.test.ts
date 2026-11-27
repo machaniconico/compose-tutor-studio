@@ -1,10 +1,15 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { installLocalStorage } from './localStorageStub';
 import { projectToMidi } from '@cts/midi-io';
+import { REVERB_IMPULSE_SECONDS } from '../src/audio/effects';
+import { planStemRender, planWavRender } from '../src/audio/wav';
+import { exportStemTracks, prepareStemZip, stemFileNames } from '../src/features/export/exportStems';
 import { safeFileStem } from '../src/features/export/download';
 import { fileTransferFailureMessage } from '../src/features/export/exportFailureMessages';
 import {
   PROJECT_TEMPLATES,
+  createEmptyProject,
+  createTrack,
   deserializeProject,
   instantiateTemplate,
   serializeProject,
@@ -52,10 +57,17 @@ describe('export filename helper', () => {
   it('falls back for blank or dotted titles', () => {
     expect(safeFileStem('   ')).toBe('project');
     expect(safeFileStem(' ... ')).toBe('project');
+    expect(safeFileStem('\u200d\u200d')).toBe('project');
+    expect(safeFileStem('\u0301')).toBe('project');
+    expect(safeFileStem('👨\u200d👩')).toBe('👨\u200d👩');
   });
 
   it('keeps Japanese titles readable', () => {
     expect(safeFileStem('  雨 の 曲  ')).toBe('雨_の_曲');
+  });
+
+  it('preserves emoji joiners and variation selectors', () => {
+    expect(safeFileStem(' 👩‍🎤 / ✌️ ')).toBe('👩‍🎤_✌️');
   });
 
   it('avoids Windows reserved device names', () => {
@@ -142,5 +154,71 @@ describe('template instantiation', () => {
     const inStore = useStore.getState().project;
     expect(inStore.title).toBe(PROJECT_TEMPLATES['8bar-pop'].name);
     expect(validateProject(inStore).ok).toBe(true);
+  });
+});
+
+describe('stem export', () => {
+  const keys = createTrack('鍵盤', 'instrument', undefined, undefined, undefined, 'keys');
+  const bass = createTrack('ベース', 'instrument', undefined, undefined, undefined, 'bass');
+  const room = createTrack('部屋', 'bus', undefined, undefined, undefined, 'room');
+  const master = createTrack('マスター', 'master', undefined, undefined, undefined, 'master');
+
+  it('excludes muted tracks and the master and lists unmuted returns separately', () => {
+    expect(exportStemTracks([keys, { ...bass, mute: true }, room, master]).map(({ id }) => id))
+      .toEqual(['keys', 'room']);
+  });
+
+  it('includes only soloed sources and their unmuted returns in solo mode', () => {
+    const soloKeys = { ...keys, solo: true, sends: { room: 0.5 } };
+    const unused = { ...room, id: 'unused' };
+    expect(exportStemTracks([soloKeys, bass, room, unused, master]).map(({ id }) => id))
+      .toEqual(['keys', 'room']);
+    expect(exportStemTracks([soloKeys, bass, { ...room, mute: true }]).map(({ id }) => id))
+      .toEqual(['keys']);
+    expect(exportStemTracks([soloKeys, { ...bass, mute: true, solo: true }, room]).map(({ id }) => id))
+      .toEqual(['keys', 'room']);
+  });
+
+  it('uses safe, case-insensitively unique filenames, including suffix collisions', () => {
+    const names = ['../鍵盤\\\u0000', '鍵盤', '鍵盤_2', 'CON', 'Room', 'room'];
+    expect(stemFileNames(names.map((name) => ({ ...keys, name })))).toEqual([
+      '鍵盤.wav', '鍵盤_2.wav', '鍵盤_2_2.wav', 'project_CON.wav', 'Room.wav', 'room_2.wav',
+    ]);
+  });
+
+  it('preserves emoji in stem names while replacing other format characters', () => {
+    expect(stemFileNames([{ ...keys, name: '👩‍🎤\u200b✌️\u00ad曲' }])).toEqual(['👩‍🎤_✌️_曲.wav']);
+  });
+
+  it('refuses an oversized stem ZIP before creating any offline audio context', () => {
+    const tracks = Array.from({ length: 250 }, (_, index) => ({ ...keys, id: `keys-${index}` }));
+    const project = { ...createEmptyProject({ bpm: 120, lengthBars: 64 }), tracks };
+    const mix = planWavRender(project, { sampleRate: 48000 });
+    expect(() => prepareStemZip(mix, { bitDepth: 24 })).toThrow(/約 4 GB/);
+  });
+
+  it('plans the dry stem independently and uses the US-034 effect tail for the return', () => {
+    const source = { ...keys, solo: true, sends: { room: 0.7 } };
+    source.clips = [{
+      id: 'keys-clip', trackId: 'keys', type: 'midi', startBeat: 0, lengthBeats: 4, loop: false,
+      notes: [{ id: 'note', pitch: 60, startBeat: 2.75, durationBeats: 1, velocity: 100 }],
+    }];
+    const wetReturn = {
+      ...room,
+      effects: [{ id: 'verb', type: 'reverb' as const, enabled: true, params: { mix: 1 } }],
+    };
+    const project = { ...createEmptyProject({ bpm: 120, lengthBars: 1 }), loopRange: { startBeat: 2, endBeat: 3 },
+      tracks: [source, bass, wetReturn, master] };
+    const mix = planWavRender(project, { range: 'loop', sampleRate: 48000 });
+    const dry = planStemRender(mix, 'keys');
+    const wet = planStemRender(mix, 'room');
+    expect(dry.outputTrackId).toBe('keys');
+    expect(dry.project.tracks.map(({ id }) => id)).toEqual(['keys', 'master']);
+    expect(wet.outputTrackId).toBe('room');
+    expect(wet.project.tracks.map(({ id }) => id)).toEqual(['keys', 'room', 'master']);
+    expect(wet.events).toEqual(dry.events);
+    expect(wet.events).toMatchObject([{ time: 0.375, payload: { durationBeats: 0.25, cut: true } }]);
+    expect(wet.frames - dry.frames).toBe(REVERB_IMPULSE_SECONDS * 48000);
+    expect(source.solo).toBe(true);
   });
 });
