@@ -241,6 +241,19 @@ describe('NativeFileGateway', () => {
     expect(decodeURIComponent(surrogateHeader)).toBe('song_.mid');
   });
 
+  it('exports stem ZIPs only with a PK header and a .zip name', async () => {
+    const invoke: NativeRawInvoke = vi.fn(async () => ({ status: 'saved' }));
+    const zip = new Uint8Array(30);
+    zip.set([0x50, 0x4b, 0x03, 0x04]);
+    await expect(new NativeFileGateway(invoke).exportZip(zip, 'a - stems.ZIP')).resolves
+      .toEqual({ status: 'saved' });
+    expect(vi.mocked(invoke).mock.calls[0]![0]).toBe('file_export_zip');
+    await expect(new NativeFileGateway(invoke).exportZip(wavBytes(), 'a.zip')).rejects
+      .toMatchObject({ code: 'invalid-file' });
+    await expect(new NativeFileGateway(invoke).exportZip(zip, 'a.wav')).rejects
+      .toMatchObject({ code: 'invalid-filename' });
+  });
+
   it('returns export cancellation and rejects non-exact native responses', async () => {
     const cancelled: NativeRawInvoke = vi.fn(async () => ({ status: 'cancelled' }));
     await expect(

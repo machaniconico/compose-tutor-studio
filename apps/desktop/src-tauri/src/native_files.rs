@@ -21,6 +21,9 @@ const MAX_SUGGESTED_FILENAME_HEADER_BYTES: usize = MAX_SUGGESTED_FILENAME_UTF8_B
 const PROJECT_MAX_BYTES: usize = 16 * 1024 * 1024;
 const MIDI_MAX_BYTES: usize = 8 * 1024 * 1024;
 const WAV_MAX_BYTES: usize = 192 * 1024 * 1024;
+// Stem ZIP holds one STORE-d WAV per track. The command clones the IPC body once
+// (and the native dialog await keeps it alive), so the cap is 1 GiB, not ZIP32's 4 GiB.
+const ZIP_MAX_BYTES: usize = 1024 * 1024 * 1024;
 const SOURCE_AUDIO_MAX_BYTES: usize = 128 * 1024 * 1024;
 const PROJECT_BUNDLE_MAX_BYTES: usize = 128 * 1024 * 1024;
 const PROJECT_BUNDLE_MANIFEST_MAX_BYTES: usize = 512 * 1024;
@@ -36,6 +39,7 @@ enum FileFormat {
     ProjectBundle,
     Midi,
     Wav,
+    Zip,
     SourceAudio,
 }
 
@@ -54,6 +58,7 @@ impl FileFormat {
             Self::ProjectBundle => PROJECT_BUNDLE_MAX_BYTES,
             Self::Midi => MIDI_MAX_BYTES,
             Self::Wav => WAV_MAX_BYTES,
+            Self::Zip => ZIP_MAX_BYTES,
             Self::SourceAudio => SOURCE_AUDIO_MAX_BYTES,
         }
     }
@@ -64,6 +69,7 @@ impl FileFormat {
             Self::ProjectBundle => "Compose Tutor portable project",
             Self::Midi => "MIDI file",
             Self::Wav => "WAV audio",
+            Self::Zip => "ZIP archive",
             Self::SourceAudio => "Supported audio",
         }
     }
@@ -74,6 +80,7 @@ impl FileFormat {
             Self::ProjectBundle => &["ctsbundle"],
             Self::Midi => &["mid", "midi"],
             Self::Wav => &["wav"],
+            Self::Zip => &["zip"],
             Self::SourceAudio => &["wav", "mp3", "m4a", "aac"],
         }
     }
@@ -84,6 +91,7 @@ impl FileFormat {
             Self::ProjectBundle => "Open a portable Compose Tutor project",
             Self::Midi => "Import a MIDI file",
             Self::Wav => "Open a WAV file",
+            Self::Zip => "Open a ZIP file",
             Self::SourceAudio => "Open source audio",
         }
     }
@@ -94,6 +102,7 @@ impl FileFormat {
             Self::ProjectBundle => "Export portable Compose Tutor project",
             Self::Midi => "Export MIDI file",
             Self::Wav => "Export WAV audio",
+            Self::Zip => "Export stem ZIP",
             Self::SourceAudio => "Export source audio",
         }
     }
@@ -185,6 +194,7 @@ fn extension_start(format: FileFormat, file_name: &str) -> Option<usize> {
             ascii_suffix_start(file_name, ".midi").or_else(|| ascii_suffix_start(file_name, ".mid"))
         }
         FileFormat::Wav => ascii_suffix_start(file_name, ".wav"),
+        FileFormat::Zip => ascii_suffix_start(file_name, ".zip"),
         FileFormat::SourceAudio => source_audio_format(file_name).map(|(_, start)| start),
     }
 }
@@ -209,6 +219,7 @@ fn has_expected_extension(format: FileFormat, file_name: &str) -> bool {
         FileFormat::ProjectBundle => ascii_suffix_start(file_name, ".ctsbundle").is_some(),
         FileFormat::Midi => extension_start(format, file_name).is_some(),
         FileFormat::Wav => ascii_suffix_start(file_name, ".wav").is_some(),
+        FileFormat::Zip => ascii_suffix_start(file_name, ".zip").is_some(),
         FileFormat::SourceAudio => source_audio_format(file_name).is_some(),
     }
 }
@@ -992,6 +1003,8 @@ fn validate_file_bytes(format: FileFormat, bytes: &[u8]) -> FileResult<()> {
         FileFormat::Wav => {
             bytes.len() >= 12 && has_ascii(bytes, 0, b"RIFF") && has_ascii(bytes, 8, b"WAVE")
         }
+        // Local file header signature of the first entry; an empty ZIP (EOCD only) is never a stem export.
+        FileFormat::Zip => bytes.len() >= 30 && has_ascii(bytes, 0, b"PK\x03\x04"),
         FileFormat::SourceAudio => [
             SourceAudioFormat::Wav,
             SourceAudioFormat::Mp3,
@@ -1473,6 +1486,14 @@ pub(crate) async fn file_export_wav(
     request: Request<'_>,
 ) -> FileResult<SaveFileResult> {
     export_file(window, request, FileFormat::Wav).await
+}
+
+#[tauri::command]
+pub(crate) async fn file_export_zip(
+    window: WebviewWindow,
+    request: Request<'_>,
+) -> FileResult<SaveFileResult> {
+    export_file(window, request, FileFormat::Zip).await
 }
 
 #[cfg(test)]
@@ -2238,6 +2259,41 @@ mod tests {
             clone_bounded_raw_body(&InvokeBody::Json(serde_json::json!([])), FileFormat::Midi),
             Err(NativeFileErrorDto::new(NativeFileErrorCode::InvalidRequest))
         );
+    }
+
+    fn valid_zip() -> Vec<u8> {
+        let mut bytes = b"PK\x03\x04".to_vec();
+        bytes.resize(30, 0);
+        bytes
+    }
+
+    #[test]
+    fn stem_zip_validates_header_size_and_file_name() {
+        assert!(validate_file_bytes(FileFormat::Zip, &valid_zip()).is_ok());
+        // Empty archive (end-of-central-directory only) and non-ZIP bytes are rejected.
+        let mut empty_archive = b"PK\x05\x06".to_vec();
+        empty_archive.resize(22, 0);
+        assert!(validate_file_bytes(FileFormat::Zip, &empty_archive).is_err());
+        assert!(validate_file_bytes(FileFormat::Zip, b"RIFF1234WAVEfmt ").is_err());
+        assert!(validate_file_bytes(FileFormat::Zip, b"PK\x03\x04").is_err());
+        assert!(validate_file_bytes(FileFormat::Zip, &[]).is_err());
+        assert!(validate_payload_size(FileFormat::Zip, ZIP_MAX_BYTES).is_ok());
+        assert_eq!(
+            validate_payload_size(FileFormat::Zip, ZIP_MAX_BYTES + 1)
+                .unwrap_err()
+                .code,
+            NativeFileErrorCode::FileTooLarge
+        );
+        assert_eq!(
+            normalize_suggested_file_name(FileFormat::Zip, "Song - stems.ZIP").unwrap(),
+            "Song - stems.ZIP"
+        );
+        assert_eq!(
+            normalize_suggested_file_name(FileFormat::Zip, "con.zip").unwrap(),
+            "_con.zip"
+        );
+        assert!(normalize_suggested_file_name(FileFormat::Zip, "song.wav").is_err());
+        assert!(normalize_suggested_file_name(FileFormat::Zip, "a/b.zip").is_err());
     }
 
     #[test]

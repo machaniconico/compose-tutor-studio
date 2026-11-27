@@ -9,6 +9,7 @@ export type ExportOperation =
   | 'midi-export'
   | 'wav-export'
   | 'track-wav-export'
+  | 'stem-zip-export'
   | 'project-export'
   | 'project-import'
   | 'portable-project-export'

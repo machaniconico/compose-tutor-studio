@@ -11,6 +11,7 @@ fn main() {
         "file_export_project_bundle",
         "file_export_midi",
         "file_export_wav",
+        "file_export_zip",
         "app_claim_close_request",
         "app_finish_close",
         "persistence_initialize",

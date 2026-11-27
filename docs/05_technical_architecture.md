@@ -602,3 +602,11 @@ renderer importはbundle全体を検証してからdistinct payloadをcontent-ad
 ### 選択Track WAV renderer
 
 full-mixとselected Trackは同じoffline renderer、export operation lock、lease handoffを使う。selected scopeはoriginal Projectからroutingを一度だけcompileし、pure downstream mixを`buildTrackGraphs`と`planAudioTail`へ供給する。schedule、asset preflight、decode lease、resource estimateはsource-only transient Project、graphとautomationはimmutableなoriginal Projectを参照する。schema、Rust command、permission、persistenceは変更しない。
+
+### ステムZIP
+
+- `features/export/exportStems.ts`が、鳴るInstrument / Drum / Audio Track(`computeAudibleTracks`でmute/soloを解決、Master / Busは除外)を1つずつ選択Track rendererで書き出し、`zipStore`(STORE、固定DOS日時1980-01-01、UTF-8 flag、CRC-32、Unix mode 0644)へ順に詰める。同じProjectと形式なら同じbytesになる
+- 対象Trackは、mixerと同じ`resolveAudioRoutingMix`(Bus経由のsolo / mute / sendを解決)で鳴り、Masterまで届くInstrument / Drum / Audio Trackである。soloされたBusはその入力源を残し、muteされたBusだけに流れるTrackは除く。
+- 全ステムの長さは、各Trackの`planSelectedTrackWavRender`(tail込み)のうち最長のframe数にそろえ、`WavRenderOptions.minFrames`で全ステムを同じ長さでrenderする。無音でpaddingするのではなく、各ステムは自分のdelay / reverb tailをその長さまで自然に含む。P50の形式options(サンプルレート・ビット数・ディザ)をそのまま渡し、P51のノーマライズは使わない。ループ範囲書き出し(P53)をマージした時は同じ範囲を全ステムへ渡す
+- メモリ: 事前にarchiveの正確なbyte数(各entryの`30 + 名前bytes + WAV bytes`のlocal entry、`46 + 名前bytes`のcentral entry、22 bytesの終端の合計)を計算し、1 GiB超とZIP32の限界(4 GiB、65,534ファイル)をrender前に拒否する。1度にrenderするのは1ステムだけで(そのステムのClipが使うdecode済み素材は、そのrenderの間だけ保持する)、rendererのFloat32 bufferは常に1ステム分で、各renderのleaseはZIPへ渡した直後に解放する。entry名は`NN_名前.wav`全体をUTF-8で200 bytes以内にcode point単位で切り詰め、重複解決の前に適用する。ZIPに残るのは符号化済みWAV bytesだけである
+- native: `file_export_zip`(専用permission `allow-file-export-zip`)は`file_export_wav`と同じ`export_file`を通り、候補名(`.zip`、240 bytes)、1 GiB上限、`PK\x03\x04`と最小30 bytesのheader、OS picker、temp write→atomic replaceを検証する。Webはbrowser downloadで、ネットワーク通信はしない。schema、persistenceは変更しない

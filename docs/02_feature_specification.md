@@ -21,6 +21,7 @@
 | Exercise | 理論演習 | Yes | コード判定、スケール判定、メロディ添削 |
 | AI Coach | 説明付き改善提案 | Optional | APIキー設定時のみ。MVPではモック可 |
 | Export | MIDI/WAV | Yes | MIDIはFormat 1の正規化projection、WAVは簡易レンダー |
+| Export | ステムZIP | Yes | 鳴るInstrument / Drum / Audio Trackごとに1つのWAVを書き出し、STOREのZIP 1つにまとめる。mixerのmute / solo / Bus経路で鳴らないTrack(soloされたBusの入力源は含み、muteされたBusだけに流れるTrackは除く)とMaster / Busは含めず、mix.wavも含めない。全ステムは同じ長さ(最長のtail込みrenderにそろえ、各ステムが自分のtailを含む)で、WAV形式(サンプルレート・ビット数・ディザ)は書き出しダイアログの選択に従い、ノーマライズはしない(ステム間の音量差を保つ)。合計1 GiB超は書き出す前に拒否する。ファイル名は`01_Melody.wav`の形式 |
 | Import | MIDI import | Yes | `.mid` / `.midi`を検証し、MTrkとchannelに応じた複数トラックを現在の曲へ追加する |
 | Vocal Cut | カラオケ作成 | Yes | ステレオ中央定位をローカル軽減し、A/B試聴後にPCM 16-bit WAVへ書き出す。ML stem分離ではない |
 | Track Management | Track追加・整理・音色 | Partial | production UIはinstrument / drum / stereo Busと音源fileからのAudio Trackを追加し、non-masterの複製・並べ替え、一般Trackの削除・改名、内蔵シンセ14音色と4つの音色調整を扱う。schema v4では学習role Trackも改名可能でroleを保持し、削除だけを保護する。Folder / Stackは未実装 |

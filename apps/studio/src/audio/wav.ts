@@ -162,6 +162,8 @@ export function planWavRender(
   audioClipPlans: readonly AudioClipPlaybackPlan[] = buildWavAudioClipPlans(project),
   suppliedRoutingState?: AudioTailRoutingState,
   format: WavFormatOptions = {},
+  /** Pad the render to at least this many frames (stems share one length). */
+  minFrames = 1,
 ): WavRenderPlan {
   const { sampleRate, bitDepth } = resolveWavFormat(format);
   assertWavSourceOccurrenceBudget(resolvedEvents, audioClipPlans);
@@ -178,7 +180,7 @@ export function planWavRender(
     suppliedRoutingState,
   );
   const totalSeconds = tail.totalSeconds;
-  const frames = Math.max(1, Math.ceil(totalSeconds * sampleRate));
+  const frames = Math.max(1, minFrames, Math.ceil(totalSeconds * sampleRate));
   const floatOutputBytes = frames * RENDER_CHANNELS * Float32Array.BYTES_PER_ELEMENT;
   const pcmBytes = 44 + frames * RENDER_CHANNELS * (bitDepth / 8);
   // The renderer owns one PCM encoder buffer. The full export reservation
@@ -555,6 +557,8 @@ export type WavRenderOptions = WavFormatOptions & Readonly<{
   audioAssetCache?: AudioAssetPlaybackCache;
   audioClipBufferCache?: AudioClipBufferCache;
   signal?: AbortSignal;
+  /** Pad the output with silence to at least this many frames (stem alignment). */
+  minFrames?: number;
 }>;
 
 export type WavRenderScope =
@@ -765,6 +769,36 @@ export async function renderSelectedTrackToWav(
   );
 }
 
+/** Plan one selected-Track render without allocating audio, for stem sizing. */
+export function planSelectedTrackWavRender(
+  project: Project,
+  trackId: string,
+  format: WavFormatOptions = {},
+  minFrames?: number,
+): WavRenderPlan {
+  const sourceProject = resolveWavRenderProject(project, { kind: 'selected-track', trackId });
+  const compiledRouting = compileAudioRouting(project);
+  if (!compiledRouting.ok) {
+    const first = compiledRouting.errors[0];
+    throw new Error(
+      `Audio routing is invalid.${first ? ` ${first.path}: ${first.message}` : ''}`,
+    );
+  }
+  const routingMix = resolveSelectedTrackRoutingMix(project, trackId, compiledRouting.plan);
+  return planWavRender(
+    project,
+    buildWavScheduleEvents(sourceProject),
+    buildWavAudioClipPlans(sourceProject),
+    {
+      plan: compiledRouting.plan,
+      audibleChannelIds: routingMix.audibleChannelIds,
+      activeEdgeIds: routingMix.activeEdgeIds,
+    },
+    format,
+    minFrames,
+  );
+}
+
 async function renderWavWithRouting(
   project: Project,
   sourceProject: Project,
@@ -781,7 +815,7 @@ async function renderWavWithRouting(
   }, {
     sampleRate: options.sampleRate ?? DEFAULT_WAV_FORMAT.sampleRate,
     bitDepth: options.bitDepth ?? DEFAULT_WAV_FORMAT.bitDepth,
-  });
+  }, options.minFrames);
   assertRoutingGraphNodeBudget(project, routingPlan, 'disabled');
   const { index: musicalTime, tempo } = createProjectMusicalTime(project);
   const audioAssetCache = options.audioAssetCache ?? getAudioAssetPlaybackCache();

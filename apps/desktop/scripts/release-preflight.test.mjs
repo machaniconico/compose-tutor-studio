@@ -57,6 +57,7 @@ const productionPermissions = [
   'allow-file-export-project-bundle',
   'allow-file-export-midi',
   'allow-file-export-wav',
+  'allow-file-export-zip',
   'allow-app-claim-close-request',
   'allow-app-finish-close',
   'core:webview:allow-clear-all-browsing-data',
