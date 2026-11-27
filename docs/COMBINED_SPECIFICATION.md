@@ -708,8 +708,13 @@ Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生pass�
 
 ### 10.2 WAV
 
-- MVPは44.1kHz stereo
-- MVPはPCM 16-bit。24-bitとsample rate選択は後続検討
+- 既定は44.1kHz stereo・PCM 16-bit・ディザOFF。この既定の出力はP50以前のmainとバイト単位で同一(固定した旧encoderとの一致テストで守る)
+- 書き出しオプション: サンプルレート44.1 / 48 kHz、ビット深度16 / 24 bit、ディザON / OFF。選択はExportダイアログ内のUI状態で、Projectやschemaには保存しない。全体WAVと選択TrackのWAVに同じ設定を使う
+- RIFFはword境界に揃える。data sizeが奇数(24-bitのmonoで奇数frame等)の時はdata chunkの後ろに0の1 byte padを置き、RIFF sizeにはpadを含め、data sizeには含めない。RIFF sizeが32-bitに収まらない出力は、確保の前に`RangeError`で拒否する
+- 24-bitはlittle-endian 3 byte PCM(fmt chunkの`bitsPerSample` 24、`blockAlign`、`byteRate`を正しく書く)。full scaleを超える値はwrapせずclampし、+1.0は`0x7FFFFF`、-1.0は`-0x800000`になる。24-bitにはディザをかけない
+- ディザは16-bitへ丸める時だけのTPDF(±1 LSB)。PRNGは固定seed(`0x43545335`)の線形合同法で、Math.randomを使わない。同じ描画結果なら同じbytesになり、テストを再現できる。ディザ後もclampする。値がちょうど0のsample(デジタル無音)にはディザをかけず0のまま出力し、PRNGも進めない
+- 48 kHzは`OfflineAudioContext`を48000で生成し、tail計画・frame数・resource予算のsample rateもこれに合わせる。frame数は`ceil(totalSeconds × sampleRate)`
+- サイズ予算はPCM bufferを`bitDepth / 8`で見積もる。48 kHz / 24-bitは同じ曲でも44.1 kHz / 16-bitより大きく見積もられ、`OfflineAudioContext`生成前に`WavRenderLimitError`で拒否する(例: 5分の曲+40秒tailは44.1 kHz / 16-bit・48 kHz / 16-bitで通り、48 kHz / 24-bitは拒否)。native保存の上限192 MiBは変えない
 - 内蔵instrument / drumとAudio Trackをレンダー対象にし、Audio Clipはliveと同じshared planner、source range、gain、fade、loopを使う
 - ライブ自然終了とWAVは、resolved eventとAudio Clip regionから同じ`planAudioTail`を使う。instrumentはノート長とpreset ADSR、oscillator停止padを、drumは各laneの実source停止時刻を、Audio Trackはtrim / loop後の可聴source終端を使う。source終端をrouting DAG順に伝播し、main / post-fader sendではsource Track insert、到達BusごとにBus insertのtail-timeを加える。pre-fader sendはsource fader / insert / panを迂回して送るためsource insert tailをそのedgeへ持ち込まず、到達後のBus insertは加える。常設Master limiterは全体へ1回だけ加え、可聴sourceがないrenderにはeffectsやlimiterだけを理由とするtailを追加しない
 - enabledなDelay / Reverbは振幅0.001（-60 dB）以上の最後の出力まで含め、exact thresholdも含む。Filterと3段EQはWeb Audio 1.1係数の最大pole半径から36dBのstate headroomを持って-60dB到達時刻を求め、無効・不安定な係数は1 stage最大2秒でfail-closedする。各Compressorは規格固定6ms look-aheadを直列加算し、Master limiter分は全体へ1回だけ加える
@@ -1239,6 +1244,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - Project menuでは、metadata-onlyの操作を`編集情報のみ (.ctsproj.json)`、音声素材を含む操作を`音声素材を含む持ち運び用 (.ctsbundle)`として別section・別button・別file acceptへ分ける。`.ctsproj.json`は「曲の編集情報をexactに交換するが音声fileは含まない」、`.ctsbundle`は「利用中の音声素材を含む別端末用コピー」と操作前に説明する
 - `.ctsbundle` export/import中はProject dialog全体を`aria-busy`にし、384 MiB予約の取得からWeb downloadまたはnative saved/cancelled/error settlementまで他の重い音声処理とProject操作を競合させない。cancelは成功toastを出さず、import前の曲・選択・履歴を保つ
 - Project menuでは、MIDIを「他アプリとの音符中心の交換形式」と説明する。MIDIへclip / loop / alias / preset / effects / mute / solo / groove / section / chord semanticsの完全復元を示唆しない
+- Exportダイアログの「音源として書き出す」にWAV形式の1行(サンプルレート 44.1 / 48 kHz、ビット数 16 / 24 bit、ディザ checkbox)を置く。既定は44.1 kHz・16 bit・ディザOFFで、以前と同じファイルが出る。ディザは16 bitのときだけ選べ、24 bitではdisabledにする。書き出し中は3つとも無効化する。選択はダイアログを開いている間のUI状態でProjectには保存しない
 - MIDI書き出しで量子化後の同一Track・同一音程が重なる場合はfile dialog / browser downloadへ進まず、「同じ音程のノートが重なっているためMIDIを書き出せません。重なりを短くするか、1つのノートにまとめてください。」とerror alertで案内する
 - MIDI importは現在の曲へ加算し、BPM / 拍子 / key / scaleを変更しない。完了statusは単数のTrack名ではなく、`Nトラック・M音を追加しました`を読み上げる
 - 成功後は先頭の追加Track / Clipを選択し、drumならDrum Editor、instrumentならPiano Rollを表示する。C2〜C6外のnoteは保持するが画面外であることを件数付きで知らせる
@@ -1547,7 +1553,7 @@ Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/R
 - MIDI note scheduling
 - Built-in synth/drum playback
 - Basic effects
-- Offline render
+- Offline render(`renderProjectToWav`の`sampleRate` 44.1 / 48 kHz・`bitDepth` 16 / 24・`dither`。既定の16-bit・ディザOFFは従来とバイト一致、計画・予算は`WavRenderPlan.sampleRate / bitDepth`で拡縮する)
 - Audio Assetのchecksum付きresolve / decode cacheとAudio Clip window plan
 - Audio Clipのpitch解析、versioned WSOLA派生PCM Worker、content-addressed single-flight LRU
 - Transient center-vocal reduction and PCM 16-bit WAV encode

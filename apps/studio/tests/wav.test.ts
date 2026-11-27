@@ -55,7 +55,9 @@ import {
   buildWavAudioClipPlans,
   buildWavScheduleEvents,
   encodeWav,
+  encodeWavAsync,
   floatToInt16,
+  floatToInt24,
   planWavRender,
   renderProjectToWav,
   renderSelectedTrackToWav,
@@ -2258,5 +2260,258 @@ describe('renderProjectToWav graph ownership', () => {
     expect(master.disconnect).toHaveBeenCalledTimes(1);
     expect(limiter.disconnect).toHaveBeenCalledTimes(1);
     expect(getReservedHeavyAudioResourceBytes()).toBe(0);
+  });
+});
+
+/** Frozen copy of the pre-P50 PCM16 encoder: the byte-identity reference. */
+function legacyEncodeWavPcm16(channels: Float32Array[], rate: number): ArrayBuffer {
+  const numChannels = channels.length;
+  const numFrames = channels.reduce((max, c) => Math.max(max, c.length), 0);
+  const blockAlign = numChannels * 2;
+  const dataSize = numFrames * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const tag = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  tag(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  tag(8, 'WAVE');
+  tag(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  tag(36, 'data');
+  view.setUint32(40, dataSize, true);
+  let offset = 44;
+  for (let frame = 0; frame < numFrames; frame += 1) {
+    for (const channel of channels) {
+      const sample = frame < channel.length ? (channel[frame] ?? 0) : 0;
+      const c = sample < -1 ? -1 : sample > 1 ? 1 : sample;
+      view.setInt16(offset, c < 0 ? Math.round(c * 0x8000) : Math.round(c * 0x7fff), true);
+      offset += 2;
+    }
+  }
+  return buffer;
+}
+
+function pseudoRandomRender(seed: number, frames: number, gain: number): Float32Array {
+  const out = new Float32Array(frames);
+  let state = seed >>> 0;
+  for (let i = 0; i < frames; i += 1) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    out[i] = ((state / 2 ** 32) * 2 - 1) * gain;
+  }
+  return out;
+}
+
+describe('P50 WAV export options', () => {
+  it('16-bit, dither off is byte-identical to the legacy encoder for several renders', async () => {
+    const renders: Array<[Float32Array[], number]> = [
+      [[pseudoRandomRender(1, 4096, 0.5), pseudoRandomRender(2, 4096, 0.5)], 44100],
+      [[pseudoRandomRender(3, 1000, 2), pseudoRandomRender(4, 1000, 2)], 44100],
+      [[pseudoRandomRender(5, 777, 1)], 22050],
+      [[pseudoRandomRender(6, 100, 1), pseudoRandomRender(7, 60, 1)], 48000],
+      [[new Float32Array([0, 1, -1, 1.5, -1.5, NaN, 0.5, -0.5]), new Float32Array(8)], 44100],
+    ];
+    for (const [channels, rate] of renders) {
+      const expected = new Uint8Array(legacyEncodeWavPcm16(channels, rate));
+      expect(new Uint8Array(encodeWav(channels, rate))).toEqual(expected);
+      expect(new Uint8Array(encodeWav(channels, rate, {}))).toEqual(expected);
+      expect(
+        new Uint8Array(encodeWav(channels, rate, { bitDepth: 16, dither: false })),
+      ).toEqual(expected);
+      expect(
+        new Uint8Array(await encodeWavAsync(channels, rate, { chunkFrames: 7 })),
+      ).toEqual(expected);
+    }
+  });
+
+  it('writes a correct 24-bit header', () => {
+    const buffer = encodeWav([new Float32Array(3), new Float32Array(3)], 48000, {
+      bitDepth: 24,
+    });
+    const view = new DataView(buffer);
+    expect(view.getUint16(20, true)).toBe(1);
+    expect(view.getUint16(22, true)).toBe(2);
+    expect(view.getUint32(24, true)).toBe(48000);
+    expect(view.getUint32(28, true)).toBe(48000 * 6);
+    expect(view.getUint16(32, true)).toBe(6);
+    expect(view.getUint16(34, true)).toBe(24);
+    expect(view.getUint32(40, true)).toBe(18);
+    expect(view.getUint32(4, true)).toBe(36 + 18);
+    expect(buffer.byteLength).toBe(44 + 18);
+  });
+
+  it('encodes known 24-bit samples little-endian and clamps instead of wrapping', () => {
+    const samples = new Float32Array([1, -1, 0, 1.0001, -1.5, 0.5, Infinity, -Infinity]);
+    const bytes = new Uint8Array(encodeWav([samples], 44100, { bitDepth: 24 }));
+    const at = (i: number) => Array.from(bytes.slice(44 + i * 3, 47 + i * 3));
+    expect(at(0)).toEqual([0xff, 0xff, 0x7f]); // +1.0 -> 0x7FFFFF
+    expect(at(1)).toEqual([0x00, 0x00, 0x80]); // -1.0 -> -0x800000 exactly
+    expect(at(2)).toEqual([0, 0, 0]);
+    expect(at(3)).toEqual([0xff, 0xff, 0x7f]); // just over 1 clamps
+    expect(at(4)).toEqual([0x00, 0x00, 0x80]);
+    expect(at(5)).toEqual([0x00, 0x00, 0x40]); // round(0.5 * 0x7FFFFF) = 0x400000
+    expect(at(6)).toEqual([0xff, 0xff, 0x7f]);
+    expect(at(7)).toEqual([0x00, 0x00, 0x80]);
+    expect(floatToInt24(1)).toBe(0x7fffff);
+    expect(floatToInt24(-1)).toBe(-0x800000);
+  });
+
+  it('dithers 16-bit deterministically, within 1 LSB, and never wraps at full scale', () => {
+    const channels = [pseudoRandomRender(9, 2048, 1.2), pseudoRandomRender(10, 2048, 1.2)];
+    const plain = new Int16Array(encodeWav(channels, 44100).slice(44));
+    const a = encodeWav(channels, 44100, { dither: true });
+    const b = encodeWav(channels, 44100, { dither: true });
+    expect(new Uint8Array(a)).toEqual(new Uint8Array(b));
+    const dithered = new Int16Array(a.slice(44));
+    let changed = 0;
+    for (let i = 0; i < plain.length; i += 1) {
+      const delta = Math.abs(dithered[i]! - plain[i]!);
+      expect(delta).toBeLessThanOrEqual(2);
+      if (delta !== 0) changed += 1;
+    }
+    expect(changed).toBeGreaterThan(plain.length / 4);
+    const loud = new Int16Array(
+      encodeWav([new Float32Array([5, -5, 5, -5])], 44100, { dither: true }).slice(44),
+    );
+    // Over-range input stays pinned at full scale (noise may only lower it by 1 LSB), never wraps.
+    for (const v of [loud[0]!, loud[2]!]) expect(v).toBeGreaterThanOrEqual(0x7ffe);
+    for (const v of [loud[1]!, loud[3]!]) expect(v).toBeLessThanOrEqual(-0x7fff);
+  });
+
+  it('does not dither 24-bit output', () => {
+    const channels = [pseudoRandomRender(11, 512, 0.8)];
+    expect(new Uint8Array(encodeWav(channels, 44100, { bitDepth: 24, dither: true }))).toEqual(
+      new Uint8Array(encodeWav(channels, 44100, { bitDepth: 24 })),
+    );
+  });
+
+  it('a 1-bar render at 48 kHz has the expected frame count and scaled byte estimates', () => {
+    const clip: Clip = {
+      id: 'one-bar',
+      trackId: 'drums',
+      type: 'drum',
+      startBeat: 0,
+      lengthBeats: 4,
+      loop: false,
+      drumEvents: [],
+    };
+    const base = planWavRender(projectWithDrumClip(clip));
+    const hi = planWavRender(projectWithDrumClip(clip), undefined, undefined, undefined, {
+      sampleRate: 48000,
+      bitDepth: 24,
+    });
+    expect(base.frames).toBe(2 * 44100);
+    expect(hi.sampleRate).toBe(48000);
+    expect(hi.frames).toBe(2 * 48000);
+    expect(hi.estimatedBytes).toBe(hi.frames * RENDER_CHANNELS * 4 + 44 + hi.frames * 2 * 3);
+    expect(hi.exportEstimatedBytes).toBe(
+      hi.frames * RENDER_CHANNELS * 4 + (44 + hi.frames * 2 * 3) * 4,
+    );
+  });
+
+  it('scales the size guard: a render that fits at 44.1 kHz/16-bit is refused at 48 kHz/24-bit', () => {
+    const project = projectWithDrumClip({
+      id: 'five-minute-final-hat',
+      trackId: 'drums',
+      type: 'drum',
+      startBeat: 596,
+      lengthBeats: 4,
+      loop: false,
+      stepsPerBar: 16,
+      drumEvents: [{ id: 'hat-599-75', lane: 'openHat', stepIndex: 15, velocity: 100 }],
+    });
+    project.lengthBars = 150;
+    project.lengthBeats = 600;
+    project.tracks[0]!.effects = ['delay-1', 'delay-2'].map((id) => ({
+      id,
+      type: 'delay' as const,
+      enabled: true,
+      params: { delayTime: 1, feedback: 1, mix: 1 },
+    }));
+    expect(() => planWavRender(project)).not.toThrow();
+    expect(() =>
+      planWavRender(project, undefined, undefined, undefined, { sampleRate: 48000, bitDepth: 16 }),
+    ).not.toThrow();
+    expect(() =>
+      planWavRender(project, undefined, undefined, undefined, { sampleRate: 48000, bitDepth: 24 }),
+    ).toThrow(WavRenderLimitError);
+  });
+
+  it('pads an odd data chunk to an even length without counting the pad in the data size', async () => {
+    const mono = [new Float32Array([0.25])];
+    for (const encoded of [
+      encodeWav(mono, 44100, { bitDepth: 24 }),
+      await encodeWavAsync(mono, 44100, {}, { bitDepth: 24 }),
+    ]) {
+      const view = new DataView(encoded);
+      expect(encoded.byteLength).toBe(48);
+      expect(view.getUint32(4, true)).toBe(40);
+      expect(view.getUint32(40, true)).toBe(3);
+      expect(view.getUint8(47)).toBe(0);
+    }
+    // Even data sizes get no pad.
+    expect(encodeWav([new Float32Array(2)], 44100, { bitDepth: 24 }).byteLength).toBe(50);
+  });
+
+  it('keeps exact digital silence silent when dither is on', () => {
+    const out = new Int16Array(
+      encodeWav([new Float32Array(4)], 44100, { dither: true }).slice(44),
+    );
+    expect(Array.from(out)).toEqual([0, 0, 0, 0]);
+    const mixed = encodeWav([new Float32Array([0, 0.5, 0, -0.5])], 44100, { dither: true });
+    const again = encodeWav([new Float32Array([0, 0.5, 0, -0.5])], 44100, { dither: true });
+    expect(new Uint8Array(mixed)).toEqual(new Uint8Array(again));
+    const m = new Int16Array(mixed.slice(44));
+    expect(m[0]).toBe(0);
+    expect(m[2]).toBe(0);
+  });
+
+  it('refuses RIFF-oversized encodes before allocating', async () => {
+    const channels = Array.from({ length: 32 }, () => ({ length: 44_739_243 }) as Float32Array);
+    const alloc = vi.spyOn(globalThis, 'ArrayBuffer');
+    expect(() => encodeWav(channels, 44100, { bitDepth: 24 })).toThrow(RangeError);
+    await expect(encodeWavAsync(channels, 44100, {}, { bitDepth: 24 })).rejects.toThrow(RangeError);
+    expect(alloc).not.toHaveBeenCalled();
+    alloc.mockRestore();
+  });
+
+  it('rejects unsupported formats', () => {
+    const project = projectWithMasterOnly();
+    expect(() =>
+      planWavRender(project, undefined, undefined, undefined, { sampleRate: 96000 as 48000 }),
+    ).toThrow(RangeError);
+    expect(() =>
+      planWavRender(project, undefined, undefined, undefined, { bitDepth: 32 as 24 }),
+    ).toThrow(RangeError);
+  });
+
+  it('renders at the requested sample rate and writes a 24-bit file', async () => {
+    const audioBuffer = {
+      numberOfChannels: 2,
+      sampleRate: 48_000,
+      getChannelData: vi.fn(() => new Float32Array([0, 1])),
+    } as unknown as AudioBuffer;
+    installOfflineContext(() => Promise.resolve(audioBuffer));
+
+    const rendered = await renderProjectToWav(projectWithMasterOnly(), {
+      sampleRate: 48000,
+      bitDepth: 24,
+    });
+    const bytes = new Uint8Array(await rendered.blob.arrayBuffer());
+    rendered.release();
+
+    const ctor = vi.mocked(globalThis.OfflineAudioContext as unknown as (...a: unknown[]) => unknown);
+    expect(ctor.mock.calls.at(-1)?.[2]).toBe(48000);
+    const view = new DataView(bytes.buffer);
+    expect(view.getUint32(24, true)).toBe(48000);
+    expect(view.getUint16(34, true)).toBe(24);
+    expect(bytes.byteLength).toBe(44 + 2 * 2 * 3);
   });
 });

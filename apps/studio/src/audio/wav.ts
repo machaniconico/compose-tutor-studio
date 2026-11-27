@@ -76,8 +76,41 @@ import { createNoiseBuffer, DrumVoiceManager } from './drums';
 import { SynthVoiceManager } from './synth';
 import { planAudioTail, type AudioTailRoutingState } from './tail';
 
-/** Render sample rate (Hz). */
+/** Default render sample rate (Hz). Export options may select 48 kHz instead. */
 export const RENDER_SAMPLE_RATE = 44100;
+export const WAV_SAMPLE_RATES = [44100, 48000] as const;
+export type WavSampleRate = (typeof WAV_SAMPLE_RATES)[number];
+export const WAV_BIT_DEPTHS = [16, 24] as const;
+export type WavBitDepth = (typeof WAV_BIT_DEPTHS)[number];
+
+/** Encoder options. Defaults (16-bit, no dither) reproduce the original bytes exactly. */
+export type WavEncodeOptions = Readonly<{
+  bitDepth?: WavBitDepth;
+  /** TPDF dither; only applied when reducing to 16-bit (24-bit is never dithered). */
+  dither?: boolean;
+}>;
+
+/** Export format chosen in the export dialog. Not project data. */
+export type WavFormatOptions = WavEncodeOptions &
+  Readonly<{ sampleRate?: WavSampleRate }>;
+
+export const DEFAULT_WAV_FORMAT = {
+  sampleRate: RENDER_SAMPLE_RATE,
+  bitDepth: 16,
+  dither: false,
+} as const satisfies Required<WavFormatOptions>;
+
+function resolveWavFormat(format: WavFormatOptions): Required<WavFormatOptions> {
+  const sampleRate = format.sampleRate ?? DEFAULT_WAV_FORMAT.sampleRate;
+  const bitDepth = format.bitDepth ?? DEFAULT_WAV_FORMAT.bitDepth;
+  if (!WAV_SAMPLE_RATES.includes(sampleRate)) {
+    throw new RangeError(`Unsupported WAV sample rate: ${String(sampleRate)}`);
+  }
+  if (!WAV_BIT_DEPTHS.includes(bitDepth)) {
+    throw new RangeError(`Unsupported WAV bit depth: ${String(bitDepth)}`);
+  }
+  return { sampleRate, bitDepth, dither: format.dither ?? false };
+}
 /** Render channel count. */
 export const RENDER_CHANNELS = 2;
 /** Browser-safe ceiling for an offline render before allocating audio buffers. */
@@ -101,6 +134,8 @@ export class WavRenderLimitError extends Error {
 }
 
 export type WavRenderPlan = Readonly<{
+  sampleRate: WavSampleRate;
+  bitDepth: WavBitDepth;
   lengthBeats: number;
   songSeconds: number;
   uncappedTailSeconds: number;
@@ -111,7 +146,7 @@ export type WavRenderPlan = Readonly<{
   fadeEndSeconds: number | null;
   tailCapped: boolean;
   frames: number;
-  /** Offline Float32 output plus the PCM16 encoder buffer. */
+  /** Offline Float32 output plus the PCM encoder buffer (16- or 24-bit). */
   estimatedBytes: number;
   /**
    * Conservative end-to-end export peak: offline Float32 output plus PCM16
@@ -126,7 +161,9 @@ export function planWavRender(
   resolvedEvents: readonly ScheduledEvent[] = buildWavScheduleEvents(project),
   audioClipPlans: readonly AudioClipPlaybackPlan[] = buildWavAudioClipPlans(project),
   suppliedRoutingState?: AudioTailRoutingState,
+  format: WavFormatOptions = {},
 ): WavRenderPlan {
+  const { sampleRate, bitDepth } = resolveWavFormat(format);
   assertWavSourceOccurrenceBudget(resolvedEvents, audioClipPlans);
   const { tempo } = createProjectMusicalTime(project);
   const lengthBeats = project.lengthBeats;
@@ -136,19 +173,19 @@ export function planWavRender(
     resolvedEvents,
     0,
     lengthBeats,
-    RENDER_SAMPLE_RATE,
+    sampleRate,
     audioTailSources(audioClipPlans, tempo, 0),
     suppliedRoutingState,
   );
   const totalSeconds = tail.totalSeconds;
-  const frames = Math.max(1, Math.ceil(totalSeconds * RENDER_SAMPLE_RATE));
+  const frames = Math.max(1, Math.ceil(totalSeconds * sampleRate));
   const floatOutputBytes = frames * RENDER_CHANNELS * Float32Array.BYTES_PER_ELEMENT;
-  const pcm16Bytes = 44 + frames * RENDER_CHANNELS * 2;
-  // The renderer owns one PCM16 encoder buffer. The full export reservation
+  const pcmBytes = 44 + frames * RENDER_CHANNELS * (bitDepth / 8);
+  // The renderer owns one PCM encoder buffer. The full export reservation
   // additionally covers the Blob snapshot, native Blob.arrayBuffer() result,
   // and one IPC body copy. Web uses less, but shares this conservative plan.
-  const estimatedBytes = floatOutputBytes + pcm16Bytes;
-  const exportEstimatedBytes = floatOutputBytes + pcm16Bytes * 4;
+  const estimatedBytes = floatOutputBytes + pcmBytes;
+  const exportEstimatedBytes = floatOutputBytes + pcmBytes * 4;
   if (
     !Number.isFinite(songSeconds) ||
     !Number.isFinite(totalSeconds) ||
@@ -162,6 +199,8 @@ export function planWavRender(
     throw new WavRenderLimitError(songSeconds, exportEstimatedBytes);
   }
   return {
+    sampleRate,
+    bitDepth,
     lengthBeats,
     songSeconds,
     uncappedTailSeconds: tail.uncappedTailSeconds,
@@ -203,7 +242,7 @@ export function assertWavCombinedResourceBudget(
   retainedDecodedBytes = 0,
   derivedBytes = 0,
 ): number {
-  const assets = estimatePreparedAudioResources(preparedAudio, RENDER_SAMPLE_RATE);
+  const assets = estimatePreparedAudioResources(preparedAudio, plan.sampleRate);
   const assetId = preparedAudio.assets[0]?.asset.id ?? null;
   const resolvePeakBytes = checkedAudioResourceTotal([
     assets.rawBytes,
@@ -240,11 +279,11 @@ export function assertWavProjectCombinedResourceBudget(
 ): number {
   const assetPeak = assertProjectAudioAssetCombinedResourceBudget(
     project,
-    RENDER_SAMPLE_RATE,
+    plan.sampleRate,
     retainedDecodedBytes,
     derivedBytes,
   );
-  const assets = estimateProjectAudioResources(project, RENDER_SAMPLE_RATE);
+  const assets = estimateProjectAudioResources(project, plan.sampleRate);
   const renderPeakBytes = checkedAudioResourceTotal([
     plan.exportEstimatedBytes,
     assets.rawBytes,
@@ -272,7 +311,10 @@ export function floatToInt16(sample: number): number {
 }
 
 /**
- * Encode interleaved/planar channel data to a 16-bit PCM WAV.
+ * Encode interleaved/planar channel data to a 16- or 24-bit PCM WAV.
+ *
+ * With no options (16-bit, no dither) the output is byte-identical to the
+ * original PCM16 encoder.
  *
  * Accepts either an AudioBuffer or an array of per-channel Float32Arrays. Pure:
  * no Web Audio dependency beyond reading the buffer, no I/O. Returns an
@@ -281,8 +323,9 @@ export function floatToInt16(sample: number): number {
 export function encodeWav(
   source: AudioBuffer | Float32Array[],
   sampleRate?: number,
+  options: WavEncodeOptions = {},
 ): ArrayBuffer {
-  const encoder = prepareWavPcm16Encoder(source, sampleRate);
+  const encoder = prepareWavEncoder(source, sampleRate, options);
   encoder.writeFrames(0, encoder.numFrames);
   return encoder.buffer;
 }
@@ -296,15 +339,16 @@ export type EncodeWavAsyncOptions = Readonly<{
 }>;
 
 /**
- * Encode the same PCM16 contract as `encodeWav`, yielding between bounded frame
+ * Encode the same PCM contract as `encodeWav`, yielding between bounded frame
  * ranges so multi-minute local transforms do not freeze the editor UI.
  */
 export async function encodeWavAsync(
   source: AudioBuffer | Float32Array[],
   sampleRate?: number,
   options: EncodeWavAsyncOptions = {},
+  encodeOptions: WavEncodeOptions = {},
 ): Promise<ArrayBuffer> {
-  const encoder = prepareWavPcm16Encoder(source, sampleRate);
+  const encoder = prepareWavEncoder(source, sampleRate, encodeOptions);
   const chunkFrames =
     Number.isSafeInteger(options.chunkFrames) && (options.chunkFrames ?? 0) > 0
       ? (options.chunkFrames as number)
@@ -325,31 +369,64 @@ export async function encodeWavAsync(
   return encoder.buffer;
 }
 
-type WavPcm16Encoder = Readonly<{
+type WavEncoder = Readonly<{
   buffer: ArrayBuffer;
   numFrames: number;
   writeFrames: (startFrame: number, endFrame: number) => void;
 }>;
 
-function prepareWavPcm16Encoder(
+/** Fixed seed: the same render always dithers to the same bytes (reproducible exports). */
+const DITHER_SEED = 0x43545335;
+
+/** TPDF noise of +/-1 LSB: the difference of two uniform values. */
+function createTpdfNoise(): () => number {
+  let seed = DITHER_SEED;
+  const uniform = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  return () => uniform() - uniform();
+}
+
+/** Clamp to [-1, 1] and convert to a signed 24-bit int (asymmetric full scale). */
+export function floatToInt24(sample: number): number {
+  const clamped = sample < -1 ? -1 : sample > 1 ? 1 : sample;
+  return clamped < 0 ? Math.round(clamped * 0x800000) : Math.round(clamped * 0x7fffff);
+}
+
+function prepareWavEncoder(
   source: AudioBuffer | Float32Array[],
   sampleRate?: number,
-): WavPcm16Encoder {
+  options: WavEncodeOptions = {},
+): WavEncoder {
+  const bitDepth = options.bitDepth ?? 16;
+  if (!WAV_BIT_DEPTHS.includes(bitDepth)) {
+    throw new RangeError(`Unsupported WAV bit depth: ${String(bitDepth)}`);
+  }
+  const nextNoise = bitDepth === 16 && options.dither === true ? createTpdfNoise() : undefined;
   const channels: Float32Array[] = Array.isArray(source)
     ? source
     : collectChannels(source);
   const rate = sampleRate ?? (Array.isArray(source) ? RENDER_SAMPLE_RATE : source.sampleRate);
   const numChannels = channels.length;
   const numFrames = channels.reduce((max, channel) => Math.max(max, channel.length), 0);
-  const bytesPerSample = 2;
+  const bytesPerSample = bitDepth / 8;
   const blockAlign = numChannels * bytesPerSample;
   const byteRate = rate * blockAlign;
   const dataSize = numFrames * blockAlign;
-  const buffer = new ArrayBuffer(44 + dataSize);
+  // RIFF chunks are word-aligned: an odd data chunk gets one zero pad byte that
+  // counts toward the RIFF size but not the data size. Check the 32-bit RIFF
+  // limit before any allocation.
+  const padBytes = dataSize % 2;
+  const totalBytes = 44 + dataSize + padBytes;
+  if (!Number.isSafeInteger(totalBytes) || totalBytes > 0xffffffff) {
+    throw new RangeError('WAV output exceeds the 4 GiB RIFF size limit');
+  }
+  const buffer = new ArrayBuffer(totalBytes);
   const view = new DataView(buffer);
 
   writeAscii(view, 0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
+  view.setUint32(4, 36 + dataSize + padBytes, true);
   writeAscii(view, 8, 'WAVE');
   writeAscii(view, 12, 'fmt ');
   view.setUint32(16, 16, true);
@@ -358,7 +435,7 @@ function prepareWavPcm16Encoder(
   view.setUint32(24, rate, true);
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true);
+  view.setUint16(34, bitDepth, true);
   writeAscii(view, 36, 'data');
   view.setUint32(40, dataSize, true);
 
@@ -371,12 +448,28 @@ function prepareWavPcm16Encoder(
         for (let channelIndex = 0; channelIndex < numChannels; channelIndex += 1) {
           const channel = channels[channelIndex];
           const sample = channel && frame < channel.length ? (channel[frame] ?? 0) : 0;
-          view.setInt16(offset, floatToInt16(sample), true);
+          if (bitDepth === 24) {
+            const pcm = floatToInt24(sample);
+            view.setUint8(offset, pcm & 0xff);
+            view.setUint8(offset + 1, (pcm >> 8) & 0xff);
+            view.setUint8(offset + 2, (pcm >> 16) & 0xff);
+          } else if (nextNoise && sample !== 0) {
+            // Exact digital silence is never dithered (and does not advance the PRNG).
+            view.setInt16(offset, ditherToInt16(sample, nextNoise()), true);
+          } else {
+            view.setInt16(offset, floatToInt16(sample), true);
+          }
           offset += bytesPerSample;
         }
       }
     },
   };
+}
+
+function ditherToInt16(sample: number, noise: number): number {
+  const clamped = sample < -1 ? -1 : sample > 1 ? 1 : sample;
+  const scaled = (clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff) + noise;
+  return Math.max(-0x8000, Math.min(0x7fff, Math.round(scaled)));
 }
 
 function throwIfEncodingAborted(signal: AbortSignal | undefined): void {
@@ -457,7 +550,7 @@ export function buildWavAudioClipPlans(project: Project): AudioClipPlaybackPlan[
   }
 }
 
-export type WavRenderOptions = Readonly<{
+export type WavRenderOptions = WavFormatOptions & Readonly<{
   audioAssetResolver?: AudioAssetBytesResolver | null;
   audioAssetCache?: AudioAssetPlaybackCache;
   audioClipBufferCache?: AudioClipBufferCache;
@@ -685,6 +778,9 @@ async function renderWavWithRouting(
     plan: routingPlan,
     audibleChannelIds: routingMix.audibleChannelIds,
     activeEdgeIds: routingMix.activeEdgeIds,
+  }, {
+    sampleRate: options.sampleRate ?? DEFAULT_WAV_FORMAT.sampleRate,
+    bitDepth: options.bitDepth ?? DEFAULT_WAV_FORMAT.bitDepth,
   });
   assertRoutingGraphNodeBudget(project, routingPlan, 'disabled');
   const { index: musicalTime, tempo } = createProjectMusicalTime(project);
@@ -739,7 +835,7 @@ async function renderWavWithRouting(
       preparedPeakBytes - warpResources.retainedDerivedBytes,
     );
 
-    const ctx = new OfflineAudioContext(RENDER_CHANNELS, plan.frames, RENDER_SAMPLE_RATE);
+    const ctx = new OfflineAudioContext(RENDER_CHANNELS, plan.frames, plan.sampleRate);
 
     // Master bus topology and gain policy are shared with live playback.
     const { master, limiter } = buildMasterBus(ctx, ctx.destination);
@@ -908,7 +1004,10 @@ async function renderWavWithRouting(
       }
 
       const rendered = await ctx.startRendering();
-      const wav = encodeWav(rendered);
+      const wav = encodeWav(rendered, plan.sampleRate, {
+        bitDepth: plan.bitDepth,
+        dither: options.dither === true,
+      });
       const blob = new Blob([wav], { type: 'audio/wav' });
       const lease: WavRenderLease = {
         blob,
