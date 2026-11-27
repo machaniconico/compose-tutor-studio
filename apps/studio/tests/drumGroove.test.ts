@@ -167,6 +167,13 @@ describe('nextEventsInWindow persisted drum groove', () => {
     expect(nextEventsInWindow([midProject, projectEnd], 0, 5, 120, 0, 0, null)).toEqual([]);
   });
 
+  it('keeps the same audible hit when a loop pass offset rounds it onto the translated clip end', () => {
+    const hit = rawDrumEvent({ clipEndBeat: 0.5 });
+    const laterPass = 2 ** 53;
+    expect(resolveDrumOccurrence(hit, laterPass)?.beat).toBe(laterPass);
+    expect(resolveDrumOccurrence(rawDrumEvent({ clipEndBeat: 0.25 }), laterPass)).toBeNull();
+  });
+
   it('salts humanization by identity and stays deterministic', () => {
     const identities = Array.from({ length: 8 }, (_, index) =>
       rawDrumEvent({

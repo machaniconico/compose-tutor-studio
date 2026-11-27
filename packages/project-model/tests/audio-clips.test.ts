@@ -17,6 +17,7 @@ import {
   setAudioClipGain,
   setAudioClipLoop,
   splitAudioClip,
+  splitClip,
   trimAudioClipLeft,
   trimAudioClipRight,
   validateProject,
@@ -89,6 +90,44 @@ function audioFixture(options: {
     asset,
   };
 }
+
+describe('audio split candidate', () => {
+  it('rounds after integrating a triplet tempo change with decimal BPM', () => {
+    const base = createEmptyProject({ lengthBars: 2, clock: t0 });
+    base.bpm = base.tempoMap[0]!.bpm = 112.5;
+    base.tempoMap.push({ id: 'triplet-tempo', beat: 1 / 3, bpm: 90 });
+    const { project, clip } = audioFixture({ project: base });
+    // 25,600 / 3 frames before the change, 32,000 / 3 frames after it.
+    Object.assign(clip, { sourceFrameCount: 51_200, lengthBeats: 5 / 3 });
+    const result = splitClip(project, clip.id, 2 / 3);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(findClip(result.project, result.rightClipId)?.clip).toMatchObject({
+      sourceStartFrame: 19_200, sourceFrameCount: 32_000,
+    });
+  });
+
+  it('partitions the source range at an exact frame with a nonzero source start', () => {
+    const { project, clip } = audioFixture();
+    clip.sourceStartFrame = 12_000;
+    clip.sourceFrameCount = 72_000;
+    clip.lengthBeats = 3;
+    const result = splitClip(project, clip.id, 1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(findClip(result.project, clip.id)?.clip).toMatchObject({
+      sourceStartFrame: 12_000, sourceFrameCount: 24_000, lengthBeats: 1,
+    });
+    expect(findClip(result.project, result.rightClipId)?.clip).toMatchObject({
+      sourceStartFrame: 36_000, sourceFrameCount: 48_000, startBeat: 1, lengthBeats: 2,
+    });
+  });
+
+  it('rejects audio that has fades', () => {
+    const { project, clip } = audioFixture({ fadeInFrames: 1 });
+    expect(splitClip(project, clip.id, 1)).toMatchObject({ ok: false, code: 'split-audio-edited' });
+  });
+});
 
 function variableTempoProject(): Project {
   const project = createEmptyProject({ lengthBars: 2, clock: t0 });

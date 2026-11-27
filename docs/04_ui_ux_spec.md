@@ -105,6 +105,7 @@ Track Listの管理UI:
 #### 2.3.1 Arranger Clip編集
 
 - 選択Clipの開始・長さ、独立コピー、連動コピー、連動解除を1つの編集panelへまとめ、操作結果または拒否理由を`status` / `alert`で通知する
+- MIDI / Drum Clipの「分割位置（小節）」と「分割」は既存のクリップ概要の行に置く。音声クリップと同じく、小節番号と小節内の割合を入力する。初期値はクリップ中央に最も近いtickとする。成功時は右側のクリップを選択してフォーカスを移し、拒否時は入力値を保って理由を通知する
 - MIDI Clipだけに「素材をクリップ末尾まで繰り返す」checkboxを表示する。native checkboxのchecked状態をProjectの`loop`と一致させ、キーボード・読み上げ操作を保つ
 - 連動コピーでもcheckboxは選択instanceだけを変更する。「このクリップだけ」と明示し、正本の素材や別配置のloopまで変わったと誤解させない。変更はUndo/Redo可能にする
 - 独立/連動コピーまたは連動解除をkeyboardで実行して起点buttonが消える場合は、成功後の対象Clip buttonへフォーカスを移す。loop checkboxはSpace操作後もフォーカスを保ち、transportのSpace shortcutを起動しない
@@ -114,7 +115,7 @@ Track Listの管理UI:
 Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材名・状態と次の非破壊操作をまとめて表示する。
 
 - 配置、左端、右端はmap-awareな小節番号、gainは-96〜+24 dB、fade in / outはミリ秒で入力し、確定時にframeへ変換する。入力途中はlocal draftに留め、Enterまたはフォーカス移動で1回だけcommitする
-- loop checkbox、分割位置、「右へ独立コピー」、削除確認をkeyboardで操作できるようにする。Audio Clipのコピーはimmutable bytesだけを共有し、編集値は常に独立することを補足する
+- loop checkbox、小節で指定する分割位置、「右へ独立コピー」、削除確認をkeyboardで操作できるようにする。音声は指定位置に最も近い素材のサンプル境界で分割し、位置や素材の状態で拒否したときは理由を表示する。Audio Clipのコピーはimmutable bytesだけを共有し、編集値は常に独立することを補足する
 - loop中は左端trimとsplitをdisabledにし、source loop phaseをまだ保存していない理由を説明する。右端trimは反復の外側窓として利用できる
 - `ready` metadataでも実binaryがmissing / changed / unavailableならClip上とpanel内で色以外の状態文を表示し、素材を必要とする配置 / trim / gain / fade / loop / split / duplicate controlを無効にする。削除は利用可能にし、最後の参照なら現行ProjectのAudioAsset metadataも安全に外す。保存場所の確認または元の環境で開く案内を出す
 

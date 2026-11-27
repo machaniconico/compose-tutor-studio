@@ -68,7 +68,8 @@ function halfOpenOccurrenceCount(numerator: number, denominator: number): number
     : SATURATED_OCCURRENCE_COUNT;
 }
 
-function loopedNoteOccurrenceCount(
+/** Count one note's occurrences for an already known natural loop period. */
+export function loopedNoteOccurrenceCount(
   clipLengthBeats: number,
   patternLengthBeats: number,
   note: NoteEvent,

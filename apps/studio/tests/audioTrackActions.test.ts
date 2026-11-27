@@ -2,8 +2,12 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendAudioTrackClip,
   compileMusicalTime,
+  createAudioTrackClip,
+  createEmptyProject,
   createRecordedAudioTakeFolder,
+  findClip,
   inspectAudioPunchTarget,
+  splitAudioClip,
   type AudioClip,
   type Project,
   type ReadyAudioAsset,
@@ -2297,6 +2301,60 @@ describe('Studio Audio Track microphone recording', () => {
 });
 
 describe('Studio Audio Clip commands', () => {
+  it('accepts main’s beat, sixteenth and triplet audio splits with identical source frames', () => {
+    const sourceRange = (project: Project, id: string) => {
+      const clip = findClip(project, id)?.clip;
+      if (clip?.type !== 'audio' || clip.sourceStartFrame === undefined || clip.sourceFrameCount === undefined) {
+        throw new Error(`Missing source range for audio clip ${id}`);
+      }
+      return { start: clip.sourceStartFrame, frames: clip.sourceFrameCount };
+    };
+
+    const projectId = useStore.getState().project.id;
+    for (const bpm of [90, 100, 123, 140, 97.5]) {
+      for (const sampleRate of [44_100, 48_000]) {
+        const framesPerBeat = 60 * sampleRate / bpm;
+        const frameCount = Math.round(8 * framesPerBeat);
+        const base = { ...createEmptyProject({ lengthBars: 4, bpm }), id: projectId };
+        const asset = { ...punchFixtureAsset('split-matrix', frameCount + 12_345), sampleRate };
+
+        for (const [startBeat, sourceStartFrame] of [[0, 0], [4, 12_345]] as const) {
+          const created = createAudioTrackClip(base, asset, {
+            startBeat, sourceStartFrame, sourceFrameCount: frameCount,
+          });
+          if (!created.ok) throw new Error(created.error.message);
+          const { project, clipId } = created;
+          const clip = findClip(project, clipId)?.clip;
+          if (clip?.type !== 'audio') throw new Error('Missing audio clip fixture');
+          clip.lengthBeats = 8;
+
+          for (const offset of [1, 1 / 4, 3 / 4, 1 / 3, 2 / 3]) {
+            const splitBeat = startBeat + offset;
+            const label = `${bpm} BPM, ${sampleRate} Hz, start ${startBeat}, cut ${splitBeat}`;
+            // Main’s Studio command delegates its acceptance and rounding to splitAudioClip.
+            const main = splitAudioClip(project, clipId, { splitBeat });
+            expect(main.ok, label).toBe(true);
+            if (!main.ok) throw new Error(main.error.message);
+
+            useStore.setState({ project, past: [], future: [] });
+            const split = actions.splitStudioAudioClip(clipId, splitBeat);
+            if (!split.ok) throw new Error(`P32 refused ${label}: ${split.code}`);
+            expect(split, label).toMatchObject({ ok: true, changed: true });
+            if (!split.rightClipId) throw new Error(`P32 omitted the right clip at ${label}`);
+            const updated = useStore.getState().project;
+            const left = sourceRange(updated, clipId);
+            const right = sourceRange(updated, split.rightClipId);
+            expect(left, label).toEqual(sourceRange(main.project, clipId));
+            expect(right, label).toEqual(sourceRange(main.project, main.rightClipId));
+            expect(left.frames + right.frames, label).toBe(frameCount);
+            expect(right.start, label).toBe(left.start + left.frames);
+            expect(Math.abs(left.frames - offset * framesPerBeat), label).toBeLessThan(0.500000001);
+          }
+        }
+      }
+    }
+  });
+
   it('moves, trims, adjusts gain/fades/loop and restores each gesture with one Undo', async () => {
     const { result: imported } = await importFixture();
     const clipId = imported.clipId;

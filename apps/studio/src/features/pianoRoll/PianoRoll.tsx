@@ -44,7 +44,7 @@ import {
 import {
   commitNoteUpdates,
   duplicateNotesAt,
-  quantizeNotes,
+  quantizeNotesWithReport,
   removeNotes,
 } from '../../state/editorActions';
 import {
@@ -1274,12 +1274,12 @@ export function PianoRoll() {
 
   const quantizeSelection = useCallback(() => {
     if (!clip || liveSelectedNoteIds.length === 0) return;
-    const committed = quantizeNotes(clip.id, liveSelectedNoteIds, gridSnap);
-    setKeyboardAnnouncement(
-      committed.length > 0
-        ? `${committed.length}個のノートをクオンタイズしました。`
-        : '選択ノートはすでに現在のグリッド上です。',
-    );
+    const { committed, skippedForLoop } = quantizeNotesWithReport(clip.id, liveSelectedNoteIds, gridSnap);
+    const moved = committed.length > 0 ? `${committed.length}個のノートをクオンタイズしました。` : '';
+    const skipped = skippedForLoop > 0
+      ? `${skippedForLoop}個のノートは、繰り返しの長さや回数を保つために動かしませんでした。`
+      : '';
+    setKeyboardAnnouncement(moved + skipped || '選択したノートの位置は変わりませんでした。');
   }, [clip, gridSnap, liveSelectedNoteIds]);
 
   if (!clip || clip.type !== 'midi') {

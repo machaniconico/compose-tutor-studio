@@ -516,7 +516,12 @@ MIDIノート編集と同時に、スケール・コード・メロディ作法�
 
 ArrangerはTrack lane上のClipを選択し、開始位置と長さ、右隣への独立/連動複製、連動解除を操作できる。MIDI Clipには「素材をクリップ末尾まで繰り返す」checkboxを表示し、正本/aliasを問わず選択したtimeline instanceの`loop`だけを変更する。素材は正本と共有してもloop設定は各配置へ帰属し、Undo/Redoで往復できる。初期実装では連動Clipの長さは正本と一致し、正本に連動先がある間の単独resizeを拒否する。配置範囲はProject内のhalf-open区間に収め、重なりは既存の加算再生を維持する。
 
-Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset bytesを参照する独立Clipとして扱う。移動、左右trim、clip gain、frame単位fade、loop、split、独立複製、削除を操作でき、各確定はUndo 1回にする。非loopのtrimはtempo map上の経過秒を48 kHz source frameへ変換してrate 1.0のsource rangeとtimeline windowを同期する。loopのright trimは外側の反復窓だけを変える。loop phaseを永続化するfieldがない間は、loop中のleft trimとsplitを型付きに拒否する。
+- **D2（クオンタイズ）** ループする配置が素材を使う場合、素材の1周目に収まる最後のグリッドまでにそろえる。mainでは最後に終わる音が周期を決める。その音の終点や繰り返し回数が変わる移動は見送り、クリップ長と周期を保つ。
+- **D4（分割）** 小節位置を曲の先頭からの拍に変換し、1拍480 tickの目盛りで検証する。分割点はクリップの内側に置き、クリップの開始と開始点から分割点までの距離も整数tickにそろえる。ドラムの分割点は現在の拍子マップで打点を置ける位置に限る。
+- wave5では分割点をまたぐ音を左右のノートに分ける。mainでは後半を鳴らし直すと発音イベントが変わるため、またぐ音がある位置での分割は拒否する。成功時はすべてのノートの長さを保ち、両方のクリップに正の長さを持たせる。
+- 録音中、ループ中、連動コピーとその元クリップの分割は理由付きで拒否する。分割の前後で全トラックのライブ・WAVの発音イベント（反復ごとのドラムの鳴り方を含む）とMIDI書き出しの全バイトが一致したときだけ、Undo 1回で反映する。変更でドラムの鳴り方が変わる位置は拒否する。
+
+Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset bytesを参照する独立Clipとして扱う。移動、左右trim、clip gain、frame単位fade、loop、split、独立複製、削除を操作でき、各確定はUndo 1回にする。非loopのtrimはtempo map上の経過秒を48 kHz source frameへ変換してrate 1.0のsource rangeとtimeline windowを同期する。loopのright trimは外側の反復窓だけを変える。loop phaseを永続化するfieldがない間は、loop中のleft trimとsplitを型付きに拒否する。補正やフェードのない音声クリップは、分割点に最も近い素材のフレーム境界で分割する。丸めによるずれは素材の半フレーム以内とし、左右は元の素材範囲を隙間や重複なく参照する。素材とWAV出力のサンプルレートが異なる場合も同じ方法で分割する。
 
 複製後に解決される保存済みNote / DrumEvent payloadが200,000件を越える場合、操作はProject / history / selectionを変えず拒否し、ノート・ドラム・コピーを減らす案内を表示する。この永続予算ではMIDI Clip loopの派生音を増やさない。ライブはMIDI Clip loopの展開後Noteと派生Chord noteを含む実効scheduleを20,000件以下、WAVは全曲を一括scheduleするため10,000件以下に制限する。両者とも展開後onsetの0.75拍rolling window内を256件以下に検査する。transport loopは反復後のsteady-state密度も同じ上限で再検査し、超過時はper-track Web Audio graph / event nodeを作らず型付きに拒否する。WAV超過時はOfflineAudioContextと部分fileを作らない。
 
@@ -1138,6 +1143,7 @@ Track Listの管理UI:
 #### 2.3.1 Arranger Clip編集
 
 - 選択Clipの開始・長さ、独立コピー、連動コピー、連動解除を1つの編集panelへまとめ、操作結果または拒否理由を`status` / `alert`で通知する
+- MIDI / Drum Clipの「分割位置（小節）」と「分割」は既存のクリップ概要の行に置く。音声クリップと同じく、小節番号と小節内の割合を入力する。初期値はクリップ中央に最も近いtickとする。成功時は右側のクリップを選択してフォーカスを移し、拒否時は入力値を保って理由を通知する
 - MIDI Clipだけに「素材をクリップ末尾まで繰り返す」checkboxを表示する。native checkboxのchecked状態をProjectの`loop`と一致させ、キーボード・読み上げ操作を保つ
 - 連動コピーでもcheckboxは選択instanceだけを変更する。「このクリップだけ」と明示し、正本の素材や別配置のloopまで変わったと誤解させない。変更はUndo/Redo可能にする
 - 独立/連動コピーまたは連動解除をkeyboardで実行して起点buttonが消える場合は、成功後の対象Clip buttonへフォーカスを移す。loop checkboxはSpace操作後もフォーカスを保ち、transportのSpace shortcutを起動しない
@@ -1147,7 +1153,7 @@ Track Listの管理UI:
 Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材名・状態と次の非破壊操作をまとめて表示する。
 
 - 配置、左端、右端はmap-awareな小節番号、gainは-96〜+24 dB、fade in / outはミリ秒で入力し、確定時にframeへ変換する。入力途中はlocal draftに留め、Enterまたはフォーカス移動で1回だけcommitする
-- loop checkbox、分割位置、「右へ独立コピー」、削除確認をkeyboardで操作できるようにする。Audio Clipのコピーはimmutable bytesだけを共有し、編集値は常に独立することを補足する
+- loop checkbox、小節で指定する分割位置、「右へ独立コピー」、削除確認をkeyboardで操作できるようにする。音声は指定位置に最も近い素材のサンプル境界で分割し、位置や素材の状態で拒否したときは理由を表示する。Audio Clipのコピーはimmutable bytesだけを共有し、編集値は常に独立することを補足する
 - loop中は左端trimとsplitをdisabledにし、source loop phaseをまだ保存していない理由を説明する。右端trimは反復の外側窓として利用できる
 - `ready` metadataでも実binaryがmissing / changed / unavailableならClip上とpanel内で色以外の状態文を表示し、素材を必要とする配置 / trim / gain / fade / loop / split / duplicate controlを無効にする。削除は利用可能にし、最後の参照なら現行ProjectのAudioAsset metadataも安全に外す。保存場所の確認または元の環境で開く案内を出す
 

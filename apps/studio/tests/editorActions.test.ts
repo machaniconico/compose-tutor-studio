@@ -4,6 +4,8 @@ import {
   MAX_TRACK_EFFECTS,
   compileMusicalTime,
   drumStepToBeatOnTimeline,
+  duplicateClip,
+  setMidiClipLoop,
 } from '@cts/project-model';
 import { installLocalStorage } from './localStorageStub';
 import { subscribeAppEvents } from '../src/state/appEvents';
@@ -210,6 +212,54 @@ describe('replaceChordTrack', () => {
 });
 
 describe('quantizeNotes', () => {
+  it('keeps quantization inside a shared loop period without dropping a repeat or moving its anchor', () => {
+    const clipId = melodyClipId();
+    const store = useStore.getState();
+    expect(store.applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) => clip.id === clipId ? { ...clip, lengthBeats: 8 } : clip),
+      })),
+    }))).toBe(true);
+    for (const [startBeat, durationBeats] of [[1.75, 1.125], [2.25, 0.75], [1.9, 0.25]] as const) {
+      useStore.getState().addNote(clipId, { pitch: 60, startBeat, durationBeats, velocity: 90 });
+    }
+    const linked = duplicateClip(useStore.getState().project, clipId, { linked: true, startBeat: 8 });
+    if (!linked.ok) throw new Error(linked.reason);
+    const loop = setMidiClipLoop(linked.project, linked.clipId, true);
+    if (!loop.ok) throw new Error(loop.reason);
+    expect(useStore.getState().applyProjectChange(() => loop.project)).toBe(true);
+    const notes = actions.findClip(loop.project, clipId)!.notes!;
+    const moved = actions.quantizeNotes(clipId, notes.map((note) => note.id), 1);
+    expect(moved.map((note) => note.startBeat)).toEqual([1]);
+    expect(actions.findClip(useStore.getState().project, linked.clipId)?.notes?.map(
+      (note) => note.startBeat,
+    )).toEqual([1, 2.25, 1.9]);
+  });
+
+  it('does not quantize a loop note onto a swung grid line that would drop its last repeat', () => {
+    const clipId = melodyClipId();
+    expect(useStore.getState().applyProjectChange((project) => ({
+      ...project,
+      swing: 50,
+      tracks: project.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) => clip.id === clipId
+          ? { ...clip, lengthBeats: 1.35, loop: true }
+          : clip),
+      })),
+    }))).toBe(true);
+    useStore.getState().addNote(clipId, { pitch: 60, startBeat: 0, durationBeats: 1, velocity: 90 });
+    useStore.getState().addNote(clipId, {
+      pitch: 62, startBeat: 0.24, durationBeats: 0.125, velocity: 90,
+    });
+    const before = useStore.getState();
+    const target = actions.findClip(before.project, clipId)!.notes!.find((event) => event.pitch === 62)!;
+    expect(actions.quantizeNotes(clipId, [target.id], 0.25)).toEqual([]);
+    expect(useStore.getState().project).toBe(before.project);
+    expect(useStore.getState().past).toBe(before.past);
+  });
   it('snaps selected note starts to the grid', () => {
     const clipId = chordsClipId();
     useStore.getState().addNote(clipId, { pitch: 60, startBeat: 1.3, durationBeats: 1, velocity: 100 });

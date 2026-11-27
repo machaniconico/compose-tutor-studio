@@ -14,6 +14,7 @@ import {
   resolveClipSource,
   resizeClip,
   setMidiClipLoop,
+  splitClip,
   unlinkClip,
   updateNote,
   validateProject,
@@ -103,6 +104,96 @@ function linkedFixture(type: 'midi' | 'drum' = 'midi'): LinkedFixture {
     aliasPath: `tracks[${trackIndex}].clips[${aliasIndex}]`,
   };
 }
+
+describe('splitClip', () => {
+  it('splits at an absolute whole tick and keeps note ids, durations and the original project', () => {
+    const { project, source } = midiPattern();
+    source.startBeat = 4;
+    source.notes!.push({ id: 'right-note', pitch: 64, startBeat: 2, durationBeats: 1, velocity: 90 });
+    const result = splitClip(project, source.id, (5 * 480 + 1) / 480, t1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const left = findClip(result.project, source.id)!.clip;
+    const right = findClip(result.project, result.rightClipId)!.clip;
+    expect(left.notes).toEqual([source.notes![0]]);
+    expect(right.notes).toEqual([{ ...source.notes![1], startBeat: 2 - left.lengthBeats }]);
+    expect(left.startBeat + left.lengthBeats).toBe(right.startBeat);
+    expect(right.startBeat + right.lengthBeats).toBe(8);
+    expect(source.notes).toHaveLength(2);
+    expect(validateProject(result.project).ok).toBe(true);
+  });
+
+  it('accepts all whole-tick triplet positions at nonzero clip starts', () => {
+    expect(splitClipAtTriplet(480, 1 + 2 / 3)).toBe(true);
+    for (const startTick of [0, 480, 1920, 1680, 100, 3360]) {
+      for (const step of [160, 40]) {
+        for (let offset = step; offset < 8 * 480; offset += step) {
+          const at = (startTick + offset) / 480;
+          expect(splitClipAtTriplet(startTick, at), `start tick ${startTick}, cut ${at}`).toBe(true);
+        }
+      }
+    }
+
+    function splitClipAtTriplet(startTick: number, at: number): boolean {
+      const { project, source } = midiPattern();
+      Object.assign(source, { startBeat: startTick / 480, lengthBeats: 8, notes: [] });
+      return splitClip(project, source.id, at, t1).ok;
+    }
+  });
+
+  it('rejects clip edges, off-grid positions, hostile values and cuts through notes', () => {
+    const { project, source } = midiPattern();
+    for (const at of [0, 4, 5, 1 / 960, NaN, Infinity, '2', Symbol(), {
+      valueOf() { throw new Error('no coercion'); },
+    }]) {
+      expect(splitClip(project, source.id, at)).toMatchObject({
+        ok: false, project, code: 'split-invalid-position',
+      });
+    }
+    expect(splitClip(project, source.id, 0.5)).toMatchObject({
+      ok: false, project, code: 'split-crossing-note',
+    });
+    source.startBeat = 1 / 960;
+    expect(splitClip(project, source.id, 2)).toMatchObject({
+      ok: false, project, code: 'split-off-grid-start',
+    });
+    const inherited = Object.create(project) as Project;
+    expect(splitClip(inherited, source.id, 2).ok).toBe(false);
+    expect(splitClip(null as unknown as Project, source.id, 2).ok).toBe(false);
+  });
+
+  it('keeps linked copies, their source and looping clips intact', () => {
+    const { project, source, alias } = linkedFixture();
+    expect(splitClip(project, source.id, 2)).toMatchObject({ ok: false, code: 'split-linked-clip' });
+    expect(splitClip(project, alias.id, 6)).toMatchObject({ ok: false, code: 'split-linked-clip' });
+    const single = midiPattern();
+    single.source.loop = true;
+    expect(splitClip(single.project, single.source.id, 2)).toMatchObject({
+      ok: false, code: 'split-looping-clip',
+    });
+  });
+
+  it('recognizes a whole-tick drum step at a triplet cut', () => {
+    const project = createEmptyProject({ lengthBars: 8, clock: t0 });
+    const drum = project.tracks.find((track) => track.type === 'drum')!.clips[0]!;
+    Object.assign(drum, { startBeat: 1, lengthBeats: 4, stepsPerBar: 12, drumEvents: [] });
+    expect(splitClip(project, drum.id, 800 / 480)).toMatchObject({ ok: true });
+  });
+
+  it('requires a drum step and reindexes the candidate against the cut', () => {
+    const project = createEmptyProject({ lengthBars: 8, clock: t0 });
+    const drum = project.tracks.find((track) => track.type === 'drum')!.clips[0]!;
+    drum.drumEvents = [{ id: 'late-hit', lane: 'snare', stepIndex: 9, velocity: 88 }];
+    expect(splitClip(project, drum.id, 1 / 480)).toMatchObject({ ok: false, code: 'split-drum-grid' });
+    const result = splitClip(project, drum.id, 2);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(findClip(result.project, drum.id)?.clip.drumEvents).toEqual([]);
+    expect(findClip(result.project, result.rightClipId)?.clip.drumEvents).toEqual([
+      { ...drum.drumEvents[0], stepIndex: 1 },
+    ]);
+  });
+});
 
 describe('linked clip content', () => {
   it('stores one payload owner and resolves an alias at its own placement', () => {

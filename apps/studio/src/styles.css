@@ -2299,8 +2299,24 @@ button.pr__note:hover {
   font-size: 11px;
 }
 
-.arranger__clip-actions button {
+.arranger__clip-actions button,
+.arranger__split button {
   min-height: 32px;
+}
+
+.arranger__split,
+.arranger__split label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.arranger__split {
+  flex-wrap: wrap;
+}
+
+.arranger__split input {
+  width: 6ch;
 }
 
 .arranger__loop-toggle {
@@ -2513,7 +2529,8 @@ button.pr__note:hover {
     bottom: 2px;
   }
 
-  .arranger__clip-actions button {
+  .arranger__clip-actions button,
+  .arranger__split button {
     min-height: 44px;
   }
 }

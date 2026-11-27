@@ -25,6 +25,8 @@ import {
   MAX_PROJECT_LENGTH_BARS,
   MAX_PROJECT_TIMELINE_BEATS,
   MIN_EVENT_DURATION_BEATS,
+  PPQ,
+  SWING_GRID_BEATS,
   barToBeatAt,
   beatToBarPosition,
   beatsPerBar as beatsPerBarOf,
@@ -32,9 +34,13 @@ import {
   compileDrumStepProjector,
   compileMusicalTime,
   findLearningTrack,
+  isGrooveResolvedMode,
+  loopedNoteOccurrenceCount,
+  midiClipNaturalPatternLength,
   normalizeLearningTrackName,
   projectDrumStep,
   resolveClipContent,
+  resolveGrooveNoteSpan,
   timeSignatureAtBeat,
 } from '@cts/project-model';
 import {
@@ -556,18 +562,55 @@ export function duplicateNotesAt(
   return committedDuplicates;
 }
 
+function keepsLoopRepeats(project: Project, clip: Clip, period: number, before: NoteEvent, after: NoteEvent): boolean {
+  const count = loopedNoteOccurrenceCount(clip.lengthBeats, period, before);
+  if (count === Number.MAX_SAFE_INTEGER
+    || count !== loopedNoteOccurrenceCount(clip.lengthBeats, period, after)
+  ) return false;
+  if (!isGrooveResolvedMode(project)) return true;
+
+  const end = clip.startBeat + clip.lengthBeats;
+  // Swing and tick rounding can only drop hits close to the end of the clip.
+  const safeBeat = Math.min(project.lengthBeats, end) - SWING_GRID_BEATS - 1 / PPQ;
+  for (let repeat = count - 1; repeat >= 0; repeat -= 1) {
+    const oldBeat = clip.startBeat + (before.startBeat + repeat * period);
+    const newBeat = clip.startBeat + (after.startBeat + repeat * period);
+    if (Math.max(oldBeat, newBeat) < safeBeat) break;
+    if (
+      Boolean(resolveGrooveNoteSpan(project, oldBeat, before.durationBeats, end))
+      !== Boolean(resolveGrooveNoteSpan(project, newBeat, after.durationBeats, end))
+    ) return false;
+  }
+  return true;
+}
+
 /** Quantize the start of the given notes (within a clip) to a grid snap. */
 export function quantizeNotes(
   clipId: string,
   noteIds: readonly string[],
   snap: number,
 ): NoteEvent[] {
+  return quantizeNotesWithReport(clipId, noteIds, snap).committed;
+}
+
+export function quantizeNotesWithReport(
+  clipId: string,
+  noteIds: readonly string[],
+  snap: number,
+): { committed: NoteEvent[]; skippedForLoop: number } {
+  if (typeof snap !== 'number' || !Number.isFinite(snap)) return { committed: [], skippedForLoop: 0 };
   const ids = new Set(noteIds);
   const state = useStore.getState();
   const clip = findClip(state.project, clipId);
-  if (!clip || clip.type !== 'midi') return [];
+  if (!clip || clip.type !== 'midi') return { committed: [], skippedForLoop: 0 };
+  const ownerId = clipContentOwnerId(state.project, clipId);
+  const loops = state.project.tracks.flatMap((track) => track.clips.filter((instance) =>
+    instance.loop && (instance.id === ownerId || instance.aliasOf === ownerId),
+  ));
+  const notes = clip.notes ?? [];
+  const period = loops.length > 0 ? midiClipNaturalPatternLength(notes) : clip.lengthBeats;
   const quantizedStart = (note: NoteEvent): number => {
-    const maximumStart = Math.max(0, clip.lengthBeats - note.durationBeats);
+    const maximumStart = Math.max(0, period - note.durationBeats);
     const nearest = quantizeStart(note.startBeat, snap);
     if (nearest <= maximumStart || snap <= 0) return Math.min(nearest, maximumStart);
     // The nearest grid line can lie beyond the clip for a long final note.
@@ -575,15 +618,27 @@ export function quantizeNotes(
     const latestGrid = Math.floor((maximumStart + snap * 1e-9) / snap) * snap;
     return Math.max(0, Math.min(maximumStart, latestGrid));
   };
-  return commitNoteUpdates(
-    clipId,
-    (clip.notes ?? [])
-      .filter((note) => ids.has(note.id))
-      .map((note) => ({
-        id: note.id,
-        patch: { startBeat: quantizedStart(note) },
-      })),
-  );
+  const updates: NoteUpdate[] = [];
+  let skippedForLoop = 0;
+  for (const note of notes) {
+    if (!ids.has(note.id)) continue;
+    const startBeat = quantizedStart(note);
+    if (loops.length > 0 && startBeat !== note.startBeat) {
+      const candidate = { ...note, startBeat };
+      // Main derives the period from the last note end. Keep that anchor and
+      // preserve the number of times this note sounds through the clip window.
+      const newEnd = startBeat + note.durationBeats;
+      if (newEnd > period
+        || (note.startBeat + note.durationBeats === period && newEnd !== period)
+        || !loops.every((loop) => keepsLoopRepeats(state.project, loop, period, note, candidate))
+      ) {
+        skippedForLoop += 1;
+        continue;
+      }
+    }
+    updates.push({ id: note.id, patch: { startBeat } });
+  }
+  return { committed: commitNoteUpdates(clipId, updates), skippedForLoop };
 }
 
 /**

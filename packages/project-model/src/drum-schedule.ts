@@ -378,11 +378,9 @@ export function resolveDrumOccurrence(
     beatsPerBar: safePositive(payload.beatsPerBar, 4),
   });
   if (!hit) return null;
-  const sourceClipEnd = Number.isFinite(payload.clipEndBeat)
-    ? payload.clipEndBeat
-    : Number.POSITIVE_INFINITY;
-  const occurrenceClipEnd = sourceClipEnd + (playheadBeat - event.beat);
-  if (hit.beat >= occurrenceClipEnd) return null;
+  // The clip window travels with every transport-loop pass. Compare in source
+  // coordinates so adding a pass offset cannot round a hit onto the clip end.
+  if (!canReachAnyScheduleWindow(event)) return null;
   return {
     beat: hit.beat,
     payload: withResolvedDrumVoice(
