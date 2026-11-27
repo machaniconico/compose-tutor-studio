@@ -27,6 +27,7 @@ import { readMeterLevel, type MeterLevel } from '../../audio/graph';
 import { accessibleTrackName } from '../tracklist/trackPresentation';
 import {
   addStudioAudioSend,
+  addStudioReverbReturn,
   removeStudioAudioSend,
   setStudioTrackOutput,
   studioRoutingErrorMessage,
@@ -598,6 +599,30 @@ function RoutingControls(props: {
         ) : null}
         {!canAddSend ? (
           <small>1つのトラックから追加できるセンドは最大{MAX_AUDIO_SENDS_PER_SOURCE}件です。</small>
+        ) : null}
+        {track.type !== 'bus' ? (
+          <div className="mix-ch__reverb-return">
+            <button
+              type="button"
+              className="mini-btn"
+              aria-label={`${accessibleName} リバーブ用リターンを追加`}
+              onClick={() => {
+                const result = addStudioReverbReturn(track.id);
+                reportRoutingResult(
+                  result,
+                  `${track.name}からリバーブ用リターンへ送りました。送る量は、センドのつまみで調整できます。`,
+                );
+                if (result.ok && !result.changed) {
+                  pushToast(`${track.name}はリバーブ用リターンへのセンドはすでにあります。`, 'info');
+                }
+              }}
+            >
+              リバーブ用リターンを追加
+            </button>
+            <small>
+              リターンは、いくつものトラックの音を少しずつ集めて、リバーブなどの効果をまとめてかけるための専用バスです。
+            </small>
+          </div>
         ) : null}
         <small>フェーダー前は音量・効果の前、フェーダー後は音量・効果・パンの後から送ります。</small>
       </div>

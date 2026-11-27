@@ -1,5 +1,6 @@
 import {
   addAudioSend,
+  addTrack,
   defaultAudioSendInput,
   removeAudioSend,
   setTrackOutput,
@@ -11,9 +12,15 @@ import {
   type Project,
   type UpdateAudioSendPatch,
 } from '@cts/project-model';
+import { createDefaultEffectConfig } from '../audio/effects';
+import { uid } from './ids';
 import { useStore } from './store';
 
-export type StudioRoutingErrorCode = AudioRoutingMutationErrorCode | 'commit-rejected';
+export type StudioRoutingErrorCode =
+  | AudioRoutingMutationErrorCode
+  | 'commit-rejected'
+  | 'track-limit'
+  | 'invalid-source';
 
 export type StudioRoutingCommandResult =
   | Readonly<{
@@ -25,13 +32,15 @@ export type StudioRoutingCommandResult =
     }>
   | Readonly<{ ok: false; code: StudioRoutingErrorCode }>;
 
-function failed(code: StudioRoutingErrorCode): StudioRoutingCommandResult {
+type StudioRoutingFailure = Extract<StudioRoutingCommandResult, { ok: false }>;
+
+function failed(code: StudioRoutingErrorCode): StudioRoutingFailure {
   return { ok: false, code };
 }
 
 function mutationFailure(
   result: Extract<AudioRoutingMutationResult, { ok: false }>,
-): StudioRoutingCommandResult {
+): StudioRoutingFailure {
   return failed(result.error.code);
 }
 
@@ -106,6 +115,72 @@ export function removeStudioAudioSend(sendId: string): StudioRoutingCommandResul
   return runRoutingCommand((project) => removeAudioSend(project, sendId));
 }
 
+/** Name of the return created by the one-step reverb action. */
+export const REVERB_RETURN_NAME = 'リバーブ';
+/** Starting send level: a light touch of reverb (linear gain, 1 = full). */
+export const REVERB_RETURN_SEND_GAIN = 0.3;
+
+export type StudioReverbReturnResult =
+  | (Extract<StudioRoutingCommandResult, { ok: true }> & Readonly<{ returnId: string; reusedReturn: boolean }>)
+  | StudioRoutingFailure;
+
+/**
+ * One undoable step: make sure the project has a return (bus with a reverb) and
+ * send the track to it post-fader. An existing bus that already has an enabled
+ * reverb is reused; a track already sending to it is left unchanged.
+ */
+export function addStudioReverbReturn(sourceTrackId: string): StudioReverbReturnResult {
+  const state = useStore.getState();
+  const snapshot = state.project;
+  const playbackWasActive = state.transport.phase !== 'stopped';
+  const source = snapshot.tracks.find((track) => track.id === sourceTrackId);
+  if (!source) return failed('track-not-found');
+  if (source.type === 'master') return failed('master-protected');
+  if (source.type === 'bus') return failed('invalid-source');
+
+  let working = snapshot;
+  let returnTrack = snapshot.tracks.find(
+    (track) => track.type === 'bus' && track.effects.some((fx) => fx.type === 'reverb' && fx.enabled),
+  );
+  const reusedReturn = returnTrack !== undefined;
+  if (!returnTrack) {
+    const added = addTrack(snapshot, 'bus', { name: REVERB_RETURN_NAME });
+    if (!added.ok) return failed(added.error.code === 'track-limit' ? 'track-limit' : 'unexpected');
+    const reverb = createDefaultEffectConfig('reverb', uid('fx'));
+    // A return carries only the effect's own sound, so it is fully wet.
+    const effect = { ...reverb, params: { ...reverb.params, wet: 1 } };
+    working = {
+      ...added.project,
+      tracks: added.project.tracks.map((track) =>
+        track.id === added.trackId ? { ...track, effects: [effect] } : track),
+    };
+    returnTrack = working.tracks.find((track) => track.id === added.trackId)!;
+  }
+
+  const existingSend = working.audioRouting.sends.find(
+    (send) => send.sourceTrackId === sourceTrackId && send.targetBusId === returnTrack.id,
+  );
+  if (existingSend) {
+    return {
+      ok: true,
+      changed: false,
+      sourceTrackId,
+      sendId: existingSend.id,
+      playbackStopped: false,
+      returnId: returnTrack.id,
+      reusedReturn,
+    };
+  }
+
+  const sent = addAudioSend(working, {
+    ...defaultAudioSendInput(sourceTrackId, returnTrack.id, 'post-fader'),
+    gain: REVERB_RETURN_SEND_GAIN,
+  });
+  if (!sent.ok) return mutationFailure(sent);
+  const committed = commitRoutingMutation(snapshot, sent, playbackWasActive);
+  return committed.ok ? { ...committed, returnId: returnTrack.id, reusedReturn } : committed;
+}
+
 export function studioRoutingErrorMessage(code: StudioRoutingErrorCode): string {
   switch (code) {
     case 'invalid-routing':
@@ -122,6 +197,10 @@ export function studioRoutingErrorMessage(code: StudioRoutingErrorCode): string 
       return '現在のプロジェクトの経路を安全に読み取れないため、変更しませんでした。';
     case 'commit-rejected':
       return '別の変更が先に反映されたため、経路は変更していません。もう一度お試しください。';
+    case 'track-limit':
+      return 'トラックの数が上限に達しているため、リターンを追加できません。使わないトラックを減らしてからお試しください。';
+    case 'invalid-source':
+      return 'バスからはリバーブ用リターンを作れません。楽器やドラムのトラックで試してください。';
     case 'unexpected':
       return '経路を変更できませんでした。プロジェクトは変更されていません。';
   }

@@ -271,7 +271,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | Drum Sequencer | ステップ入力 | Yes | 16ステップ基本。後続で確率/スウィング |
 | Clip Launcher | ループ試作 | Partial | MVPは簡易クリップ一覧。v1で非線形再生 |
 | Arranger | セクション配置 | Yes | Intro/A/B/Chorus/Bridge/Outro ラベル |
-| Mixer | 音量/パン/ミュート/ソロ/routing | Yes | 各トラックの基本操作、stereo Bus、main output、pre/post-fader sendを扱う |
+| Mixer | 音量/パン/ミュート/ソロ/routing | Yes | 各トラックの基本操作、stereo Bus、main output、pre/post-fader sendを扱う。ルーティング欄の「リバーブ用リターンを追加」で、リバーブ入りのBus(リターン)の作成とpost-fader send(送り量0.3)の追加を1回のUndoで行う。有効なリバーブを含むBusが既にあれば再利用し、同じトラックからのセンドが既にあれば(無効にしてあっても)何も変えない |
 | Automation | Track音量/パンとMaster出力音量の時間変化 | Yes | non-Master Trackの音量 / パンとeffective Masterの出力音量について、beat snap付きlane editor、hold / linear、lane Bypass、Global / TrackまたはMaster Readを保存し、再生中はRead / Touch / Latch / Writeで対応操作を記録する。mode自体はruntime-only |
 | Effects | 基本エフェクト | Partial | Filter/Delay/Reverbを最小実装 |
 | Tutorial | 操作・状態連動チュートリアル | Yes | 確定操作イベントと採用済みProject/UI状態を再照合して進行 |
