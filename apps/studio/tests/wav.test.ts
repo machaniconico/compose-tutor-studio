@@ -4,6 +4,7 @@ import {
   CURRENT_SCHEMA_VERSION,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
   ScheduleEventLimitError,
+  splitClip,
 } from '@cts/project-model';
 import type {
   AudioClip,
@@ -65,6 +66,7 @@ import {
   resolveWavRenderProject,
   scheduleWavFinalFade,
 } from '../src/audio/wav';
+import { checkSplitParity } from '../src/audio/clipSplitParity';
 import { MASTER_LIMITER_LOOKAHEAD_SECONDS } from '../src/audio/masterBus';
 import { useStore } from '../src/state/store';
 
@@ -1657,6 +1659,44 @@ describe('WAV render allocation budget', () => {
 });
 
 describe('WAV Audio Clip integration', () => {
+  it('tiles the original WAV source commands at an aligned seam and accepts a fractional output seam', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const project = await projectWithAudioClip(bytes);
+    project.tracks.push(projectWithMasterOnly().tracks[0]!);
+    const clip = project.tracks[0]!.clips[0]! as AudioClip;
+    Object.assign(clip, { loop: false, lengthBeats: 1, fadeInFrames: 0, fadeOutFrames: 0 });
+
+    project.createdAt = project.updatedAt = '2026-07-17T00:00:00.000Z';
+    const fractional = splitClip(project, clip.id, 1.25);
+    if (!fractional.ok) throw new Error(fractional.reason);
+    expect(checkSplitParity(project, fractional.project, fractional)).toBeNull();
+
+    const split = splitClip(project, clip.id, 1.5);
+    if (!split.ok) throw new Error(split.reason);
+    expect(checkSplitParity(project, split.project, split)).toBeNull();
+
+    const renderCommands = async (candidate: Project) => {
+      const { sources } = installAudioClipOfflineContext();
+      const rendered = await renderProjectToWav(candidate, {
+        audioAssetResolver: { resolve: async () => bytes },
+      });
+      rendered.release();
+      return sources.flatMap((source) => source.starts).map(({ when, offset, duration }) => {
+        const frames = [when, offset, duration].map((seconds) => seconds * RENDER_SAMPLE_RATE);
+        for (const frame of frames) expect(frame).toBeCloseTo(Math.round(frame), 8);
+        return frames.map(Math.round);
+      });
+    };
+    const original = await renderCommands(project);
+    const halves = await renderCommands(split.project);
+    expect(original).toEqual([[22_050, 11_025, 22_050]]);
+    expect(halves).toEqual([[22_050, 11_025, 11_025], [33_075, 22_050, 11_025]]);
+
+    const right = split.project.tracks[0]!.clips[1]! as AudioClip;
+    right.sourceStartFrame += 1;
+    expect(checkSplitParity(project, split.project, split)).toBe('split-audio-range');
+  });
+
   it('uses the shared interval planner for source range, clip loop, gain, and fades', async () => {
     const project = await projectWithAudioClip(Uint8Array.from([1, 2, 3, 4]));
     const [plan] = buildWavAudioClipPlans(project);

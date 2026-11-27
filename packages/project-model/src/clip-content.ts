@@ -1,6 +1,8 @@
 import type { Clock } from './clock';
 import { nowIso, systemClock } from './clock';
 import { makeId } from './ids';
+import { splitAudioClip } from './audio-clips';
+import { PPQ, wholeBeatTick } from './ticks';
 import {
   compileDrumStepProjector,
   compileMusicalTime,
@@ -13,6 +15,7 @@ import {
   MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS,
   preflightScheduleEventBudget,
 } from './schedule-budget';
+import { validateProject } from './validation';
 import {
   buildClipIndex,
   findClip,
@@ -366,4 +369,137 @@ export function resizeClip(
     clipId,
     project: { ...project, tracks, updatedAt: nowIso(clock) },
   };
+}
+
+export const SPLIT_CLIP_MESSAGES = {
+  'split-missing-clip': 'クリップが見つかりません。クリップを選び直してください。',
+  'split-invalid-position': 'クリップの端を避け、内側の目盛りに分割位置を合わせてください。1拍は480目盛りです。',
+  'split-off-grid-start': 'クリップの開始位置や開始から分割までの長さが目盛りに合っていません。1拍は480目盛りです。',
+  'split-linked-clip': '素材を共有しているため分割できません。先にすべての連動コピーの連動を解除してください。',
+  'split-looping-clip': '繰り返し中のクリップは分割できません。先に繰り返しをオフにしてください。',
+  'split-crossing-note': '分割位置をまたぐ音が途中で鳴り直すため、分割できません。音の切れ目を選んでください。',
+  'split-drum-grid': 'ドラムは打点を置ける目盛りで分割してください。',
+  'split-audio-range': 'この位置では音声素材を分けられません。素材の内側で別の位置を選んでください。',
+  'split-audio-edited': 'フェードや音声補正を保ったまま分割できません。別のクリップを選んでください。',
+  'split-audio-unavailable': '音声素材を確認できません。素材の状態を確認してください。',
+  'split-unsupported-type': 'この種類のクリップは分割できません。',
+  'split-clip-limit': 'このトラックにはこれ以上クリップを追加できません。',
+  'split-recording': '録音中は分割できません。録音を止めてから試してください。',
+  'split-sound-changed': '分けると音の鳴り方が変わるため、分割できません。別の位置を選んでください。',
+  'split-midi-changed': '分けるとMIDIの書き出し結果が変わるため、分割できません。別の位置を選んでください。',
+  'split-project-unavailable': 'クリップを安全に分割できませんでした。編集中の操作を終えてから試してください。',
+} as const;
+
+export type SplitClipFailure = keyof typeof SPLIT_CLIP_MESSAGES;
+
+export type SplitClipResult =
+  | Readonly<{ ok: true; project: Project; trackId: string; clipId: string; rightClipId: string }>
+  | Readonly<{ ok: false; project: Project; code: SplitClipFailure; reason: string }>;
+
+/** Build a split candidate. Studio compares playback and export before adoption. */
+export function splitClip(
+  project: Project,
+  clipId: string,
+  atBeat: unknown,
+  clock: Clock = systemClock,
+): SplitClipResult {
+  const fail = (code: SplitClipFailure): SplitClipResult =>
+    ({ ok: false, project, code, reason: SPLIT_CLIP_MESSAGES[code] });
+  try {
+    if (typeof clipId !== 'string' || project === null || typeof project !== 'object'
+      || !Object.hasOwn(project, 'tracks')) {
+      return fail('split-missing-clip');
+    }
+    const found = findClip(project, clipId);
+    if (!found) return fail('split-missing-clip');
+    const { clip, track } = found;
+    const splitTick = typeof atBeat === 'number' ? wholeBeatTick(atBeat) : null;
+    if (splitTick === null) return fail('split-invalid-position');
+    const startTick = Object.hasOwn(clip, 'startBeat') ? wholeBeatTick(clip.startBeat) : null;
+    if (startTick === null) return fail('split-off-grid-start');
+    const endBeat = clip.startBeat + clip.lengthBeats;
+    const projectEnd = projectLengthBeats(project);
+    const endTick = wholeBeatTick(endBeat);
+    const projectEndTick = wholeBeatTick(projectEnd);
+    const splitBeat = splitTick / PPQ;
+    const leftLength = (splitTick - startTick) / PPQ;
+    // Imported clips can have an off-grid end. Preserve that edge.
+    const rightLength = endTick === null ? endBeat - splitBeat : (endTick - splitTick) / PPQ;
+    if (
+      splitTick <= startTick
+      || (endTick === null
+        ? !Number.isFinite(rightLength) || rightLength < MIN_EVENT_DURATION_BEATS
+        : splitTick >= endTick)
+      || (endTick !== null && projectEndTick !== null ? endTick > projectEndTick : endBeat > projectEnd)
+    ) return fail('split-invalid-position');
+    if (
+      (Object.hasOwn(clip, 'aliasOf') && clip.aliasOf !== undefined)
+      || project.tracks.some((owner) => owner.clips.some((candidate) =>
+        Object.hasOwn(candidate, 'aliasOf') && candidate.aliasOf === clipId,
+      ))
+    ) return fail('split-linked-clip');
+    if (clip.loop) return fail('split-looping-clip');
+    if (track.clips.length >= MAX_CLIPS_PER_TRACK) return fail('split-clip-limit');
+
+    if (clip.type === 'audio') {
+      if (clip.audioWarp !== undefined || clip.fadeInFrames !== 0 || clip.fadeOutFrames !== 0) {
+        return fail('split-audio-edited');
+      }
+      const asset = project.audioAssets.find((entry) => entry.id === clip.audioAssetId);
+      if (asset?.availability !== 'ready') return fail('split-audio-unavailable');
+      const result = splitAudioClip(project, clipId, { splitBeat }, clock);
+      if (!result.ok) return fail('split-audio-range');
+      return { ...result, clipId, trackId: track.id };
+    }
+
+    if (clip.type !== 'midi' && clip.type !== 'drum') return fail('split-unsupported-type');
+    const rightClipId = makeId('clip');
+    if (projectHasEntityId(project, rightClipId)) return fail('split-project-unavailable');
+    const left: Clip = { ...clip, lengthBeats: leftLength };
+    const right: Clip = { ...clip, id: rightClipId, startBeat: splitBeat, lengthBeats: rightLength };
+    if (clip.notes) {
+      left.notes = [];
+      right.notes = [];
+      for (const note of clip.notes) {
+        if (note.startBeat >= leftLength) {
+          right.notes.push({ ...note, startBeat: note.startBeat - leftLength });
+        } else if (note.startBeat + note.durationBeats <= leftLength) {
+          left.notes.push(note);
+        } else {
+          return fail('split-crossing-note');
+        }
+      }
+    }
+    if (clip.type === 'drum') {
+      const projector = compileDrumStepProjector(clip.stepsPerBar ?? 16, clip.startBeat, compileMusicalTime(project));
+      const beatOf = (step: number): number => projectDrumStep(projector, step).beat;
+      const tickPositionOf = (step: number): number => {
+        const beat = beatOf(step);
+        return wholeBeatTick(beat) ?? beat * PPQ;
+      };
+      let low = 0;
+      let high = projector.stepsPerBar;
+      while (high < Number.MAX_SAFE_INTEGER / 2 && tickPositionOf(high) < splitTick) high *= 2;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (tickPositionOf(middle) < splitTick) low = middle + 1;
+        else high = middle;
+      }
+      if (wholeBeatTick(beatOf(low)) !== splitTick) return fail('split-drum-grid');
+      if (clip.drumEvents) {
+        left.drumEvents = clip.drumEvents.filter((hit) => hit.stepIndex < low);
+        right.drumEvents = clip.drumEvents
+          .filter((hit) => hit.stepIndex >= low)
+          .map((hit) => ({ ...hit, stepIndex: hit.stepIndex - low }));
+      }
+    }
+    const tracks = project.tracks.map((owner) => owner === track
+      ? { ...owner, clips: owner.clips.flatMap((candidate) => candidate === clip ? [left, right] : [candidate]) }
+      : owner);
+    const candidate = { ...project, tracks, updatedAt: nowIso(clock) };
+    if (!validateProject(candidate).ok) return fail('split-project-unavailable');
+    return { ok: true, project: candidate, trackId: track.id, clipId, rightClipId };
+  } catch {
+    return fail('split-project-unavailable');
+  }
 }

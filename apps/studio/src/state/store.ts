@@ -32,12 +32,16 @@ import {
   MAX_AUDIO_TAKES_PER_FOLDER,
   MIN_EVENT_DURATION_BEATS,
   resolveClipContent,
+  splitClip,
+  SPLIT_CLIP_MESSAGES,
   type ChordEvent,
   type DrumEvent,
   type DrumLane,
   type MusicalKey,
   type NoteEvent,
   type Project,
+  type SplitClipFailure,
+  type SplitClipResult,
   type ScaleName,
   type Track,
   type AutomationTarget,
@@ -68,6 +72,7 @@ import {
   type NativeCloseAuthorization,
 } from '../platform/nativeAppLifecycle';
 import { hasLiveMixChanged } from '../audio/mixState';
+import { checkSplitParity } from '../audio/clipSplitParity';
 import { fenceRendererStorageWrites } from '../platform/rendererStorageFence';
 import { nativeLifecycleGate } from '../platform/nativeLifecycleGate';
 import { settleNativeCloseHandoff } from '../platform/nativeCloseHandoff';
@@ -332,6 +337,7 @@ export type StoreState = {
 
   /** Generic escape hatch: apply an immutable project change (bumps updatedAt, pushes history, saves). */
   applyProjectChange: (fn: (p: Project) => Project) => boolean;
+  splitClipAtBeat: (clipId: string, beat: unknown) => SplitClipResult;
   /** Adopt exactly one already-stored ReadyAudioAsset without re-reading it. */
   applyVerifiedAudioAssetAddition: (
     fn: (p: Project) => Project,
@@ -493,11 +499,11 @@ export type StoreState = {
   canUndo: () => boolean;
   canRedo: () => boolean;
   /**
-   * Open the one app-wide fader transaction with a fresh gesture token.
+   * Open an app-wide edit transaction with a fresh token.
    * Every edit keeps the normal gates. Commit records one Undo step and
    * schedules one autosave. Audio and automation recording refuse a begin.
    */
-  beginProjectTransaction: (token: object, pointerId: number) => boolean;
+  beginProjectTransaction: (token: object, pointerId?: number) => boolean;
   commitProjectTransaction: (token: object) => boolean;
   /** Restore the pre-gesture project without changing history or transport. */
   cancelProjectTransaction: (token: object) => boolean;
@@ -1776,7 +1782,7 @@ export function createStudioStore(
    */
   let openProjectTransaction: {
     token: object;
-    pointerId: number;
+    pointerId: number | undefined;
     base: Project;
     projectId: string;
     activationId: string;
@@ -2700,6 +2706,31 @@ export function createStudioStore(
     future: [],
 
     applyProjectChange: (fn) => commitProject(fn(get().project)),
+    splitClipAtBeat: (clipId, beat) => {
+      const state = get();
+      const { project } = state;
+      const fail = (code: SplitClipFailure): SplitClipResult =>
+        ({ ok: false, project, code, reason: SPLIT_CLIP_MESSAGES[code] });
+      if (state.audioRecordingOperationId !== null || automationCoordinator.hasActivePass()) {
+        return fail('split-recording');
+      }
+      if (state.projectOperationBusy || state.isProjectTransactionOpen()) {
+        return fail('split-project-unavailable');
+      }
+      const result = splitClip(project, clipId, beat);
+      if (!result.ok) return result;
+      const mismatch = checkSplitParity(project, result.project, result);
+      if (mismatch) return fail(mismatch);
+
+      const token = {};
+      if (!state.beginProjectTransaction(token)) return fail('split-project-unavailable');
+      if (!commitProject(result.project)) {
+        state.cancelProjectTransaction(token);
+        return fail('split-project-unavailable');
+      }
+      if (!state.commitProjectTransaction(token)) return fail('split-project-unavailable');
+      return { ...result, project: get().project };
+    },
     applyVerifiedAudioAssetAddition: (fn, verifiedAudioAssetId) => {
       const state = get();
       if (state.audioRecordingOperationId !== null) return false;

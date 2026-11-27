@@ -131,7 +131,7 @@ describe('Arranger clip workflow', () => {
     const html = renderToStaticMarkup(<Arranger />);
 
     expect(html.match(/value="0\.5"/g)).toHaveLength(2);
-    expect(html.match(/step="any"/g)).toHaveLength(2);
+    expect(html.match(/step="any"[^>]*value="0.5"/g)).toHaveLength(2);
   });
 
   it('shows a linked badge and unlink action without duplicating payload', () => {

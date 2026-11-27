@@ -1,6 +1,8 @@
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import {
   barToBeatAt,
+  beatTick,
+  PPQ,
   beatToBarPosition,
   type AudioAsset,
   type AudioClip,
@@ -95,7 +97,7 @@ export function audioWarpEditorTransientReason(input: Readonly<{
   return audioWarpEditorBusyReason(input.savePhase);
 }
 
-function beatAsBarNumber(musicalTime: MusicalTimeIndex, beat: number): number {
+export function beatAsBarNumber(musicalTime: MusicalTimeIndex, beat: number): number {
   const position = beatToBarPosition(musicalTime, beat);
   const barStart = barToBeatAt(musicalTime, position.bar);
   const barEnd = barToBeatAt(musicalTime, position.bar + 1);
@@ -272,8 +274,8 @@ export function AudioClipEditor({
   const startBar = beatAsBarNumber(musicalTime, clip.startBeat);
   const endBeat = clip.startBeat + clip.lengthBeats;
   const endBar = beatAsBarNumber(musicalTime, endBeat);
-  const splitBar = beatAsBarNumber(musicalTime, clip.startBeat + clip.lengthBeats / 2);
-  const [splitDraft, setSplitDraft] = useState(conciseNumber(splitBar));
+  const splitBar = beatAsBarNumber(musicalTime, beatTick(clip.startBeat + clip.lengthBeats / 2) / PPQ);
+  const [splitDraft, setSplitDraft] = useState(String(splitBar));
   const sampleRate = persisted?.sampleRate ?? 48_000;
   const sourceSeconds = clip.sourceFrameCount / sampleRate;
   const assetSeconds = persisted ? persisted.frameCount / persisted.sampleRate : null;
@@ -346,7 +348,7 @@ export function AudioClipEditor({
         : 'このクリップはループ中か、フォルダー全区間を満たす音声が残っていないため追加できません。'
     );
 
-  useEffect(() => setSplitDraft(conciseNumber(splitBar)), [clip.id, splitBar]);
+  useEffect(() => setSplitDraft(String(splitBar)), [clip.id, splitBar]);
 
   const apply = (
     operation: () => StudioAudioClipCommandResult,
@@ -569,7 +571,7 @@ export function AudioClipEditor({
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault();
-                setSplitDraft(conciseNumber(splitBar));
+                setSplitDraft(String(splitBar));
               }
             }}
           />
@@ -584,7 +586,7 @@ export function AudioClipEditor({
               return;
             }
             if (!commitBar(value, (beat) => splitStudioAudioClip(clip.id, beat), 'クリップを分割しました。')) {
-              setSplitDraft(conciseNumber(splitBar));
+              setSplitDraft(String(splitBar));
             }
           }}
         >

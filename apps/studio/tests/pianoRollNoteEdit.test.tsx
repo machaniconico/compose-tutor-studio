@@ -58,6 +58,27 @@ function setup() {
 }
 
 describe('piano roll selection edits', () => {
+  it('announces how many notes were skipped to preserve their loop', () => {
+    const state = useStore.getState();
+    const clip = state.project.tracks.find((track) => track.name === 'Melody')!.clips[0]!;
+    state.applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((entry) => entry.id === clip.id ? { ...entry, loop: true } : entry),
+      })),
+    }));
+    state.addNote(clip.id, { pitch: 60, startBeat: 0.14, durationBeats: 0.5, velocity: 90 });
+    state.addNote(clip.id, { pitch: 64, startBeat: 1.14, durationBeats: 0.5, velocity: 90 });
+    state.selectClip(clip.id);
+    state.selectNotes(useStore.getState().project.tracks.find((track) => track.name === 'Melody')!
+      .clips[0]!.notes!.map((note) => note.id));
+    render(<PianoRoll />);
+
+    fireEvent.click(screen.getByRole('button', { name: '選択ノートをクオンタイズ' }));
+    expect(screen.getByText('1個のノートをクオンタイズしました。1個のノートは、繰り返しの長さや回数を保つために動かしませんでした。')).toBeTruthy();
+  });
+
   it('copies with Ctrl+C, pastes at the moved playhead with Ctrl+V, and Ctrl+Shift+V keeps the original position', () => {
     const { view, notes } = setup();
     const note = view.container.querySelector<HTMLButtonElement>('.pr__note')!;

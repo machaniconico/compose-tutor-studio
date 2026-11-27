@@ -13,6 +13,8 @@ import {
   beatToBarPosition,
   compileMusicalTime,
   duplicateClip,
+  beatTick,
+  PPQ,
   resizeClip,
   setMidiClipLoop,
   unlinkClip,
@@ -20,7 +22,7 @@ import {
 } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import { pxPerBeat } from '../timeline';
-import { AudioClipEditor } from './AudioClipEditor';
+import { AudioClipEditor, audioBarNumberToBeat, beatAsBarNumber, parseAudioNumericDraft } from './AudioClipEditor';
 import { audioAssetStatusLabel } from '../audioTrack/audioAssetPresentation';
 
 /** Section types with Japanese labels and an accent class. */
@@ -57,14 +59,6 @@ function locateClip(
     if (clip) return { track, clip };
   }
   return null;
-}
-
-function beatAsBarNumber(musicalTime: MusicalTimeIndex, beat: number): number {
-  const position = beatToBarPosition(musicalTime, beat);
-  const barStart = barToBeatAt(musicalTime, position.bar);
-  const barEnd = barToBeatAt(musicalTime, position.bar + 1);
-  const barLength = barEnd - barStart;
-  return position.bar + (barLength > 0 ? position.beatInBar / barLength : 0);
 }
 
 function beatAtBarNumber(musicalTime: MusicalTimeIndex, barNumber: number): number {
@@ -119,6 +113,7 @@ export type ClipNotice =
       message: string;
       expected:
         | { operation: 'duplicate'; clipId: string }
+        | { operation: 'split'; clipId: string }
         | { operation: 'unlink'; clipId: string }
         | { operation: 'resize'; clipId: string; startBeat: number; lengthBeats: number }
         | { operation: 'loop'; clipId: string; loop: boolean };
@@ -135,6 +130,7 @@ export function isClipNoticeCurrent(
 
   switch (notice.expected.operation) {
     case 'duplicate':
+    case 'split':
       return true;
     case 'unlink':
       return located.clip.aliasOf === undefined;
@@ -359,6 +355,23 @@ export function Arranger() {
         ? '連動コピーを右隣に作りました。どちらを編集しても同じ素材へ反映されます。'
         : '独立コピーを右隣に作りました。元とは別々に編集できます。',
       expected: { operation: 'duplicate', clipId: outcome.clipId },
+    });
+  };
+
+  const splitSelected = (beat: number): void => {
+    if (!selected) return;
+    const result = useStore.getState().splitClipAtBeat(selected.clip.id, beat);
+    if (!result.ok) {
+      setClipNotice({ kind: 'error', message: result.reason });
+      return;
+    }
+    selectTrack(result.trackId);
+    selectClip(result.rightClipId);
+    setFocusClipId(result.rightClipId);
+    setClipNotice({
+      kind: 'status',
+      message: 'クリップを分割しました。',
+      expected: { operation: 'split', clipId: result.rightClipId },
     });
   };
 
@@ -625,6 +638,7 @@ export function Arranger() {
           onCommit={resizeSelected}
           onDuplicate={(linked) => duplicateSelected(linked)}
           onUnlink={unlinkSelected}
+          onSplit={splitSelected}
           onLoopChange={setSelectedLoop}
         />
       ) : (
@@ -670,6 +684,7 @@ function ClipEditor(props: {
   onCommit: (startBeat: number, lengthBeats: number) => boolean;
   onDuplicate: (linked: boolean) => void;
   onUnlink: () => void;
+  onSplit: (beat: number) => void;
   onLoopChange: (loop: boolean) => void;
 }) {
   const {
@@ -680,14 +695,18 @@ function ClipEditor(props: {
     onCommit,
     onDuplicate,
     onUnlink,
+    onSplit,
     onLoopChange,
   } = props;
   const clipStartBar = beatAsBarNumber(musicalTime, clip.startBeat);
   const clipEndBar = beatAsBarNumber(musicalTime, clip.startBeat + clip.lengthBeats);
   const [startBars, setStartBars] = useState(String(clipStartBar));
   const [lengthBars, setLengthBars] = useState(String(clipEndBar - clipStartBar));
+  const splitDefault = beatAsBarNumber(musicalTime, beatTick(clip.startBeat + clip.lengthBeats / 2) / PPQ);
+  const [splitBar, setSplitBar] = useState(String(splitDefault));
 
   useEffect(() => setStartBars(String(clipStartBar)), [clip.startBeat, clipStartBar]);
+  useEffect(() => setSplitBar(String(splitDefault)), [splitDefault]);
   useEffect(
     () => setLengthBars(String(clipEndBar - clipStartBar)),
     [clip.lengthBeats, clipEndBar, clipStartBar],
@@ -715,6 +734,27 @@ function ClipEditor(props: {
       <div className="arranger__clip-summary">
         <strong>{trackName}</strong>
         <span>{clip.aliasOf ? '連動コピー' : '独立クリップ'}</span>
+        <div className="arranger__split">
+          <label>
+            <span>分割位置（小節）</span>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={splitBar}
+              onChange={(event) => setSplitBar(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              const bar = parseAudioNumericDraft(splitBar);
+              onSplit(bar === null ? Number.NaN : audioBarNumberToBeat(musicalTime, bar) ?? Number.NaN);
+            }}
+          >
+            分割
+          </button>
+        </div>
       </div>
       <div className="arranger__editor-row">
         <label>

@@ -6,6 +6,7 @@ import {
   createAudioTrackClip,
   deleteAudioClip,
   duplicateAudioClip,
+  findClip,
   moveAudioClip,
   moveAudioClipTimingPoint,
   mergeAudioClipPitchRegions,
@@ -18,7 +19,6 @@ import {
   setAudioClipFades,
   setAudioClipGain,
   setAudioClipLoop,
-  splitAudioClip,
   splitAudioClipPitchRegion,
   inspectAudioPunchTarget,
   trimAudioClipLeft,
@@ -30,7 +30,8 @@ import {
   type AudioWarpMarker,
   type Project,
   type ReadyAudioAsset,
-  type SplitAudioClipResult,
+  SPLIT_CLIP_MESSAGES,
+  type SplitClipFailure,
   compileMusicalTime,
   secondsBetweenBeats,
   MAX_AUDIO_ASSETS,
@@ -112,6 +113,7 @@ import {
 
 export type StudioAudioActionErrorCode =
   | AudioClipMutationErrorCode
+  | SplitClipFailure
   | 'cancelled'
   | 'project-busy'
   | 'input-device-required'
@@ -253,7 +255,6 @@ export type StudioNativeAudioSelectionReservation = Readonly<{
 }>;
 
 type SuccessfulMutation = Extract<AudioClipMutationResult, { ok: true }>;
-type SuccessfulSplitMutation = Extract<SplitAudioClipResult, { ok: true }>;
 
 type AudioTrackImportLeaseWork = {
   settled: boolean;
@@ -1979,7 +1980,7 @@ export function createPunchRecordingCapture(
 }
 
 function mutationFailureCode(
-  result: Exclude<AudioClipMutationResult | SplitAudioClipResult, { ok: true }>,
+  result: Exclude<AudioClipMutationResult, { ok: true }>,
 ): StudioAudioActionErrorCode {
   return result.error.code;
 }
@@ -1990,7 +1991,7 @@ function playbackWasStopped(wasActive: boolean, changed: boolean): boolean {
 
 function commitAudioMutation(
   snapshot: Project,
-  result: SuccessfulMutation | SuccessfulSplitMutation,
+  result: SuccessfulMutation,
   selectClipId: string | null = result.clipId,
 ): StudioAudioClipCommandResult {
   const state = useStore.getState();
@@ -2001,7 +2002,6 @@ function commitAudioMutation(
       changed: false,
       trackId: result.trackId,
       clipId: result.clipId,
-      ...('rightClipId' in result ? { rightClipId: result.rightClipId } : {}),
       playbackStopped: false,
     };
   }
@@ -2021,7 +2021,6 @@ function commitAudioMutation(
     changed: true,
     trackId: result.trackId,
     clipId: result.clipId,
-    ...('rightClipId' in result ? { rightClipId: result.rightClipId } : {}),
     playbackStopped: playbackWasStopped(wasActive, true),
   };
 }
@@ -3020,10 +3019,25 @@ export function splitStudioAudioClip(
   clipId: string,
   splitBeat: number,
 ): StudioAudioClipCommandResult {
-  const snapshot = useStore.getState().project;
-  const result = splitAudioClip(snapshot, clipId, { splitBeat });
-  if (!result.ok) return failed(mutationFailureCode(result));
-  return commitAudioMutation(snapshot, result, result.rightClipId);
+  const state = useStore.getState();
+  const clip = findClip(state.project, clipId)?.clip;
+  if (!clip) return failed('clip-not-found');
+  if (clip.type !== 'audio') return failed('unsupported-clip-type');
+  const result = state.splitClipAtBeat(clipId, splitBeat);
+  if (!result.ok) return failed(result.code);
+  state.selectTrack(result.trackId);
+  state.selectClip(result.rightClipId);
+  state.selectChord(null);
+  state.selectNotes([]);
+  state.setActiveView('arranger');
+  return {
+    ok: true,
+    changed: true,
+    trackId: result.trackId,
+    clipId: result.clipId,
+    rightClipId: result.rightClipId,
+    playbackStopped: playbackWasStopped(state.transport.phase !== 'stopped', true),
+  };
 }
 
 export function deleteStudioAudioClip(clipId: string): StudioAudioClipCommandResult {
@@ -3041,6 +3055,9 @@ export function deleteStudioAudioClip(clipId: string): StudioAudioClipCommandRes
 
 /** Beginner-facing recovery guidance shared by dialogs and the Arranger. */
 export function studioAudioActionErrorMessage(code: StudioAudioActionErrorCode): string {
+  if (typeof code === 'string' && Object.hasOwn(SPLIT_CLIP_MESSAGES, code)) {
+    return SPLIT_CLIP_MESSAGES[code as SplitClipFailure];
+  }
   switch (code) {
     case 'cancelled':
       return '音声の読み込みを中止しました。プロジェクトは変更されていません。';
@@ -3124,7 +3141,7 @@ export function studioAudioActionErrorMessage(code: StudioAudioActionErrorCode):
       return 'この変更はプロジェクトの保存条件を満たさないため反映しませんでした。';
     case 'commit-rejected':
       return '処理中にプロジェクトが変わったため反映しませんでした。音声素材を選び直してください。';
-    case 'unexpected':
+    default:
       return 'オーディオクリップを変更できませんでした。現在の内容は保持されています。';
   }
 }
