@@ -20,6 +20,7 @@ import {
   addChordWithAnalysis,
   applyProgressionTemplate,
 } from '../../state/editorActions';
+import { ChordDetectPopover } from './ChordDetectPopover';
 import {
   ChordPopover,
   type ChordPopoverCloseReason,
@@ -609,6 +610,7 @@ export function ChordLane() {
         <span id={gridInstructionsId} className="chord-lane__shortcut">
           ← → 小節を選ぶ · Enterで追加
         </span>
+        <ChordDetectPopover />
         <TemplatePicker />
       </div>
       <span id={gridStatusId} className="visually-hidden" aria-live="polite" aria-atomic="true">
