@@ -605,7 +605,7 @@ Audio ClipはMIDI / Drumの`aliasOf`を使わず、同じimmutable AudioAsset by
 - tempo eventは曲末未満の任意beat、拍子eventは曲末未満かつ直前segmentから見た小節境界だけへ新規追加・移動できる。同じmapの同beat重複、範囲外、後続拍子eventまたは曲末を小節途中にする候補をatomicに拒否する。canonical schema v4で既に`beat === lengthBeats`にある終端eventは互換入力として、位置を据え置いた値編集 / no-op、曲内への移動、削除だけを許し、新規追加または曲内eventの終端への移動は許さない
 - mapはbeat昇順とProject全体のglobal ID一意性を保つ。先頭tempo / 拍子の編集時は`bpm` / `timeSignature` mirrorを同じcommandで更新し、拍子map変更時は`lengthBeats`を正本として`lengthBars` mirrorを再計算する。schema versionは増やさない
 
-### 7.8.1 曲の長さ(小節数)の変更
+### 7.8.2 曲の長さ(小節数)の変更
 
 - 「テンポ / 拍子」tabの「曲の長さ」で、曲末に1小節追加・曲末の1小節削除・小節数の直接指定ができ、現在の長さを小節数と拍数で表示する。長さは現在の拍子mapでの整数小節で、1〜256小節。増やす時は最後の拍子で小節を足し、`lengthBeats`を正本として`lengthBars` mirrorも同じcommandで更新する。schema versionは増やさない
 - 短くする時は内容を失わない範囲でだけ自動整理する(content-safe truncate)。新しい曲末をまたぐ、または越えるclipは、鳴る内容が何も失われない場合に限り、曲末までに短縮する(完全に曲末以降にある空のclipは削除)。判定は再生と同じ配置(ループ・alias clipを含む)で行い、全ての音符・ドラムの音がhalf-openな曲末より前に始まり、音符は曲末までに鳴り終わることを条件とする。Audio clipは可聴範囲がclip窓全体なので、曲末をまたぐ・越える場合は短縮せず拒否する。削除対象のclipを残るalias clipが参照している場合も拒否する
