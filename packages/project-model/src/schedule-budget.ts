@@ -4,6 +4,9 @@
 // Runtime scheduling is intentionally tighter because every occurrence becomes
 // an object and may create Web Audio nodes during offline rendering.
 
+import { createDrumScheduleEvent } from './drum-schedule';
+import { isGrooveResolvedMode, resolveGrooveDrumEvent, resolveGrooveNoteSpan } from './groove-schedule';
+import { PPQ } from './ticks';
 import { buildClipIndex, resolveClipSource, type ClipIndex } from './clip-resolution';
 import {
   countRealizedChordNotes,
@@ -21,8 +24,7 @@ import {
 } from './time';
 import type { Project } from './types';
 
-/** Compatibility-safe invariant enforced by the TypeScript and Rust codecs. */
-export const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS = 200_000;
+export { MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS } from './limits';
 /** Live allocation/scan ceiling; offline WAV applies a lower caller limit. */
 export const MAX_RUNTIME_SCHEDULE_EVENTS = 20_000;
 /** Wider than the 0.6 beats covered by 120ms at the validated 300 BPM maximum. */
@@ -156,9 +158,18 @@ function preflightDensity(
   }
 
   const onsets: number[] = [];
+  // Resolved mode counts the shared resolver's onsets; legacy mode is main's.
+  const resolved = isGrooveResolvedMode(project);
   if (options.projection === 'audible') {
     visitRealizedChordPitches(project, (chord) => {
-      appendFiniteOnset(onsets, chord.startBeat);
+      if (!resolved) {
+        appendFiniteOnset(onsets, chord.startBeat);
+        return;
+      }
+      const span = resolveGrooveNoteSpan(
+        project, chord.startBeat, chord.durationBeats, chord.startBeat + chord.durationBeats,
+      );
+      if (span) onsets.push(span.onsetTick / PPQ);
     });
   }
 
@@ -179,7 +190,15 @@ function preflightDensity(
         } as const;
         const occurrenceCount = countMidiClipNoteOccurrences(midiPattern);
         visitMidiClipNoteOccurrences(midiPattern, occurrenceCount, (occurrence) => {
-          appendFiniteOnset(onsets, instance.startBeat + occurrence.localStartBeat);
+          const beat = instance.startBeat + occurrence.localStartBeat;
+          if (!resolved) {
+            appendFiniteOnset(onsets, beat);
+            return;
+          }
+          const span = resolveGrooveNoteSpan(
+            project, beat, occurrence.durationBeats, instance.startBeat + instance.lengthBeats,
+          );
+          if (span) onsets.push(span.onsetTick / PPQ);
         });
       } else {
         for (const note of source.notes ?? []) {
@@ -202,6 +221,14 @@ function preflightDensity(
               beatsPerBar: fixedBarBeats,
             }
           : projectDrumStep(drumProjector, drum.stepIndex);
+        if (resolved) {
+          const event = resolveGrooveDrumEvent(project, createDrumScheduleEvent(
+            track.id, instance.id, { ...source, startBeat: instance.startBeat, lengthBeats: instance.lengthBeats },
+            drum, timing.beat, stepsPerBar, timing.beatsPerBar,
+          ));
+          if (event) onsets.push(event.beat);
+          continue;
+        }
         const beatsPerStep = timing.beatsPerBar / stepsPerBar;
         const rawOnset = timing.beat;
         const onset = drum.stepIndex % 2 === 0

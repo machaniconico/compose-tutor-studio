@@ -335,6 +335,9 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   { from: 7, to: 8, migrate: migrateV7ToV8 },
   { from: 8, to: 9, migrate: migrateV8ToV9 },
   { from: 9, to: 10, migrate: migrateV9ToV10 },
+  { from: 10, to: 11, migrate: (project) => ({
+    ...project, schemaVersion: 11, swing: 0, hiHatChoke: false,
+  }) },
 ]);
 
 export type ProjectMigrationErrorCode =

@@ -301,6 +301,10 @@ export type AudioRouting = {
 export type Project = {
   id: string;
   schemaVersion: number;
+  /** Project-wide sixteenth-note swing, in percent (0–60). */
+  swing: number;
+  /** Let closed hi-hats stop earlier open hi-hats on the same track. */
+  hiHatChoke: boolean;
   title: string;
   bpm: number;
   timeSignature: [number, number];

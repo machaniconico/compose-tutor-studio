@@ -44,6 +44,9 @@ export const DRUM_VOICE_TIMING = Object.freeze({
   }),
 });
 
+/** Fade applied from the held envelope when a closed hat chokes an open hat. */
+export const HAT_CHOKE_FADE_SECONDS = 0.005;
+
 /** Latest source-node stop, relative to each drum lane's trigger time. */
 export const DRUM_SOURCE_STOP_SECONDS: Readonly<Record<DrumLane, number>> =
   Object.freeze({

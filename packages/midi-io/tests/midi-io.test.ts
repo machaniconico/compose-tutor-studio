@@ -325,6 +325,8 @@ describe('exportProjectToMidi', () => {
   const project: Project = {
     id: 'test-project',
     schemaVersion: 1,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Test Song',
     bpm: 120,
     timeSignature: [4, 4],

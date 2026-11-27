@@ -832,6 +832,7 @@ function audioTakeFolderTopologyEqual(left: Project, right: Project): boolean {
  */
 export function hasPlaybackTopologyChanged(current: Project, next: Project): boolean {
   if (current === next) return false;
+  if (current.swing !== next.swing || current.hiHatChoke !== next.hiHatChoke) return true;
   if (!musicalTimelineTopologyEqual(current, next)) return true;
   if (!audioAssetTopologyEqual(current, next)) return true;
   if (!audioTakeFolderTopologyEqual(current, next)) return true;

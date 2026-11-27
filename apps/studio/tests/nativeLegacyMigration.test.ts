@@ -64,7 +64,7 @@ function migrateArchivedCorpusProjectJson(projectJson: string): string {
   if (
     project.schemaVersion !== LEGACY_MIGRATION_VERSION - 1
     || LEGACY_MIGRATION_VERSION !== 5
-    || CURRENT_SCHEMA_VERSION !== 10
+    || CURRENT_SCHEMA_VERSION !== 11
     || Object.prototype.hasOwnProperty.call(project, 'audioTakeFolders')
   ) {
     throw new Error('archived legacy corpus is not an unmigrated schema-v4 project');
@@ -99,6 +99,9 @@ function migrateArchivedCorpusProjectJson(projectJson: string): string {
         ? ['automationLanes', automationLanes]
         : entry,
     );
+    if (entry[0] === 'schemaVersion') {
+      migratedEntries.push(['swing', 0], ['hiHatChoke', false]);
+    }
     if (entry[0] === 'audioAssets') {
       migratedEntries.push(['audioTakeFolders', []]);
     }

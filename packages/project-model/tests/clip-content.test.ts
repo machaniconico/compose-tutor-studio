@@ -621,6 +621,8 @@ describe('project schema v1 to v2 clip migration', () => {
     const { project } = midiPattern();
     const legacy = structuredClone(project) as unknown as Record<string, unknown>;
     legacy.schemaVersion = 1;
+    delete legacy.swing;
+    delete legacy.hiHatChoke;
     const tracks = legacy.tracks as Array<{ clips: Array<Record<string, unknown>> }>;
     delete legacy.lengthBeats;
     delete legacy.tempoMap;

@@ -1,6 +1,7 @@
 // Project validation. Enforces docs/06_data_model.md section 5 plus structural
 // integrity checks (unique ids, clip.trackId references an existing track).
 
+import { MAX_SWING_PERCENT } from './groove';
 import {
   beatsPerBar,
   compileDrumStepProjector,
@@ -121,6 +122,12 @@ export function validateProject(project: Project): ValidationResult {
       'schemaVersion',
       `schemaVersion must be ${CURRENT_SCHEMA_VERSION} (got ${project.schemaVersion})`,
     );
+  }
+  if (!Object.hasOwn(project, 'swing') || !inRange(project.swing, 0, MAX_SWING_PERCENT)) {
+    push('swing', 'Swing must be a number between 0 and 60 percent.');
+  }
+  if (!Object.hasOwn(project, 'hiHatChoke') || typeof project.hiHatChoke !== 'boolean') {
+    push('hiHatChoke', 'Hi-hat choke must be on or off.');
   }
   if (!inRange(project.bpm, 20, 300)) {
     push('bpm', `bpm must be between 20 and 300 (got ${project.bpm})`);

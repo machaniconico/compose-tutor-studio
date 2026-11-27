@@ -30,19 +30,25 @@ describe('schema-v7 Automation Read state', () => {
     const current = createEmptyProject({ clock });
     const v6 = structuredClone(current) as unknown as Record<string, unknown>;
     v6.schemaVersion = 6;
+    delete v6.swing;
+    delete v6.hiHatChoke;
     delete v6.automationReadState;
     const before = structuredClone(v6);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(10);
+    expect(CURRENT_SCHEMA_VERSION).toBe(11);
     expect(migrateProject(v6)).toEqual({
       ...v6,
-      schemaVersion: 10,
+      schemaVersion: 11,
+      swing: 0,
+      hiHatChoke: false,
       automationReadState: { globalEnabled: true, disabledTrackIds: [] },
     });
     expect(v6).toEqual(before);
 
     const v1 = structuredClone(current) as unknown as Record<string, unknown>;
     v1.schemaVersion = 1;
+    delete v1.swing;
+    delete v1.hiHatChoke;
     for (const key of [
       'lengthBeats',
       'tempoMap',
@@ -76,6 +82,8 @@ describe('schema-v7 Automation Read state', () => {
 
     const smuggled = structuredClone(current) as unknown as Record<string, unknown>;
     smuggled.schemaVersion = 6;
+    delete smuggled.swing;
+    delete smuggled.hiHatChoke;
     issue(smuggled, 'automationReadState', 'unknown-key');
 
     const missing = structuredClone(current) as unknown as Record<string, unknown>;
@@ -124,6 +132,8 @@ describe('schema-v7 Automation Read state', () => {
     const master = current.tracks.find((track) => track.type === 'master')!;
     const masterLane = structuredClone(current) as unknown as Record<string, unknown>;
     masterLane.schemaVersion = 7;
+    delete masterLane.swing;
+    delete masterLane.hiHatChoke;
     masterLane.automationLanes = [{
       id: 'legacy-master-lane',
       bypassed: false,
@@ -140,6 +150,8 @@ describe('schema-v7 Automation Read state', () => {
 
     const masterRead = structuredClone(current) as unknown as Record<string, unknown>;
     masterRead.schemaVersion = 7;
+    delete masterRead.swing;
+    delete masterRead.hiHatChoke;
     masterRead.automationReadState = {
       globalEnabled: true,
       disabledTrackIds: [master.id],
@@ -149,6 +161,8 @@ describe('schema-v7 Automation Read state', () => {
 
     const missingRead = structuredClone(current) as unknown as Record<string, unknown>;
     missingRead.schemaVersion = 7;
+    delete missingRead.swing;
+    delete missingRead.hiHatChoke;
     delete missingRead.automationReadState;
     issue(missingRead, 'automationReadState', 'required');
   });

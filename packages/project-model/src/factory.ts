@@ -134,6 +134,8 @@ export function createDefaultProject(opts: CreateDefaultProjectOpts = {}): Proje
   return {
     id: makeId('project'),
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: true,
     title,
     bpm,
     timeSignature,

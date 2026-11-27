@@ -155,7 +155,7 @@ class StructureDecoder {
   }
 
   required(record: UnknownRecord, key: string, path: string): unknown {
-    if (!Object.prototype.hasOwnProperty.call(record, key)) {
+    if (!Object.hasOwn(record, key)) {
       this.issue(path, 'required', 'required property is missing');
       return undefined;
     }
@@ -264,7 +264,7 @@ class StructureDecoder {
   }
 
   optionalString(record: UnknownRecord, key: string, path: string): string | undefined {
-    return Object.prototype.hasOwnProperty.call(record, key)
+    return Object.hasOwn(record, key)
       ? this.string(record[key], path)
       : undefined;
   }
@@ -298,7 +298,7 @@ function decodeNumberRecord(decoder: StructureDecoder, value: unknown, path: str
 
 function decodeInstrument(decoder: StructureDecoder, value: unknown, path: string): InstrumentConfig {
   const record = decoder.record(value, path, ['type', 'preset', 'params']) ?? {};
-  const params = Object.prototype.hasOwnProperty.call(record, 'params')
+  const params = Object.hasOwn(record, 'params')
     ? decodeNumberRecord(decoder, record.params, `${path}.params`)
     : undefined;
   return {
@@ -338,7 +338,7 @@ function decodeNote(decoder: StructureDecoder, value: unknown, path: string): No
 
 function decodeDrum(decoder: StructureDecoder, value: unknown, path: string): DrumEvent {
   const record = decoder.record(value, path, ['id', 'lane', 'stepIndex', 'velocity', 'probability']) ?? {};
-  const probability = Object.prototype.hasOwnProperty.call(record, 'probability')
+  const probability = Object.hasOwn(record, 'probability')
     ? decoder.number(record.probability, `${path}.probability`)
     : undefined;
   return {
@@ -513,18 +513,18 @@ function decodeClip(
     CLIP_TYPES,
     `${path}.type`,
   );
-  const notes = Object.prototype.hasOwnProperty.call(record, 'notes')
+  const notes = Object.hasOwn(record, 'notes')
     ? decoder.array(record.notes, `${path}.notes`, (item, itemPath) => decodeNote(decoder, item, itemPath))
     : undefined;
-  const drumEvents = Object.prototype.hasOwnProperty.call(record, 'drumEvents')
+  const drumEvents = Object.hasOwn(record, 'drumEvents')
     ? decoder.array(record.drumEvents, `${path}.drumEvents`, (item, itemPath) =>
         decodeDrum(decoder, item, itemPath),
       )
     : undefined;
-  const stepsPerBar = Object.prototype.hasOwnProperty.call(record, 'stepsPerBar')
+  const stepsPerBar = Object.hasOwn(record, 'stepsPerBar')
     ? decoder.positiveSafeInteger(record.stepsPerBar, `${path}.stepsPerBar`)
     : undefined;
-  const drumGroove = Object.prototype.hasOwnProperty.call(record, 'drumGroove')
+  const drumGroove = Object.hasOwn(record, 'drumGroove')
     ? decodeDrumGroove(decoder, record.drumGroove, `${path}.drumGroove`)
     : undefined;
   const aliasOf = decoder.optionalString(record, 'aliasOf', `${path}.aliasOf`);
@@ -539,7 +539,7 @@ function decodeClip(
     if (requiresAudioPayload) {
       return decoder.safeInteger(decoder.required(record, key, `${path}.${key}`), `${path}.${key}`);
     }
-    return Object.prototype.hasOwnProperty.call(record, key)
+    return Object.hasOwn(record, key)
       ? decoder.safeInteger(record[key], `${path}.${key}`)
       : undefined;
   };
@@ -549,10 +549,10 @@ function decodeClip(
   const fadeOutFrames = decodeFrameField('fadeOutFrames');
   const gainDb = requiresAudioPayload
     ? decoder.number(decoder.required(record, 'gainDb', `${path}.gainDb`), `${path}.gainDb`)
-    : Object.prototype.hasOwnProperty.call(record, 'gainDb')
+    : Object.hasOwn(record, 'gainDb')
       ? decoder.number(record.gainDb, `${path}.gainDb`)
       : undefined;
-  const audioWarp = schemaVersion >= 9 && Object.prototype.hasOwnProperty.call(record, 'audioWarp')
+  const audioWarp = schemaVersion >= 9 && Object.hasOwn(record, 'audioWarp')
     ? decodeAudioWarp(decoder, record.audioWarp, `${path}.audioWarp`, schemaVersion)
     : undefined;
   return {
@@ -601,7 +601,7 @@ function decodeTrack(
     'effects',
   ]) ?? {};
   const color = decoder.optionalString(record, 'color', `${path}.color`);
-  const instrument = Object.prototype.hasOwnProperty.call(record, 'instrument')
+  const instrument = Object.hasOwn(record, 'instrument')
     ? decodeInstrument(decoder, record.instrument, `${path}.instrument`)
     : undefined;
   return {
@@ -648,10 +648,10 @@ function decodeChord(decoder: StructureDecoder, value: unknown, path: string): C
     'tags',
   ]) ?? {};
   const degree = decoder.optionalString(record, 'degree', `${path}.degree`);
-  const chordFunction = Object.prototype.hasOwnProperty.call(record, 'function')
+  const chordFunction = Object.hasOwn(record, 'function')
     ? decoder.member(record.function, CHORD_FUNCTIONS, `${path}.function`)
     : undefined;
-  const tags = Object.prototype.hasOwnProperty.call(record, 'tags')
+  const tags = Object.hasOwn(record, 'tags')
     ? decoder.array(record.tags, `${path}.tags`, (item, itemPath) => decoder.string(item, itemPath))
     : undefined;
   return {
@@ -749,7 +749,7 @@ function decodeAudioAsset(
 
   if (availability === 'ready') {
     for (const key of ['legacyAssetId', 'reason']) {
-      if (Object.prototype.hasOwnProperty.call(record, key)) {
+      if (Object.hasOwn(record, key)) {
         decoder.issue(`${path}.${key}`, 'unknown-key', `property is not allowed for a ready asset`);
       }
     }
@@ -797,7 +797,7 @@ function decodeAudioAsset(
     'channelCount',
     'frameCount',
   ]) {
-    if (Object.prototype.hasOwnProperty.call(record, key)) {
+    if (Object.hasOwn(record, key)) {
       decoder.issue(`${path}.${key}`, 'unknown-key', `property is not allowed for an unresolved asset`);
     }
   }
@@ -1006,7 +1006,7 @@ function inspectLegacyAutomationLane(
   decoder: StructureDecoder,
   value: unknown,
   path: string,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
 ): AutomationTarget {
   const record = decoder.record(
     value,
@@ -1064,7 +1064,7 @@ function decodeAudioRouteDestination(
     `${path}.type`,
   );
   if (type === 'master') {
-    if (Object.prototype.hasOwnProperty.call(record, 'trackId')) {
+    if (Object.hasOwn(record, 'trackId')) {
       decoder.issue(`${path}.trackId`, 'unknown-key', 'Master destination must not contain trackId');
     }
     return { type: 'master' };
@@ -1159,6 +1159,8 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
     const record = decoder.record(input, '', [
       'id',
       'schemaVersion',
+      'swing',
+      'hiHatChoke',
       'title',
       'bpm',
       'timeSignature',
@@ -1203,6 +1205,8 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
         decoder.required(record, 'schemaVersion', 'schemaVersion'),
         'schemaVersion',
       ),
+      swing: decoder.number(decoder.required(record, 'swing', 'swing'), 'swing'),
+      hiHatChoke: decoder.boolean(decoder.required(record, 'hiHatChoke', 'hiHatChoke'), 'hiHatChoke'),
       title: decoder.string(decoder.required(record, 'title', 'title'), 'title'),
       bpm: decoder.number(decoder.required(record, 'bpm', 'bpm'), 'bpm'),
       timeSignature,
@@ -1309,7 +1313,7 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
 /** Reject fields that were not part of the declared legacy transport shape. */
 function inspectLegacyProjectStructure(
   input: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
 ): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
@@ -1463,7 +1467,7 @@ function schemaVersionOf(input: unknown):
   }
   let version: unknown;
   try {
-    version = (input as UnknownRecord).schemaVersion;
+    version = Object.hasOwn(input, 'schemaVersion') ? (input as UnknownRecord).schemaVersion : undefined;
   } catch {
     version = undefined;
   }
@@ -1553,7 +1557,7 @@ function decodeProjectValue(input: unknown): ProjectDecodeResult {
   if (version.version < CURRENT_SCHEMA_VERSION) {
     const legacyIssues = inspectLegacyProjectStructure(
       input,
-      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
     );
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };

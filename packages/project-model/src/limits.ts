@@ -11,3 +11,6 @@ export const MIN_AUDIO_WARP_SEGMENT_SECONDS = 0.04;
 export const MIN_AUDIO_WARP_STRETCH = 0.5;
 export const MAX_AUDIO_WARP_STRETCH = 2;
 export const MAX_AUDIO_PITCH_SHIFT_CENTS = 300;
+
+/** Compatibility-safe invariant enforced by the TypeScript and Rust codecs. */
+export const MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS = 200_000;

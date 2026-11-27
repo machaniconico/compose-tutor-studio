@@ -31,6 +31,7 @@ import { resolvePreset, type Envelope } from './presets';
 import {
   DRUM_SOURCE_STOP_SECONDS,
   DYNAMICS_COMPRESSOR_LOOKAHEAD_SECONDS,
+  HAT_CHOKE_FADE_SECONDS,
   REVERB_IMPULSE_PEAK_AMPLITUDE,
   SYNTH_OSCILLATOR_STOP_PAD_SECONDS,
 } from './voiceTiming';
@@ -431,7 +432,12 @@ function sourceEndSeconds(
       - beatToSecondsAt(musicalTime, startBeat),
   );
   if (payload.kind === 'drum') {
-    return onsetSeconds + DRUM_SOURCE_STOP_SECONDS[payload.lane];
+    const duration = DRUM_SOURCE_STOP_SECONDS[payload.lane];
+    const untilChoked = payload.chokedAtBeat === undefined
+      ? duration
+      : secondsBetweenBeats(musicalTime, event.beat, payload.chokedAtBeat)
+        + HAT_CHOKE_FADE_SECONDS;
+    return onsetSeconds + Math.min(duration, untilChoked);
   }
 
   if (!synthTail) return null;

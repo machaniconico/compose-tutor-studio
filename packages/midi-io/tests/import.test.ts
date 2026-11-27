@@ -38,6 +38,8 @@ describe('parseMidiFile', () => {
     const project: Project = {
       id: 'p',
       schemaVersion: 1,
+      swing: 0,
+      hiHatChoke: false,
       title: 'Round Trip',
       bpm: 90,
       timeSignature: [4, 4],

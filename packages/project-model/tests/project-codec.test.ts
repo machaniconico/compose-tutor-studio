@@ -24,6 +24,8 @@ function projectRecord(): Record<string, unknown> {
 function legacyProjectRecord(project: Project, schemaVersion: 1 | 2): Record<string, unknown> {
   const legacy = structuredClone(project) as unknown as Record<string, unknown>;
   legacy.schemaVersion = schemaVersion;
+  delete legacy.swing;
+  delete legacy.hiHatChoke;
   delete legacy.lengthBeats;
   delete legacy.tempoMap;
   delete legacy.timeSignatureMap;

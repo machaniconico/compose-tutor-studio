@@ -865,7 +865,10 @@ async function renderWavWithRouting(
         } else {
           const drum = drums.get(payload.trackId);
           if (drum) {
-            drum.trigger(payload.lane, time, payload.velocity, payload.voiceSeed);
+            const choke = payload.chokedAtBeat === undefined
+              ? undefined
+              : { stopTime: tempo.beatToSeconds(payload.chokedAtBeat) };
+            drum.trigger(payload.lane, time, payload.velocity, payload.voiceSeed, choke);
           }
         }
       }

@@ -5,11 +5,18 @@ import {
   createNoiseBuffer,
   drumNoiseStartOffsetSeconds,
 } from '../src/audio/drums';
+import { HAT_CHOKE_FADE_SECONDS } from '../src/audio/voiceTiming';
 
 class FakeAudioParam {
   value = 0;
 
   setValueAtTime(value: number): void {
+    this.value = value;
+  }
+
+  cancelScheduledValues = vi.fn();
+
+  linearRampToValueAtTime(value: number): void {
     this.value = value;
   }
 
@@ -237,6 +244,27 @@ describe('deterministic synthesized drum noise', () => {
 });
 
 describe('DrumVoiceManager node ownership', () => {
+  it('chokes an earlier open hat once at the first sounding closed hat', () => {
+    const fake = new FakeContext();
+    const manager = new DrumVoiceManager(context(fake), new FakeNode() as unknown as AudioNode);
+    manager.trigger('openHat', 0, 100, 1, { tick: 0 });
+    manager.trigger('closedHat', 0.0001, 100, 2, { tick: 0 });
+    expect(fake.sources[0]?.stops).toHaveLength(1);
+
+    manager.trigger('closedHat', 0.125, 100, 3, { tick: 120 });
+    manager.trigger('closedHat', 0.1251, 100, 4, { tick: 120 });
+    expect(fake.sources[0]?.stops).toHaveLength(2);
+    expect(fake.sources[0]?.stops.at(-1)).toBe(0.125 + HAT_CHOKE_FADE_SECONDS);
+    expect(fake.gains[0]?.gain.cancelScheduledValues).toHaveBeenCalledExactlyOnceWith(0.125);
+  });
+
+  it('honors the offline choke stop time on the open hat source', () => {
+    const fake = new FakeContext();
+    const manager = new DrumVoiceManager(context(fake), new FakeNode() as unknown as AudioNode);
+    manager.trigger('openHat', 1, 100, 1, { stopTime: 1.125 });
+    expect(fake.sources[0]?.stops.at(-1)).toBe(1.125 + HAT_CHOKE_FADE_SECONDS);
+  });
+
   it('disconnects every lane subgraph exactly once after natural source endings', () => {
     const fake = new FakeContext();
     const output = new FakeNode();

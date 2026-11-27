@@ -48,6 +48,8 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: 'test-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Test',
     bpm: 120,
     timeSignature: [4, 4],

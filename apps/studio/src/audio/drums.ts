@@ -8,7 +8,7 @@
 // Works with any BaseAudioContext (live playback and offline WAV render).
 
 import type { DrumLane } from '@cts/project-model';
-import { DRUM_VOICE_TIMING } from './voiceTiming';
+import { DRUM_VOICE_TIMING, HAT_CHOKE_FADE_SECONDS } from './voiceTiming';
 
 /** Seconds of white noise in the shared buffer. Long enough for any one hit. */
 const NOISE_SECONDS = 1;
@@ -115,6 +115,7 @@ export class DrumVoiceManager {
   private readonly output: AudioNode;
   private readonly noise: AudioBuffer;
   private readonly activeSubvoices = new Set<{ cancel: () => void }>();
+  private readonly openHats = new Set<{ tick: number; stopAt: (time: number) => void }>();
   private disposed = false;
 
   constructor(ctx: BaseAudioContext, output: AudioNode, noise?: AudioBuffer) {
@@ -129,6 +130,7 @@ export class DrumVoiceManager {
     time: number,
     velocity: number,
     voiceSeed: number = LEGACY_DRUM_VOICE_SEED_V1,
+    choke?: { tick: number } | { stopTime: number },
   ): void {
     if (this.disposed) return;
     const vel = Math.min(1, Math.max(0, velocity / 127));
@@ -143,6 +145,11 @@ export class DrumVoiceManager {
           this.snare(time, vel, stableVoiceSeed);
           break;
         case 'closedHat':
+          if (choke && 'tick' in choke) {
+            for (const hat of this.openHats) {
+              if (hat.tick < choke.tick) hat.stopAt(time);
+            }
+          }
           this.hat(
             time,
             vel,
@@ -158,6 +165,7 @@ export class DrumVoiceManager {
             DRUM_VOICE_TIMING.openHat,
             stableVoiceSeed,
             NOISE_SUBVOICE_SALT.openHatNoise,
+            choke,
           );
           break;
         case 'clap':
@@ -201,6 +209,7 @@ export class DrumVoiceManager {
   private scheduleSubvoice(
     source: AudioScheduledSourceNode,
     schedule: (own: <T extends AudioNode>(node: T) => T) => void,
+    onCleanup?: () => void,
   ): void {
     const nodes: AudioNode[] = [];
     let settled = false;
@@ -211,6 +220,7 @@ export class DrumVoiceManager {
       settled = true;
       source.onended = null;
       this.activeSubvoices.delete(subvoice);
+      onCleanup?.();
       disconnectNode(source);
       for (const node of nodes) disconnectNode(node);
     };
@@ -337,8 +347,11 @@ export class DrumVoiceManager {
     timing: typeof DRUM_VOICE_TIMING.closedHat | typeof DRUM_VOICE_TIMING.openHat,
     voiceSeed: number,
     subvoiceSalt: number,
+    choke?: { tick: number } | { stopTime: number },
   ): void {
     const { source: noise, offset } = this.noiseSource(voiceSeed, subvoiceSalt);
+    let activeHat: { tick: number; stopAt: (time: number) => void } | undefined;
+    const peak = 0.32 * vel;
     this.scheduleSubvoice(noise, (own) => {
       const hp = own(this.ctx.createBiquadFilter());
       const gain = own(this.ctx.createGain());
@@ -346,17 +359,52 @@ export class DrumVoiceManager {
       noise.loop = false;
       hp.type = 'highpass';
       hp.frequency.setValueAtTime(7000, time);
-      gain.gain.setValueAtTime(0.32 * vel, time);
+      gain.gain.setValueAtTime(peak, time);
       gain.gain.exponentialRampToValueAtTime(
         0.001,
         time + timing.envelopeDecaySeconds,
       );
-      silenceAtSourceStop(gain.gain, time + timing.sourceStopSeconds);
+      let stopTime = time + timing.sourceStopSeconds;
+      // Choke: the hat must sound unchanged until `at`, then fade from the held
+      // envelope value. Cancelling the decay ramp itself would hold the peak
+      // level from the onset until the choke and change the sound before it.
+      const stopAt = (at: number): void => {
+        const fadeEnd = Math.max(at, time) + HAT_CHOKE_FADE_SECONDS;
+        if (fadeEnd >= stopTime) return;
+        const from = Math.max(at, time);
+        const param = gain.gain;
+        if (typeof param.cancelAndHoldAtTime === 'function') {
+          param.cancelAndHoldAtTime(from);
+        } else {
+          // Fallback: remove only events at/after `from`, then re-create the
+          // exact geometric segment of the decay up to `from`.
+          param.cancelScheduledValues(from);
+          const decayEnd = time + timing.envelopeDecaySeconds;
+          if (from < decayEnd && peak > 0.001) {
+            const held = peak * (0.001 / peak) ** ((from - time) / timing.envelopeDecaySeconds);
+            param.exponentialRampToValueAtTime(held, from);
+          } else {
+            param.setValueAtTime(0.001, from);
+          }
+        }
+        param.linearRampToValueAtTime(0, fadeEnd);
+        noise.stop(fadeEnd);
+        stopTime = fadeEnd;
+      };
+      silenceAtSourceStop(gain.gain, stopTime);
       noise.connect(hp);
       hp.connect(gain);
       gain.connect(this.output);
       noise.start(time, offset);
-      noise.stop(time + timing.sourceStopSeconds);
+      noise.stop(stopTime);
+      if (choke && 'stopTime' in choke) {
+        stopAt(choke.stopTime);
+      } else if (choke) {
+        activeHat = { tick: choke.tick, stopAt };
+        this.openHats.add(activeHat);
+      }
+    }, () => {
+      if (activeHat) this.openHats.delete(activeHat);
     });
   }
 

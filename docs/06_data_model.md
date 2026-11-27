@@ -27,6 +27,8 @@
 export type Project = {
   id: string;
   schemaVersion: number;
+  swing: number;
+  hiHatChoke: boolean;
   title: string;
   bpm: number;
   timeSignature: [number, number];
@@ -248,9 +250,9 @@ export type ChordEvent = {
 };
 ```
 
-### 2.1 Project schema v10（current）
+### 2.1 Project schema v11（current）
 
-- `schemaVersion`のcurrent valueは`10`。decodeはversionごとにrequired field、unknown field、型、有限値、整数、範囲を厳密検証し、`v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10`の順にpureかつ決定的にmigrationする。
+- `schemaVersion`のcurrent valueは`11`。decodeはversionごとにrequired field、unknown field、型、有限値、整数、範囲を厳密検証し、`v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11`の順にpureかつ決定的にmigrationする。
 - v3では`Project.lengthBeats`を曲長の正本、`tempoMap` / `timeSignatureMap`を時間変換の正本とする。mapはbeat 0から始まり、IDを含む昇順event列として保存する。`bpm`、`timeSignature`、`lengthBars`は旧consumer用の互換mirrorであり、それぞれ先頭tempo、先頭拍子、拍子mapから算出した実小節数と一致しなければならない。
 - `compileMusicalTime`でimmutable indexを作り、`beatToSecondsAt` / `secondsToBeatAt` / `secondsBetweenBeats` / `barToBeatAt` / `beatToBarPosition`を共通変換境界とする。従来の固定tempo用`beatToSeconds(bpm)`は互換APIとして残す。
 - Trackの意味は`role`が正本であり、runtimeで名前から推測しない。`general`は予約名を含め自由に改名でき、改名でroleは変わらない。学習role Trackの削除は保護し、Track複製時のroleは`general`にする。
@@ -265,9 +267,11 @@ export type ChordEvent = {
 - v7→v8は`schemaVersion`だけを更新し、v7で不正だったMaster automation / Read IDを移行時に許容しない。canonical v8だけが最初のeffective Masterのvolume target / Read IDを追加で許容し、Master pan、later Master、missing Track、重複 / 非canonical順を拒否する。
 - v8→v9も`schemaVersion`だけを更新し、既存のAudio Clip、Automation、routing、takeと可聴結果を変えない。canonical v9だけがAudio Clipのoptional `audioWarp`を受理し、v8以下へのfield混入をunknown fieldとして拒否する。
 - v9→v10は既存`audioWarp`に`formantMode: 'off'`を決定的に追加して既存の可聴結果を変えない。canonical v10は`off | preserve`を必須とし、v9のfield混入、v10での欠落 / unknown値 / unknown keyを拒否する。
-- TypeScript codecとnative Rust境界は同じcanonical schema v10 JSONを検証・migration・保存する。AudioAsset binary、Elastic Audioの解析候補 / 表示用waveform / pitch frame、派生PCM cache、A/B状態はJSONへ埋め込まず、保存済み`audioWarp`はchecksum / byte lengthでapp-owned repositoryのimmutable objectを参照する。
+- v11では`swing`（0〜60 の有限数、単位はパーセント）と`hiHatChoke`（boolean）が必須。新規プロジェクトは`swing: 0`、`hiHatChoke: true`。v10→v11は版番号を進め、`swing: 0`、`hiHatChoke: false`を追加する。v10にこれらのキーがあれば拒否する。
+- 再生・WAV・MIDIは2つのmodeを持つ。**legacy mode**(`swing === 0 && hiHatChoke === false`)はv10から移行した全Projectの設定で、live・WAV・MIDIはmain(v10)のcode pathをそのまま使い、schedule・WAV tail・SMF bytesがmainと一致する(beat単位のclip終端dropを含む。新しいtick規則は適用しない)。**resolved mode**(`swing > 0 || hiHatChoke === true`)では3経路とも`groove-schedule.ts`の共通resolverから発音・省略・終端を受け取る。値はそれぞれ一度だけ480 PPQの整数tickへ丸め、`onsetTick >= min(clipEndTick, songEndTick)`の発音を省く。realized chordはvoiceごとに自身の終端を同じ規則に使う。MIDIは480 PPQの決定を出力PPQへ換算するだけで、省略を判定し直さない。曲のスウィングは絶対位置の奇数番目(0始まり)の1/16グリッド上の発音を`0.25 × swing / 100`拍遅らせる。ドラムクリップに正の`drumGroove.swing`があればクリップの値だけを使う。drumのprobability・humanize・`voiceSeed`は、resolved modeでもスウィング前の作成時の拍(`authoredBeat`)から引くので、legacy modeと同じ打点が同じ強さで鳴り、変わるのは発音時刻だけになる。その後で、同じtrack・lane・tickのdrum hitは元の順で最後の1件に統合し、WAVとMIDIの発音数を揃える。チョークを有効にすると、同じトラックで後に鳴る最初のクローズドハットがオープンハットを止める。オープンハットはチョーク時刻まで変化せず、その時刻の値から短いfadeで0へ下げる。ライブのtransport loopはスウィング後の発音位置でループ区間を判定し、区間内に発音がなければwindowごとの走査をせずに返す。
+- TypeScript codecとnative Rust境界は同じcanonical schema v11 JSONを検証・migration・保存する。AudioAsset binary、Elastic Audioの解析候補 / 表示用waveform / pitch frame、派生PCM cache、A/B状態はJSONへ埋め込まず、保存済み`audioWarp`はchecksum / byte lengthでapp-owned repositoryのimmutable objectを参照する。
 
-linked Clipのv2契約はcurrent v10でも次のとおり維持する。
+linked Clipのv2契約はcurrent v11でも次のとおり維持する。
 
 - v2の`aliasOf`はMIDI / Drum Clipだけが持てる。同じTrack・同じtype・同じ`lengthBeats`の非alias正本Clipを直接参照し、自己参照、dangling、別Track/type、chain/cycleを禁止する。
 - 正本だけが`notes`または`drumEvents` / `stepsPerBar` / `drumGroove`を所有する。aliasはこれらと`audioAssetId`を省略し、`id` / `trackId` / `type` / `startBeat` / `lengthBeats` / `loop` / `aliasOf`だけを保存する。
@@ -316,7 +320,7 @@ Program / Bank、marker、variable tempo / meter / key signature、initial key�
 
 drum Clipの表示小節数は永続fieldではなく、Clip開始位置に有効な拍子と以後の`timeSignatureMap`をたどって導出する。beat 0だけの固定mapでは従来の`max(1, ceil(Clip.lengthBeats / beatsPerBar(Project.timeSignature)))`と一致する。各cellは対応するmap-aware beatがClip終端未満の場合だけ編集可能とし、partial final barのclip終端以降はdisabledにする。Clip length、stepsPerBar、DrumEventをpaddingしない。
 
-MIDI writerはProject上限まで各partのFF 21 `port/channel` pairを一意にする。chord realizationとdestination allocationの前にClip `trackId`、包含Trackとのtype対応、payload exclusivityを検証する。authored / realized pitch、note / drum velocity、export対象Track volume / pan、DrumEvent laneもdata byte生成前に全件検証し、量子化で省略されるnoteを含め、整数範囲外、非有限値、不明laneの1件でもあれば部分SMFを返さず全体を`invalid-project`にする。MIDI Clip noteはライブ/WAVと同じbeat-domain occurrenceをabsolute beatから個別に量子化し、final note-offをclip終端tick以下へclampする。start tickがclip終端tickと同じになり正durationを内部へ収められないsub-tick partialは省略する。量子化可否を数えるallocation-free occurrence workは各Clipではなくexport全体で累積し、最大event数の半数をhard capにする。各part内で量子化後の同一channel/pitch intervalが重なる場合、Note Offから元instanceを識別できずnormalized durationを保てないため`overlapping-note`として拒否する。exact adjacencyと別part destinationは許可する。正しいautomation Clipとaudio Trackは有効なlossy入力として受理するが、MIDI event / part MTrkには投影しない。
+MIDI writerはProject上限まで各partのFF 21 `port/channel` pairを一意にする。chord realizationとdestination allocationの前にClip `trackId`、包含Trackとのtype対応、payload exclusivityを検証する。authored / realized pitch、note / drum velocity、export対象Track volume / pan、DrumEvent laneもdata byte生成前に全件検証し、量子化で省略されるnoteを含め、整数範囲外、非有限値、不明laneの1件でもあれば部分SMFを返さず全体を`invalid-project`にする。MIDI Clip noteはライブ/WAVと同じbeat-domain occurrenceをabsolute beatから個別に量子化する。legacy modeでは出力PPQでclip終端tickと同じになるsub-tick partialを省略し、note-offを終端tick以下へclampする(main同一)。resolved modeでは共通resolverが480 PPQで発音の採否と終端(clip終端tick以下)を決め、MIDIは出力PPQへ換算するだけにする。量子化可否を数えるallocation-free occurrence workは各Clipではなくexport全体で累積し、最大event数の半数をhard capにする。resolved modeのドラムは、固定長・チョーク・同一channel/pitchの次の発音のうち最も早いtickで終了する。同じtrack・lane・tickの打点は共通resolverが保存順で最後の1件に統合し、WAVも同じ1件だけを鳴らす。各part内で量子化後の同一channel/pitch intervalが重なる場合、Note Offから元instanceを識別できずnormalized durationを保てないため`overlapping-note`として拒否する。exact adjacencyと別part destinationは許可する。正しいautomation Clipとaudio Trackは有効なlossy入力として受理するが、MIDI event / part MTrkには投影しない。
 
 MIDIからはclip境界、loop / alias、instrument preset、effects、mute / solo、groove、section、chordの機能・構成音をexactに復元しない。Project→MIDI→Projectの比較は上表のnormalized projectionだけを対象とする。
 
@@ -329,6 +333,7 @@ raw onsetはClip開始位置からlocal barを進め、各bar開始時に有効�
 transport反復時のclip終端は`source clip end + (playheadBeat - raw event beat)`へ平行移動する。resolved onsetがこの値以上ならdropする。no-loop schedulerはswing遅延分をlookbackしてraw eventを選ぶため、隣接half-open windowをまたぐhitを欠落・重複させない。
 
 現行のdrum `Clip.loop`はライブ、WAV、drum MIDIで反復展開しない。MIDI normalized projectionはaudio resolverを通さず、swing / probability / humanize / seed / mute / soloをbakeしない。transport loopの無効boundsは、拍子分母を含むProject曲長から導出した`0..songEnd`へ正規化し、active playback中の切替はProject / historyを変えず新しいrequest generationへ移る。audio resolverはversion tag、保存済みseed、Track / Clip / DrumEvent identity、lane、source step、丸めたunwrapped occurrenceから32-bit `voiceSeed`を導出する。`voiceSeed`はresolved payloadだけの一時値であり、Project codec / SQLite / `.ctsproj.json`へ保存しない。
+v11 resolved modeでは上の2段落の代わりに共通resolverの480 PPQ規則を使う(§2.1)。eventの`beat`はスウィング後のonset tick、payloadの`swing`は0で、MIDIもこの同じ決定からdrumのgroove・swing・チョークを書き出す。
 
 ### 2.4 Transient audio tail / transport end projection
 
@@ -410,7 +415,7 @@ production Editorが変更する正本は既存の`Project.tempoMap`と`Project.
 - Track削除は所有folderをcascade除去し、Track複製はfolder / take / segmentへfresh IDを発行してassetを共有する。AudioAsset GCはAudio Clipだけでなく全take参照もrootとして数える
 - liveとoffline WAVはfolderを一時的なAudio regionへ正規化して既存Audio Clip plannerへ渡す。選択takeだけを鳴らし、spliceは`crossfadeMs`を境界中心に半分ずつ延長したlinear overlap、persist済みtake fadeはslice長へ再正規化せずtake-local時間のままtruncateする
 - MIDI exportはtake audioを出力しないが、壊れたv5 aggregateを無視せず独立validationで`invalid-project`として拒否する
-- fixed-pass Audio cycleとbounded Auto Punchのexact-window folder生成はv5で導入されcurrent schema v10へ継承された同じtake aggregateを使う。Quick Punch、automatic input monitoring、cycleとの併用、disk streaming、arbitrary overlaps、MIDI comping、multi-input、named comps、flatten / bounceはschema / UIの対応済み範囲に含めない
+- fixed-pass Audio cycleとbounded Auto Punchのexact-window folder生成はv5で導入されcurrent schema v11へ継承された同じtake aggregateを使う。Quick Punch、automatic input monitoring、cycleとの併用、disk streaming、arbitrary overlaps、MIDI comping、multi-input、named comps、flatten / bounceはschema / UIの対応済み範囲に含めない
 
 ### 2.6.5 Audio Clip timing / monophonic pitch編集（schema v10）
 
@@ -423,7 +428,7 @@ production Editorが変更する正本は既存の`Project.tempoMap`と`Project.
 - left / right trimは残るsource windowへmarker / regionをcropし、始終点をexactに作り直す。splitは左右へpartitionして両Clipのsource frame / target beatをrebaseする。audioWarp付きClipのloop化、take folder化、Auto Punchのspanning Clip変換はmetadataの意味を保てないため候補をatomicに拒否する
 - accepted editはAudio Clipの`audioWarp`だけを含むcandidate全体をcanonical codecで検証し、1 gesture = 1 Project change / 1 Undo / 1 save revisionとする。解析だけ、semantic no-op、invalid / busy / staleではProject参照と履歴を変えない
 - live、全体WAV、選択Track WAVは保存済みmetadataとAudioAsset checksumから同じversioned派生PCM requestを作る。派生PCMは永続正本ではなく再生成可能なcontent-addressed cacheである
-- manual formant editing、vibrato editing、polyphonic pitch、take folder / loop-cycle warp、phase-coherent multitrack stretch、audio quantize / groove extraction、audio follow / Smart Tempoのfieldはcurrent schema v10に定義しない。off / preserveの実声品質、unsupported rate、極端なpitch shiftは別品質gateでありschema fieldではない
+- manual formant editing、vibrato editing、polyphonic pitch、take folder / loop-cycle warp、phase-coherent multitrack stretch、audio quantize / groove extraction、audio follow / Smart Tempoのfieldはcurrent schema v11に定義しない。off / preserveの実声品質、unsupported rate、極端なpitch shiftは別品質gateでありschema fieldではない
 
 ### 2.7 Track管理とpreset（schema v4）
 

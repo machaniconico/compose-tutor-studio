@@ -24,6 +24,8 @@ function masterMixProject(
   return {
     id: 'project-master-mix-e2e',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: FIXTURE_TITLE,
     bpm: 120,
     timeSignature: [4, 4],

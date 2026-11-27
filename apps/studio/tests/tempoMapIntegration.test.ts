@@ -37,6 +37,8 @@ function projectWithTimeline(
   return {
     id: 'tempo-map-integration',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Tempo map integration',
     bpm: tempoMap[0]?.bpm ?? 120,
     timeSignature: [

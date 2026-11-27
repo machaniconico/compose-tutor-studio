@@ -54,6 +54,8 @@ function routingProject(tracks: Track[], audioRouting: AudioRouting): Project {
   return {
     id: 'routing-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Routing test',
     bpm: 120,
     timeSignature: [4, 4],

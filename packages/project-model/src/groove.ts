@@ -1,5 +1,5 @@
 // Pure timing and drum-grid transforms (US-018 and US-019).
-import { MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS } from './schedule-budget';
+import { MAX_PERSISTED_EFFECTIVE_SCHEDULE_EVENTS } from './limits';
 import { beatTick, PPQ } from './ticks';
 import type { DrumEvent, DrumLane } from './types';
 
@@ -136,6 +136,7 @@ export function humanize<T extends { startBeat: number; velocity: number }>(
  */
 export function applyHiHatChoke<T extends { lane?: DrumLane; startBeat: number; durationBeats?: number }>(
   hits: readonly T[],
+  onChoke?: (open: T, closed: T) => void,
 ): T[] {
   assertEventCount(hits.length);
   const out = [...hits];
@@ -153,7 +154,7 @@ export function applyHiHatChoke<T extends { lane?: DrumLane; startBeat: number; 
       const { index, lane } = order[i]!;
       const hit = hits[index]!;
       if (lane === 'closedHat') {
-        closedHere ??= hit;
+        if (closedHere === undefined || hit.startBeat < closedHere.startBeat) closedHere = hit;
         continue;
       }
       if (next === undefined) continue;
@@ -162,6 +163,7 @@ export function applyHiHatChoke<T extends { lane?: DrumLane; startBeat: number; 
       if (beatTick(hit.startBeat + length) !== closedTick) length = closedTick / PPQ - hit.startBeat;
       if (hit.durationBeats !== undefined && beatTick(hit.startBeat + hit.durationBeats) <= closedTick) continue;
       out[index] = { ...hit, durationBeats: length };
+      onChoke?.(hit, next);
     }
     if (closedHere !== undefined) next = closedHere;
     end = start;

@@ -116,6 +116,8 @@ function project(track: Track): Project {
   return {
     id: 'tail-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Tail test',
     bpm: 120,
     timeSignature: [4, 4],

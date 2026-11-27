@@ -46,6 +46,8 @@ function projectWithLoop(lengthBeats: number): Project {
   return {
     id: 'bounded-export',
     schemaVersion: 1,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Bounded export',
     bpm: 120,
     timeSignature: [4, 4],

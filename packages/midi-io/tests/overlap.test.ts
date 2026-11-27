@@ -54,6 +54,8 @@ function project(tracks: Track[], chordTrack: ChordEvent[] = []): Project {
   return {
     id: 'overlap-project',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 'Overlap',
     bpm: 120,
     timeSignature: [4, 4],

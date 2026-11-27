@@ -45,6 +45,8 @@ function addBus(project: Project, id: string): Track {
 function schemaV3Record(project: Project): Record<string, unknown> {
   const legacy = structuredClone(project) as unknown as Record<string, unknown>;
   legacy.schemaVersion = 3;
+  delete legacy.swing;
+  delete legacy.hiHatChoke;
   delete legacy.audioRouting;
   delete legacy.audioTakeFolders;
   delete legacy.automationReadState;

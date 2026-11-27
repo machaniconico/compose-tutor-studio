@@ -10155,3 +10155,84 @@ fn acknowledged_crash_draft_survives_sigkill_and_reopens_writable() {
         assert!(all_crash_drafts(connection).unwrap().is_empty());
     });
 }
+
+// ---- P20 acceptance (schema v11: Project.swing 0..=60 percent, Project.hiHatChoke) ----
+// 受け入れテスト(実装者は編集禁止)。契約:
+// - v10 -> v11 は swing: 0 と hiHatChoke: false を足すだけで、他は変えない。
+// - v11 は swing(0 以上 60 以下の有限数)と hiHatChoke(bool)の両方が必須。
+fn p20_v10_project_value() -> Value {
+    let v9 = migrate_project_value_v8_to_v9(schema_v8_master_automation_project_value())
+        .expect("valid v8 migrates");
+    let v10 = migrate_project_value_v9_to_v10(v9).expect("valid v9 migrates");
+    assert_eq!(v10["schemaVersion"], json!(10));
+    v10
+}
+
+fn p20_v11_project_value(swing: Value, choke: Value) -> Value {
+    let mut v11 = p20_v10_project_value();
+    v11["schemaVersion"] = json!(11);
+    v11["swing"] = swing;
+    v11["hiHatChoke"] = choke;
+    v11
+}
+
+fn p20_accepts(value: &Value) -> bool {
+    validate_project_file_json(&serde_json::to_vec(value).unwrap())
+}
+
+#[test]
+fn native_validate_accepts_v11_swing_and_choke() {
+    for swing in [json!(0), json!(0.0), json!(30), json!(37.5), json!(60)] {
+        for choke in [json!(true), json!(false)] {
+            let v11 = p20_v11_project_value(swing.clone(), choke.clone());
+            assert!(
+                p20_accepts(&v11),
+                "v11 must accept swing={swing} hiHatChoke={choke}"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_validate_rejects_v11_swing_out_of_range() {
+    // 正の対照: 有効な v11 は受理される(未対応版が理由で落ちているだけの場合を除く)。
+    assert!(p20_accepts(&p20_v11_project_value(json!(30), json!(true))));
+    for bad in [
+        json!(-1),
+        json!(61),
+        json!("30"),
+        json!(-0.001),
+        json!(60.001),
+    ] {
+        let v11 = p20_v11_project_value(bad.clone(), json!(true));
+        assert!(!p20_accepts(&v11), "v11 must reject swing={bad}");
+    }
+}
+
+#[test]
+fn native_validate_rejects_v11_choke_non_boolean() {
+    assert!(p20_accepts(&p20_v11_project_value(json!(0), json!(false))));
+    for bad in [json!(1), json!(0), json!("true"), json!(null)] {
+        let v11 = p20_v11_project_value(json!(0), bad.clone());
+        assert!(!p20_accepts(&v11), "v11 must reject hiHatChoke={bad}");
+    }
+}
+
+#[test]
+fn legacy_proof_migrates_v10_to_v11_with_swing_zero_choke_false() {
+    let v10 = p20_v10_project_value();
+    let before = v10.clone();
+    let migrated = migrate_project_for_legacy_proof(v10.clone(), 11).expect("v10 migrates to v11");
+    assert_eq!(v10, before, "migration input must remain immutable");
+    assert_eq!(migrated["schemaVersion"], json!(11));
+    assert_eq!(migrated["swing"].as_f64(), Some(0.0));
+    assert_eq!(migrated["hiHatChoke"], json!(false));
+    // swing と hiHatChoke と schemaVersion 以外は 1 つも変わらない。
+    let mut expected = before;
+    expected["schemaVersion"] = json!(11);
+    let mut actual = migrated.clone();
+    actual.as_object_mut().unwrap().remove("swing");
+    actual.as_object_mut().unwrap().remove("hiHatChoke");
+    assert_eq!(actual, expected);
+    assert!(p20_accepts(&migrated), "migrated v11 must validate");
+}

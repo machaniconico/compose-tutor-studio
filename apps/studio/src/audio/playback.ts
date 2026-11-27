@@ -6,6 +6,7 @@
 // of being allowed to attach itself to a newer play request.
 
 import {
+  beatTick,
   compileAudioRouting,
   effectiveMasterTrackId,
   MAX_AUDIO_TAKES_PER_FOLDER,
@@ -2297,9 +2298,23 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
         payload.velocity,
       );
     } else {
+      const { anchorBeat, anchorTime, transportTempo } = session;
+      let choke: { tick: number } | { stopTime: number } | undefined;
+      if (session.loop) {
+        // Loop passes can resolve drum probability differently. Choke only
+        // when a closed hat actually sounds, including across the loop edge.
+        if (session.projectSnapshot.hiHatChoke
+          && (payload.lane === 'closedHat' || payload.lane === 'openHat')) {
+          choke = { tick: beatTick(timeToBeat(event.time, transportTempo, anchorBeat, anchorTime)) };
+        }
+      } else if (payload.chokedAtBeat !== undefined) {
+        choke = {
+          stopTime: beatToTime(payload.chokedAtBeat, transportTempo, anchorBeat, anchorTime),
+        };
+      }
       session.drums
         .get(payload.trackId)
-        ?.trigger(payload.lane, event.time, payload.velocity, payload.voiceSeed);
+        ?.trigger(payload.lane, event.time, payload.velocity, payload.voiceSeed, choke);
     }
   }
 }

@@ -85,6 +85,8 @@ function project(tracks: Track[]): Project {
   return {
     id: 'p',
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    swing: 0,
+    hiHatChoke: false,
     title: 't',
     bpm: 120,
     timeSignature: [4, 4],
@@ -509,6 +511,8 @@ describe('buildScheduleEvents', () => {
     legacy.createdAt = '2026-07-12T00:00:00.000Z';
     legacy.updatedAt = '2026-07-12T00:00:00.000Z';
     const legacyRecord = structuredClone(legacy) as unknown as Record<string, unknown>;
+    delete legacyRecord.swing;
+    delete legacyRecord.hiHatChoke;
     delete legacyRecord.lengthBeats;
     delete legacyRecord.tempoMap;
     delete legacyRecord.timeSignatureMap;
