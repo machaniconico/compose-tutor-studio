@@ -16,7 +16,7 @@ const PATTERN_TIMING = {
   stab: { step: PPQ, length: PPQ / 4 },
 } satisfies Record<CompingPattern, { step: number; length: number }>;
 
-function compingTickSpan(chord: ChordEventInput) {
+export function compingTickSpan(chord: ChordEventInput) {
   // Round inwards so every emitted note fits, including when a span is shorter than one tick.
   const start = Math.ceil(chord.startBeat * PPQ - TICK_EPSILON) + 0; // Normalize negative zero.
   const end = Math.floor((chord.startBeat + chord.durationBeats) * PPQ + TICK_EPSILON);

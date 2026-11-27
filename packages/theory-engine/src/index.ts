@@ -157,3 +157,6 @@ export { mulberry32, createPrng, randomInt, pick, type RandomFn } from './prng';
 
 // Suggest chord names from the notes in a clip.
 export * from './chord-detect';
+
+export * from './drum-patterns';
+export * from './accompaniment';

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { BassMode, GeneratedNote, MelodyAnalysis, MelodyFinding } from '@cts/theory-engine';
-import { analyzeMelody } from '@cts/theory-engine';
+import { ACCOMPANIMENT_MOODS, analyzeMelody, type AccompanimentMood } from '@cts/theory-engine';
 import { resolveEditTarget } from '@cts/project-model';
 import { useStore } from '../../state/store';
 import {
@@ -9,10 +9,12 @@ import {
   generateBassIntoClip,
   generateMelodyIntoClip,
   projectBeatsPerBar,
+  writeAccompaniment,
   type ClipGenerationFailure,
 } from '../../state/editorActions';
 import type { CoachAdapter, CoachSuggestion } from '../../coach/adapter';
 import { MockCoach } from '../../coach/mockCoach';
+import { simplifyExplanation } from '../inspector/difficultyText';
 
 const GENERATION_NOTICE: Record<ClipGenerationFailure, string> = {
   missingTarget: '音符を書き込むクリップを開けません。リンク元のクリップがあるか確認しましょう。',
@@ -40,14 +42,58 @@ type AssistantPanelProps = {
   coach?: CoachAdapter;
 };
 
-/** Bass + Melody + AI Coach assistant. */
 export function AssistantPanel({ coach = defaultCoach }: AssistantPanelProps) {
   return (
     <div className="assistant">
+      <AccompanimentAssistant />
       <BassAssistant />
       <MelodyAssistant />
       <CoachAssistant coach={coach} />
     </div>
+  );
+}
+
+const ACCOMPANIMENT_EXPLANATIONS = [
+  { part: 'ドラム', text: 'くり返すリズムで、拍を感じやすくします。' },
+  { part: 'ベース', text: 'コードのルート音を中心に、低い音で曲を支えます。' },
+  { part: '和音', text: 'コードに合う音を重ねます。となり合うコードでは、近い高さの音を選びます。' },
+];
+
+function AccompanimentAssistant() {
+  const difficulty = useStore((s) => s.editor.difficulty);
+  const [mood, setMood] = useState<AccompanimentMood>('straight');
+  const [seed, setSeed] = useState(0);
+  const [status, setStatus] = useState('');
+
+  const onGenerate = () => {
+    const result = writeAccompaniment({ seed, mood, complexity: 0.5, intensity: 0.5 });
+    if (result.ok) setSeed(seed + 1);
+    setStatus(result.ok ? 'ドラム・ベース・和音の伴奏を作りました。' : result.reason);
+  };
+
+  return (
+    <section className="panel-section">
+      <p className="panel-section__title">伴奏をおまかせ</p>
+      <label className="assistant__accompaniment-mood">
+        雰囲気
+        <select value={mood} onChange={(event) => setMood(event.currentTarget.value as AccompanimentMood)}>
+          {Object.entries(ACCOMPANIMENT_MOODS).map(([id, label]) => (
+            <option key={id} value={id}>{label}</option>
+          ))}
+        </select>
+      </label>
+      <button type="button" className="assistant__generate assistant__accompaniment-button" onClick={onGenerate}>
+        {seed === 0 ? '伴奏を作る' : '伴奏を作り直す'}
+      </button>
+      {status && <p className="assistant__hint" role="status">{status}</p>}
+      {seed > 0 && (
+        <ul className="assistant__reasons">
+          {ACCOMPANIMENT_EXPLANATIONS.map(({ part, text }) => (
+            <li key={part}><strong>{part}</strong> {simplifyExplanation(text, difficulty)}</li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

@@ -1318,6 +1318,18 @@ input[type='range'] {
   flex-direction: column;
 }
 
+.assistant__accompaniment-mood {
+  display: grid;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
+  font-size: 12px;
+}
+
+.assistant__accompaniment-mood select,
+.assistant__accompaniment-button {
+  min-height: 44px;
+}
+
 .assistant__modes {
   display: grid;
   grid-template-columns: 1fr 1fr;

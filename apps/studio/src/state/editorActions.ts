@@ -72,6 +72,12 @@ import {
 } from '@cts/project-model';
 import {
   analyzeChord,
+  DRUM_PATTERNS,
+  type DrumPatternId,
+  generateAccompaniment,
+  type AccompanimentOptions,
+  type AccompanimentPart,
+  type AccompanimentResult,
   compingNoteCount,
   compingPattern,
   parseChord,
@@ -1592,12 +1598,11 @@ function writeComping(
   confirm: typeof confirmChordNotes,
 ): boolean {
   const span = clip ?? wholeSongChordNotesSpan(project);
-  const clipEnd = span.startBeat + span.lengthBeats;
-  if (clipEnd > MAX_CLIP_END_BEATS) {
-    pushToast(`クリップの終わりが上限（${MAX_CLIP_END_BEATS} 拍）を超えています。クリップを短くするか、曲の先頭に近づけてください。`, 'error');
+  const end = accompanimentClipEnd(project, span);
+  if (end === undefined) {
+    pushToast(ACCOMPANIMENT_CLIP_LIMIT, 'error');
     return false;
   }
-  const end = Math.min(clipEnd, songEndBeat(project));
   const chords: ChordEventInput[] = [];
   let noteCount = 0;
   for (const chord of project.chordTrack) {
@@ -1691,6 +1696,144 @@ function withoutLinkOrLoop(clip: Clip): Clip {
   const out: Clip = { ...clip, loop: false };
   delete out.aliasOf;
   return out;
+}
+
+const ACCOMPANIMENT_CLIP_LIMIT = `クリップの終わりが上限（${MAX_CLIP_END_BEATS} 拍）を超えています。クリップを短くするか、曲の先頭に近づけてください。`;
+
+function accompanimentClipEnd(project: Project, span: ChordNotesSpan): number | undefined {
+  const clipEnd = span.startBeat + span.lengthBeats;
+  if (Number.isFinite(clipEnd) && clipEnd <= MAX_CLIP_END_BEATS) {
+    return Math.min(clipEnd, songEndBeat(project));
+  }
+}
+
+const ACCOMPANIMENT_TARGETS = [
+  { role: 'drums', label: 'ドラム', trackType: 'drum', clipType: 'drum' },
+  { role: 'bass', label: 'ベース', trackType: 'instrument', clipType: 'midi' },
+  { role: 'chords', label: '和音', trackType: 'instrument', clipType: 'midi' },
+] as const;
+
+type WrittenAccompaniment = Extract<AccompanimentResult, { ok: true }>;
+type GeneratedAccompanimentNote = WrittenAccompaniment[AccompanimentPart][number];
+export type WriteAccompanimentResult = { ok: true } | { ok: false; reason: string };
+
+function accompanimentSoundsAsWritten(
+  project: Project, clip: Clip, notes: readonly GeneratedAccompanimentNote[],
+): boolean {
+  const { events, problems } = soundingEvents(project, { clipId: clip.id, includeMuted: true });
+  // The non-looping clip renders its saved events once, in array order.
+  return problems.length === 0 && events.length === notes.length && events.every((event, index) => {
+    const note = notes[index]!;
+    if (event.sourceIndex !== index || event.repeat !== 0 || event.velocity !== note.velocity ||
+        beatTick(event.startBeat) !== beatTick(clip.startBeat + note.startBeat) ||
+        Math.abs(event.startBeat - event.unswungStartBeat) > 1e-9) return false;
+    if ('lane' in note) return event.kind === 'drum' && event.lane === note.lane;
+    return event.kind === 'note' && event.pitch === note.pitch &&
+      Math.abs(event.durationBeats - note.durationBeats) <= 1e-9;
+  });
+}
+
+/** Generate and apply all three roles as one undoable change. */
+export function writeAccompaniment(
+  options: Pick<AccompanimentOptions, 'seed' | 'mood' | 'complexity' | 'intensity'>,
+  confirm = confirmChordNotes,
+): WriteAccompanimentResult {
+  const { project } = useStore.getState();
+  const missing: string[] = [];
+  const targets = ACCOMPANIMENT_TARGETS.flatMap(({ role, label, trackType, clipType }) => {
+    const track = project.tracks.find((t) => t.role === role && t.type === trackType);
+    if (!track) {
+      missing.push(label);
+      return [];
+    }
+    const existing = track.clips.find((clip) => clip.type === clipType);
+    return [{ role, label, track, existing, clipType, span: existing ?? wholeSongChordNotesSpan(project) }];
+  });
+  if (missing.length > 0) {
+    return { ok: false, reason: `伴奏を作るには「${missing.join('」「')}」の役割を持つトラックが必要です。トラックを追加するか、役割を設定してください。` };
+  }
+
+  const windows: NonNullable<AccompanimentOptions['windows']> = {};
+  for (const { role, label, track, existing, span } of targets) {
+    const endBeat = accompanimentClipEnd(project, span);
+    if (endBeat === undefined) return { ok: false, reason: ACCOMPANIMENT_CLIP_LIMIT };
+    if (!existing && track.clips.some((clip) => tickSpansOverlap(
+      clipTickSpan(clip.startBeat, clip.lengthBeats), clipTickSpan(span.startBeat, span.lengthBeats),
+    ))) {
+      return { ok: false, reason: `「${label}」に書き込めるクリップがありません。空いている範囲にクリップを用意してください。` };
+    }
+    windows[role] = { startBeat: span.startBeat, endBeat };
+  }
+  const drumClip = targets.find(({ role }) => role === 'drums')?.existing;
+  const drumSteps = drumClip
+    ? drumClip.stepsPerBar ?? DEFAULT_STEPS_PER_BAR
+    : Math.min(DRUM_STEPS_DOMAIN.maxStepsPerBar, drumStepsPerBar(project.timeSignature));
+  const generated = generateAccompaniment(project.chordTrack, {
+    ...options,
+    windows,
+    beatsPerBar: projectBeatsPerBar(project),
+    drumStepsPerBar: drumSteps,
+  });
+  if (!generated.ok) return generated;
+
+  for (const { role, label } of targets) {
+    if (generated[role].length === 0) {
+      return { ok: false, reason: `「${label}」に書き込める音がありません。コードがある位置にクリップを置くか、音が入るように範囲を広げてください。` };
+    }
+  }
+
+  const allClips = project.tracks.flatMap((track) => track.clips);
+  const written = targets.map(({ role, track, existing, span, clipType }) => {
+    const clip: Clip = existing ? withoutLinkOrLoop(existing) : {
+      id: uid('clip'), trackId: track.id, type: clipType, ...span, loop: false,
+    };
+    if (role === 'drums') {
+      clip.stepsPerBar = drumSteps;
+      clip.drumEvents = generated.drums.map(({ lane, stepIndex, velocity }) => ({
+        id: uid('drum'), lane, stepIndex, velocity,
+      }));
+    } else {
+      clip.notes = generated[role].map((note) => ({ id: uid('note'), ...note }));
+    }
+    return { role, track, existing, clip };
+  });
+  const candidate = mapTracks(project, (track) => {
+    const target = written.find((part) => part.track === track);
+    if (!target) return track;
+    const { clip, existing } = target;
+    return { ...track, clips: existing ? track.clips.map((c) => c === existing ? clip : c) : [...track.clips, clip] };
+  });
+  const limit = findProjectSoundingLimitProblem(candidate);
+  if (limit) return { ok: false, reason: limit };
+  if (written.some(({ role, clip }) => !accompanimentSoundsAsWritten(candidate, clip, generated[role]))) {
+    return { ok: false, reason: '作った音が予定の位置や長さで鳴りません。クリップの範囲やスウィングの設定を見直してください。' };
+  }
+
+  const changes: string[] = [];
+  let replacesNotes = false;
+  for (const { track, existing } of written) {
+    if (!existing) continue;
+    const source = existing.aliasOf !== undefined ? resolveLinkSource(existing, allClips) : existing;
+    const hasNotes = (clip: Clip) => Boolean(clip.notes?.length || clip.drumEvents?.length);
+    const replaces = hasNotes(existing) || (typeof source !== 'string' && hasNotes(source));
+    replacesNotes ||= replaces;
+    if (replaces) changes.push(`「${track.name}」で今使っている音を置き換えます。`);
+    if (existing.aliasOf !== undefined) changes.push(`「${track.name}」のクリップのリンクを外します。`);
+    if (existing.loop) changes.push(`「${track.name}」のクリップの繰り返しを止めます。`);
+  }
+  if (replacesNotes && !confirm(`${changes.join('')}伴奏を書き込みますか？「元に戻す」で戻せます。`)) {
+    return { ok: false, reason: '伴奏の書き込みを取り消しました。' };
+  }
+
+  const store = useStore.getState();
+  if (store.project !== project) {
+    return { ok: false, reason: '確認中に曲が変更されました。もう一度、伴奏を作ってください。' };
+  }
+  store.commitTransaction();
+  if (!store.applyProjectChange(() => candidate)) {
+    return { ok: false, reason: '伴奏を書き込めませんでした。' };
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -1968,89 +2111,7 @@ export function generateMelodyIntoClip(
 // Drums — pattern templates.
 // ---------------------------------------------------------------------------
 
-export type DrumPatternId =
-  | 'fourOnFloor'
-  | 'eightBeat'
-  | 'hiphop'
-  | 'gameLoop'
-  | 'lofi';
-
-export type DrumPattern = {
-  id: DrumPatternId;
-  name: string;
-  /**
-   * lane -> beat offsets within one bar of `bpb` beats that are ON (0 = 1st
-   * beat, 0.5 = its off-beat). Hits at or past the bar end are dropped.
-   */
-  beats: (bpb: number) => Partial<Record<DrumLane, number[]>>;
-};
-
-/** Whole beats of a bar (0, 1, ...), as many as fit before `bpb`. */
-function barBeats(bpb: number): number[] {
-  return Array.from({ length: Math.ceil(bpb) }, (_, i) => i).filter((beat) => beat < bpb);
-}
-
-/** Every 8th note of a bar (0, 0.5, 1, ...). */
-function barEighths(bpb: number): number[] {
-  return Array.from({ length: Math.ceil(bpb * 2) }, (_, i) => i / 2).filter((beat) => beat < bpb);
-}
-
-/**
- * One-bar drum pattern presets. Original beginner-friendly patterns;
- * not copied from any product's factory content.
- */
-export const DRUM_PATTERNS: DrumPattern[] = [
-  {
-    id: 'fourOnFloor',
-    name: 'Four on the floor',
-    // Kick on every beat of the bar, hi-hat on each off-beat, clap on beats 2, 4, ...
-    beats: (bpb) => ({
-      kick: barBeats(bpb),
-      closedHat: barBeats(bpb).map((beat) => beat + 0.5),
-      clap: barBeats(bpb).filter((beat) => beat % 2 === 1),
-    }),
-  },
-  {
-    id: 'eightBeat',
-    name: '8ビート',
-    // Hi-hat on every 8th, kick on beats 1, 3, ..., snare on beats 2, 4, ...
-    beats: (bpb) => ({
-      kick: barBeats(bpb).filter((beat) => beat % 2 === 0),
-      snare: barBeats(bpb).filter((beat) => beat % 2 === 1),
-      closedHat: barEighths(bpb),
-    }),
-  },
-  {
-    id: 'hiphop',
-    name: 'ヒップホップ',
-    beats: () => ({
-      kick: [0, 1.5, 2.5],
-      snare: [1, 3],
-      closedHat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
-      openHat: [3.5],
-    }),
-  },
-  {
-    id: 'gameLoop',
-    name: 'ゲームループ',
-    beats: () => ({
-      kick: [0, 2],
-      snare: [1, 3],
-      closedHat: [0, 0.75, 1.5, 2.25, 3, 3.75],
-      perc: [0.5, 2.5],
-    }),
-  },
-  {
-    id: 'lofi',
-    name: 'ローファイ',
-    beats: () => ({
-      kick: [0, 2.5],
-      snare: [1, 3],
-      closedHat: [0, 1, 2, 3],
-      perc: [1.75],
-    }),
-  },
-];
+export { DRUM_PATTERNS, type DrumPattern, type DrumPatternId } from '@cts/theory-engine';
 
 /**
  * Apply a drum pattern to a drum clip, replacing its events. The pattern's
