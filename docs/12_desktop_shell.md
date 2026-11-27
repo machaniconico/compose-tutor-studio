@@ -150,7 +150,7 @@ repository初期化のsingle-flightは失敗時だけ解除し、保存の再試
 
 marker付き再開はprocess crashを対象とする。Unixではmarker作成・database family削除・marker削除の親directoryを同期するが、Windowsの通常file deleteに対するdirectory metadata write-throughは未実装であり、突然の電源断直後までのdelete永続性は保証範囲外である。配布前QAでは通常終了・強制process終了を検査し、power-loss/実NTFS検証またはwrite-through tombstoneは後続hardeningとして扱う。
 
-guard VFSはbundled SQLite 3.53.2とoriginal VFS名をruntimeでexact確認する。Unix actual fd検証は固定されたprivate `unixFile`先頭ABIへ依存するため、rusqlite/libsqlite3-sys/SQLite更新時は必ず再監査する。自動検証ではmain/WALのxOpen中差替えをtest hookで発生させ、SQLite I/O前の拒否、外部bytes不変、exclusive WALの`-shm`不生成を固定する。同一UIDが検証完了後に継続してfilesystem entryを操作する攻撃まで対象にする配布では、追加のOS sandbox/ACLが必要である。
+guard VFSはbundled SQLite 3.54.1とoriginal VFS名をruntimeでexact確認する。Unix actual fd検証は固定されたprivate `unixFile`先頭ABIへ依存するため、rusqlite/libsqlite3-sys/SQLite更新時は必ず再監査する。自動検証ではmain/WALのxOpen中差替えをtest hookで発生させ、SQLite I/O前の拒否、外部bytes不変、exclusive WALの`-shm`不生成を固定する。同一UIDが検証完了後に継続してfilesystem entryを操作する攻撃まで対象にする配布では、追加のOS sandbox/ACLが必要である。
 
 自動検証ではmarkerのchecksum/version/atomicity、database family、初期化時のsymlink/hardlink/unsafe sidecar拒否と外部bytes不変、Unix private mode、Windows directory reparse、process lock、seal、same-ID retry、startup gate、WebView storage二重clear、UIのtyped phrase/focus/close lock/single-flight/retryに加え、実native UIの消去・終了、外部seed markerからの起動再開、空再起動を確認する。配布前の3OS smokeでは実production profileのcache消去、複雑な全record class、外部export実fileが残ることも確認する。
 
