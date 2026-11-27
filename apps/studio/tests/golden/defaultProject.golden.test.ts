@@ -24,7 +24,7 @@ describe('golden: studio createDefaultProject', () => {
     const project = createDefaultProject();
     const encoded = encodeProjectJson(project);
     if (!encoded.ok) throw new Error(`encode failed: ${JSON.stringify(encoded.error)}`);
-    expect(JSON.parse(encoded.json).schemaVersion).toBe(11);
+    expect(JSON.parse(encoded.json).schemaVersion).toBe(12);
     checkGolden(join(EXPECTED_DIR, 'studio-default-project.json'), `${encoded.json}\n`);
     const schedule = buildScheduleEvents(project)
       .map((e) => JSON.parse(JSON.stringify({ beat: e.beat, payload: e.payload })) as { beat: number })

@@ -3,7 +3,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -247,7 +247,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -491,7 +491,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -735,7 +735,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -979,7 +979,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -1223,7 +1223,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -1467,7 +1467,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -1711,7 +1711,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -1955,7 +1955,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",
@@ -2199,7 +2199,7 @@
     "ok": true,
     "project": {
       "id": "main-fixture",
-      "schemaVersion": 11,
+      "schemaVersion": 12,
       "swing": 0,
       "hiHatChoke": false,
       "title": "Main fixture",

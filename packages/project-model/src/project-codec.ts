@@ -123,7 +123,8 @@ const CHORD_FUNCTIONS = ['T', 'SD', 'D', 'Other'] as const;
 const AUDIO_AVAILABILITIES = ['ready', 'unresolved'] as const;
 const AUDIO_MEDIA_TYPES = ['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/aac'] as const;
 const UNRESOLVED_AUDIO_REASONS = ['legacy-reference', 'missing-reference'] as const;
-const AUTOMATION_TARGET_TYPES = ['track-volume', 'track-pan'] as const;
+const LEGACY_AUTOMATION_TARGET_TYPES = ['track-volume', 'track-pan'] as const;
+const AUTOMATION_TARGET_TYPES = [...LEGACY_AUTOMATION_TARGET_TYPES, 'track-filter-cutoff'] as const;
 const AUTOMATION_INTERPOLATIONS = ['hold', 'linear'] as const;
 const AUDIO_SEND_POSITIONS = ['pre-fader', 'post-fader'] as const;
 const AUDIO_WARP_ALGORITHMS = ['wsola-v1'] as const;
@@ -944,12 +945,13 @@ function decodeAutomationTarget(
   decoder: StructureDecoder,
   value: unknown,
   path: string,
+  targetTypes: readonly AutomationTarget['type'][] = AUTOMATION_TARGET_TYPES,
 ): AutomationTarget {
   const record = decoder.record(value, path, ['type', 'trackId']) ?? {};
   return {
     type: decoder.member(
       decoder.required(record, 'type', `${path}.type`),
-      AUTOMATION_TARGET_TYPES,
+      targetTypes,
       `${path}.type`,
     ),
     trackId: decoder.string(
@@ -1006,7 +1008,7 @@ function inspectLegacyAutomationLane(
   decoder: StructureDecoder,
   value: unknown,
   path: string,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11,
 ): AutomationTarget {
   const record = decoder.record(
     value,
@@ -1024,6 +1026,7 @@ function inspectLegacyAutomationLane(
     decoder,
     decoder.required(record, 'target', `${path}.target`),
     `${path}.target`,
+    LEGACY_AUTOMATION_TARGET_TYPES,
   );
   decoder.array(
     decoder.required(record, 'points', `${path}.points`),
@@ -1313,12 +1316,13 @@ function decodeCurrentProject(input: unknown): ProjectDecodeResult {
 /** Reject fields that were not part of the declared legacy transport shape. */
 function inspectLegacyProjectStructure(
   input: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11,
 ): ProjectCodecIssue[] {
   const decoder = new StructureDecoder();
   const record = decoder.record(input, '', [
     'id',
     'schemaVersion',
+    ...(schemaVersion >= 11 ? ['swing', 'hiHatChoke'] : []),
     'title',
     'bpm',
     'timeSignature',
@@ -1345,6 +1349,10 @@ function inspectLegacyProjectStructure(
     'schemaVersion',
   );
   decoder.string(decoder.required(record, 'title', 'title'), 'title');
+  if (schemaVersion >= 11) {
+    decoder.number(decoder.required(record, 'swing', 'swing'), 'swing');
+    decoder.boolean(decoder.required(record, 'hiHatChoke', 'hiHatChoke'), 'hiHatChoke');
+  }
   decoder.number(decoder.required(record, 'bpm', 'bpm'), 'bpm');
   const timeSignature = decoder.required(record, 'timeSignature', 'timeSignature');
   if (!Array.isArray(timeSignature)) {
@@ -1557,7 +1565,7 @@ function decodeProjectValue(input: unknown): ProjectDecodeResult {
   if (version.version < CURRENT_SCHEMA_VERSION) {
     const legacyIssues = inspectLegacyProjectStructure(
       input,
-      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
+      version.version as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11,
     );
     if (legacyIssues.length > 0) {
       return { ok: false, error: { code: 'invalid-project', issues: legacyIssues } };

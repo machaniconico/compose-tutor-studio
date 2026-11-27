@@ -2,7 +2,7 @@
 //
 // API contract under test:
 // - `Project.swing: number` (percent, 0..60, 0 = straight) and `Project.hiHatChoke: boolean`.
-// - CURRENT_SCHEMA_VERSION === 11.
+// - CURRENT_SCHEMA_VERSION >= 11 (version-agnostic; the v10 -> v11 step is exercised through MIGRATIONS).
 // - migrateProject v10 -> v11 adds `swing: 0, hiHatChoke: false` and changes nothing else.
 // - createDefaultProject / createEmptyProject / instantiateTemplate produce `swing: 0, hiHatChoke: true`.
 // - validateProject rejects swing < 0, > 60, NaN, Infinity, non-number, and non-boolean hiHatChoke
@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CURRENT_SCHEMA_VERSION,
+  MIGRATIONS,
   PROJECT_TEMPLATES,
   createDefaultProject,
   createEmptyProject,
@@ -38,9 +39,11 @@ function fixture(file: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(FIXTURES, file), 'utf8')) as Record<string, unknown>;
 }
 
-/** A valid v11 record built from the current factory. */
+/** A valid v11 record: the current factory project stamped as a v11 file (later versions add no field here). */
 function v11Record(): Record<string, unknown> {
-  return structuredClone(createEmptyProject({ clock })) as unknown as Record<string, unknown>;
+  const record = structuredClone(createEmptyProject({ clock })) as unknown as Record<string, unknown>;
+  record.schemaVersion = 11;
+  return record;
 }
 
 /** The same record shaped as a v10 file (no swing / hiHatChoke). */
@@ -54,14 +57,26 @@ function v10Record(): Record<string, unknown> {
 
 describe('P20 v11 schema', () => {
   it('migrate_v10ToV11_addsSwingZeroAndChokeFalse_only', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(11);
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(11);
+    const step = MIGRATIONS.find((migration) => migration.from === 10);
+    expect(step?.to).toBe(11);
     for (const file of ['v10-automation-routing.json', 'v10-drum-loop-alias.json', 'v10-tempo-meter-map.json']) {
       const v10 = fixture(file);
       expect(v10.schemaVersion).toBe(10);
       const before = structuredClone(v10);
-      const migrated = migrateProject(v10) as unknown as Record<string, unknown>;
+      // The v10 -> v11 step itself, exactly as before.
+      const stepped = step!.migrate(v10) as unknown as Record<string, unknown>;
       expect(v10).toEqual(before); // input is not mutated
-      expect(migrated).toEqual({ ...before, schemaVersion: 11, swing: 0, hiHatChoke: false });
+      expect(stepped).toEqual({ ...before, schemaVersion: 11, swing: 0, hiHatChoke: false });
+      // The full chain ends at the current version and keeps swing 0 / hiHatChoke false and every other key.
+      const migrated = migrateProject(v10) as unknown as Record<string, unknown>;
+      expect(v10).toEqual(before);
+      expect(migrated).toMatchObject({
+        ...before,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        swing: 0,
+        hiHatChoke: false,
+      });
     }
   });
 
@@ -72,7 +87,8 @@ describe('P20 v11 schema', () => {
       ...(Object.keys(PROJECT_TEMPLATES) as TemplateId[]).map((id) => instantiateTemplate(id, clock)),
     ];
     for (const project of projects) {
-      expect(project.schemaVersion).toBe(11);
+      expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(11);
+      expect(project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
       expect(project.swing).toBe(0);
       expect(project.hiHatChoke).toBe(true);
       expect(validateProject(project).ok).toBe(true);
@@ -123,9 +139,10 @@ describe('P20 v11 schema', () => {
   });
 
   it('codec_v11File_missingSwing_isRejected', () => {
-    // Positive control: a complete v11 file decodes without migration.
+    // Positive control: a complete v11 file decodes (migrated only if the current version is later).
     const complete = decodeProject(v11Record());
     expect(complete.ok).toBe(true);
+    if (complete.ok) expect(complete.migrated).toBe(CURRENT_SCHEMA_VERSION > 11);
     const missingSwing = v11Record();
     delete missingSwing.swing;
     const rejected = decodeProject(missingSwing);

@@ -16,7 +16,7 @@ vi.hoisted(() => {
   });
 });
 
-import type { Project } from '@cts/project-model';
+import { CURRENT_SCHEMA_VERSION, type Project } from '@cts/project-model';
 import { buildCase, goldenCases } from '../../../../packages/project-model/tests/golden/cases';
 import { buildScheduleEvents } from '../../src/audio/events';
 import { createProjectMusicalTime, beatDurationSeconds } from '../../src/audio/musicalTime';
@@ -91,7 +91,8 @@ describe('P20 v11 goldens', () => {
     expect(cases.length).toBeGreaterThanOrEqual(14);
     for (const c of cases) {
       const project = buildCase(c);
-      expect(project.schemaVersion, c.name).toBe(11);
+      expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(11);
+      expect(project.schemaVersion, c.name).toBe(CURRENT_SCHEMA_VERSION);
       project.swing = 0;
       project.hiHatChoke = false;
       const expected = pinned(c.name);
@@ -111,7 +112,8 @@ describe('P20 v11 goldens', () => {
     ]));
     for (const c of migrated) {
       const project = buildCase(c); // decoded WITHOUT touching swing / hiHatChoke: the migration defaults apply
-      expect(project.schemaVersion, c.name).toBe(11);
+      expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(11);
+      expect(project.schemaVersion, c.name).toBe(CURRENT_SCHEMA_VERSION);
       expect(project.swing, `${c.name} swing`).toBe(0);
       expect(project.hiHatChoke, `${c.name} hiHatChoke`).toBe(false);
       const expected = pinned(c.name);

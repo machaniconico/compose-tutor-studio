@@ -1,7 +1,8 @@
-import type {
-  AutomationInterpolation,
-  AutomationPoint,
-  AutomationTarget,
+import {
+  MAX_FILTER_CUTOFF_OCTAVES,
+  type AutomationInterpolation,
+  type AutomationPoint,
+  type AutomationTarget,
 } from '@cts/project-model';
 
 export const AUTOMATION_LANE_HEIGHT = 240;
@@ -19,7 +20,7 @@ export type AutomationTargetPresentation = Readonly<{
   displayLabel: string;
   displayMin: number;
   displayMax: number;
-  displayStep: number;
+  displayStep: number | 'any';
 }>;
 
 export const AUTOMATION_TARGETS: Readonly<
@@ -46,6 +47,17 @@ export const AUTOMATION_TARGETS: Readonly<
     displayMin: -100,
     displayMax: 100,
     displayStep: 1,
+  },
+  'track-filter-cutoff': {
+    label: '明るさ(フィルター)',
+    shortLabel: '明るさ(フィルター)',
+    min: -MAX_FILTER_CUTOFF_OCTAVES,
+    max: MAX_FILTER_CUTOFF_OCTAVES,
+    step: 0.01,
+    displayLabel: '明るさの変化（オクターブ）',
+    displayMin: -MAX_FILTER_CUTOFF_OCTAVES,
+    displayMax: MAX_FILTER_CUTOFF_OCTAVES,
+    displayStep: 'any',
   },
 };
 
@@ -146,21 +158,22 @@ export function clampAutomationValue(
   return Math.min(target.max, Math.max(target.min, value));
 }
 
-/** Convert persisted model scalars to beginner-facing percent-style units. */
+/** Show volume and pan as percentages, and filter offsets in octaves. */
 export function automationValueToDisplay(
   value: number,
   targetType: AutomationTargetType,
 ): number {
-  return clampAutomationValue(value, targetType) * 100;
+  const scale = targetType === 'track-filter-cutoff' ? 1 : 100;
+  return clampAutomationValue(value, targetType) * scale;
 }
 
-/** Convert beginner-facing percent-style input back to the persisted scalar. */
+/** Convert the editor’s value back to the persisted scalar. */
 export function automationDisplayValueToModel(
   displayValue: number,
   targetType: AutomationTargetType,
 ): number {
   if (!Number.isFinite(displayValue)) return Number.NaN;
-  return displayValue / 100;
+  return targetType === 'track-filter-cutoff' ? displayValue : displayValue / 100;
 }
 
 export function snapAutomationBeat(
@@ -511,6 +524,11 @@ export function formatAutomationValue(
 ): string {
   if (targetType === 'track-volume') {
     return `${Math.round(value * 100)}%`;
+  }
+  if (targetType === 'track-filter-cutoff') {
+    const amount = Number(value.toFixed(2));
+    if (amount === 0) return '変化なし';
+    return `${amount > 0 ? '+' : ''}${amount} オクターブ`;
   }
   if (Math.abs(value) < 0.005) return '中央';
   const amount = Math.round(Math.abs(value) * 100);

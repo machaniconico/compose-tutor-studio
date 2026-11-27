@@ -88,8 +88,8 @@ describe('schema-v9 Audio Warp', () => {
     delete v8.hiHatChoke;
     const tracks = v8.tracks as Array<{ clips: Array<Record<string, unknown>> }>;
     delete tracks.at(-1)!.clips[0]!.audioWarp;
-    expect(CURRENT_SCHEMA_VERSION).toBe(11);
-    expect(migrateProject(v8)).toEqual({ ...v8, schemaVersion: 11, swing: 0, hiHatChoke: false });
+    expect(CURRENT_SCHEMA_VERSION).toBe(12);
+    expect(migrateProject(v8)).toEqual({ ...v8, schemaVersion: 12, swing: 0, hiHatChoke: false });
 
     tracks.at(-1)!.clips[0]!.audioWarp = {};
     const smuggled = decodeProject(v8);

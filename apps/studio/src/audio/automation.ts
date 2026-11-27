@@ -3,9 +3,10 @@ import type {
   AutomationPoint,
   AutomationReadState,
   AutomationTarget,
+  Project,
   Track,
 } from '@cts/project-model';
-import type { LoopRegion } from './scheduler';
+import { beatToTime, timeToBeat, type LoopRegion, type TempoSource } from './scheduler';
 
 export type AutomationCommand = Readonly<{
   beat: number;
@@ -81,14 +82,11 @@ function commandsOnce(
   }];
   const commandBeats = new Set([startBeat]);
 
-  for (const point of lane.points) {
-    if (
-      point.beat <= startBeat
-      || point.beat > endBeat
-      || (!includeEnd && point.beat === endBeat)
-    ) continue;
-    const previousIndex = lastPointAtOrBefore(lane.points, point.beat) - 1;
-    const previous = previousIndex >= 0 ? lane.points[previousIndex] : undefined;
+  const firstIndex = lastPointAtOrBefore(lane.points, startBeat) + 1;
+  for (let index = firstIndex; index < lane.points.length; index += 1) {
+    const point = lane.points[index]!;
+    if (point.beat > endBeat || (!includeEnd && point.beat === endBeat)) break;
+    const previous = lane.points[index - 1];
     commands.push({
       beat: point.beat,
       value: point.value,
@@ -195,7 +193,11 @@ export function automationCommandsInWindow(
 }
 
 export function automationBaseValue(track: Track, target: AutomationTarget): number {
-  return target.type === 'track-volume' ? track.volume : track.pan;
+  switch (target.type) {
+    case 'track-volume': return track.volume;
+    case 'track-pan': return track.pan;
+    case 'track-filter-cutoff': return 0;
+  }
 }
 
 /** At most one lane per target is accepted by schema validation. */
@@ -206,4 +208,43 @@ export function automationLaneForTrack(
 ): AutomationLane | null {
   return lanes.find((lane) => lane.target.trackId === trackId && lane.target.type === type)
     ?? null;
+}
+
+/** Only tracks with an audible cutoff change need to schedule filter detune. */
+export function activeFilterCutoffLanes(
+  project: Project,
+): ReadonlyMap<string, AutomationLane> {
+  return new Map(project.automationLanes
+    .filter((lane) =>
+      lane.target.type === 'track-filter-cutoff'
+      && isAutomationReadEnabled(project.automationReadState, lane)
+      && lane.points.some((point) => point.value !== 0),
+    )
+    .map((lane) => [lane.target.trackId, lane]));
+}
+
+/** Schedule the stored octave curve over one synth voice, including its release. */
+export function scheduleFilterCutoff(
+  detune: AudioParam,
+  lane: AutomationLane,
+  startBeat: number,
+  startTime: number,
+  stopTime: number,
+  tempo: TempoSource,
+  lengthBeats: number,
+  loop: LoopRegion | null,
+  tempoChangeBeats: readonly number[],
+): void {
+  const endBeat = Math.min(
+    timeToBeat(stopTime, tempo, startBeat, startTime),
+    loop ? Infinity : lengthBeats,
+  );
+  for (const command of automationCommandsInWindow(
+    lane, 0, startBeat, endBeat, loop, loop === null, tempoChangeBeats,
+  )) {
+    const time = beatToTime(command.beat, tempo, startBeat, startTime);
+    const cents = command.value * 1200;
+    if (command.interpolation === 'linear') detune.linearRampToValueAtTime(cents, time);
+    else detune.setValueAtTime(cents, time);
+  }
 }

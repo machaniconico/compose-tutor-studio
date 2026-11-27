@@ -49,8 +49,8 @@ describe('schema-v8 effective-Master volume automation', () => {
     const { swing, hiHatChoke, ...legacy } = structuredClone(project);
     const v7 = { ...legacy, schemaVersion: 7 };
     const migrated = migrateProject(v7);
-    expect(CURRENT_SCHEMA_VERSION).toBe(11);
-    expect(migrated).toEqual({ ...v7, schemaVersion: 11, swing: 0, hiHatChoke: false });
+    expect(CURRENT_SCHEMA_VERSION).toBe(12);
+    expect(migrated).toEqual({ ...v7, schemaVersion: 12, swing: 0, hiHatChoke: false });
   });
 
   it('rejects every Master automation lane and Read id during legacy-v7 inspection', () => {

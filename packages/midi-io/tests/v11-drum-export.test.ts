@@ -9,7 +9,7 @@ describe('v11 MIDI drum export', () => {
   it.each(Object.entries(v10DrumGrooveFixtures))('preserves v10 MIDI bytes for %s', (name, input) => {
     const decoded = decodeProject(input);
     if (!decoded.ok) throw new Error(JSON.stringify(decoded));
-    expect(decoded.project).toMatchObject({ schemaVersion: 11, swing: 0, hiHatChoke: false });
+    expect(decoded.project).toMatchObject({ schemaVersion: 12, swing: 0, hiHatChoke: false });
     const actual = projectToMidi(decoded.project);
     const expected = Uint8Array.from(goldenMidi[name as keyof typeof goldenMidi].match(/../g)!, (byte) => parseInt(byte, 16));
     expect(actual).toEqual(expected);

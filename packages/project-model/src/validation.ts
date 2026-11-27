@@ -37,6 +37,8 @@ import {
 import { validateAudioRouting } from './audio-routing';
 import {
   automationTargetTypesForTrack,
+  automationValueRange,
+  isAutomationTargetType,
   effectiveMasterTrackId,
   isSupportedAutomationTarget,
 } from './automation-targets';
@@ -653,15 +655,24 @@ export function validateProject(project: Project): ValidationResult {
     if (atErrorLimit()) return;
     const lanePath = `automationLanes[${laneIndex}]`;
     markId(lane.id, `${lanePath}.id`);
-    if (!trackIds.has(lane.target.trackId)) {
-      push(`${lanePath}.target.trackId`, `automation target references missing track "${lane.target.trackId}"`);
+    const target = lane.target;
+    if (typeof target !== 'object' || target === null) {
+      push(`${lanePath}.target`, 'automation target must be an object');
+      return;
+    }
+    const { type: targetType, trackId } = target;
+    if (typeof trackId !== 'string') {
+      push(`${lanePath}.target.trackId`, 'automation target must reference a track ID');
+    } else if (!trackIds.has(trackId)) {
+      push(`${lanePath}.target.trackId`, `automation target references missing track "${trackId}"`);
     } else if (!isSupportedAutomationTarget(project, lane.target)) {
       push(
         `${lanePath}.target.trackId`,
         'automation target is not supported for this track',
       );
     }
-    const targetKey = `${lane.target.type}\u0000${lane.target.trackId}`;
+    if (!isAutomationTargetType(targetType) || typeof trackId !== 'string') return;
+    const targetKey = `${targetType}\u0000${trackId}`;
     if (automationTargets.has(targetKey)) {
       push(`${lanePath}.target`, 'only one automation lane is allowed per target');
     } else {
@@ -673,6 +684,7 @@ export function validateProject(project: Project): ValidationResult {
         `automation lane must contain at most ${MAX_AUTOMATION_POINTS_PER_LANE} points`,
       );
     }
+    const [minValue, maxValue] = automationValueRange(targetType);
     let previousBeat = Number.NEGATIVE_INFINITY;
     lane.points.forEach((point, pointIndex) => {
       if (atErrorLimit()) return;
@@ -685,11 +697,10 @@ export function validateProject(project: Project): ValidationResult {
         push(`${pointPath}.beat`, 'automation point beats must be strictly increasing');
       }
       previousBeat = point.beat;
-      const valueRange = lane.target.type === 'track-volume' ? [0, 2] : [-1, 1];
-      if (!inRange(point.value, valueRange[0] ?? 0, valueRange[1] ?? 0)) {
+      if (!inRange(point.value, minValue, maxValue)) {
         push(
           `${pointPath}.value`,
-          `${lane.target.type} automation value is outside its allowed range`,
+          `${targetType} automation value is outside its allowed range`,
         );
       }
     });

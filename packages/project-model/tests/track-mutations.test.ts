@@ -4,6 +4,7 @@ import {
   DEFAULT_SYNTH_TRACK_PRESET,
   MAX_PROJECT_TRACKS,
   MAX_TRACK_NAME_CODE_POINTS,
+  addAutomationPoint,
   addTrack,
   createAudioTrackClip,
   createEmptyProject,
@@ -595,6 +596,29 @@ describe('moveTrack and removeTrack', () => {
       (output) => output.sourceTrackId === firstBus.trackId,
     )).toBe(false);
     expect(removed.project.audioRouting.sends).toEqual([]);
+    expect(validateProject(removed.project).ok).toBe(true);
+  });
+
+  it('removes a deleted instrument track’s cutoff lane and keeps other tracks’ lanes', () => {
+    const added = expectSuccess(addTrack(base(), 'instrument'));
+    const melody = added.project.tracks.find((track) => track.role === 'learning.melody')!;
+    const ownLane = addAutomationPoint(added.project, {
+      target: { type: 'track-filter-cutoff', trackId: added.trackId },
+      beat: 1,
+      value: 0.5,
+      interpolation: 'linear',
+    });
+    if (!ownLane.ok) throw new Error(ownLane.error.message);
+    const otherLane = addAutomationPoint(ownLane.project, {
+      target: { type: 'track-filter-cutoff', trackId: melody.id },
+      beat: 1,
+      value: -0.5,
+      interpolation: 'hold',
+    });
+    if (!otherLane.ok) throw new Error(otherLane.error.message);
+
+    const removed = expectSuccess(removeTrack(otherLane.project, added.trackId));
+    expect(removed.project.automationLanes.map((lane) => lane.id)).toEqual([otherLane.laneId]);
     expect(validateProject(removed.project).ok).toBe(true);
   });
 

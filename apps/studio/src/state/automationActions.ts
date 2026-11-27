@@ -243,7 +243,7 @@ export function studioAutomationErrorMessage(
     case 'master-protected':
       return 'このMasterはオートメーションに対応していません。先頭のMasterの出力音量、または通常トラックやバスを選択してください。';
     case 'invalid-target':
-      return 'このパラメーターはオートメーションの対象にできません。通常トラックの音量またはパン、またはMasterの出力音量を選択してください。';
+      return 'このパラメーターはオートメーションの対象にできません。選択中のトラックに表示されている項目を選んでください。';
     case 'invalid-beat':
       return 'ポイントの位置が曲の範囲外です。0拍から曲の終わりまでに設定してください。';
     case 'invalid-value':

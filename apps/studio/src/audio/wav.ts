@@ -16,9 +16,11 @@ import {
   type Project,
 } from '@cts/project-model';
 import {
+  activeFilterCutoffLanes,
   automationBaseValue,
   automationCommandsInWindow,
   isAutomationReadEnabled,
+  scheduleFilterCutoff,
 } from './automation';
 import {
   acquireProjectAudioBuffers,
@@ -795,7 +797,9 @@ async function renderWavWithRouting(
       const tracksById = new Map(project.tracks.map((track) => [track.id, track]));
       const effectiveMasterId = effectiveMasterTrackId(project);
       const tempoChangeBeats = project.tempoMap.slice(1).map((event) => event.beat);
+      const cutoffLanes = activeFilterCutoffLanes(project);
       for (const lane of project.automationLanes) {
+        if (lane.target.type === 'track-filter-cutoff') continue;
         const track = tracksById.get(lane.target.trackId);
         const isMasterVolumeLane = effectiveMasterId !== null
           && lane.target.trackId === effectiveMasterId
@@ -855,11 +859,17 @@ async function renderWavWithRouting(
         if (payload.kind === 'note') {
           const synth = synths.get(payload.trackId);
           if (synth) {
+            const cutoff = cutoffLanes.get(payload.trackId);
             synth.noteOn(
               payload.pitch,
               time,
               beatDurationSeconds(musicalTime, ev.beat, payload.durationBeats),
               payload.velocity,
+              undefined,
+              cutoff ? (detune, stopTime) => scheduleFilterCutoff(
+                  detune, cutoff, ev.beat, time, stopTime, tempo,
+                  project.lengthBeats, null, tempoChangeBeats,
+                ) : undefined,
             );
           }
         } else {

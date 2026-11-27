@@ -10236,3 +10236,173 @@ fn legacy_proof_migrates_v10_to_v11_with_swing_zero_choke_false() {
     assert_eq!(actual, expected);
     assert!(p20_accepts(&migrated), "migrated v11 must validate");
 }
+
+// ---- P23 acceptance (schema v12: automation target `track-filter-cutoff`) ----
+// 受け入れテスト(実装者は編集禁止)。契約:
+// - v12 の自動化ターゲット型に "track-filter-cutoff" が加わる。v11 では不可(v11 のターゲットは track-volume / track-pan のみ)。
+// - 値はオクターブ差で、有限数かつ -log2(10) 以上 log2(10) 以下(両端を含む)。
+// - 対応トラックは instrument のみ。ドラム・バス・マスターでは不可。同一トラックに cutoff レーンは 1 本まで。
+// - v11 -> v12 は schemaVersion だけを変える(新しいフィールドなし)。
+fn p23_project_value(schema_version: u64, cutoff_values: &[Value]) -> Value {
+    let mut project = p20_v11_project_value(json!(0), json!(false));
+    project["schemaVersion"] = json!(schema_version);
+    let instrument_id = project["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["type"] == "instrument")
+        .expect("fixture has an instrument track")["id"]
+        .clone();
+    project["automationLanes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": "p23-cutoff-lane",
+            "bypassed": false,
+            "target": { "type": "track-filter-cutoff", "trackId": instrument_id },
+            "points": cutoff_values.iter().enumerate().map(|(index, value)| json!({
+                "id": format!("p23-cutoff-point-{index}"),
+                "beat": index,
+                "value": value,
+                "interpolation": "linear"
+            })).collect::<Vec<_>>()
+        }));
+    project
+}
+
+#[test]
+fn validate_project_v12_accepts_cutoff_target() {
+    // 正の対照: cutoff レーンを持たない v12 も受理される(v12 自体が未対応で落ちているだけの場合を除く)。
+    let mut plain = p20_v11_project_value(json!(0), json!(false));
+    plain["schemaVersion"] = json!(12);
+    assert!(
+        p20_accepts(&plain),
+        "a v12 project without a cutoff lane must validate"
+    );
+    let value = p23_project_value(12, &[json!(0), json!(1), json!(-0.5)]);
+    assert!(
+        p20_accepts(&value),
+        "v12 must accept a cutoff lane on an instrument track"
+    );
+    let log2_10 = std::f64::consts::LOG2_10;
+    let boundaries = p23_project_value(12, &[json!(log2_10), json!(-log2_10)]);
+    assert!(
+        p20_accepts(&boundaries),
+        "v12 must accept the +/-log2(10) boundary values"
+    );
+}
+
+#[test]
+fn validate_project_v11_rejects_cutoff_target() {
+    // 正の対照: 同じ形の v11(volume レーンのみ)は受理される。
+    assert!(p20_accepts(&p20_v11_project_value(json!(0), json!(false))));
+    let value = p23_project_value(11, &[json!(0), json!(1)]);
+    assert_eq!(value["schemaVersion"], json!(11));
+    assert!(
+        !p20_accepts(&value),
+        "v11 must reject the track-filter-cutoff target"
+    );
+}
+
+#[test]
+fn validate_project_v12_rejects_cutoff_value_outside_plus_minus_log2_of_10() {
+    assert!(p20_accepts(&p23_project_value(12, &[json!(1)])));
+    let log2_10 = std::f64::consts::LOG2_10;
+    for bad in [
+        json!(log2_10 + 1e-9),
+        json!(-log2_10 - 1e-9),
+        json!(4),
+        json!(-4),
+        json!("1"),
+        json!(null),
+    ] {
+        let value = p23_project_value(12, std::slice::from_ref(&bad));
+        assert!(!p20_accepts(&value), "v12 must reject cutoff value={bad}");
+    }
+}
+
+// instrument / drum / bus / audio / master を 1 本ずつ含む v12 の土台(足りない型だけ master の前に足す)。
+fn p23_project_with_every_track_type() -> Value {
+    let mut project = p23_project_value(12, &[json!(0)]);
+    for (track_type, id) in [
+        ("drum", "p23-drum"),
+        ("bus", "p23-bus"),
+        ("audio", "p23-audio"),
+    ] {
+        let tracks = project["tracks"].as_array_mut().unwrap();
+        if tracks.iter().any(|track| track["type"] == track_type) {
+            continue;
+        }
+        let master_index = tracks
+            .iter()
+            .position(|track| track["type"] == "master")
+            .unwrap();
+        tracks.insert(
+            master_index,
+            json!({
+                "id": id,
+                "name": id,
+                "type": track_type,
+                "role": "general",
+                "clips": [],
+                "volume": 1,
+                "pan": 0,
+                "mute": false,
+                "solo": false,
+                "effects": []
+            }),
+        );
+        project["audioRouting"]["outputs"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "sourceTrackId": id, "destination": { "type": "master" } }));
+    }
+    project
+}
+
+#[test]
+fn validate_project_v12_rejects_cutoff_target_on_non_instrument_tracks() {
+    // 正の対照: drum / bus / audio / master を含む土台でも、instrument 上の cutoff レーンは受理される。
+    assert!(p20_accepts(&p23_project_with_every_track_type()));
+    for track_type in ["drum", "bus", "audio", "master"] {
+        let mut value = p23_project_with_every_track_type();
+        let track_id = value["tracks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|track| track["type"] == track_type)
+            .unwrap_or_else(|| panic!("fixture has a {track_type} track"))["id"]
+            .clone();
+        let last = value["automationLanes"].as_array().unwrap().len() - 1;
+        value["automationLanes"][last]["target"]["trackId"] = track_id;
+        assert!(
+            !p20_accepts(&value),
+            "v12 must reject a cutoff lane on a {track_type} track"
+        );
+    }
+}
+
+#[test]
+fn validate_project_v12_rejects_second_cutoff_lane_on_the_same_track() {
+    let mut value = p23_project_value(12, &[json!(0)]);
+    assert!(
+        p20_accepts(&value),
+        "control: one cutoff lane on the track is valid"
+    );
+    let mut second = value["automationLanes"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    second["id"] = json!("p23-cutoff-lane-2");
+    second["points"][0]["id"] = json!("p23-cutoff-point-dup");
+    value["automationLanes"]
+        .as_array_mut()
+        .unwrap()
+        .push(second);
+    assert!(
+        !p20_accepts(&value),
+        "v12 must allow only one cutoff lane per track"
+    );
+}

@@ -251,7 +251,7 @@ export type AutomationPoint = {
 };
 
 export type AutomationTarget = {
-  type: 'track-volume' | 'track-pan';
+  type: 'track-volume' | 'track-pan' | 'track-filter-cutoff';
   trackId: string;
 };
 

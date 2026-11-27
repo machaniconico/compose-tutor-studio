@@ -29,7 +29,7 @@ import {
 } from './automation-targets';
 
 export type AutomationWriteMode = 'read' | 'touch' | 'latch' | 'write';
-export type AutomationRecordingTargetType = AutomationTarget['type'];
+export type AutomationRecordingTargetType = 'track-volume' | 'track-pan';
 export type AutomationRecordingIdFactory = (kind: 'lane' | 'point') => string;
 
 /** Stable ordering for the two target kinds; per-Track support can be narrower. */
@@ -43,6 +43,14 @@ export const AUTOMATION_RECORDING_EPSILON = Object.freeze({
   'track-volume': 0.001,
   'track-pan': 0.0005,
 } satisfies Readonly<Record<AutomationRecordingTargetType, number>>);
+
+export function automationWriteTargetTypesForTrack(
+  project: Pick<Project, 'tracks'>,
+  trackId: string,
+): readonly AutomationRecordingTargetType[] {
+  const supported = automationTargetTypesForTrack(project, trackId);
+  return AUTOMATION_WRITE_TARGET_TYPES.filter((type) => supported.includes(type));
+}
 
 export const AUTOMATION_TOUCH_RETURN_SECONDS = 0.100;
 
@@ -114,8 +122,10 @@ type CapturedRegion = Readonly<{
   returnKind: 'linear' | 'hold';
 }>;
 
+type AutomationRecordingTarget = AutomationTarget & { type: AutomationRecordingTargetType };
+
 type TargetCapture = Readonly<{
-  target: AutomationTarget;
+  target: AutomationRecordingTarget;
   mode: Exclude<AutomationWriteMode, 'read'>;
   touching: boolean;
   samples: readonly AutomationRecordingSample[];
@@ -247,7 +257,9 @@ function failure(
   });
 }
 
-function freezeTarget(target: AutomationTarget): AutomationTarget {
+function freezeTarget<T extends AutomationTarget['type']>(
+  target: Readonly<{ type: T; trackId: string }>,
+): Readonly<{ type: T; trackId: string }> {
   return Object.freeze({ type: target.type, trackId: target.trackId });
 }
 
@@ -431,7 +443,7 @@ function initialWriteCaptures(
   for (const trackMode of tracks) {
     if (trackMode.mode !== 'write') continue;
     const track = project.tracks.find((candidate) => candidate.id === trackMode.trackId)!;
-    for (const type of automationTargetTypesForTrack(project, track.id)) {
+    for (const type of automationWriteTargetTypesForTrack(project, track.id)) {
       captures.push({
         target: { type, trackId: track.id },
         mode: 'write',
@@ -554,11 +566,11 @@ export function rebaseAutomationPass(
           'Automation pass rebase requires every Read Track to remain unchanged.',
         );
       }
-      const targetTypes = automationTargetTypesForTrack(
+      const targetTypes = automationWriteTargetTypesForTrack(
         expectedCanonical,
         trackMode.trackId,
       );
-      const nextTargetTypes = automationTargetTypesForTrack(
+      const nextTargetTypes = automationWriteTargetTypesForTrack(
         nextCanonical,
         trackMode.trackId,
       );
@@ -619,7 +631,7 @@ function inspectTargetInput(
   pass: AutomationPass,
   input: AutomationPassTargetInput,
 ): Readonly<{
-  target: AutomationTarget;
+  target: AutomationRecordingTarget;
   mode: Exclude<AutomationWriteMode, 'read'>;
 }> | AutomationRecordingFailure {
   if (!isRecord(input) || !isRecord(input.target)) {
@@ -785,7 +797,7 @@ export function sampleAutomationPass(
 
 function curveValueAt(
   project: Project,
-  target: AutomationTarget,
+  target: AutomationRecordingTarget,
   beat: number,
 ): number {
   const track = project.tracks.find((candidate) => candidate.id === target.trackId)!;

@@ -120,9 +120,10 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 
 #### 2.3.4 Automation Lane Editor
 
-- Editorの4つ目のARIA tabを「オートメーション」とし、選択中のTrackを編集対象にする。Track未選択では選択案内、Master選択では非対応理由、point 0件ではTrack scalarが全区間に使われることと最初の追加方法を表示し、暗黙にTrackやlaneを作らない
-- non-Master Trackでは音量 / パンのtargetとbeat snapを選べる。lane上の位置または現在の再生位置へpointを追加し、音量laneとパンlaneは独立して保存する。snapは入力位置の確定時だけに使い、Projectへ別設定として保存しない
-- laneの折れ線は、最初のpoint前が現在のTrack scalar、各pointの「値を保つ / なめらかに変化」がそのpointから次のpointへの出力方向、最終point後が最終値保持であることを形と説明文の両方で示す。hold区間は段差、linear区間は斜線で描き、色だけに依存しない
+- Editorの4つ目のARIA tabを「オートメーション」とし、選択中のTrackを編集対象にする。Track未選択では選択案内、later Master選択では非対応理由、point 0件では基準値が全区間に使われることと最初の追加方法を表示し、暗黙にTrackやlaneを作らない
+- non-Master Trackでは音量 / パンとbeat snapを選べる。instrument Trackでは「明るさ(フィルター)」も選べる。各laneは独立して保存し、lane上の位置または現在の再生位置へpointを追加できる。snapは入力位置の確定時だけに使い、Projectへ別設定として保存しない
+- 「明るさ(フィルター)」を選んだ時は、0が元の音色、プラスが明るい音、マイナスがやわらかい音と表示する。点はオクターブ差で編集する。
+- laneの折れ線は、最初のpoint前が基準値、各pointの「値を保つ / なめらかに変化」がそのpointから次のpointへの出力方向、最終point後が最終値保持であることを形と説明文の両方で示す。hold区間は段差、linear区間は斜線で描き、色だけに依存しない
 - pointは最低44×44 CSS pxのnative buttonとし、parameter名、順番、beat、値、次のpointまでの変化方法をaccessible nameに含める。選択pointだけをroving tab stopにし、削除後は次、前、lane追加操作の順でfocusを回復する
 - 選択pointのInspectorではbeat、値、次までの変化方法をlabel付きnative controlで編集し、Delete / Backspaceによる1件削除と確認付きのlane全消去を提供する。同一beat、曲外、値範囲外、stale selectionはProjectを変更せずinline alertで具体的な修正を案内し、成功はpolite statusで通知する
 - local draftまたはpointer previewは確定前にProject / history / revisionを変えない。Enter / blur / pointerupなど1 gestureの確定をProject変更1回、Undo 1回にまとめ、no-opでは履歴・保存通知を増やさない

@@ -13,7 +13,7 @@ describe('automation target support', () => {
   it('uses the first Master as the only volume-capable Master', () => {
     const project = createEmptyProject({ clock });
     const effectiveMaster = project.tracks.find((track) => track.type === 'master')!;
-    const regularTrack = project.tracks.find((track) => track.type !== 'master')!;
+    const regularTrack = project.tracks.find((track) => track.type === 'instrument')!;
     const compatibilityMaster = {
       ...structuredClone(effectiveMaster),
       id: 'target-compatibility-master',
@@ -24,6 +24,7 @@ describe('automation target support', () => {
     expect(automationTargetTypesForTrack(project, regularTrack.id)).toEqual([
       'track-volume',
       'track-pan',
+      'track-filter-cutoff',
     ]);
     expect(automationTargetTypesForTrack(project, effectiveMaster.id)).toEqual([
       'track-volume',

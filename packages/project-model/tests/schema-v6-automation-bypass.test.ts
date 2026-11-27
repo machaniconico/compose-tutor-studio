@@ -96,8 +96,8 @@ describe('schema-v6 Automation lane bypass', () => {
   it('keeps schema-v6 lane bypass in the current schema and creates every new lane active', () => {
     const project = projectWithLane();
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(11);
-    expect(project.schemaVersion).toBe(11);
+    expect(CURRENT_SCHEMA_VERSION).toBe(12);
+    expect(project.schemaVersion).toBe(12);
     expect(project.automationLanes).toEqual([{
       id: 'schema-v6-lane',
       bypassed: false,
@@ -119,7 +119,7 @@ describe('schema-v6 Automation lane bypass', () => {
     const legacy = legacyRecord(current, 5);
     const before = structuredClone(legacy);
     const expected = structuredClone(legacy);
-    expected.schemaVersion = 11;
+    expected.schemaVersion = 12;
     expected.swing = 0;
     expected.hiHatChoke = false;
     expected.automationReadState = { globalEnabled: true, disabledTrackIds: [] };
@@ -145,7 +145,7 @@ describe('schema-v6 Automation lane bypass', () => {
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
     expect(decoded).toMatchObject({ sourceSchemaVersion: 1, migrated: true });
-    expect(decoded.project.schemaVersion).toBe(11);
+    expect(decoded.project.schemaVersion).toBe(12);
     expect(decoded.project.automationLanes).toEqual([]);
     expect(decoded.project.automationReadState).toEqual({
       globalEnabled: true,
