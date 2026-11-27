@@ -579,6 +579,67 @@ export function fitNotesToScaleInProject(project: Project, clipId: string, noteI
   );
 }
 
+export type RetimedNote = Readonly<{ startBeat: number; velocity: number }>;
+
+const RETIME_LOOP_CHANGED = 'ループしているクリップでは、ループの長さが変わる編集はできません。';
+
+/**
+ * 選んだ音の開始位置と強さだけを変える(グルーヴ編集用。Undo 1 段、部分適用なし)。
+ * `retime` は選んだ音(クリップ内の順)を同じ順の新しい値へ写す。開始位置は整数 tick に
+ * 丸め、音の高さと長さは変えない。D1〜D3 は P33 の編集と同じ規則で確かめる。
+ */
+export function retimeNotesInProject(
+  project: Project,
+  clipId: string,
+  noteIds: readonly string[],
+  retime: (picked: readonly NoteEvent[]) => readonly RetimedNote[],
+  describe: (count: number) => string,
+  unchangedMessage: string,
+): NoteEditOutcome {
+  const target = locateTarget(project, clipId);
+  if (typeof target === 'string') return refuse(target);
+  const domain = clipDomainProblem(target);
+  if (domain !== null) return refuse(domain);
+  const picked = pickNotes(target, noteIds);
+  if (typeof picked === 'string') return refuse(picked);
+  const ordered = (target.owner.notes ?? []).filter((note) => picked.includes(note));
+  let results: readonly RetimedNote[];
+  try {
+    results = retime(ordered);
+  } catch {
+    return refuse('選んだ音が多すぎるため、この編集はできません。');
+  }
+  if (results.length !== ordered.length) return refuse(SOUND_CHANGED);
+  const next = new Map<string, NoteEvent>();
+  for (const [index, note] of ordered.entries()) {
+    const result = results[index]!;
+    // 目標の位置が今の位置と同じ音には触れない(目盛りに乗っていなくてもそのまま)。
+    if (result.startBeat === note.startBeat && result.velocity === note.velocity) continue;
+    const startBeat = result.startBeat === note.startBeat ? note.startBeat : beatTick(result.startBeat) / PPQ;
+    const edited: NoteEvent = { ...note, startBeat, velocity: result.velocity };
+    if (!Number.isInteger(edited.velocity) || edited.velocity < 1 || edited.velocity > 127 || !(startBeat >= 0)) {
+      return refuse('音の強さや位置が使える範囲を外れるため、取りやめました。どの音も動かしていません。');
+    }
+    if (startBeat === note.startBeat && edited.velocity === note.velocity) continue;
+    const problem = placementProblem(project, target, edited);
+    if (problem !== null) return refuse(problem);
+    next.set(note.id, edited);
+  }
+  const ids = picked.map((note) => note.id);
+  if (next.size === 0) return { ok: true, changed: false, project, noteIds: ids, message: unchangedMessage };
+  const notes = (target.owner.notes ?? []).map((note) => next.get(note.id) ?? note);
+  if (target.placements.some((placement) => placement.loop)
+    && midiClipNaturalPatternLength(target.owner.notes ?? []) !== midiClipNaturalPatternLength(notes)) {
+    return refuse(RETIME_LOOP_CHANGED);
+  }
+  const changed = withOwnerNotes(project, target.owner.id, notes);
+  const changedIds = new Set(next.keys());
+  const problem = scheduleProblem(project, changed, target, changedIds, changedIds, (pitch) =>
+    `この編集をすると、このトラックで同じ高さの音(${noteName(pitch)})どうしが重なってしまうため、取りやめました。どの音も動かしていません。`);
+  if (problem !== null) return refuse(problem);
+  return { ok: true, changed: true, project: changed, noteIds: ids, message: describe(next.size) };
+}
+
 // ---------------------------------------------------------------------------
 // 店(store)への反映。どれも Undo 1 段。
 // ---------------------------------------------------------------------------
@@ -694,4 +755,22 @@ export function fitSelectedNotesToScale(clipId: string, noteIds: readonly string
   if (locked) return refuse(locked);
   const snapshot = useStore.getState().project;
   return commit(fitNotesToScaleInProject(snapshot, clipId, noteIds), snapshot, 'スケール合わせ');
+}
+
+/** 選んだ音の開始位置・強さを変える(グルーヴ編集)。録音中は断る。 */
+export function retimeSelectedNotes(
+  clipId: string,
+  noteIds: readonly string[],
+  retime: (picked: readonly NoteEvent[]) => readonly RetimedNote[],
+  describe: (count: number) => string,
+  unchangedMessage: string,
+): NoteEditResult {
+  const locked = editLockReason('編集');
+  if (locked) return refuse(locked);
+  const snapshot = useStore.getState().project;
+  return commit(
+    retimeNotesInProject(snapshot, clipId, noteIds, retime, describe, unchangedMessage),
+    snapshot,
+    '編集',
+  );
 }

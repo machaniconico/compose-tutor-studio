@@ -18,6 +18,7 @@ import {
 } from '@cts/project-model';
 import { DRUM_PATTERNS, applyDrumPattern, setDrumStepVelocity } from '../../state/editorActions';
 import { publishAppEvent } from '../../state/appEvents';
+import { DRUM_STEPS_PER_BAR_CHOICES, setDrumStepsPerBar } from '../../state/grooveActions';
 
 /** Six lanes shown top-to-bottom, with Japanese labels. */
 const LANES: { lane: DrumLane; label: string }[] = [
@@ -237,6 +238,8 @@ export function DrumGrid() {
   const tracks = project.tracks;
   const selectedClipId = useStore((s) => s.editor.selectedClipId);
   const applyProjectChange = useStore((s) => s.applyProjectChange);
+  const recordingBusy = useStore((s) => s.audioRecordingOperationId !== null);
+  const [stepsNotice, setStepsNotice] = useState('');
 
   const [bar, setBar] = useState(0);
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
@@ -414,6 +417,32 @@ export function DrumGrid() {
         ) : null}
 
         <div className="drums__groove" role="group" aria-label="グルーヴ設定">
+          <label>
+            1小節のステップ数
+            <select
+              value={DRUM_STEPS_PER_BAR_CHOICES.some((choice) => choice === stepsPerBar) ? stepsPerBar : ''}
+              aria-label="1小節のステップ数"
+              disabled={recordingBusy}
+              onChange={(event) => {
+                const result = setDrumStepsPerBar(clip.id, Number(event.currentTarget.value));
+                setStepsNotice(
+                  !result.ok
+                    ? result.reason
+                    : result.changed === 0
+                      ? ''
+                      : `ステップ数を切り替えました。${result.moved ?? 0}個の音を近い位置へ移し、${result.merged ?? 0}個を1つにまとめました。元に戻すで取り消せます。`,
+                );
+              }}
+            >
+              {DRUM_STEPS_PER_BAR_CHOICES.some((choice) => choice === stepsPerBar) ? null : (
+                <option value="" disabled>{stepsPerBar}</option>
+              )}
+              {DRUM_STEPS_PER_BAR_CHOICES.map((choice) => (
+                <option key={choice} value={choice}>{choice}ステップ</option>
+              ))}
+            </select>
+          </label>
+          {stepsNotice ? <small role="status">{stepsNotice}</small> : null}
           <label>
             スイング
             <input
