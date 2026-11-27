@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { Term } from '../common/Term';
 import {
   effectiveMasterTrackId,
   MAX_AUDIO_SENDS_PER_SOURCE,
@@ -472,7 +473,9 @@ function RoutingControls(props: {
       </label>
 
       <div className="mix-ch__sends" aria-label={`${accessibleName} センド`}>
-        <span className="mix-ch__routing-title">センド</span>
+        <span className="mix-ch__routing-title">
+          <Term id="send">センド</Term>
+        </span>
         {sends.length === 0 ? <small>追加したバスへ音を分けて送れます。</small> : null}
         {sends.map((send) => {
           const otherTargets = new Set(

@@ -6519,3 +6519,16 @@ fieldset.vocal-cut__step:disabled .vocal-cut__presets label:hover {
     grid-column: 1;
   }
 }
+.term { position: relative; display: inline; border-bottom: 1px dotted currentColor; cursor: help; }
+.term:focus-visible { outline: 2px solid var(--accent, #4f8cff); outline-offset: 2px; }
+/* body 直下に描画し、位置は Term.tsx が画面内に収まるよう決めて inline で与える(パネルの overflow で切れない) */
+.term__tip { position: fixed; z-index: 100; width: max-content; max-width: 240px; padding: 6px 8px; border-radius: 4px; background: #222; color: #fff; font-size: 12px; font-weight: normal; line-height: 1.5; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+/* 語と説明の隙間(4px)でもホバーが切れないよう、隙間を説明側の当たり判定で埋める */
+.term__tip::before { content: ''; position: absolute; left: 0; right: 0; top: -4px; height: 4px; }
+.term__tip--above::before { top: auto; bottom: -4px; }
+.term__tip strong { display: block; margin-bottom: 2px; }
+.glossary-panel { display: flex; flex-direction: column; gap: var(--sp-3); }
+.glossary-panel__search { width: 100%; }
+.glossary-panel__list { margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.glossary-panel__item dt { font-weight: bold; }
+.glossary-panel__item dd { margin: 0; font-size: 12px; line-height: 1.5; }
