@@ -120,6 +120,11 @@ function playablePitches(chord: ChordEvent): number[] {
   return ordered.map((pc) => rootPitch + ((pc - rootPc + 12) % 12));
 }
 
+/** Playable MIDI pitches of one chord, exactly as playback realizes it. */
+export function realizeChordPitches(chord: ChordEvent): number[] {
+  return playablePitches(chord);
+}
+
 /**
  * Realize project chord events onto its dedicated chord instrument track.
  *

@@ -380,3 +380,8 @@ Chord Track のコンテキスト内操作:
 - point / regionはroving tab stopを1件にし、削除・分割・結合・busy解除後は同じ対象、次、前、解析buttonの順で予測可能にfocusを戻す
 - errorは`role="alert"`、成功や「まだProject未変更」はpolite status、解析進捗はlive regionで伝え、色・波形・音だけに依存しない
 - 320px幅と1024×640の両方でdocument横overflowを作らず、時間軸だけを横scroll可能にし、操作対象は44px相当を維持する
+
+### 7.4 試聴
+
+- ピアノロールの鍵盤は押した瞬間に音が鳴る。コード編集ポップオーバーには「このコードを鳴らす」ボタンがあり、コードのチップをクリックしても鳴る。
+- 試聴は音だけでProjectを変えない。録音中は鳴らさない。ウィンドウから離れると止まる。

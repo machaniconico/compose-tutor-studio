@@ -14,6 +14,7 @@ import {
   shouldShowOnboarding,
 } from './features/onboarding/OnboardingOverlay';
 import { useStore } from './state/store';
+import { installPreviewLifecycle } from './audio/livePreview';
 import { startLesson } from './state/tutorialBridge';
 import { isAnyDialogOpen } from './features/common/dialogState';
 import { matchShortcut } from './features/common/keymap';
@@ -238,6 +239,9 @@ export function App() {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
+
+  // Auditioned notes must never outlive transport start, project switch, blur or unmount.
+  useEffect(() => installPreviewLifecycle(), []);
 
   // A measured profile is bound to the physical device route, not a Project or
   // dialog. Keep invalidation alive even while the recording dialog is closed.

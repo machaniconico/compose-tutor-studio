@@ -1761,6 +1761,13 @@ input[type='range'] {
 
 .chord-pop__foot {
   margin-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.chord-pop__listen {
+  width: 100%;
 }
 
 .chord-pop__delete {

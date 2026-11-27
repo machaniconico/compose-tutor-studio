@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react';
 import { useStore } from '../../state/store';
+import { instrumentForClip, previewNote } from '../../audio/livePreview';
 import {
   MIN_EVENT_DURATION_BEATS,
   barToBeatAt,
@@ -799,6 +800,7 @@ export function PianoRoll() {
       const committedClip = findClip(useStore.getState().project, clip.id);
       const created = committedClip?.notes?.find((note) => !beforeIds.has(note.id));
       if (created) {
+        previewNote(instrumentForClip(useStore.getState().project, clip.id), created.pitch);
         selectNotes([created.id]);
         setKeyboardNoteId(created.id);
         setPendingKeyboardFocus({ kind: 'note', noteId: created.id });
@@ -1134,6 +1136,7 @@ export function PianoRoll() {
           setKeyboardAnnouncement('ノートを追加できませんでした。');
           return;
         }
+        previewNote(instrumentForClip(useStore.getState().project, clip.id), created.pitch);
         selectNotes([created.id]);
         setKeyboardNoteId(created.id);
         setPendingKeyboardFocus({ kind: 'note', noteId: created.id });
@@ -1283,6 +1286,11 @@ export function PianoRoll() {
                 key={midi}
                 className={`pr__key${inScale ? ' is-scale' : ''}${isC ? ' is-c' : ''}`}
                 style={{ height: rowHeight }}
+                data-midi={midi}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  previewNote(instrumentForClip(useStore.getState().project, clip?.id ?? null), midi);
+                }}
               >
                 {isC ? <span className="pr__key-label">{midiToNoteName(midi)}</span> : null}
               </div>
