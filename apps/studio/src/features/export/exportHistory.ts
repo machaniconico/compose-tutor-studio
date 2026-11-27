@@ -1,6 +1,8 @@
 // Export history persistence helpers. The storage-facing functions accept an
 // optional Storage object so the core behavior stays easy to test.
 
+import { RENDER_SAMPLE_RATE, type WavExportRange, type WavSampleRate } from '../../audio/wav';
+
 export const EXPORT_HISTORY_STORAGE_KEY = 'cts.exportHistory';
 export const EXPORT_HISTORY_LIMIT = 50;
 
@@ -11,14 +13,11 @@ export type ExportHistoryEntry = {
   fileName: string;
   exportedAt: string;
   projectId: string;
+  sampleRate?: WavSampleRate;
+  range?: WavExportRange;
 };
 
-export type ExportHistoryInput = {
-  kind: ExportHistoryKind;
-  fileName: string;
-  projectId: string;
-  exportedAt?: string;
-};
+export type ExportHistoryInput = Omit<ExportHistoryEntry, 'exportedAt'> & { exportedAt?: string };
 
 const KIND_LABELS: Record<ExportHistoryKind, string> = {
   midi: 'MIDI',
@@ -43,6 +42,10 @@ export function addExportHistoryEntry(
     fileName: input.fileName,
     projectId: input.projectId,
     exportedAt: input.exportedAt ?? new Date().toISOString(),
+    ...(input.kind === 'wav' && {
+      sampleRate: input.sampleRate ?? RENDER_SAMPLE_RATE,
+      range: input.range ?? 'full',
+    }),
   };
 
   return [entry, ...history].slice(0, Math.max(0, limit));
@@ -101,6 +104,10 @@ export function clearExportHistory(storage: Storage | null = getLocalStorage()):
 /** Short Japanese label for the export kind. */
 export function formatExportKindJa(kind: ExportHistoryKind): string {
   return KIND_LABELS[kind];
+}
+
+export function formatWavExportSettingsJa({ sampleRate, range }: Pick<ExportHistoryEntry, 'sampleRate' | 'range'>): string {
+  return `${sampleRate === 48000 ? '48 kHz' : '44.1 kHz'} / ${range === 'loop' ? 'ループ範囲' : '全体'}`;
 }
 
 /** Compact visual marker for the export kind. */

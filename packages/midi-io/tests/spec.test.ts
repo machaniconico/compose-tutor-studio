@@ -14,6 +14,7 @@ type ParsedEvent =
   | { type: 'noteOn'; tick: number; channel: number; pitch: number; velocity: number }
   | { type: 'noteOff'; tick: number; channel: number; pitch: number; velocity: number }
   | { type: 'controller'; tick: number; channel: number; controller: number; value: number }
+  | { type: 'program'; tick: number; channel: number; program: number }
   | { type: 'meta'; tick: number; metaType: number; data: number[] };
 
 type ParsedTrack = { events: ParsedEvent[] };
@@ -105,6 +106,8 @@ function parseTrack(bytes: Uint8Array, start: number, end: number): ParsedTrack 
       const controller = bytes[pos++]!;
       const value = bytes[pos++]!;
       events.push({ type: 'controller', tick, channel, controller, value });
+    } else if (hi === 0xc0) {
+      events.push({ type: 'program', tick, channel, program: bytes[pos++]! });
     } else {
       throw new Error(`unhandled status 0x${status.toString(16)} at ${pos}`);
     }

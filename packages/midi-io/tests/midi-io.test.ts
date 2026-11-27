@@ -320,6 +320,43 @@ describe('exportProjectToMidi', () => {
     expect(hasNoteOn).toBe(true);
   });
 
+  it('writes G major and a tick-zero program change before the first note', () => {
+    const piano: Project['tracks'][number] = {
+      ...project.tracks[0]!, instrument: { type: 'synth', preset: 'pianoLike' },
+    };
+    const midi = exportProjectToMidi({ ...project, key: 'G', tracks: [piano] });
+    const data = Buffer.from(midi);
+    const keyMeta = data.indexOf(Buffer.from([0x00, 0xff, 0x59, 0x02, 1, 0]));
+    const program = data.indexOf(Buffer.from([0x00, 0xc0, 0]));
+    const firstNote = data.indexOf(Buffer.from([0x00, 0x90, 60, 100]));
+    expect(keyMeta).toBeGreaterThan(0);
+    expect(program).toBeGreaterThan(keyMeta);
+    expect(firstNote).toBeGreaterThan(program);
+    const parsed = parseMidi(midi);
+    expect(parsed.key).toBe('G major');
+    expect(parsed.tracks[1]?.program).toBe(0);
+  });
+
+  it.each([
+    ['C#', 'major', 7, 0, 'C# major'],
+    ['Gb', 'major', -6, 0, 'Gb major'],
+    ['A#', 'naturalMinor', 7, 1, 'A# minor'],
+    ['Ab', 'naturalMinor', -7, 1, 'Ab minor'],
+    ['Bb', 'harmonicMinor', -5, 1, 'Bb minor'],
+  ] as const)('encodes %s %s as a signed key signature', (key, scale, sf, mode, expected) => {
+    const midi = exportProjectToMidi({ ...project, key, scale });
+    expect(Buffer.from(midi).includes(Buffer.from([0xff, 0x59, 0x02, sf & 0xff, mode]))).toBe(true);
+    expect(parseMidi(midi).key).toBe(expected);
+  });
+
+  it('omits the key signature for blues and uses the default program for a missing preset', () => {
+    const midi = exportProjectToMidi({ ...project, scale: 'blues' });
+    expect(Buffer.from(midi).includes(Buffer.from([0xff, 0x59]))).toBe(false);
+    const parsed = parseMidi(midi);
+    expect(parsed).not.toHaveProperty('key');
+    expect(parsed.tracks[1]?.program).toBe(89);
+  });
+
   it('uses PPQ 480 by default', () => {
     const midi = exportProjectToMidi(project);
     const view = new DataView(midi.buffer);
@@ -371,6 +408,7 @@ describe('exportProjectToMidi', () => {
     // 1 step = 1/4 beat: step 4 is beat 1 (the 2nd beat), step 12 is beat 3 (bar 2).
     expect(onsets).toEqual([0, 1, 3]);
     expect(drums?.notes.every((n) => n.channel === 9)).toBe(true);
+    expect(drums).not.toHaveProperty('program');
   });
 
   it('ends the exported notes at the song end after the song is shortened across a note', () => {

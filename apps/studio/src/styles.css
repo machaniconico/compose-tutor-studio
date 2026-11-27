@@ -1953,6 +1953,13 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
+.export-menu__field {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.export-menu [role="status"]:empty { position: absolute; }
+
 .export-menu__hint {
   margin: 0;
   font-size: 12px;

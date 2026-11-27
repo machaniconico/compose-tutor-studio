@@ -75,7 +75,7 @@ test('sample song can be heard, saved, and prepared for MIDI export', async ({ p
   await expect(page.getByRole('dialog', { name: 'ようこそ' })).toBeHidden();
 
   await page.getByRole('button', { name: '一時停止' }).click();
-  await expect(page.getByRole('button', { name: '再生' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '再生', exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: '保存' }).click();
   await expect(page.getByText(/保存済み/)).toBeVisible();
@@ -616,7 +616,18 @@ test('offline core workflow does not make external network requests', async ({ p
     await expectValidMidiFile(midiPath);
     await expect(page.getByText('MIDIファイルを書き出しました。')).toBeVisible();
 
-    await page.getByRole('button', { name: 'WAVエクスポート' }).click();
+    const wavExport = page.getByRole('button', { name: 'WAVエクスポート' });
+    await page.getByLabel('WAVの書き出し範囲').selectOption('loop');
+    await expect(page.getByText(/ループ範囲がありません/)).toBeVisible();
+    await expect(wavExport).toBeDisabled();
+
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'ループ', exact: true }).click();
+    // The loop range remains available for export after loop playback is turned off.
+    await page.getByRole('button', { name: 'ループ', exact: true }).click();
+    await page.getByRole('button', { name: '書き出し' }).click();
+    await page.getByLabel('WAVのサンプルレート').selectOption('48000');
+    await wavExport.click();
     await expect(page.getByRole('dialog', { name: '書き出し前チェック（WAV）' })).toBeVisible();
     const wavDownloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: /WAVを書き出す|このまま書き出す/ }).click();
@@ -625,6 +636,12 @@ test('offline core workflow does not make external network requests', async ({ p
     const wavPath = testInfo.outputPath('offline-core.wav');
     await wavDownload.saveAs(wavPath);
     await expectValidWavFile(wavPath);
+    const bytes = await readFile(wavPath);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    expect(view.getUint32(24, true)).toBe(48000);
+    // One bar at 120 BPM (two seconds), plus one second of release.
+    expect(view.getUint32(40, true)).toBe(3 * 48000 * 4);
+    await expect(page.getByText(/48 kHz \/ ループ範囲/)).toBeVisible();
     await expect(page.getByText('WAVファイルを書き出しました。')).toBeVisible();
   } finally {
     await page.context().setOffline(false);

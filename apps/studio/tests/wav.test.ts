@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   songEndBeat,
   createDefaultProject,
   createEmptyProject,
+  PPQ,
   setTimeSignature,
   type Clip,
   type InstrumentMacros,
@@ -13,6 +15,7 @@ import { exportProjectToMidi, parseMidi } from '@cts/midi-io';
 import { buildScheduleEvents, type SchedulePayload } from '../src/audio/events';
 import { nextEventsInWindow } from '../src/audio/scheduler';
 import { applyMacros } from '../src/audio/macros';
+import { PRESET_LIST } from '../src/audio/presets';
 import {
   encodeWav,
   floatToInt16,
@@ -21,6 +24,8 @@ import {
   renderProjectToWav,
   renderScheduleEvents,
   songTailSeconds,
+  wavLoopWindow,
+  type WavSampleRate,
 } from '../src/audio/wav';
 
 // applyMacros is wrapped in a spy (calling the real mapping) so the WAV render
@@ -108,10 +113,10 @@ describe('encodeWav header (stereo)', () => {
 describe('encodeWav (mono)', () => {
   it('produces a single-channel header', () => {
     const mono = new Float32Array([0.25, -0.25]);
-    const buffer = encodeWav([mono], 22050);
+    const buffer = encodeWav([mono], 48000);
     const view = new DataView(buffer);
     expect(view.getUint16(22, true)).toBe(1); // channels
-    expect(view.getUint32(24, true)).toBe(22050);
+    expect(view.getUint32(24, true)).toBe(48000);
     expect(view.getUint16(32, true)).toBe(2); // block align = 1ch * 2 bytes
     expect(view.getUint32(40, true)).toBe(2 * 2); // 2 frames * 2 bytes
   });
@@ -382,14 +387,14 @@ describe('live playback, WAV and MIDI sound the same events', () => {
   });
 });
 
-describe('renderProjectToWav applies the track macros', () => {
+describe('renderProjectToWav', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.mocked(applyMacros).mockClear();
   });
 
-  /** Minimal OfflineAudioContext: records the filter cutoffs the voices set. */
-  function stubOfflineContext(cutoffs: number[]): void {
+  /** Records synth automation and writes an impulse at each oscillator onset. */
+  function stubOfflineContext(cutoffs: number[], timing?: { starts: number[]; releaseEnds: number[] }): void {
     const param = (record?: number[]) => ({
       setValueAtTime: vi.fn((v: number) => record?.push(v)),
       linearRampToValueAtTime: vi.fn(),
@@ -398,20 +403,50 @@ describe('renderProjectToWav applies the track macros', () => {
       'OfflineAudioContext',
       class {
         currentTime = 0;
+        private readonly starts: number[] = [];
+
+        constructor(
+          private readonly channels: number,
+          private readonly frames: number,
+          private readonly sampleRate: number,
+        ) {}
         createOscillator() {
-          return { type: 'sine', frequency: param(), detune: param(), connect: vi.fn(), start: vi.fn(), stop: vi.fn() };
+          return {
+            type: 'sine', frequency: param(), detune: param(), connect: vi.fn(),
+            start: (time: number) => {
+              this.starts.push(time);
+              timing?.starts.push(time);
+            },
+            stop: vi.fn(),
+          };
         }
         createBiquadFilter() {
           return { type: 'lowpass', frequency: param(cutoffs), Q: param(), connect: vi.fn() };
         }
         createGain() {
-          return { gain: param(), connect: vi.fn() };
+          return {
+            gain: {
+              ...param(),
+              linearRampToValueAtTime: (value: number, time: number) => {
+                if (value === 0) timing?.releaseEnds.push(time);
+              },
+            },
+            connect: vi.fn(),
+          };
         }
         createStereoPanner() {
           return { pan: param(), connect: vi.fn() };
         }
         async startRendering() {
-          return { numberOfChannels: 2, getChannelData: () => new Float32Array(1) };
+          return {
+            numberOfChannels: this.channels,
+            sampleRate: this.sampleRate,
+            getChannelData: (channel: number) => {
+              const data = new Float32Array(this.frames);
+              for (const time of this.starts) data[Math.round(time * this.sampleRate)] = channel ? -0.25 : 0.5;
+              return data;
+            },
+          };
         }
       },
     );
@@ -443,6 +478,138 @@ describe('renderProjectToWav applies the track macros', () => {
         effects: [],
       },
     ],
+  });
+
+  it('matches the full 44.1 kHz WAV bytes captured from HEAD (07113994)', async () => {
+    stubOfflineContext([]);
+    // This tempo hits a fractional frame where rounding would change the old WAV.
+    const project = { ...keysProject(), bpm: 137 };
+    const wav = await renderProjectToWav(project);
+    const digest = createHash('sha256').update(new Uint8Array(await wav.arrayBuffer())).digest('hex');
+    expect(digest).toBe('8b4937feb17ba5c0abd6617b3650151257106ecb5799475f37ac0e23f09ad0e7');
+    expect(await (await renderProjectToWav(project, { sampleRate: 44100, range: 'full' })).arrayBuffer())
+      .toEqual(await wav.arrayBuffer());
+  });
+
+  it('writes 48 kHz stereo PCM with the rounded song length plus a one-second tail', async () => {
+    stubOfflineContext([]);
+    const project = { ...keysProject(), lengthBars: 4, bpm: 137 };
+    const wav = await renderProjectToWav(project, { sampleRate: 48000 });
+    const view = new DataView(await wav.arrayBuffer());
+    expect(view.getUint32(24, true)).toBe(48000);
+    expect(view.getUint32(40, true)).toBe((Math.round(16 * 60 / 137 * 48000) + 48000) * 2 * 2);
+  });
+
+  it('writes the eight beats in [4, 12) and keeps the echo and release tail', async () => {
+    stubOfflineContext([]);
+    const project = { ...keysProject(), bpm: 137, lengthBars: 4, loopRange: { startBeat: 4, endBeat: 12 } };
+    const track = project.tracks[0]!;
+    track.effects = [{ id: 'echo', type: 'delay', enabled: true, params: { timeSeconds: 0.5 } }];
+    const clip = track.clips[0]!;
+    clip.lengthBeats = 16;
+    clip.notes = [
+      { id: 'before', startBeat: 3, durationBeats: 3, pitch: 60, velocity: 100 },
+      { id: 'start', startBeat: 4, durationBeats: 2, pitch: 61, velocity: 100 },
+      { id: 'cross', startBeat: 11, durationBeats: 2, pitch: 62, velocity: 100 },
+      { id: 'end', startBeat: 12, durationBeats: 1, pitch: 63, velocity: 100 },
+    ];
+    const loop = wavLoopWindow(project);
+    if ('reason' in loop) throw new Error(loop.reason);
+    const schedule = renderScheduleEvents(project, loop.window);
+    expect(schedule).toMatchObject([
+      { beat: 4, time: 0, payload: { pitch: 61, durationBeats: 2 } },
+      { beat: 11, time: 7 * (60 / 137), payload: { pitch: 62, durationBeats: 1, cut: true } },
+    ]);
+    const wav = await renderProjectToWav(project, { sampleRate: 48000, range: 'loop' });
+    const view = new DataView(await wav.arrayBuffer());
+    expect(view.getUint32(40, true)).toBe((Math.round(8 * 60 / 137 * 48000) + 72000) * 2 * 2);
+  });
+
+  it('clamps the loop to the song end and uses integer-tick boundaries', async () => {
+    stubOfflineContext([]);
+    const project = { ...keysProject(), bpm: 120, loopRange: { startBeat: 3.003, endBeat: 12 } };
+    expect(wavLoopWindow(project)).toEqual({ window: { startBeat: 1441 / PPQ, endBeat: 4 } });
+    const wav = await renderProjectToWav(project, { range: 'loop' });
+    expect(new DataView(await wav.arrayBuffer()).getUint32(40, true))
+      .toBe((Math.round(479 / PPQ * 60 / 120 * 44100) + 44100) * 4);
+  });
+
+  it('rejects invalid sample rates with a Japanese reason', async () => {
+    await expect(renderProjectToWav(keysProject(), { sampleRate: 96000 as WavSampleRate })).rejects.toThrow('44.1 kHzか48 kHz');
+    expect(() => encodeWav([], 22050)).toThrow('44.1 kHzか48 kHz');
+  });
+
+  it('rejects missing or empty loop ranges with a Japanese reason', async () => {
+    const project = keysProject();
+    await expect(renderProjectToWav(project, { range: 'loop' })).rejects.toThrow('ループ範囲がありません');
+    for (const loopRange of [
+      { startBeat: 2, endBeat: 2 + 0.25 / PPQ },
+      { startBeat: 4, endBeat: 8 },
+    ]) {
+      await expect(renderProjectToWav({ ...project, loopRange }, { range: 'loop' })).rejects.toThrow('書き出せるループ範囲がありません');
+    }
+  });
+
+  it('preserves loop envelopes and MIDI metadata in 300 cases (seed 0x028)', async () => {
+    let seed = 0x028;
+    const randomInt = (max: number) => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return Math.floor(seed / 2 ** 32 * max);
+    };
+    // Expected GM programs and MIDI spellings are independent of the writer's tables.
+    const programs = [
+      ['warmPad', 89], ['roundBass', 38], ['subBass', 38], ['deepSubBass', 39],
+      ['brightLead', 81], ['leadSine', 81], ['squareLead', 80], ['pianoLike', 0],
+      ['softKeys', 4], ['bell', 14], ['organLike', 16], ['stringsLike', 48],
+      ['brassLike', 61], ['pluck', 45], ['glassPad', 92], ['constructor', 89], [undefined, 89],
+    ] as const;
+    expect(programs.map(([preset]) => preset)).toEqual(expect.arrayContaining(PRESET_LIST.map(({ id }) => id)));
+    const keys = [
+      ['G', 'G', 'G'], ['C#', 'C#', 'C#'], ['Gb', 'Gb', 'F#'], ['D#', 'Eb', 'D#'],
+      ['Ab', 'Ab', 'Ab'], ['Bb', 'Bb', 'Bb'], ['A#', 'Bb', 'A#'], ['F', 'F', 'F'],
+      ['Db', 'Db', 'C#'], ['E', 'E', 'E'], ['B', 'B', 'B'], ['G#', 'Ab', 'G#'],
+      ['A', 'A', 'A'], ['C', 'C', 'C'], ['D', 'D', 'D'], ['F#', 'F#', 'F#'], ['Eb', 'Eb', 'Eb'],
+    ] as const;
+    const scales = ['major', 'naturalMinor', 'harmonicMinor', 'melodicMinor'] as const;
+    const timing = { starts: [] as number[], releaseEnds: [] as number[] };
+    stubOfflineContext([], timing);
+    for (let i = 0; i < 300; i++) {
+      timing.starts.length = 0;
+      timing.releaseEnds.length = 0;
+      const [preset, program] = programs[randomInt(programs.length)]!;
+      const [key, major, minor] = keys[randomInt(keys.length)]!;
+      const scale = scales[randomInt(scales.length)]!;
+      const bpm = 55 + randomInt(200);
+      const sampleRate = randomInt(2) === 0 ? 44100 : 48000;
+      const start = 1 + randomInt(4 * PPQ - 2);
+      const end = start + 1 + randomInt(4 * PPQ - start);
+      const loopRange = { startBeat: (start + 0.2) / PPQ, endBeat: (end + 0.3) / PPQ };
+      const project: Project = { ...keysProject(), bpm, key, scale, loopRange };
+      const track = project.tracks[0]!;
+      track.instrument = preset === undefined ? undefined : {
+        type: 'synth', preset,
+        macros: { brightness: 0.5, release: randomInt(101) / 100, width: 0, attack: randomInt(101) / 100 },
+      };
+      const noteTicks = [start - 1, start, start + randomInt(end - start), end - 1, end]
+        .map((tick, index) => ({ tick, pitch: 60 + index, duration: 1 + randomInt(2 * PPQ) }));
+      track.clips[0]!.notes = noteTicks.map(({ tick, pitch, duration }) => ({
+        id: `n${pitch}`, pitch, startBeat: tick / PPQ, durationBeats: duration / PPQ, velocity: 100,
+      }));
+      const wav = await renderProjectToWav(project, { range: 'loop', sampleRate });
+      const actualStarts = timing.starts.filter((_, index) => index % 2 === 0);
+      const expectedStarts = noteTicks.filter(({ tick }) => tick >= start && tick < end)
+        .map(({ tick }) => (tick - start) / PPQ * (60 / bpm))
+        .sort((a, b) => a - b);
+      expect(actualStarts, `case ${i}`).toHaveLength(expectedStarts.length);
+      expect(Math.min(...actualStarts), `case ${i}`).toBe(0);
+      actualStarts.forEach((time, index) => expect(time, `case ${i}`).toBeCloseTo(expectedStarts[index]!, 10));
+      expect(timing.releaseEnds, `case ${i}`).toHaveLength(expectedStarts.length);
+      const frames = (wav.size - 44) / 4;
+      expect(frames / sampleRate, `case ${i}`).toBeGreaterThanOrEqual(Math.max(...timing.releaseEnds));
+      const midi = parseMidi(exportProjectToMidi(project));
+      expect(midi.key, `case ${i}`).toBe(scale === 'major' ? `${major} major` : `${minor} minor`);
+      expect(midi.tracks[1]?.program, `case ${i}`).toBe(program);
+    }
   });
 
   it('calls applyMacros with the track macros and renders the shaped cutoff', async () => {

@@ -1,10 +1,11 @@
 /**
  * Standard MIDI File importer.
  *
- * Parses SMF format 0/1 bytes into beat-based note events and top-level tempo
- * / time-signature metadata. The parser is intentionally pure and dependency
- * free so UI code can decide how to map the result into a project.
+ * Parses SMF format 0/1 bytes into beat-based note events and metadata.
+ * The parser is intentionally pure so UI code can map the result into a project.
  */
+
+import { readKeySignature } from './keySignature.js';
 
 export type ParsedMidiNote = {
   pitch: number;
@@ -32,6 +33,8 @@ export type ParsedMidiTrack = {
   index: number;
   name: string | null;
   notes: ParsedMidiNote[];
+  /** First program change in the track, when one is present. */
+  program?: number;
 };
 
 export type ParsedMidi = {
@@ -42,6 +45,8 @@ export type ParsedMidi = {
   timeSignatures: ParsedMidiTimeSignature[];
   bpm: number;
   timeSignature: [number, number];
+  /** Earliest key signature, for example 'G major' or 'Bb minor'. */
+  key?: string;
 };
 
 type Chunk = {
@@ -118,6 +123,7 @@ export function parseMidi(bytes: Uint8Array): ParsedMidi {
     timeSignature: firstTimeSignature
       ? [firstTimeSignature.numerator, firstTimeSignature.denominator]
       : [...DEFAULT_TIME_SIGNATURE],
+    ...(context.keySignature && { key: context.keySignature.key }),
   };
 }
 
@@ -126,6 +132,7 @@ type ParseContext = {
   ppq: number;
   tempos: ParsedMidiTempo[];
   timeSignatures: ParsedMidiTimeSignature[];
+  keySignature?: { tick: number; key: string };
 };
 
 function parseTrack(context: ParseContext, chunk: Chunk, index: number): ParsedMidiTrack {
@@ -135,6 +142,7 @@ function parseTrack(context: ParseContext, chunk: Chunk, index: number): ParsedM
   let tick = 0;
   let runningStatus: number | null = null;
   let name: string | null = null;
+  let program: number | undefined;
 
   const startNote = (channel: number, pitch: number, velocity: number): void => {
     const key = noteKey(channel, pitch);
@@ -204,6 +212,11 @@ function parseTrack(context: ParseContext, chunk: Chunk, index: number): ParsedM
             denominator,
           });
         }
+      } else if (metaType === 0x59 && data.length === 2) {
+        const key = readKeySignature(data[0]!, data[1]!);
+        if (key && tick < (context.keySignature?.tick ?? Infinity)) {
+          context.keySignature = { tick, key };
+        }
       } else if (metaType === 0x2f) {
         break;
       }
@@ -236,11 +249,13 @@ function parseTrack(context: ParseContext, chunk: Chunk, index: number): ParsedM
       }
     } else if (eventType === 0x80) {
       endNote(channel, data1);
+    } else if (eventType === 0xc0 && data1 < 128) {
+      program ??= data1;
     }
   }
 
   notes.sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch || a.channel - b.channel);
-  return { index, name, notes };
+  return { index, name, notes, ...(program !== undefined && { program }) };
 }
 
 function noteKey(channel: number, pitch: number): string {

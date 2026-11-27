@@ -31,7 +31,13 @@ export function computeAudibleTracks(tracks: readonly Track[]): Set<string> {
   return new Set((soloed.length > 0 ? soloed : unmuted).map((track) => track.id));
 }
 
-type SoundingOptions = { includeMuted?: boolean; clipId?: string; sourceClipId?: string };
+type SoundingOptions = {
+  includeMuted?: boolean;
+  clipId?: string;
+  sourceClipId?: string;
+  /** A one-pass window, with boundaries already aligned to project ticks. */
+  window?: { startBeat: number; endBeat: number };
+};
 
 export function soundingEvents(
   project: Project,
@@ -41,7 +47,7 @@ export function soundingEvents(
   const audible = options.includeMuted ? undefined : computeAudibleTracks(project.tracks);
   const events: SoundingEvent[] = [];
   const problems: string[] = [];
-  const end = songEndBeat(project);
+  const end = Math.min(songEndBeat(project), options.window?.endBeat ?? Infinity);
   const bpb = beatsPerBar(project.timeSignature);
 
   for (const track of project.tracks) {
@@ -60,6 +66,7 @@ export function soundingEvents(
       }
       if (options.sourceClipId !== undefined && source.id !== options.sourceClipId) continue;
       const emit = audible && !audible.has(track.id) ? undefined : (event: ClipOnset) => {
+        if (options.window && event.startBeat < options.window.startBeat) return;
         if (event.kind === 'note') {
           // A note lasts at least one tick; the three outputs only map this end.
           // The raw ticks come from placedNoteTicks, as the editors check them.
