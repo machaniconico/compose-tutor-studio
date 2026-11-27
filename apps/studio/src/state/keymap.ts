@@ -3,6 +3,8 @@
 // step. Whether a shortcut may fire at all (typing in an input, open dialog) is
 // each listener's check.
 
+import { isPlayingCode } from '../features/input/keyboardMap';
+
 export type ShortcutScope = 'global' | 'pianoRoll' | 'arrange' | 'liveInput';
 
 export type ShortcutAction =
@@ -223,6 +225,33 @@ const SCOPE_TITLES_JA: Record<ShortcutScope, string> = {
   liveInput: 'キーボードで演奏しているとき',
 };
 
+type EditableTarget = EventTarget & {
+  getAttribute?: (name: string) => string | null;
+  isContentEditable?: boolean;
+  parentElement?: EditableTarget | null;
+  tagName?: string;
+};
+
+export function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  let element = target as EditableTarget | null;
+
+  while (element) {
+    const tagName = element.tagName?.toUpperCase();
+    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true;
+    if (element.isContentEditable) return true;
+
+    const contentEditable = element.getAttribute?.('contenteditable')?.toLowerCase();
+    if (contentEditable === 'false') return false;
+    if (contentEditable === '' || contentEditable === 'true' || contentEditable === 'plaintext-only') {
+      return true;
+    }
+
+    element = element.parentElement ?? null;
+  }
+
+  return false;
+}
+
 const SPACE_KEYS = new Set([' ', 'space', 'spacebar']);
 
 function eventKey(event: ShortcutEventLike): string {
@@ -234,9 +263,14 @@ function eventKey(event: ShortcutEventLike): string {
 export function findShortcut(
   scope: ShortcutScope,
   event: ShortcutEventLike,
+  liveInputEnabled = false,
 ): ShortcutAction | null {
   const key = eventKey(event);
   const mod = event.ctrlKey || event.metaKey;
+  if (scope === 'pianoRoll' && liveInputEnabled && !mod && !event.altKey) {
+    // Plain C and Q are reserved along with the playing keys while performing.
+    if (isPlayingCode(event.code) || (!event.shiftKey && ['s', 'c', 'q'].includes(key))) return null;
+  }
   // `?` needs Shift on most layouts, so Shift is part of the character there.
   const shift = key !== '?' && event.shiftKey;
   const entry = KEYMAP.find(

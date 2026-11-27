@@ -7,7 +7,7 @@ const playbackMock = vi.hoisted(() => ({
 }));
 vi.mock('../src/audio/playback', () => playbackMock);
 
-import { LivePreview, MAX_PREVIEW_VOICES, fitEnvelope } from '../src/audio/livePreview';
+import { LivePreview, MAX_PREVIEW_VOICES, fitEnvelope, type PreviewTarget } from '../src/audio/livePreview';
 import { resolvePreset } from '../src/audio/synth';
 
 type MockParam = {
@@ -31,13 +31,15 @@ type MockOsc = {
   frequency: MockParam;
   detune: MockParam;
   connect: ReturnType<typeof vi.fn>;
+  disconnect: ReturnType<typeof vi.fn>;
+  onended?: (() => void) | null;
   start: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
 };
 
 function createMockContext(state: 'suspended' | 'running') {
   const oscillators: MockOsc[] = [];
-  const gains: { gain: MockParam; connect: ReturnType<typeof vi.fn> }[] = [];
+  const gains: { gain: MockParam; connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }[] = [];
   const ctx = {
     state,
     currentTime: 1,
@@ -50,6 +52,7 @@ function createMockContext(state: 'suspended' | 'running') {
         frequency: param(),
         detune: param(),
         connect: vi.fn(),
+        disconnect: vi.fn(),
         start: vi.fn(),
         stop: vi.fn(),
       };
@@ -61,9 +64,10 @@ function createMockContext(state: 'suspended' | 'running') {
       frequency: param(),
       Q: param(),
       connect: vi.fn(),
+      disconnect: vi.fn(),
     })),
     createGain: vi.fn(() => {
-      const gain = { gain: param(), connect: vi.fn() };
+      const gain = { gain: param(), connect: vi.fn(), disconnect: vi.fn() };
       gains.push(gain);
       return gain;
     }),
@@ -237,6 +241,78 @@ describe('LivePreview', () => {
       expect(soundingAt(mock.oscillators, t)).toBeLessThanOrEqual(MAX_PREVIEW_VOICES * 2);
     }
     expect(preview.activeVoiceCount()).toBeLessThanOrEqual(MAX_PREVIEW_VOICES);
+  });
+
+  it('sustains until noteOff, avoids duplicates, and disconnects released nodes', async () => {
+    await preview.noteOn(60);
+    await preview.noteOn(60);
+    expect(mock.oscillators).toHaveLength(2);
+    mock.ctx.currentTime += 60;
+    expect(preview.activeVoiceCount()).toBe(1);
+    expect(mock.oscillators.every((osc) => osc.stop.mock.calls.length === 0)).toBe(true);
+
+    preview.noteOff(61);
+    expect(mock.oscillators.every((osc) => osc.stop.mock.calls.length === 0)).toBe(true);
+    preview.noteOff(60);
+    preview.noteOff(60);
+    expect(preview.activeVoiceCount()).toBe(0);
+
+    const [oscA, oscB] = mock.oscillators;
+    for (const osc of mock.oscillators) {
+      expect(osc.stop).toHaveBeenCalledTimes(1);
+      expect(stopTime(osc)).toBeCloseTo(mock.ctx.currentTime + 0.05);
+      expect(osc.disconnect).not.toHaveBeenCalled();
+    }
+    oscB?.onended?.();
+    expect(oscA?.disconnect).toHaveBeenCalledTimes(1);
+    expect(oscB?.disconnect).toHaveBeenCalledTimes(1);
+    expect(mock.ctx.createBiquadFilter.mock.results[0]?.value.disconnect).toHaveBeenCalledTimes(1);
+    expect(mock.gains[1]?.disconnect).toHaveBeenCalledTimes(1);
+    expect(mock.gains[0]?.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('allNotesOff releases held notes and lets a timed preview finish', async () => {
+    await preview.previewNote(undefined, 60);
+    await Promise.all([preview.noteOn(60), preview.noteOn(62)]);
+    mock.ctx.currentTime += 0.1;
+
+    preview.allNotesOff();
+    expect(preview.activeVoiceCount()).toBe(1);
+    expect(mock.oscillators[0]?.stop).toHaveBeenCalledExactlyOnceWith(1.3);
+    for (const osc of mock.oscillators.slice(2)) {
+      expect(stopTime(osc)).toBeCloseTo(1.15);
+    }
+  });
+
+  it('cancels pending starts on noteOff and allNotesOff and allows the same pitch to restart', async () => {
+    let resolveTarget!: (target: PreviewTarget) => void;
+    const target = new Promise<PreviewTarget>((resolve) => { resolveTarget = resolve; });
+    preview = new LivePreview(() => target);
+    const released = preview.noteOn(60);
+    preview.noteOff(60);
+    const stopped = preview.noteOn(62);
+    preview.allNotesOff();
+    const current = preview.noteOn(60);
+    resolveTarget({
+      context: mock.ctx as unknown as BaseAudioContext,
+      master: master as unknown as AudioNode,
+    });
+    await Promise.all([released, stopped, current]);
+    expect(mock.oscillators).toHaveLength(2);
+    expect(preview.activeVoiceCount()).toBe(1);
+    preview.noteOff(60);
+    expect(preview.activeVoiceCount()).toBe(0);
+  });
+
+  it('allows a pitch to be retried after audio initialization fails', async () => {
+    const getTarget = vi.fn(async () => ({
+      context: mock.ctx as unknown as BaseAudioContext,
+      master: master as unknown as AudioNode,
+    })).mockRejectedValueOnce(new Error('audio startup failed'));
+    preview = new LivePreview(getTarget);
+    await expect(preview.noteOn(60)).rejects.toThrow('audio startup failed');
+    await preview.noteOn(60);
+    expect(preview.activeVoiceCount()).toBe(1);
   });
 
   it('never touches the playback schedule', async () => {

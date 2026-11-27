@@ -38,6 +38,7 @@ import { createDefaultProject } from './defaultProject';
 import { nowIso, uid } from './ids';
 import { publishAppEvent } from './appEvents';
 import { pushToast } from './tutorialBridge';
+import { DEFAULT_KEYBOARD_OCTAVE } from '../features/input/keyboardMap';
 import type { NoteColorMode } from '../features/pianoRoll/noteColor';
 import {
   deleteProject as deleteStoredProject,
@@ -70,6 +71,9 @@ export type EditorState = {
   selectedChordId: string | null;
   selectedNoteIds: string[];
   scaleSnap: boolean;
+  liveInputEnabled: boolean;
+  liveInputOctave: number;
+  liveInputScaleLock: boolean;
   chordToneHighlight: boolean;
   /** ピアノロールで他トラックのゴーストノートを隠すトラック ID(UI 状態。保存しない)。 */
   ghostHiddenTrackIds: string[];
@@ -200,6 +204,9 @@ type StoreState = {
   // editor toggles (UI-only)
   setActiveView: (view: EditorView) => void;
   toggleScaleSnap: () => void;
+  toggleLiveInput: () => void;
+  setLiveInputOctave: (octave: number) => void;
+  toggleLiveInputScaleLock: () => void;
   toggleChordToneHighlight: () => void;
   toggleGhostTrack: (trackId: string) => void;
   setNoteColorMode: (mode: NoteColorMode) => void;
@@ -371,6 +378,9 @@ function makeEditor(project: Project): EditorState {
     selectedChordId: null,
     selectedNoteIds: [],
     scaleSnap: true,
+    liveInputEnabled: false,
+    liveInputOctave: DEFAULT_KEYBOARD_OCTAVE,
+    liveInputScaleLock: false,
     chordToneHighlight: true,
     ghostHiddenTrackIds: [],
     noteColorMode: 'plain',
@@ -824,6 +834,12 @@ export const useStore = create<StoreState>((set, get) => {
 
     // --- editor toggles (UI only) ---
     setActiveView: (view) => set((s) => ({ editor: { ...s.editor, activeView: view } })),
+    toggleLiveInput: () =>
+      set((s) => ({ editor: { ...s.editor, liveInputEnabled: !s.editor.liveInputEnabled } })),
+    setLiveInputOctave: (octave) =>
+      set((s) => ({ editor: { ...s.editor, liveInputOctave: octave } })),
+    toggleLiveInputScaleLock: () =>
+      set((s) => ({ editor: { ...s.editor, liveInputScaleLock: !s.editor.liveInputScaleLock } })),
     toggleScaleSnap: () => {
       const next = !get().editor.scaleSnap;
       set((s) => ({ editor: { ...s.editor, scaleSnap: next } }));

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useStore, watchDragEnd } from '../../state/store';
-import { findShortcut, type ShortcutAction } from '../../state/keymap';
+import { findShortcut, isEditableShortcutTarget, type ShortcutAction } from '../../state/keymap';
 import type { Clip, NoteEvent, Project, Track } from '@cts/project-model';
 import { beatTick, beatsPerBar, clipEditSpan, firstPassBeatAt, PPQ, resizeClip, resolveLinkSource, songEndBeat, soundingEvents } from '@cts/project-model';
 import { detectChords, midiToNoteName, type ChordDetectionSegment } from '@cts/theory-engine';
@@ -519,18 +519,12 @@ export function PianoRoll() {
   // --- keyboard shortcuts (ignored while typing in inputs) ---
   useEffect(() => {
     if (linkedClip) return;
-    function isEditableTarget(t: EventTarget | null): boolean {
-      const el = t as HTMLElement | null;
-      if (!el) return false;
-      const tag = el.tagName;
-      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
-    }
     function onKey(e: KeyboardEvent) {
-      if (isEditableTarget(e.target)) return;
+      if (isEditableShortcutTarget(e.target)) return;
       if (isAnyDialogOpen()) return;
       if (editor.activeView !== 'pianoRoll') return;
       const ids = [...selected];
-      const action = findShortcut('pianoRoll', e);
+      const action = findShortcut('pianoRoll', e, useStore.getState().editor.liveInputEnabled);
       const transpose = action ? TRANSPOSE_ACTIONS[action] : undefined;
       const nudgeSteps = action ? NUDGE_ACTIONS[action] : undefined;
       const noteTool = action ? NOTE_TOOL_ACTIONS[action] : undefined;
