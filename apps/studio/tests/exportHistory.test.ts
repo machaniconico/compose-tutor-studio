@@ -5,12 +5,26 @@ import {
   addExportHistoryEntry,
   clearExportHistory,
   formatExportRelativeTimeJa,
+  formatWavExportSettingsJa,
   loadExportHistory,
   recordExportHistory,
 } from '../src/features/export/exportHistory';
 import { MemoryStorage } from './localStorageStub';
 
 describe('export history', () => {
+  it('persists 48 kHz loop exports and displays legacy WAV entries as 44.1 kHz / full', () => {
+    const storage = new MemoryStorage();
+    const legacy = { kind: 'wav', fileName: 'old.wav', projectId: 'p', exportedAt: '2026-01-01T00:00:00Z' } as const;
+    storage.setItem(EXPORT_HISTORY_STORAGE_KEY, JSON.stringify([legacy]));
+    recordExportHistory({
+      ...legacy, fileName: 'loop.wav', sampleRate: 48000, range: 'loop', exportedAt: '2026-01-02T00:00:00Z',
+    }, storage);
+    const entries = loadExportHistory(storage);
+    expect(entries[0]).toMatchObject({ sampleRate: 48000, range: 'loop' });
+    expect(entries[1]).toEqual(legacy);
+    expect(entries.map(formatWavExportSettingsJa)).toEqual(['48 kHz / ループ範囲', '44.1 kHz / 全体']);
+  });
+
   it('records successful exports newest first in localStorage', () => {
     const storage = new MemoryStorage();
 

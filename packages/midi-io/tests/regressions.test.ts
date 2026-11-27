@@ -6,42 +6,10 @@ import { decodeSmfMessages, drumClip, makeProject, makeTrack, midiClip } from '.
 
 /** Status bytes of channel messages at `tick`, in file order. */
 function statusesAt(bytes: Uint8Array, trackIndex: number, tick: number): string[] {
-  let pos = 14;
-  for (let t = 0; t <= trackIndex; t++) {
-    const len = new DataView(bytes.buffer, bytes.byteOffset).getUint32(pos + 4);
-    if (t < trackIndex) {
-      pos += 8 + len;
-      continue;
-    }
-    const out: string[] = [];
-    let p = pos + 8;
-    const end = p + len;
-    let now = 0;
-    while (p < end) {
-      let delta = 0;
-      let b: number;
-      do {
-        b = bytes[p++]!;
-        delta = (delta << 7) | (b & 0x7f);
-      } while (b & 0x80);
-      now += delta;
-      const status = bytes[p]!;
-      if (status === 0xff) {
-        let l = 0;
-        p += 2;
-        do {
-          b = bytes[p++]!;
-          l = (l << 7) | (b & 0x7f);
-        } while (b & 0x80);
-        p += l;
-        continue;
-      }
-      if (now === tick) out.push(`${(status & 0xf0) === 0x80 ? 'off' : (status & 0xf0) === 0x90 ? 'on' : 'cc'}${bytes[p + 1]}`);
-      p += 3;
-    }
-    return out;
-  }
-  return [];
+  const labels: Record<number, string> = { 0x80: 'off', 0x90: 'on', 0xb0: 'cc', 0xc0: 'program' };
+  return (decodeSmfMessages(bytes)[trackIndex] ?? [])
+    .filter((message) => message.tick === tick)
+    .map(({ data: [status, value] }) => `${labels[status! & 0xf0]}${value}`);
 }
 
 describe('MIDI の同 tick 順序', () => {

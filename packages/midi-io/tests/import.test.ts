@@ -41,6 +41,8 @@ describe('parseMidi', () => {
     expect(parsed.timeSignature).toEqual([3, 4]);
     expect(parsed.tempos[0]?.microsecondsPerQuarter).toBe(500000);
     expect(parsed.timeSignatures[0]?.numerator).toBe(3);
+    expect(parsed).not.toHaveProperty('key');
+    expect(parsed.tracks[0]).not.toHaveProperty('program');
 
     const note = parsed.tracks[0]?.notes[0];
     expect(note).toBeDefined();
@@ -49,6 +51,25 @@ describe('parseMidi', () => {
       startBeat: 0,
       durationBeats: 1,
       velocity: 100,
+    });
+  });
+
+  it('reads signed key signatures and the first program in format 0 without affecting running status', () => {
+    const track = trackChunk([
+      0x00, 0xff, 0x59, 0x02, 0xf8, 0x01, // Invalid: eight flats
+      0x00, 0xff, 0x59, 0x02, 0x01, 0x02, // Invalid: mode 2
+      0x00, 0xff, 0x59, 0x02, 0xfb, 0x01, // Bb minor
+      0x00, 0xc2, 0,
+      0x00, 48, // Program change via running status
+      0x00, 0x92, 60, 100,
+      ...writeVarLen(PPQ), 60, 0,
+      0x00, 0xff, 0x2f, 0x00,
+    ]);
+    const parsed = parseMidi(concatChunks(buildHeaderChunk(0, 1, PPQ), track));
+    expect(parsed.key).toBe('Bb minor');
+    expect(parsed.tracks[0]).toMatchObject({
+      program: 0,
+      notes: [{ pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100, channel: 2 }],
     });
   });
 

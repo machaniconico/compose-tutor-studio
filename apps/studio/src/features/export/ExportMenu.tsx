@@ -12,7 +12,13 @@ import { useStore } from '../../state/store';
 import { publishAppEvent } from '../../state/appEvents';
 import { pushToast } from '../../state/tutorialBridge';
 import { recordDiagnostic } from '../../platform/diagnostics';
-import { renderProjectToWav } from '../../audio/wav';
+import {
+  renderProjectToWav,
+  RENDER_SAMPLE_RATE,
+  wavLoopWindow,
+  type WavExportRange,
+  type WavSampleRate,
+} from '../../audio/wav';
 import { Dialog } from '../common/Dialog';
 import { safeFileStem } from './download';
 import { parseProjectFileImport } from './projectFileImport';
@@ -25,6 +31,7 @@ import {
   clearExportHistory,
   formatExportKindJa,
   formatExportRelativeTimeJa,
+  formatWavExportSettingsJa,
   getExportKindIcon,
   loadExportHistory,
   recordExportHistory,
@@ -49,7 +56,9 @@ type PendingChecklist = {
 /** Top-bar export button + dialog. */
 export function ExportMenu() {
   const [open, setOpen] = useState(false);
-  const [rendering, setRendering] = useState(false);
+  const [wavProgress, setWavProgress] = useState<'rendering' | 'saving' | null>(null);
+  const [sampleRate, setSampleRate] = useState<WavSampleRate>(RENDER_SAMPLE_RATE);
+  const [range, setRange] = useState<WavExportRange>('full');
   const [history, setHistory] = useState<ExportHistoryEntry[]>(() => loadExportHistory());
   const [checklist, setChecklist] = useState<PendingChecklist | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -58,6 +67,9 @@ export function ExportMenu() {
   const replaceProject = useStore((s) => s.replaceProject);
 
   const stem = safeFileStem(project.title);
+  const loop = range === 'loop' ? wavLoopWindow(project) : undefined;
+  const loopReason = loop && 'reason' in loop ? loop.reason : undefined;
+  const wavBlocked = wavProgress !== null || loopReason !== undefined;
 
   const openMenu = () => {
     setHistory(loadExportHistory());
@@ -98,22 +110,25 @@ export function ExportMenu() {
   };
 
   const exportWav = async () => {
-    setRendering(true);
+    setWavProgress('rendering');
     try {
-      const blob = await renderProjectToWav(project);
+      // Let the status appear before preparing the offline audio graph.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const blob = await renderProjectToWav(project, { sampleRate, range });
+      setWavProgress('saving');
       const fileName = `${stem}.wav`;
       const result = await saveBlob(blob, fileName, [
-        { name: 'WAV audio', extensions: ['wav'] },
+        { name: 'WAV 音声', extensions: ['wav'] },
       ]);
       if (result === 'cancelled') return;
       publishAppEvent({ type: 'export.wav', payload: { format: 'wav' } });
-      setHistory(recordExportHistory({ kind: 'wav', fileName, projectId: project.id }));
+      setHistory(recordExportHistory({ kind: 'wav', fileName, projectId: project.id, sampleRate, range }));
       pushToast('WAVファイルを書き出しました。', 'success');
     } catch (error) {
       recordDiagnostic('export-wav', error);
       pushToast(fileTransferFailureMessage('export-wav'), 'error');
     } finally {
-      setRendering(false);
+      setWavProgress(null);
     }
   };
 
@@ -145,7 +160,7 @@ export function ExportMenu() {
 
   /** チェック内容を確認したうえで書き出しを実行する。 */
   const proceedExport = () => {
-    if (!checklist) return;
+    if (!checklist || (checklist.kind === 'wav' && wavBlocked)) return;
     const kind = checklist.kind;
     setChecklist(null);
     if (kind === 'midi') {
@@ -192,7 +207,7 @@ export function ExportMenu() {
       {open && checklist ? (
         <ExportChecklistDialog
           checklist={checklist}
-          rendering={rendering}
+          blocked={checklist.kind === 'wav' && wavBlocked}
           onCancel={cancelChecklist}
           onProceed={proceedExport}
         />
@@ -210,10 +225,41 @@ export function ExportMenu() {
                 <button
                   type="button"
                   onClick={() => openChecklist('wav')}
-                  disabled={rendering}
+                  disabled={wavBlocked}
                 >
-                  {rendering ? '書き出し中…' : 'WAVエクスポート'}
+                  WAVエクスポート
                 </button>
+              </div>
+              <div className="export-menu__row">
+                <label className="export-menu__field">
+                  WAVのサンプルレート
+                  <select
+                    value={sampleRate}
+                    disabled={wavProgress !== null}
+                    onChange={(event) => setSampleRate(event.target.value === '48000' ? 48000 : RENDER_SAMPLE_RATE)}
+                  >
+                    <option value={44100}>44.1 kHz</option>
+                    <option value={48000}>48 kHz</option>
+                  </select>
+                </label>
+                <label className="export-menu__field">
+                  WAVの書き出し範囲
+                  <select
+                    value={range}
+                    disabled={wavProgress !== null}
+                    onChange={(event) => setRange(event.target.value === 'loop' ? 'loop' : 'full')}
+                    aria-invalid={loopReason ? true : undefined}
+                    aria-describedby={loopReason ? 'wav-loop-reason' : undefined}
+                  >
+                    <option value="full">全体</option>
+                    <option value="loop">ループ範囲</option>
+                  </select>
+                </label>
+              </div>
+              {loopReason && <p id="wav-loop-reason" className="export-menu__hint" role="alert">{loopReason}</p>}
+              <div role="status">
+                {wavProgress === 'rendering' && 'WAVの音声を作っています…'}
+                {wavProgress === 'saving' && 'WAVを保存しています…'}
               </div>
               <p className="export-menu__hint">
                 MIDIは他のアプリで編集でき、WAVはそのまま再生・共有できます。
@@ -275,6 +321,7 @@ export function ExportMenu() {
                       <span>{entry.fileName}</span>
                       <span className="export-menu__hint">
                         {formatExportKindJa(entry.kind)} ・{' '}
+                        {entry.kind === 'wav' && `${formatWavExportSettingsJa(entry)} ・ `}
                         {formatExportRelativeTimeJa(entry.exportedAt)}
                       </span>
                     </li>
@@ -291,7 +338,7 @@ export function ExportMenu() {
 
 type ExportChecklistDialogProps = {
   checklist: PendingChecklist;
-  rendering: boolean;
+  blocked: boolean;
   onCancel: () => void;
   onProceed: () => void;
 };
@@ -302,7 +349,7 @@ type ExportChecklistDialogProps = {
  */
 function ExportChecklistDialog({
   checklist,
-  rendering,
+  blocked,
   onCancel,
   onProceed,
 }: ExportChecklistDialogProps) {
@@ -337,7 +384,7 @@ function ExportChecklistDialog({
           <button type="button" onClick={onCancel}>
             キャンセル
           </button>
-          <button type="button" onClick={onProceed} disabled={rendering}>
+          <button type="button" onClick={onProceed} disabled={blocked}>
             {hasWarnings ? 'このまま書き出す' : `${kindLabel}を書き出す`}
           </button>
         </div>

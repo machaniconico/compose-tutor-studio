@@ -5,6 +5,7 @@
 
 import type { Project, NoteEvent, DrumLane, Track, SoundingEvent } from '@cts/project-model';
 import { projectLengthBeats, soundingEvents } from '@cts/project-model';
+import { keySignatureMeta } from './keySignature.js';
 import {
   PPQ,
   writeVarLen,
@@ -30,6 +31,32 @@ const DRUM_HIT_DURATION_BEATS = 0.25; // 1/4 beat
 
 /** GM percussion channel (0-indexed). */
 const DRUM_CHANNEL = 9;
+
+// Zero-based General MIDI programs approximating the studio synth presets.
+const PRESET_PROGRAM: Readonly<Record<string, number>> = {
+  warmPad: 89, // Warm Pad
+  roundBass: 38, // Synth Bass 1
+  subBass: 38,
+  deepSubBass: 39, // Synth Bass 2
+  brightLead: 81, // Sawtooth Lead
+  leadSine: 81,
+  squareLead: 80, // Square Lead
+  pianoLike: 0, // Acoustic Grand Piano
+  softKeys: 4, // Electric Piano 1
+  bell: 14, // Tubular Bells
+  organLike: 16, // Drawbar Organ
+  stringsLike: 48, // String Ensemble 1
+  brassLike: 61, // Brass Section
+  pluck: 45, // Pizzicato Strings
+  glassPad: 92, // Bowed Pad
+};
+
+function presetProgram(preset: unknown): number {
+  if (typeof preset === 'string' && Object.hasOwn(PRESET_PROGRAM, preset)) {
+    return PRESET_PROGRAM[preset]!;
+  }
+  return PRESET_PROGRAM['warmPad']!;
+}
 
 /** Maximum value of the SMF header's 16-bit track count. */
 const MAX_SMF_TRACKS = 0xffff;
@@ -111,7 +138,7 @@ function noteMessages(
   ];
 }
 
-/** Build one MTrk for an instrument/drum track, including CC7/CC10 at start. */
+/** Build one MTrk for an instrument/drum track, including its channel setup. */
 function buildInstrumentTrack(
   track: Track,
   events: readonly SoundingEvent[],
@@ -124,6 +151,10 @@ function buildInstrumentTrack(
     { tick: 0, bytes: [0xb0 | channel, 7, volumeToCc(track.volume)] },
     { tick: 0, bytes: [0xb0 | channel, 10, panToCc(track.pan)] },
   ];
+  // Same-tick note-ons follow the setup in buildTrackChunk's stable sort.
+  if (channel !== DRUM_CHANNEL) {
+    msgs.push({ tick: 0, bytes: [0xc0 | channel, presetProgram(track.instrument?.preset)] });
+  }
   for (const event of events) {
     const pitch = event.kind === 'note' ? event.pitch : DRUM_NOTE[event.lane];
     // A choked open hat (soundingEvents) ends at its closed hat when that comes first.
@@ -141,10 +172,10 @@ function buildInstrumentTrack(
  * Export a Project to a Format-1 Standard MIDI File (Uint8Array).
  *
  * Track layout:
- *   - Track 0 (tempo track): track name, tempo, time signature, and chord
+ *   - Track 0 (tempo track): track name, tempo, time and key signatures, and chord
  *     symbols as marker meta events (FF 06) at each chord's startBeat.
  *   - One track per instrument/drum track, with CC7 (volume) and CC10 (pan)
- *     at the track start. If the full layout exceeds the SMF track limit,
+ *     at the track start and a program change for instrument tracks. If the full layout exceeds the SMF track limit,
  *     only instrument/drum tracks with sounding events are written.
  *
  * Channels are assigned sequentially to non-drum tracks, skipping channel 9
@@ -160,6 +191,8 @@ export function projectToMidi(project: Project, options?: { ppq?: number }): Uin
     { tick: 0, bytes: tempoMeta(project.bpm) },
     { tick: 0, bytes: timeSigMeta(project.timeSignature[0], project.timeSignature[1]) },
   ];
+  const key = keySignatureMeta(project);
+  if (key) metaMessages.push({ tick: 0, bytes: key });
   for (const chord of project.chordTrack) {
     metaMessages.push({ tick: Math.round(chord.startBeat * ppq), bytes: markerMeta(chord.symbol) });
   }

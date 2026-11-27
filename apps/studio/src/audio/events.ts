@@ -115,9 +115,10 @@ export function buildScheduleEvents(
   project: Project,
   identities?: WeakMap<object, string>,
   loop?: LoopRegion | null,
+  window?: LoopRegion,
 ): ScheduledEvent[] {
   const presets = new Map(project.tracks.map((track) => [track.id, track.instrument?.preset ?? 'warmPad']));
-  const sounding = soundingEvents(project).events;
+  const sounding = soundingEvents(project, { window }).events;
   return (loop ? chokeForLoop(sounding, loop) : sounding).map((event): ScheduledEvent => {
     const { trackId, startBeat: beat, velocity } = event;
     const payload: SchedulePayload = event.kind === 'note'
