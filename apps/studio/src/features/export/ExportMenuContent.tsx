@@ -1,7 +1,7 @@
 // Export menu in the top bar: MIDI / WAV / project-file export, and project-file
 // import. Surfaces progress + errors as toasts and emits export app events.
 
-import { useRef } from 'react';
+import { useRef, useState, type MutableRefObject } from 'react';
 import { MidiExportError, projectToMidi } from '@cts/midi-io';
 import {
   DEFAULT_MAX_PROJECT_JSON_BYTES,
@@ -18,6 +18,8 @@ import {
   renderProjectToWav,
   renderSelectedTrackToWav,
   WavRenderLimitError,
+  DEFAULT_WAV_FORMAT,
+  type WavFormatOptions,
 } from '../../audio/wav';
 import { AudioAssetPlaybackError } from '../../audio/audioAssetResolver';
 import { AudioClipPlanLimitError } from '../../audio/audioClipPlanner';
@@ -112,6 +114,57 @@ export function wavExportFailureMessage(error: unknown): string {
   return 'WAVの書き出しに失敗しました。';
 }
 
+/** Compact sample rate / bit depth / dither row. Writes its choice into `formatRef`. */
+function WavFormatControls({
+  formatRef,
+  disabled,
+}: {
+  formatRef: MutableRefObject<Required<WavFormatOptions>>;
+  disabled: boolean;
+}) {
+  const [format, setFormat] = useState({ ...formatRef.current });
+  const update = (patch: Partial<Required<WavFormatOptions>>) => {
+    const next = { ...format, ...patch };
+    formatRef.current = next;
+    setFormat(next);
+  };
+  return (
+    <div className="export-menu__row export-menu__wav-format">
+      <label>
+        サンプルレート
+        <select
+          value={format.sampleRate}
+          disabled={disabled}
+          onChange={(e) => update({ sampleRate: Number(e.target.value) === 48000 ? 48000 : 44100 })}
+        >
+          <option value={44100}>44.1 kHz</option>
+          <option value={48000}>48 kHz</option>
+        </select>
+      </label>
+      <label>
+        ビット数
+        <select
+          value={format.bitDepth}
+          disabled={disabled}
+          onChange={(e) => update({ bitDepth: Number(e.target.value) === 24 ? 24 : 16 })}
+        >
+          <option value={16}>16 bit</option>
+          <option value={24}>24 bit</option>
+        </select>
+      </label>
+      <label title="16bitに丸める時の量子化ノイズをならします。24bitでは使いません。">
+        <input
+          type="checkbox"
+          checked={format.dither && format.bitDepth === 16}
+          disabled={disabled || format.bitDepth !== 16}
+          onChange={(e) => update({ dither: e.target.checked })}
+        />
+        ディザ
+      </label>
+    </div>
+  );
+}
+
 /** Export/import controls loaded only after their dialog opens. */
 export function ExportMenuContent({
   onDone,
@@ -121,6 +174,10 @@ export function ExportMenuContent({
 }: ExportMenuContentProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const portableFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Export format is dialog-local UI state, not project data. The ref is the
+  // single source for export handlers; WavFormatControls owns the visible state.
+  const wavFormatRef = useRef<Required<WavFormatOptions>>({ ...DEFAULT_WAV_FORMAT });
 
   const project = useStore((s) => s.project);
   const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
@@ -160,7 +217,7 @@ export function ExportMenuContent({
     const operation = 'wav-export' satisfies ExportOperation;
     if (!beginOperation(operation)) return;
     try {
-      const rendered = await renderProjectToWav(project);
+      const rendered = await renderProjectToWav(project, { ...wavFormatRef.current });
       const fileName = `${stem}.wav`;
       const result = await saveWavRenderLease(rendered, fileName, {
         runtime: isNative ? 'native' : 'web',
@@ -183,7 +240,9 @@ export function ExportMenuContent({
     const operation = 'track-wav-export' satisfies ExportOperation;
     if (!beginOperation(operation)) return;
     try {
-      const rendered = await renderSelectedTrackToWav(project, selectedWav.track.id);
+      const rendered = await renderSelectedTrackToWav(project, selectedWav.track.id, {
+        ...wavFormatRef.current,
+      });
       const fileName = selectedTrackWavFileName(project.title, selectedWav.track.name);
       const result = await saveWavRenderLease(rendered, fileName, {
         runtime: isNative ? 'native' : 'web',
@@ -427,6 +486,7 @@ export function ExportMenuContent({
                   {renderingTrack ? '選択トラックを書き出し中…' : '選択トラックをWAV'}
                 </button>
               </div>
+              <WavFormatControls formatRef={wavFormatRef} disabled={operationBusy} />
               <p className="export-menu__hint">
                 MIDIは他のアプリで編集でき、WAVはそのまま再生・共有できます。
               </p>

@@ -109,7 +109,7 @@ Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/R
 - MIDI note scheduling
 - Built-in synth/drum playback
 - Basic effects
-- Offline render
+- Offline render(`renderProjectToWav`の`sampleRate` 44.1 / 48 kHz・`bitDepth` 16 / 24・`dither`。既定の16-bit・ディザOFFは従来とバイト一致、計画・予算は`WavRenderPlan.sampleRate / bitDepth`で拡縮する)
 - Audio Assetのchecksum付きresolve / decode cacheとAudio Clip window plan
 - Audio Clipのpitch解析、versioned WSOLA派生PCM Worker、content-addressed single-flight LRU
 - Transient center-vocal reduction and PCM 16-bit WAV encode

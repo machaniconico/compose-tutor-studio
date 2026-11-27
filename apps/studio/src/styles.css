@@ -3193,6 +3193,17 @@ button.pr__note:hover {
   flex-wrap: wrap;
 }
 
+.export-menu__wav-format {
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: 12px;
+}
+.export-menu__wav-format label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
 .export-menu__hint {
   margin: 0;
   font-size: 12px;

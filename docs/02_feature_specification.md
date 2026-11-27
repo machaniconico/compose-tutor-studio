@@ -449,8 +449,13 @@ Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生pass�
 
 ### 10.2 WAV
 
-- MVPは44.1kHz stereo
-- MVPはPCM 16-bit。24-bitとsample rate選択は後続検討
+- 既定は44.1kHz stereo・PCM 16-bit・ディザOFF。この既定の出力はP50以前のmainとバイト単位で同一(固定した旧encoderとの一致テストで守る)
+- 書き出しオプション: サンプルレート44.1 / 48 kHz、ビット深度16 / 24 bit、ディザON / OFF。選択はExportダイアログ内のUI状態で、Projectやschemaには保存しない。全体WAVと選択TrackのWAVに同じ設定を使う
+- RIFFはword境界に揃える。data sizeが奇数(24-bitのmonoで奇数frame等)の時はdata chunkの後ろに0の1 byte padを置き、RIFF sizeにはpadを含め、data sizeには含めない。RIFF sizeが32-bitに収まらない出力は、確保の前に`RangeError`で拒否する
+- 24-bitはlittle-endian 3 byte PCM(fmt chunkの`bitsPerSample` 24、`blockAlign`、`byteRate`を正しく書く)。full scaleを超える値はwrapせずclampし、+1.0は`0x7FFFFF`、-1.0は`-0x800000`になる。24-bitにはディザをかけない
+- ディザは16-bitへ丸める時だけのTPDF(±1 LSB)。PRNGは固定seed(`0x43545335`)の線形合同法で、Math.randomを使わない。同じ描画結果なら同じbytesになり、テストを再現できる。ディザ後もclampする。値がちょうど0のsample(デジタル無音)にはディザをかけず0のまま出力し、PRNGも進めない
+- 48 kHzは`OfflineAudioContext`を48000で生成し、tail計画・frame数・resource予算のsample rateもこれに合わせる。frame数は`ceil(totalSeconds × sampleRate)`
+- サイズ予算はPCM bufferを`bitDepth / 8`で見積もる。48 kHz / 24-bitは同じ曲でも44.1 kHz / 16-bitより大きく見積もられ、`OfflineAudioContext`生成前に`WavRenderLimitError`で拒否する(例: 5分の曲+40秒tailは44.1 kHz / 16-bit・48 kHz / 16-bitで通り、48 kHz / 24-bitは拒否)。native保存の上限192 MiBは変えない
 - 内蔵instrument / drumとAudio Trackをレンダー対象にし、Audio Clipはliveと同じshared planner、source range、gain、fade、loopを使う
 - ライブ自然終了とWAVは、resolved eventとAudio Clip regionから同じ`planAudioTail`を使う。instrumentはノート長とpreset ADSR、oscillator停止padを、drumは各laneの実source停止時刻を、Audio Trackはtrim / loop後の可聴source終端を使う。source終端をrouting DAG順に伝播し、main / post-fader sendではsource Track insert、到達BusごとにBus insertのtail-timeを加える。pre-fader sendはsource fader / insert / panを迂回して送るためsource insert tailをそのedgeへ持ち込まず、到達後のBus insertは加える。常設Master limiterは全体へ1回だけ加え、可聴sourceがないrenderにはeffectsやlimiterだけを理由とするtailを追加しない
 - enabledなDelay / Reverbは振幅0.001（-60 dB）以上の最後の出力まで含め、exact thresholdも含む。Filterと3段EQはWeb Audio 1.1係数の最大pole半径から36dBのstate headroomを持って-60dB到達時刻を求め、無効・不安定な係数は1 stage最大2秒でfail-closedする。各Compressorは規格固定6ms look-aheadを直列加算し、Master limiter分は全体へ1回だけ加える
