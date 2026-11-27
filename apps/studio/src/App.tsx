@@ -1,6 +1,7 @@
 import { TransportBar } from './features/transport/TransportBar';
 import { TrackList } from './features/tracklist/TrackList';
 import { ChordLane } from './features/chordTrack/ChordLane';
+import { LiveInputPanel } from './features/input/LiveInputPanel';
 import { EditorArea } from './features/editor/EditorArea';
 import { InspectorPanel } from './features/inspector/InspectorPanel';
 import { MixerStrip } from './features/mixer/MixerStrip';
@@ -16,6 +17,7 @@ export function App() {
       <TrackList />
       <div className="center-pane">
         <ChordLane />
+        <LiveInputPanel />
         <EditorArea />
       </div>
       <InspectorPanel />

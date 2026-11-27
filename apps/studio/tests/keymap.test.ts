@@ -152,3 +152,26 @@ describe('piano-roll note editing shortcuts', () => {
     for (const id of pianoRoll) expect(global.has(id), id).toBe(false);
   });
 });
+
+describe('live input scope priority', () => {
+  it.each([
+    ['s', 'KeyS', 'toggleScaleSnap'],
+    ['c', 'KeyC', 'toggleChordToneHighlight'],
+    ['q', 'KeyQ', 'quantizeSelection'],
+    ['j', 'KeyJ', 'joinNotes'],
+    ['k', 'KeyK', 'splitNotesAtPlayhead'],
+    ['l', 'KeyL', 'legatoNotes'],
+    ['t', 'KeyT', 'staccatoNotes'],
+    ['l', 'KeyA', 'legatoNotes'],
+  ])('takes priority over bare %s (%s)', (key, code, action) => {
+    const event = press(key, { code });
+    expect(findShortcut('pianoRoll', event)).toBe(action);
+    expect(findShortcut('pianoRoll', event, true)).toBeNull();
+  });
+
+  it('leaves non-playing shortcuts and Ctrl/Cmd combinations available', () => {
+    expect(findShortcut('pianoRoll', press('Delete', { code: 'Delete' }), true)).toBe('deleteSelectedNotes');
+    expect(findShortcut('pianoRoll', press('x', { code: 'KeyX', metaKey: true }), true)).toBe('cutNotes');
+    expect(findShortcut('global', press('s', { code: 'KeyS', ctrlKey: true }), true)).toBe('save');
+  });
+});

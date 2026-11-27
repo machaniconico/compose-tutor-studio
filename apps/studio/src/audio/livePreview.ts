@@ -1,11 +1,9 @@
-// Live preview ("試聴"): short one-off notes for keyboard clicks and note
-// placement in the piano roll.
+// Live preview for piano roll clicks, chords, and held keyboard notes.
 //
 // Preview voices go through their own GainNode connected to the master input,
 // so they work while the song is playing and never touch the playback schedule.
-// At most MAX_PREVIEW_VOICES sound at once; the oldest is stopped to make room.
-// A preview lasts exactly the requested length: the preset envelope is squeezed
-// to fit, so a slow pad does not ring on past a 300ms key click.
+// The timed preview pool caps clicks and chords independently of held notes.
+// Timed notes squeeze their envelope to fit the requested length.
 
 import type { InstrumentConfig } from '@cts/project-model';
 import { useStore } from '../state/store';
@@ -49,6 +47,8 @@ export function fitEnvelope(env: Envelope, totalSeconds: number): { env: Envelop
 /** Where preview audio goes: a context and the node preview output connects to. */
 export type PreviewTarget = { context: BaseAudioContext; master: AudioNode };
 
+type HeldVoice = { release?: () => void };
+
 type PreviewVoice = { synth: SynthVoiceManager; startTime: number; endTime: number };
 
 /** Whether a preview request can be scheduled (AudioParams reject NaN/Infinity). */
@@ -65,17 +65,19 @@ export class LivePreview {
   private bus: GainNode | null = null;
   private busContext: BaseAudioContext | null = null;
   private voices: PreviewVoice[] = [];
+  private readonly held = new Map<number, HeldVoice>();
 
   constructor(getTarget: () => Promise<PreviewTarget>) {
     this.getTarget = getTarget;
   }
 
-  /** Number of preview voices sounding now (a stolen voice counts until it stops). */
+  /** Number of timed voices sounding now and held pitches that have started. */
   activeVoiceCount(): number {
     const ctx = this.busContext;
     if (!ctx) return 0;
     this.reap(ctx.currentTime);
-    return this.soundingAt(ctx.currentTime).length;
+    return this.soundingAt(ctx.currentTime).length +
+      [...this.held.values()].filter((voice) => voice.release).length;
   }
 
   /** Sound one note with the track's instrument for `durationMs`. */
@@ -98,6 +100,36 @@ export class LivePreview {
   ): Promise<void> {
     const { context, bus } = await this.prepare();
     for (const midi of midis) this.start(context, bus, trackInstrument, midi, velocity, durationMs);
+  }
+
+  /** Sustain one pitch until noteOff. Releasing while audio initializes cancels the start. */
+  async noteOn(midi: number, instrument?: InstrumentConfig, velocity = PREVIEW_VELOCITY): Promise<void> {
+    if (!isPlayable(midi, velocity, 0) || this.held.has(midi)) return;
+    const voice: HeldVoice = {};
+    this.held.set(midi, voice);
+    try {
+      const { context, bus } = await this.prepare();
+      if (this.held.get(midi) !== voice) return;
+      const synth = new SynthVoiceManager(context, bus, instrument?.preset, 1, instrument?.macros);
+      const note = synth.noteOn(midi, context.currentTime, null, velocity);
+      voice.release = () => note.release(context.currentTime);
+    } catch (error) {
+      if (this.held.get(midi) === voice) {
+        this.held.delete(midi);
+        throw error;
+      }
+    }
+  }
+
+  noteOff(midi: number): void {
+    const voice = this.held.get(midi);
+    this.held.delete(midi);
+    voice?.release?.();
+  }
+
+  /** Release all held pitches, including starts still waiting for the audio context. */
+  allNotesOff(): void {
+    for (const midi of this.held.keys()) this.noteOff(midi);
   }
 
   private async prepare(): Promise<{ context: BaseAudioContext; bus: GainNode }> {
@@ -190,4 +222,17 @@ export function previewChord(
   durationMs: number = PREVIEW_DURATION_MS,
 ): Promise<void> {
   return shared().previewChord(midis, trackInstrument, velocity, durationMs);
+}
+
+/** Start a held note through the app's audio engine. */
+export function noteOn(midi: number, instrument?: InstrumentConfig, velocity?: number): Promise<void> {
+  return shared().noteOn(midi, instrument, velocity);
+}
+
+export function noteOff(midi: number): void {
+  singleton?.noteOff(midi);
+}
+
+export function allNotesOff(): void {
+  singleton?.allNotesOff();
 }

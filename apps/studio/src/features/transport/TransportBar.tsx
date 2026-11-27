@@ -5,7 +5,7 @@ import {
   type SaveState,
   type Difficulty,
 } from '../../state/store';
-import { findShortcut, type ShortcutAction } from '../../state/keymap';
+import { findShortcut, isEditableShortcutTarget, type ShortcutAction } from '../../state/keymap';
 import type { MusicalKey, ScaleName } from '@cts/project-model';
 import {
   beatsPerBar as beatsPerBarOf,
@@ -63,13 +63,6 @@ export type TransportShortcutEvent = Pick<
 > &
   Partial<Pick<KeyboardEvent, 'code' | 'defaultPrevented'>>;
 
-type EditableTarget = EventTarget & {
-  getAttribute?: (name: string) => string | null;
-  isContentEditable?: boolean;
-  parentElement?: EditableTarget | null;
-  tagName?: string;
-};
-
 type TransportShortcutActions = {
   isPlaying: boolean;
   play: () => void;
@@ -81,25 +74,7 @@ type TransportShortcutActions = {
   undo: () => void;
 };
 
-export function isEditableShortcutTarget(target: EventTarget | null): boolean {
-  let element = target as EditableTarget | null;
-
-  while (element) {
-    const tagName = element.tagName?.toUpperCase();
-    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true;
-    if (element.isContentEditable) return true;
-
-    const contentEditable = element.getAttribute?.('contenteditable')?.toLowerCase();
-    if (contentEditable === 'false') return false;
-    if (contentEditable === '' || contentEditable === 'true' || contentEditable === 'plaintext-only') {
-      return true;
-    }
-
-    element = element.parentElement ?? null;
-  }
-
-  return false;
-}
+export { isEditableShortcutTarget } from '../../state/keymap';
 
 export function getTransportShortcut(event: TransportShortcutEvent): ShortcutAction | null {
   if (event.defaultPrevented || isEditableShortcutTarget(event.target) || isAnyDialogOpen()) {
@@ -355,6 +330,8 @@ export function TransportBar() {
     if (typeof window === 'undefined') return undefined;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (isTapActivation(event, tapButton.current)) return;
+      if ((event.key === ' ' || event.code === 'Space') &&
+          event.target instanceof Element && event.target.closest('.live-input button')) return;
       handleTransportShortcutKeyDown(event, {
         isPlaying,
         play,

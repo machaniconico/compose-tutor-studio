@@ -109,7 +109,7 @@ export class SynthVoiceManager {
    *
    * @param midi      MIDI note number
    * @param startTime AudioContext time to start
-   * @param duration  sounding duration in seconds (release happens after)
+   * @param duration  sounding duration in seconds, or null to sustain until released
    * @param velocity  0..127 MIDI velocity
    * @param options.env       envelope override (defaults to the preset's envelope)
    * @param options.cutAtEnd  the note was cut short (e.g. at the clip end): release
@@ -118,7 +118,7 @@ export class SynthVoiceManager {
   noteOn(
     midi: number,
     startTime: number,
-    duration: number,
+    duration: number | null,
     velocity: number,
     options: { env?: Envelope; cutAtEnd?: boolean } = {},
   ): {
@@ -153,21 +153,25 @@ export class SynthVoiceManager {
     // note always plays its full attack+decay before releasing. A note cut short
     // (`cutAtEnd`, e.g. at the clip end) releases at its duration, matching the
     // MIDI note-off: the envelope is cut where it is.
-    const { gate, releaseStart, releaseEnd } = noteEnvelopeTiming(env, startTime, duration, options.cutAtEnd);
+    const timing = duration === null ? null : noteEnvelopeTiming(env, startTime, duration, options.cutAtEnd);
     gain.gain.setValueAtTime(0, startTime);
-    const { ramps, level } = envelopeShape(env, peak, gate);
+    const { ramps, level } = envelopeShape(env, peak, timing?.gate ?? env.attack + env.decay);
     for (const [offset, value] of ramps) gain.gain.linearRampToValueAtTime(value, startTime + offset);
-    gain.gain.setValueAtTime(level, releaseStart);
-    gain.gain.linearRampToValueAtTime(0, releaseEnd);
+    if (timing) {
+      gain.gain.setValueAtTime(level, timing.releaseStart);
+      gain.gain.linearRampToValueAtTime(0, timing.releaseEnd);
+    }
 
     oscA.connect(filter);
     oscB.connect(filter);
     filter.connect(gain);
     const spread = p.spread ?? 0;
-    if (spread > 0 && typeof this.ctx.createStereoPanner === 'function') {
+    const panner = spread > 0 && typeof this.ctx.createStereoPanner === 'function'
+      ? this.ctx.createStereoPanner()
+      : null;
+    if (panner) {
       // Alternate notes left / right so chords spread out (deterministic: same
       // pan live and in the WAV render).
-      const panner = this.ctx.createStereoPanner();
       panner.pan.setValueAtTime((midi % 2 === 0 ? -1 : 1) * SPREAD_PAN * spread, startTime);
       gain.connect(panner);
       panner.connect(this.output);
@@ -175,13 +179,26 @@ export class SynthVoiceManager {
       gain.connect(this.output);
     }
 
-    const stopAt = releaseEnd + 0.02;
+    const releaseEndTime = timing?.releaseEnd ?? Infinity;
+    const stopAt = releaseEndTime + 0.02;
     oscA.start(startTime);
     oscB.start(startTime);
-    oscA.stop(stopAt);
-    oscB.stop(stopAt);
+    const voice: ActiveVoice = { oscA, oscB, gain, endTime: stopAt, releaseEndTime, startTime, env, peak };
+    if (timing) {
+      oscA.stop(stopAt);
+      oscB.stop(stopAt);
+    } else {
+      oscB.onended = () => {
+        oscB.onended = null;
+        oscA.disconnect();
+        oscB.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+        panner?.disconnect();
+        this.voices = this.voices.filter((active) => active !== voice);
+      };
+    }
 
-    const voice: ActiveVoice = { oscA, oscB, gain, endTime: stopAt, releaseEndTime: releaseEnd, startTime, env, peak };
     this.voices.push(voice);
     return {
       release: (when: number) => this.release(voice, when),
