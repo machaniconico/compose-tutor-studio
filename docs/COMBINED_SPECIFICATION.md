@@ -1885,6 +1885,24 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 - drain末尾fadeはProject Master faderとengine output gainを上書きせず、session output gainだけをabsolute cleanup deadlineの6ms前までautomationする。callbackがfade endより遅れた場合はsession outputを即時0にし、cleanup deadlineより遅れた場合はtimerなしで完了する。いずれも現在時刻からtailを延長しない。新しい再生、手動停止、Project activation、context interruption、controller / bridge disposeはtimerとsession graphを即時破棄し、pending fadeをcancelする。engine output/calibration gainには触れない
 - 停止状態からの`play()`は、拍子分母を含む`projectLengthBeats`に対し現在位置が有限かつ`0 <= positionBeat < songEnd`なら保持し、負値、非有限、曲末以上、または利用不能な曲長では0へ正規化する。位置補正、`starting`への遷移、request ID増加、audio issue解除を1つのstore更新で行い、loop bounds、Project identity、history、save stateは変更しない。曲末startが失敗しても、次のplayは新generationで再び0から開始できる
 
+### 6.1.6.1 再生中編集の既知ギャップ(known playback live-edit gaps)
+
+mainの再生は、wave5の`playbackLiveEdit`(US-012b)とは設計が違う。再生中のProject編集は次の2通りに分かれる。
+- クリップ配置・テンポ・楽器・オートメーションなどplayback topologyに触れる編集(`hasPlaybackTopologyChanged`)は再生を停止する。playheadは保持され、再生は自動では再開しない。
+- ノート内容だけの編集はtopologyの外で、再生は止まらない。ただし再生セッションは開始時点のschedule event(凍結スナップショット)を使い続け、編集は反映されない。
+
+`apps/studio/tests/playbackLiveEdit.test.ts`は、mainで成り立つ不変条件(セッション継続、未編集ノートの二重発音・脱落なし、playhead保持、undoの整合、停止後の無発音)をテストで固定し、成り立たないものを`it.todo`で示す。再現手順は、そのテストファイルの`setClips`と`play`で`melody([[60,0,1],[62,4,1],[64,7,1]])`を再生し、1秒後に下記の編集を行うこと(120bpm、モックのAudioContext、手動クロック)。
+
+| ID | 不変条件(wave5) | mainの挙動 | 観測 |
+|---|---|---|---|
+| G1 | 削除した未再生ノートは鳴らない | 鳴る | pitch 62を削除しても`noteOn(62)`が4拍目(2.0秒)に発火する |
+| G2 | 再生ヘッドより先に追加したノートが同じパスで聞こえる | 聞こえない | 5拍目にpitch 71を追加しても`noteOn(71)`は一度も発火しない |
+| G3 | 鳴っているノートの削除で解放される | 解放されない | 6拍のノートを再生1秒後に削除しても`releaseAll`は呼ばれず再生が続く |
+| G4 | ループ中の編集が次のパスで聞こえる | 旧内容を繰り返す | ループ0-4拍で62を削除し71を追加しても、以後のパスで62が鳴り続け71は鳴らない |
+| G5 | クリップ移動・削除・テンポ変更が再生を止めず即時に反映される | 再生が停止する | クリップ移動、削除、`setBpm(90)`のいずれも`transport.phase`が`stopped`になり、voice managerが`dispose`される |
+
+G5は設計差であり、不具合とは限らない。G1〜G4は、ノート編集を再生へ反映する機能を移植するときの受け入れ条件にする。いずれも本番コードは変更していない。
+
 ### 6.1.7 Elastic Audio Worker / DSP / cache
 
 - `compileAudioWarpRenderRequestIndex`はcurrent schema v12 Projectを先に検証し、編集された直接Audio Clipだけをcompileする。tempo map上のtarget beatをtarget sample rateの整数output frameへ1回だけ丸め、source windowのframe index、timing knot、実効pitch shift、保存済み`formantMode`、algorithm version `wsola-v1/dsp-2`、AudioAsset checksumから決定的なcache keyを作る。未編集Projectは従来のdecoded AudioBuffer経路をそのまま使う
