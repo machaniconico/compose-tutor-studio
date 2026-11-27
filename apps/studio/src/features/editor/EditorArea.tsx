@@ -6,6 +6,7 @@ import { DrumGrid } from '../drums/DrumGrid';
 import { Arranger } from '../arranger/Arranger';
 import { AutomationLaneEditor } from '../automation/AutomationLaneEditor';
 import { TempoMapEditor } from '../tempoMap/TempoMapEditor';
+import { SongLengthPanel } from '../tempoMap/SongLengthPanel';
 import { TakeCompEditor } from '../comping/TakeCompEditor';
 import { TimelineRuler } from '../transport/TimelineRuler';
 import { handleTabKeyDown } from '../common/tabs';
@@ -157,7 +158,12 @@ export function EditorArea() {
             {active && view === 'drums' ? <DrumGrid /> : null}
             {active && view === 'arranger' ? <Arranger /> : null}
             {active && view === 'automation' ? <AutomationLaneEditor /> : null}
-            {active && view === 'tempoMap' ? <TempoMapEditor /> : null}
+            {active && view === 'tempoMap' ? (
+              <>
+                <TempoMapEditor />
+                <SongLengthPanel />
+              </>
+            ) : null}
             {active && view === 'comping' ? <TakeCompEditor /> : null}
           </div>
         );
