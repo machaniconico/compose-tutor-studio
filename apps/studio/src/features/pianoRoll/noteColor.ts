@@ -4,7 +4,7 @@
 // 区別する量: pitch class(0-11)、オクターブ付き MIDI、スケール度数、コードトーン。
 // スケール外の音は「誤り」ではなく「彩りの音」と書く(Musical Correctness Rules)。
 
-import type { ChordEvent } from '@cts/project-model';
+import { chordTones, type ChordEvent } from '@cts/project-model';
 import { getScalePitchClasses, pitchClassOf, SCALE_NAMES, type ScaleName } from '@cts/theory-engine';
 
 type Difficulty = 'beginner' | 'standard' | 'advanced';
@@ -19,6 +19,16 @@ function scalePitchClasses(key: unknown, scale: ScaleName): number[] {
   if (typeof key !== 'string') return [];
   try {
     return getScalePitchClasses(key, scale);
+  } catch {
+    return [];
+  }
+}
+
+/** notes が空のコードは root / quality から出す(再生と同じ解決)。コードの音はスケールより優先する。 */
+function chordToneList(chord: ChordEvent | undefined): number[] {
+  if (chord === undefined || !Array.isArray(chord.notes)) return [];
+  try {
+    return chordTones(chord);
   } catch {
     return [];
   }
@@ -87,8 +97,9 @@ export function classifyNote(
     return { category: 'velocity', ...VELOCITY_VIEW[level], level, className: `v${level}` };
   }
   const pc = pitchClassOf(Math.round(midi));
-  const inChord = Number.isFinite(pc) && Array.isArray(chordAtBeat?.notes) &&
-    chordAtBeat.notes.some((note) => Number.isFinite(note) && pitchClassOf(Math.round(note)) === pc);
+  const inChord = Number.isFinite(pc) && chordToneList(chordAtBeat).some(
+    (note) => Number.isFinite(note) && pitchClassOf(Math.round(note)) === pc,
+  );
   // 未知のスケールでは度数もスケール判定も出さず、説明を返す。
   if (!isScaleName(scale)) {
     return mode === 'chordTone' && inChord

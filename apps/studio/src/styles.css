@@ -1819,11 +1819,39 @@ input[type='range'] {
   text-align: center;
 }
 
+.pr__hint-row {
+  order: 1;
+  flex: 1 1 100%;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pr__view-opts {
+  display: inline-flex;
+  gap: var(--sp-2);
+  margin-right: var(--sp-3);
+  vertical-align: middle;
+}
+
+.pr__view-opts .pr__field {
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.pr__view-opts input {
+  margin: 0;
+}
+
 .pr__hint {
   margin: 0;
   font-size: 11px;
   color: var(--text-faint);
   flex: 1 1 100%;
+}
+
+.pr__hint-row .pr__hint {
+  display: inline;
 }
 
 .pr__scroll {
@@ -1941,6 +1969,49 @@ button.pr__note:hover {
 .pr__note.is-out,
 .pr__note-preview-copy.is-out {
   background: var(--warning);
+}
+
+/* 音の役割の色分け(表示専用)。スケール外は警告色にせず中立の薄紫にし、記号でも区別する。
+   背景に対するコントラスト: コード=6.9:1 / スケール=10.0:1 / 外=7.5:1、記号(暗色)は 6.2 以上。 */
+.pr__note--chordTone { background: var(--chord-tone); color: var(--accent-contrast); }
+.pr__note--scaleTone { background: var(--accent); color: var(--accent-contrast); }
+.pr__note--outside { background: #a99ae0; color: var(--accent-contrast); }
+
+.pr__note-role {
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.pr__legend {
+  order: 2;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+
+.pr__legend-item {
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+/* ゴーストノート(表示専用): 編集中のノートより下に薄く出し、ポインタ操作は一切受けない。 */
+.pr__ghost {
+  position: absolute;
+  background: var(--text-faint);
+  opacity: 0.28;
+  border-radius: 2px;
+  outline: 1px dashed var(--text-faint);
+  outline-offset: -1px;
+  pointer-events: none;
 }
 
 .pr__note-preview-copy {

@@ -75,7 +75,7 @@ function validUniqueNotes(notes: readonly number[]): number[] {
 }
 
 /** Resolve stored/derived chord tones before applying a playable register. */
-function chordTones(chord: ChordEvent): number[] {
+export function chordTones(chord: ChordEvent): number[] {
   const stored = validUniqueNotes(chord.notes);
   if (stored.length > 0) return stored;
 

@@ -89,6 +89,8 @@ Track Listの管理UI:
 - coarse pointerではノートのpointer hit targetを最低24×24 CSS pxにする。Velocity Laneは固定編集音域内のノートだけを表示し、ベロシティの可視高を値どおりに保ったまま透明hit領域だけを44px以上へ広げる
 - 固定編集音域内にノートがない空グリッドは、coarse pointerのnative pan・scroll gestureを妨げない
 - キーボード操作は矢印=移動、Shift+左右=長さ、PageUp/PageDown=強さ、Shift+PageUp/PageDown=前後の音へフォーカス、Enter/Space=選択、Cmd/Ctrl+A=現在clipの固定編集音域C2〜C6全体（水平viewport外を含み、importされた音域外ノートは除く）を選択、Cmd/Ctrl+D=複製、Delete=削除、Escape=入力位置へ戻る
+- ツールバーのチェック「ほかのノートを薄く重ねる」(既定オン)で、ほかのクリップ・Trackのノートをゴーストとして重ねる。ゴーストは`aria-hidden`・`pointer-events: none`で、クリック・選択・Tab順の対象にしない。最大2,000件で打ち切り、再生位置では再描画しない
+- チェック「音の役割で色分け」(既定オフ)で、コードの音●・スケールの音○・スケールの外の音◇を色と記号で示し、凡例を出す。スケール外は警告色にせず中立の薄紫で、凡例は「スケールの外の音(経過音などで使えます)」と書く。色は背景に対し3:1以上、記号と読み上げ名・tooltipにも役割を含める。両チェックはUI状態のみで保存しない
 
 #### 2.3.1 Arranger Clip編集
 
