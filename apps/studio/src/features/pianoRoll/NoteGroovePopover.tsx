@@ -1,5 +1,7 @@
 import { useId, useState } from 'react';
 import { useStore } from '../../state/store';
+import { useStepInput } from '../../state/stepInput';
+import { StepInputSection } from './StepInputSection';
 import {
   MAX_HUMANIZE_TIMING_TICKS,
   MAX_HUMANIZE_VELOCITY,
@@ -13,6 +15,8 @@ type Props = {
   noteIds: readonly string[];
   gridSnap: number;
   onAnnounce: (message: string) => void;
+  /** ステップ入力を始めたあと。Enter(休符)をボタンに取られないよう、呼び出し側が鍵盤グリッドへフォーカスを移す。 */
+  onStepStarted?: () => void;
 };
 
 /** 新しい乱数の種。保存はせず、「ヒューマナイズ」を押すたびに作る。 */
@@ -21,7 +25,7 @@ function freshSeed(): number {
 }
 
 /** 強さ付きクオンタイズとヒューマナイズ。ツールバーの折りたたみ 1 つに収める。 */
-export function NoteGroovePopover({ clipId, noteIds, gridSnap, onAnnounce }: Props) {
+export function NoteGroovePopover({ clipId, noteIds, gridSnap, onAnnounce, onStepStarted }: Props) {
   const [strength, setStrength] = useState(100);
   const [timingTicks, setTimingTicks] = useState(20);
   const [velocity, setVelocity] = useState(8);
@@ -30,6 +34,7 @@ export function NoteGroovePopover({ clipId, noteIds, gridSnap, onAnnounce }: Pro
   const panelId = useId();
   const [open, setOpen] = useState(false);
   const recording = useStore((state) => state.audioRecordingOperationId !== null);
+  const stepActive = useStepInput((state) => state.active && state.clipId === clipId);
   const idle = recording || noteIds.length === 0;
 
   const finish = (result: GrooveEditResult, done: string): void => {
@@ -44,10 +49,10 @@ export function NoteGroovePopover({ clipId, noteIds, gridSnap, onAnnounce }: Pro
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        title="強さつきクオンタイズ・ヒューマナイズ"
+        title="強さつきクオンタイズ・ヒューマナイズ、ステップ入力"
         onClick={() => setOpen((value) => !value)}
       >
-        ゆらぎ…
+        {stepActive ? 'ゆらぎ●' : 'ゆらぎ…'}
       </button>
       {open ? (
       <div
@@ -113,6 +118,7 @@ export function NoteGroovePopover({ clipId, noteIds, gridSnap, onAnnounce }: Pro
         >
           選択ノートをヒューマナイズ
         </button>
+        <StepInputSection clipId={clipId} onAnnounce={onAnnounce} onStarted={onStepStarted} />
         <small id={statusId} role="status">
           {notice || 'ノートを選ぶと使えます。押すたびに違うゆれ方になり、元に戻すで取り消せます。'}
         </small>

@@ -5,9 +5,11 @@
 /**
  * `gesture` is consulted only while a drag is active. `playing` is consulted
  * only while PC-keyboard playing mode is on; its letters are matched by
- * physical key (`code`) so they stay put on any keyboard layout.
+ * physical key (`code`) so they stay put on any keyboard layout. `stepInput`
+ * (Enter = rest, Backspace = step back) is consulted only while piano-roll
+ * step input is on; it shares no key with `playing`.
  */
-export type ShortcutScope = 'global' | 'pianoRoll' | 'gesture' | 'control' | 'playing';
+export type ShortcutScope = 'global' | 'pianoRoll' | 'stepInput' | 'gesture' | 'control' | 'playing';
 
 export type ShortcutAction =
   | 'togglePlayback'
@@ -19,6 +21,8 @@ export type ShortcutAction =
   | 'cutNotes'
   | 'pasteNotes'
   | 'pasteNotesAtOriginal'
+  | 'stepRest'
+  | 'stepBack'
   | 'cancelGesture'
   | 'playNote'
   | 'octaveDown'
@@ -60,6 +64,9 @@ export const KEYMAP: readonly ShortcutEntry[] = [
   { scope: 'pianoRoll', key: 'x', modifiers: ['mod'], action: 'cutNotes', labelJa: '選んだ音を切り取り' },
   { scope: 'pianoRoll', key: 'v', modifiers: ['mod'], action: 'pasteNotes', labelJa: '貼り付け(再生ヘッドがクリップ内ならその位置、外ならコピーした位置)' },
   { scope: 'pianoRoll', key: 'v', modifiers: ['mod', 'shift'], action: 'pasteNotesAtOriginal', labelJa: 'コピーした時と同じ位置に貼り付け' },
+  // ステップ入力(ピアノロールのステップ入力がオンの間だけ参照する。修飾キーなし = AltGr・Ctrl・Cmd 付きは対象外)。
+  { scope: 'stepInput', key: 'enter', modifiers: [], action: 'stepRest', labelJa: 'ステップ入力: 休符(カーソルだけ進める)' },
+  { scope: 'stepInput', key: 'backspace', modifiers: [], action: 'stepBack', labelJa: 'ステップ入力: 最後の入力を消して戻る' },
   // 点やハミングの区間にフォーカスがあるときの Undo / Redo。従来どおり Ctrl と Cmd のどちらでも効く(Alt 付き = AltGr は除く)。
   { scope: 'control', key: 'z', modifiers: ['ctrlOrMetaNoAlt'], action: 'undo', labelJa: '元に戻す' },
   { scope: 'control', key: 'z', modifiers: ['ctrlOrMetaNoAlt', 'shift'], action: 'redo', labelJa: 'やり直す' },

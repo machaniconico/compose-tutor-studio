@@ -387,3 +387,70 @@ describe('PC keyboard playing', () => {
     expect(useStore.getState().editor.chordToneHighlight).toBe(!before);
   });
 });
+
+describe('PC keyboard playing + step input (P43)', () => {
+  let cleanupLifecycle: () => void;
+  beforeEach(async () => {
+    audio.oscillators.length = 0;
+    // Edits go through the real project lifecycle (applyProjectChange needs an activated project).
+    Object.defineProperty(navigator, 'locks', {
+      value: { request: async (_n: string, _o: unknown, cb: () => unknown) => cb() },
+      configurable: true,
+    });
+    useStore.setState({ projectOperationBusy: false, audioRecordingOperationId: null });
+    expect(await useStore.getState().createNewProject('PC鍵盤')).toBe(true);
+    mode.resetPcKeyboardMode();
+    cleanupLifecycle = live.installPreviewLifecycle();
+  });
+  afterEach(async () => {
+    cleanup();
+    cleanupLifecycle();
+    (await import('../src/state/stepInput')).stopStepInput();
+  });
+
+  it('a note-on inserts at the step cursor and advances it; Enter and Backspace are not playing keys', async () => {
+    const step = await import('../src/state/stepInput');
+    const track = useStore.getState().project.tracks.find((t) => t.type === 'instrument' && t.clips.some((c) => c.type === 'midi'))!;
+    const clip = track.clips.find((c) => c.type === 'midi')!;
+    useStore.setState((s) => ({ editor: { ...s.editor, selectedTrackId: track.id } }));
+    const count = () => (useStore.getState().project.tracks.flatMap((t) => t.clips).find((c) => c.id === clip.id)?.notes ?? []).length;
+    const before = count();
+    render(<PcKeyboardPlayer />);
+    fireEvent.click(screen.getByRole('button', { name: 'PC鍵盤で弾く' }));
+    // Step input off: playing alone never edits the project.
+    down('KeyA');
+    up('KeyA');
+    expect(count()).toBe(before);
+    expect(step.startStepInput(clip.id).ok).toBe(true);
+    down('KeyA');
+    up('KeyA');
+    await flush();
+    expect(count()).toBe(before + 1);
+    expect(step.useStepInput.getState().cursorTicks).toBe(step.useStepInput.getState().stepTicks);
+    // Held key auto-repeat must not insert a second note.
+    down('KeyS');
+    down('KeyS', { repeat: true });
+    up('KeyS');
+    expect(count()).toBe(before + 2);
+  });
+
+  it('while a MIDI take is active the take wins: step input inserts nothing and the cursor stays', async () => {
+    const step = await import('../src/state/stepInput');
+    const track = useStore.getState().project.tracks.find((t) => t.type === 'instrument' && t.clips.some((c) => c.type === 'midi'))!;
+    const clip = track.clips.find((c) => c.type === 'midi')!;
+    useStore.setState((s) => ({ editor: { ...s.editor, selectedTrackId: track.id } }));
+    render(<PcKeyboardPlayer />);
+    fireEvent.click(screen.getByRole('button', { name: 'PC鍵盤で弾く' }));
+    expect(step.startStepInput(clip.id).ok).toBe(true);
+    useStore.setState({ midiRecordingActive: true });
+    try {
+      down('KeyA');
+      up('KeyA');
+      await flush();
+    } finally {
+      useStore.setState({ midiRecordingActive: false });
+    }
+    expect((useStore.getState().project.tracks.flatMap((t) => t.clips).find((c) => c.id === clip.id)?.notes ?? []).length).toBe(0);
+    expect(step.useStepInput.getState().cursorTicks).toBe(0);
+  });
+});
