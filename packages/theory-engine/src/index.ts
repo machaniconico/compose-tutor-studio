@@ -154,3 +154,6 @@ export {
 
 // PRNG (決定論的乱数)
 export { mulberry32, createPrng, randomInt, pick, type RandomFn } from './prng';
+
+// Suggest chord names from the notes in a clip.
+export * from './chord-detect';

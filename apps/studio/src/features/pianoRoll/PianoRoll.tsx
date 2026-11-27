@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useStore, watchDragEnd } from '../../state/store';
 import { findShortcut, type ShortcutAction } from '../../state/keymap';
 import type { Clip, NoteEvent, Project, Track } from '@cts/project-model';
-import { beatTick, beatsPerBar, clipEditSpan, firstPassBeatAt, resizeClip, resolveLinkSource, songEndBeat, soundingEvents } from '@cts/project-model';
-import { midiToNoteName } from '@cts/theory-engine';
+import { beatTick, beatsPerBar, clipEditSpan, firstPassBeatAt, PPQ, resizeClip, resolveLinkSource, songEndBeat, soundingEvents } from '@cts/project-model';
+import { detectChords, midiToNoteName, type ChordDetectionSegment } from '@cts/theory-engine';
 import { pxPerBeat } from '../timeline';
 import { Playhead, TimelineRuler } from '../transport/TimelineRuler';
 import { isAnyDialogOpen } from '../common/dialogState';
+import { Dialog } from '../common/Dialog';
 import { useScaleInfo } from './useScaleInfo';
 import { classifyNote, noteColorLabel, NOTE_COLOR_MODES, type NoteColorMode } from './noteColor';
 import { PREVIEW_DURATION_MS, previewNote } from '../../audio/livePreview';
@@ -36,6 +37,7 @@ import {
   yToPitch,
 } from './gridMath';
 import {
+  applyDetectedChords,
   copyNotes,
   cutNotes,
   duplicateNotes,
@@ -53,7 +55,7 @@ import {
   staccato,
   transposeSelected,
 } from '../../state/editorActions';
-import { offScaleNoteHint } from '../inspector/difficultyText';
+import { offScaleNoteHint, simplifyExplanation, type Difficulty } from '../inspector/difficultyText';
 import { pushToast } from '../../state/tutorialBridge';
 
 /** Strengths offered for quantize (100% = onto the grid, as before). */
@@ -79,6 +81,121 @@ const ROW_OVERSCAN = 8;
 // per bar. validateProject accepts huge time signatures, whose full-song grid would
 // not fit in an array; cells past this are still not editable (clicks are clamped to the clip).
 const MAX_RENDERED_BEATS = 64 * 16;
+
+type DetectionPreview = { project: Project; segments: ChordDetectionSegment[] };
+
+function ChordDetectionControl({ project, clip, lengthBeats, segmentBeats, difficulty }: {
+  project: Project;
+  clip: Clip;
+  lengthBeats: number;
+  segmentBeats: number;
+  difficulty: Difficulty;
+}) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [preview, setPreview] = useState<DetectionPreview | null>(null);
+  const [selected, setSelected] = useState<Record<number, string>>({});
+  const close = useCallback(() => {
+    setPreview(null);
+    trigger.current?.focus();
+  }, []);
+  const segments = preview?.segments.filter(({ candidates }) => candidates.length > 0) ?? [];
+  const stale = preview !== null && preview.project !== project;
+  const [applyFailed, setApplyFailed] = useState(false);
+
+  function analyze() {
+    setSelected({});
+    setApplyFailed(false);
+    // Use the lane's tick boundaries even if a saved clip starts between ticks.
+    const lengthTicks = beatTick(clip.startBeat + lengthBeats) - beatTick(clip.startBeat);
+    setPreview({
+      project,
+      segments: detectChords(clip.notes ?? [], { segmentBeats, lengthBeats: lengthTicks / PPQ }),
+    });
+  }
+
+  function confirm() {
+    if (!preview || stale) return;
+    const choices = segments.flatMap(({ startBeat, durationBeats, candidates }) => {
+      const candidate = candidates.find(({ symbol }) => symbol === selected[startBeat]);
+      return candidate ? [{ startBeat, durationBeats, symbol: candidate.symbol }] : [];
+    });
+    if (applyDetectedChords(preview.project, clip.startBeat, choices)) close();
+    else setApplyFailed(true);
+  }
+
+  function keepTabInDialog(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Tab') return;
+    const controls = event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled)');
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (event.shiftKey ? event.target === first : event.target === last) {
+      event.preventDefault();
+      (event.shiftKey ? last : first)?.focus();
+    }
+  }
+
+  return (
+    <div>
+      <button type="button" ref={trigger} onClick={analyze}>このクリップのコードを調べる</button>
+      {preview && (
+        <div onKeyDown={keepTabInDialog}>
+          <Dialog title="コードの候補" onClose={close}>
+            <div className="chord-detection">
+              {segments.length > 0 ? (
+                <>
+                  <p>このように解釈できます。選んだ区間のコードを置き換えます。</p>
+                  {segments.map(({ startBeat, candidates }, index) => {
+                    const symbol = selected[startBeat] ?? '';
+                    const candidate = candidates.find((choice) => choice.symbol === symbol);
+                    return (
+                      <div key={startBeat} className="chord-detection__segment">
+                        <label>
+                          <span>クリップ内の {Number((startBeat + 1).toFixed(3))} 拍目から</span>
+                          <select
+                            autoFocus={index === 0}
+                            value={symbol}
+                            onChange={(event) => {
+                              const choice = event.target.value;
+                              setSelected((current) => ({ ...current, [startBeat]: choice }));
+                              setApplyFailed(false);
+                            }}
+                          >
+                            <option value="">変更しない</option>
+                            {candidates.map(({ symbol }) => <option key={symbol}>{symbol}</option>)}
+                          </select>
+                        </label>
+                        {candidate && (
+                          <p>{simplifyExplanation(
+                            `構成音の一致は ${candidate.matchingCount} 種類、候補に含まれない音は ${candidate.extraCount} 種類です。`,
+                            difficulty,
+                          )}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              ) : (
+                <p>{preview.segments.length === 0 && lengthBeats > 0
+                  ? 'この長さや音の数では調べられません。クリップを短くするか、音を減らしてください。'
+                  : 'コードの候補が見つかりませんでした。'}</p>
+              )}
+              {stale && <p role="status">曲が変更されました。閉じてから、もう一度コードを調べてください。</p>}
+              {applyFailed && <p role="alert">コードを反映できませんでした。閉じてから、もう一度お試しください。</p>}
+              <div className="chord-detection__actions">
+                <button type="button" onClick={close} autoFocus={segments.length === 0}>キャンセル</button>
+                {segments.length > 0 && (
+                  <button type="button" onClick={confirm} disabled={stale || !Object.values(selected).some(Boolean)}>
+                    選んだコードを反映
+                  </button>
+                )}
+              </div>
+            </div>
+          </Dialog>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Find a clip across all tracks. */
 function findClip(tracks: readonly Track[], clipId: string | null): Clip | null {
@@ -754,6 +871,14 @@ export function PianoRoll() {
   return (
     <div className="pr">
       <div className="pr__toolbar">
+        <ChordDetectionControl
+          key={`${projectOpenVersion}:${clip.id}`}
+          project={project}
+          clip={clip}
+          lengthBeats={firstPassEnd}
+          segmentBeats={bpb}
+          difficulty={editor.difficulty}
+        />
         <label className="pr__field">
           <span>グリッド</span>
           <select

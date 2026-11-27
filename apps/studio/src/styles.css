@@ -1841,6 +1841,32 @@ input[type='range'] {
   overflow-y: auto;
 }
 
+.chord-detection {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.chord-detection p { margin: 0; }
+
+.chord-detection__segment {
+  display: grid;
+  gap: var(--sp-1);
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-2);
+}
+
+.chord-detection__segment label,
+.chord-detection__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.chord-detection__segment label { justify-content: space-between; }
+.chord-detection__segment p { color: var(--text-dim); }
+.chord-detection__actions { justify-content: flex-end; }
+
 /* --- Transpose the whole song (US-016) --- */
 .transpose-song {
   display: flex;

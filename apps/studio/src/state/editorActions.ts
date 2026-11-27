@@ -323,6 +323,61 @@ export function replaceChordTrack(chords: ChordEvent[]): void {
   useStore.getState().applyProjectChange((project) => ({ ...project, chordTrack: chords }));
 }
 
+/** Apply confirmed, non-overlapping clip-relative choices in one history entry. */
+export function applyDetectedChords(
+  project: Project,
+  clipStartBeat: number,
+  choices: readonly ChordEventInput[],
+): boolean {
+  const store = useStore.getState();
+  if (store.project !== project || store.transactionBase || choices.length === 0) return false;
+
+  const clipStartTick = beatTick(clipStartBeat);
+  const spans = choices.map(({ symbol, startBeat, durationBeats }) => ({
+    symbol,
+    start: clipStartTick + beatTick(startBeat),
+    end: clipStartTick + beatTick(startBeat + durationBeats),
+  })).sort((a, b) => a.start - b.start);
+  if (spans.some(({ start, end }, i) =>
+    !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= end ||
+    (i > 0 && spans[i - 1]!.end > start)
+  )) return false;
+
+  const orderedTrack = [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat);
+  const kept = orderedTrack.flatMap((chord) => {
+    const start = beatTick(chord.startBeat);
+    const end = beatTick(chord.startBeat + chord.durationBeats);
+    const fragments: ChordEvent[] = [];
+    let cursor = start;
+    let overlapped = false;
+    const keepFragment = (left: number, right: number) => {
+      fragments.push({
+        ...chord,
+        id: fragments.length === 0 ? chord.id : uid('chord'),
+        startBeat: left / PPQ,
+        durationBeats: (right - left) / PPQ,
+      });
+    };
+    for (const span of spans) {
+      if (span.start >= end) break;
+      if (span.end <= cursor) continue;
+      overlapped = true;
+      if (cursor < span.start) keepFragment(cursor, span.start);
+      cursor = span.end;
+    }
+    if (!overlapped) return [chord];
+    if (cursor < end) keepFragment(cursor, end);
+    return fragments;
+  });
+  const inserted = spans.map(({ symbol, start, end }) =>
+    buildChordEvent(project, symbol, start / PPQ, (end - start) / PPQ),
+  );
+  const chordTrack = [...kept, ...inserted].sort((a, b) => a.startBeat - b.startBeat);
+  const applied = store.applyProjectChange(() => ({ ...project, chordTrack }));
+  if (applied) for (const event of inserted) emitChordAdded(project, event);
+  return applied;
+}
+
 /**
  * Apply a progression template across the project's bars, replacing the
  * whole chord track. Each chord spans one bar; the degree pattern repeats to
