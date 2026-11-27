@@ -107,7 +107,7 @@ export function TimelineRuler() {
         data-testid="timeline-ruler"
         style={{ width: timelineWidth(Math.max(0, lengthBeats), zoomX) }}
         title="クリックでその位置へ移動。左右にドラッグすると、くり返し再生する範囲(ループ)を選べます(1拍単位)"
-        aria-label="タイムラインの定規。クリックで再生位置を移動、ドラッグでループ範囲を選びます"
+        aria-label="タイムラインの定規。クリックで移動、ドラッグでループ範囲を選びます"
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           if (useStore.getState().automationRecording.passActive) {

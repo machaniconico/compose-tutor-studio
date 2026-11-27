@@ -67,11 +67,11 @@ export function TapTempoButton(props: { disabled?: boolean }) {
       type="button"
       className="transport-bar__tap"
       aria-label="タップテンポ"
-      title="拍に合わせて2回以上たたくと、BPMが決まります"
+      title={pendingBpm !== null ? `タップテンポ: ${pendingBpm} BPM` : '拍に合わせて2回以上たたくと、BPMが決まります'}
       disabled={props.disabled}
       onClick={onTap}
     >
-      タップ{pendingBpm !== null ? ` ${pendingBpm}` : ''}
+      ♩
     </button>
   );
 }
