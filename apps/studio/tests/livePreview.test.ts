@@ -4,6 +4,7 @@ import { listSynthPresets } from '../src/audio/synth';
 import {
   canPreview,
   LivePreview,
+  MAX_HELD_SECONDS,
   MAX_PREVIEW_SECONDS,
   MAX_PREVIEW_VOICES,
   type PreviewTarget,
@@ -156,5 +157,20 @@ describe('preview guard', () => {
     expect(canPreview()).toBe(false);
     useStore.setState({ audioRecordingOperationId: null });
     useStore.setState((s) => ({ transport: { ...s.transport, phase: 'stopped' } }));
+  });
+});
+
+describe('8 s hard maximum of a held note covers the release tail', () => {
+  it('every preset, with maximum release and attack macros, is silent and stopped by 8 s', async () => {
+    for (const { name } of listSynthPresets()) {
+      for (const params of [{ macroRelease: 1, macroAttack: 1 }, { macroRelease: 1, macroAttack: 0 }, {}]) {
+        const { preview, ctx, oscillators } = setup();
+        await preview.hold('KeyA', { preset: name, params } as never, 60);
+        expect(oscillators.length).toBeGreaterThan(0);
+        for (const o of oscillators) {
+          expect(stopAt(o) - ctx.currentTime, `${name} ${JSON.stringify(params)}`).toBeLessThanOrEqual(MAX_HELD_SECONDS + 1e-9);
+        }
+      }
+    }
   });
 });
