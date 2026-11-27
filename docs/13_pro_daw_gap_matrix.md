@@ -187,6 +187,12 @@ Batch 4ではmetadata/domain foundationに加え、Automationのlive/offline sch
 - live、全体WAV、選択Track WAVは同じ派生PCM / Audio Clip plannerを使う。A/Bは選択Clipのpitchだけをlive用snapshotで外し、timing、Project、history、revision、autosave、WAVを変えない。
 - 初期スライスの完了はCubase AudioWarp / VariAudioやLogic Flex Time / Pitchとの全面同等を意味しない。formant off / preserveは実装済みだが、manual formant / vibrato、polyphonic pitch、unsupported rate / extreme shift品質、実声のライセンス済みブラインドA/BまたはMUSHRA、take folder / loop-cycle、phase-coherent multitrack、auto quantize / groove、Smart Tempoは独立した残差である。
 
+### Batch 10: wave5/desktop 機能の移植（計画済み・未着手）
+
+- 別ブランチ wave5/desktop(タグ `wave5-desktop-final`)で作った作曲・学習機能を、本書の v10 モデルの上へ小さな PR に分けて移す。対象はクリップ分割、ノート加工、移調、グルーヴ、チョーク、プリセット / マクロ、伴奏、コード検出、PC / Web MIDI 演奏、MIDI 録音、書き出し強化、用語集、DAW 操作コース。
+- データ形式の追加は v11(`swing`、`hiHatChoke`)と v12(明るさのオートメーション)の 2 回だけ。wave5 で保存したファイルは、読み込み口で判別して理由付きで止める。変換器は最後に入れる。
+- 分類、PR の順序、受け入れ基準、重なっている機能の裁定は `docs/14_wave5_port_plan.md` を正本とする。セクション単位の移動・複製・削除は別計画にする。
+
 ## 5. 実装判断の原則
 
 - Cubase/Logic の UI や用語をそのまま複製せず、「何ができるか」を初心者向けの操作へ翻訳する。
