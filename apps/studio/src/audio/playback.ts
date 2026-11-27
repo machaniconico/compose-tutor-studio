@@ -167,6 +167,23 @@ export function initAudioBridge(): () => void {
       state.playbackTracks.set(track.id, track.automation === playingTrack.automation
         ? track : { ...track, automation: playingTrack.automation });
     }
+    // Returns have no scheduled voices and can be added or removed mid-play.
+    let returnsChanged = false;
+    if (s.transport.isPlaying) {
+      const returns = new Map(s.project.tracks.filter((track) => track.type === 'bus').map((track) => [track.id, track]));
+      for (const [id, track] of state.playbackTracks) {
+        if (track.type === 'bus' && !returns.has(id)) {
+          state.playbackTracks.delete(id);
+          returnsChanged = true;
+        }
+      }
+      for (const [id, track] of returns) {
+        if (!state.playbackTracks.has(id)) {
+          state.playbackTracks.set(id, track);
+          returnsChanged = true;
+        }
+      }
+    }
     const engine = getAudioEngine();
     if (!state.scheduler?.isRunning) {
       if (engine.isInitialized) {
@@ -175,7 +192,7 @@ export function initAudioBridge(): () => void {
       return;
     }
     const lengthChanged = s.project.lengthBars !== prev.project.lengthBars;
-    if (tempoOrMeterChanged(s.project, prev.project) ||
+    if (returnsChanged || tempoOrMeterChanged(s.project, prev.project) ||
       (lengthChanged && !state.loop && [...state.playbackTracks.values()].some(hasVolumeAutomation))) {
       restartPlayback();
       return;
@@ -487,7 +504,7 @@ function buildVoices(
     if (!graph) continue;
     if (track.type === 'drum') {
       state.drums.set(track.id, new DrumVoiceManager(ctx, graph.input));
-    } else if (track.type !== 'master') {
+    } else if (track.type !== 'master' && track.type !== 'bus') {
       state.synths.set(
         track.id,
         // The voice manager applies the track's macros, as in the WAV render.
@@ -595,7 +612,9 @@ async function startPlayback(generation: number, resume?: ResumePoint): Promise<
             const releaseEnd = synth.latestReleaseEndTime;
             if (releaseEnd > latestReleaseEnd) latestReleaseEnd = releaseEnd;
           }
-          const tail = songTailSeconds(project, { liveReleaseOverhang: latestReleaseEnd - songEndTime });
+          const tail = songTailSeconds(playbackProject(s.project), {
+            liveReleaseOverhang: latestReleaseEnd - songEndTime,
+          });
           state.ringUntil = songEndTime + tail;
         }
         s.stop(true);

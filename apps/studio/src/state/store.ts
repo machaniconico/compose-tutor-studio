@@ -20,11 +20,13 @@ import type {
   TrackRole,
 } from '@cts/project-model';
 import {
+  addReverbReturn as addProjectReverbReturn,
   addTrack as addProjectTrack,
   beatsPerBar as beatsPerBarOf,
   contentBeyondBars,
   duplicateTrack as duplicateProjectTrack,
   findProjectSoundingLimitProblem,
+  MAX_RETURN_TRACKS,
   moveTrack as moveProjectTrack,
   removeTrack as removeProjectTrack,
   renameTrack as renameProjectTrack,
@@ -32,6 +34,7 @@ import {
   setLoopRange as setProjectLoopRange,
   setTimeSignature as setProjectTimeSignature,
   setTrackColor as setProjectTrackColor,
+  setTrackSend as setProjectTrackSend,
 } from '@cts/project-model';
 import { getScalePitchClasses } from '@cts/theory-engine';
 import { createDefaultProject } from './defaultProject';
@@ -184,6 +187,8 @@ type StoreState = {
   // track management (each one undo step; a change that changes nothing adds none)
   /** Add an instrument or drum track before the master, select it and return its id. */
   addTrack: (type: 'instrument' | 'drum') => string;
+  addReverbReturn: () => void;
+  setTrackSend: (trackId: string, returnId: string, level: number) => void;
   /** Remove a track (not the master). A removed selection moves to the neighbouring track. */
   removeTrack: (trackId: string) => void;
   /** Copy a track (not the master) right after itself and select the copy. */
@@ -466,6 +471,10 @@ export const useStore = create<StoreState>((set, get) => {
   const commitProject = (next: Project): boolean => {
     const current = get().project;
     if (next.tracks !== current.tracks || next.timeSignature !== current.timeSignature || next.lengthBars !== current.lengthBars) {
+      if (next.tracks.some((track) => track.type === 'bus' && track.clips.length > 0)) {
+        pushToast('リターンにはクリップやノートを置けません。', 'error');
+        return false;
+      }
       const problem = findProjectSoundingLimitProblem(next);
       if (problem) {
         pushToast(problem, 'error');
@@ -626,6 +635,8 @@ export const useStore = create<StoreState>((set, get) => {
     // --- notes ---
     addNote: (clipId, note, options) => {
       const project = get().project;
+      const track = trackOfClip(project, clipId);
+      if (!track || track.type === 'bus') return false;
       const newNote: NoteEvent = {
         id: note.id ?? uid('note'),
         pitch: note.pitch,
@@ -642,15 +653,14 @@ export const useStore = create<StoreState>((set, get) => {
         })),
       );
       if (!committed) return false;
-      const track = trackOfClip(project, clipId);
       publishAppEvent({
         type: 'note.added',
         payload: {
           pitch: newNote.pitch,
           startBeat: newNote.startBeat,
           durationBeats: newNote.durationBeats,
-          trackId: track?.id ?? '',
-          trackName: track?.name ?? '',
+          trackId: track.id,
+          trackName: track.name,
           inScale: pitchInScale(project, newNote.pitch),
         },
       });
@@ -772,10 +782,31 @@ export const useStore = create<StoreState>((set, get) => {
       selectTrackAndFirstClip(added.id);
       return added.id;
     },
+    addReverbReturn: () => {
+      const project = get().project;
+      const next = addProjectReverbReturn(project);
+      if (next === project) {
+        pushToast(`共有の響き（リターン）は ${MAX_RETURN_TRACKS} つまで追加できます。`, 'error');
+        return;
+      }
+      get().commitTransaction();
+      if (!commitProject(next)) return;
+      const added = next.tracks.find((track, index) => track !== project.tracks[index])!;
+      selectTrackAndFirstClip(added.id);
+    },
+    setTrackSend: (trackId, returnId, level) => {
+      const project = get().project;
+      const next = setProjectTrackSend(project, trackId, returnId, level);
+      if (next !== project) commitProject(next);
+    },
     removeTrack: (trackId) => {
       const project = get().project;
       const next = removeProjectTrack(project, trackId);
-      if (next === project || !commitProject(next)) return;
+      if (next === project) return;
+      if (project.tracks.some((track) => track.id === trackId && track.type === 'bus')) {
+        get().commitTransaction();
+      }
+      if (!commitProject(next)) return;
       const { selectedTrackId, selectedClipId } = get().editor;
       if (selectedTrackId !== trackId) {
         if (selectedClipId !== null && !next.tracks.some((t) => t.clips.some((c) => c.id === selectedClipId))) {

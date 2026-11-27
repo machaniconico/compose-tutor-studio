@@ -1239,3 +1239,41 @@ describe('changeInstrumentPreset / changeInstrumentMacros', () => {
     expect(useStore.getState().project).toEqual(before);
   });
 });
+
+describe('shared return editing', () => {
+  it('removes every send to a deleted return as one undo step', () => {
+    const store = useStore.getState();
+    store.addReverbReturn();
+    store.addReverbReturn();
+    const [room, echo] = useStore.getState().project.tracks.filter((track) => track.type === 'bus');
+    const [first, second] = store.project.tracks;
+    store.setTrackSend(first!.id, room!.id, 0.4);
+    store.setTrackSend(first!.id, echo!.id, 0.6);
+    store.setTrackSend(second!.id, room!.id, 0.2);
+    const before = useStore.getState();
+    store.removeTrack(room!.id);
+    const after = useStore.getState();
+    expect(after.past).toHaveLength(before.past.length + 1);
+    expect(after.project.tracks.some((track) => track.id === room!.id)).toBe(false);
+    expect(after.project.tracks.every((track) => !Object.hasOwn(track.sends ?? {}, room!.id))).toBe(true);
+    expect(after.project.tracks[0]!.sends).toEqual({ [echo!.id]: 0.6 });
+    store.undo();
+    expect(useStore.getState().project).toEqual(before.project);
+  });
+
+  it('refuses clip and note creation on a return without changing history', () => {
+    const store = useStore.getState();
+    store.addReverbReturn();
+    const before = useStore.getState();
+    const room = before.project.tracks.find((track) => track.type === 'bus')!;
+    const clip: Clip = { id: 'invalid', trackId: room.id, type: 'midi', startBeat: 0, lengthBeats: 4, loop: false };
+    expect(actions.addEmptyClipAt(room.id, 0, 8)).toBeNull();
+    expect(store.applyProjectChange((project) => ({
+      ...project,
+      tracks: project.tracks.map((track) => track.id === room.id ? { ...track, clips: [clip] } : track),
+    }))).toBe(false);
+    expect(store.addNote(clip.id, { pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 })).toBe(false);
+    expect(useStore.getState().project).toBe(before.project);
+    expect(useStore.getState().past).toBe(before.past);
+  });
+});

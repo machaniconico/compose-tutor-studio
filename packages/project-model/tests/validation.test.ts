@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createEmptyProject, expandClip, MAX_SOUNDING_EVENTS, validateProject } from '../src/index';
+import { createEmptyProject, createMidiClip, createTrack, expandClip, MAX_SOUNDING_EVENTS, validateProject } from '../src/index';
 import type { Project } from '../src/index';
 
 const clock = () => new Date('2026-06-11T00:00:00.000Z');
@@ -356,5 +356,64 @@ describe('validateProject volume automation', () => {
       path: 'tracks[0].automation.volume.points[1].beat',
       message: '音量の点は拍の早い順に並べてください',
     });
+  });
+});
+
+describe('validateProject shared returns', () => {
+  const returns = (...ids: string[]) => ids.map((id) => createTrack(id, 'bus', undefined, undefined, undefined, id));
+
+  it('allows two returns and rejects a third and return clips', () => {
+    const project = baseProject();
+    const [room, echo, hall] = returns('room', 'echo', 'hall');
+    project.tracks.push(room!, echo!);
+    expect(validateProject(project).ok).toBe(true);
+    hall!.clips.push(createMidiClip('hall', 0, 4));
+    hall!.clips[0]!.notes = [{ id: 'n', pitch: 60, startBeat: 0, durationBeats: 1, velocity: 80 }];
+    project.tracks.push(hall!);
+    expect(validateProject(project).errors.map((error) => error.path)).toEqual(['tracks', 'tracks[7].clips']);
+  });
+
+  it('rejects return-to-return, self, missing, non-return and prototype targets', () => {
+    const project = baseProject();
+    const [room, echo] = returns('room', 'echo');
+    const source = project.tracks[0]!;
+    source.sends = { missing: 0, [source.id]: 1, [project.tracks[1]!.id]: 1, constructor: 1, ['__proto__']: 1 };
+    room!.sends = { echo: 0, room: 0 };
+    project.tracks.push(room!, echo!);
+    expect(validateProject(project).errors.map(({ path }) => path)).toEqual([
+      'tracks[0].sends.missing',
+      `tracks[0].sends.${source.id}`,
+      `tracks[0].sends.${project.tracks[1]!.id}`,
+      'tracks[0].sends.constructor',
+      'tracks[0].sends.__proto__',
+      'tracks[5].sends.echo',
+      'tracks[5].sends.room',
+    ]);
+    // These strings are valid when the project actually contains those ids.
+    project.tracks.splice(5, 2, ...returns('constructor', '__proto__'));
+    source.sends = { constructor: 1, ['__proto__']: 0 };
+    expect(validateProject(project).ok).toBe(true);
+  });
+
+  it('formats invalid maps and amounts safely and ignores inherited keys', () => {
+    const project = baseProject();
+    const source = project.tracks[0]!;
+    project.tracks.push(...returns('room'));
+    for (const value of [null, 5, [], 'invalid', false, Symbol('bad')]) {
+      source.sends = value as unknown as typeof source.sends;
+      expect(validateProject(project).errors[0]?.path).toBe('tracks[0].sends');
+    }
+    for (const value of [null, NaN, Infinity, -Infinity, -0.01, 1.01, '0.5', { toString: null }]) {
+      source.sends = { room: value } as typeof source.sends;
+      expect(validateProject(project).errors[0]?.path).toBe('tracks[0].sends.room');
+    }
+    source.sends = { toString: null } as unknown as typeof source.sends;
+    expect(validateProject(project).errors[0]?.message).toContain('null');
+    source.sends = Object.create({ missing: 1 });
+    expect(validateProject(project).ok).toBe(true);
+    const revoked = Proxy.revocable({ room: 0.5 }, {});
+    revoked.revoke();
+    source.sends = revoked.proxy;
+    expect(validateProject(project).errors[0]?.path).toBe('tracks[0].sends');
   });
 });

@@ -210,6 +210,28 @@ describe('track add and remove during playback', () => {
     expect(lastAudibleNames()).toEqual(['Chords', 'Bass', 'Melody', 'Drums']);
   });
 
+  it('adds, updates and removes shared return routing during playback', async () => {
+    const store = useStore.getState();
+    const source = trackNamed('Chords');
+    await play();
+
+    store.addReverbReturn();
+    const room = trackNamed('共有リバーブ');
+    await vi.waitFor(() => expect(graph.buildTrackGraphs).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(graph.buildTrackGraphs).mock.lastCall![2]).toContain(room);
+
+    store.setTrackSend(source.id, room.id, 0.5);
+    const mixedTracks = vi.mocked(graph.applyMixState).mock.lastCall![1];
+    expect(mixedTracks.find((track) => track.id === source.id)?.sends).toEqual({ [room.id]: 0.5 });
+
+    store.removeTrack(room.id);
+    await vi.waitFor(() => expect(graph.buildTrackGraphs).toHaveBeenCalledTimes(3));
+    const rebuiltTracks = vi.mocked(graph.buildTrackGraphs).mock.lastCall![2];
+    expect(rebuiltTracks).not.toContain(room);
+    expect(rebuiltTracks.find((track) => track.id === source.id)?.sends).toEqual({});
+    expect(useStore.getState().transport.isPlaying).toBe(true);
+  });
+
   it('queues loop resets lazily and applies lane edits only after the next play', async () => {
     const store = useStore.getState();
     const keys = trackNamed('Chords');

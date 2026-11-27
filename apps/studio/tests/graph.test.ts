@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { EffectConfig, Track, TrackType } from '@cts/project-model';
+import { createEmptyProject, validateProject, type EffectConfig, type Track, type TrackType } from '@cts/project-model';
+import { mulberry32 } from '../../../packages/project-model/tests/acceptance/helpers';
 import {
   TrackGraph,
   applyMixState,
+  buildTrackGraphs,
   clampPan,
   clampVolume,
   computeAudibleTracks,
+  resolveMuteSolo,
 } from '../src/audio/graph';
 import type { ParamEvent } from '../src/audio/automationSchedule';
 import { delayTimeSeconds } from '../src/audio/effects';
@@ -62,8 +65,13 @@ class FakeNode {
     return destination as AudioNode;
   }
 
-  disconnect(): void {
-    this.connections.length = 0;
+  disconnect(destination?: FakeNode): void {
+    if (!destination) {
+      this.connections.length = 0;
+      return;
+    }
+    const index = this.connections.indexOf(destination);
+    if (index !== -1) this.connections.splice(index, 1);
   }
 }
 
@@ -503,6 +511,135 @@ describe('volume automation graph', () => {
       const input = graph.input as unknown as FakeGainNode;
       expect(input.connections.map((node) => node.kind)).toEqual(['StereoPanner']);
       expect(input.gain.events).toEqual([]);
+    }
+  });
+});
+
+function routing(tracks: Track[]) {
+  const ctx = fakeContext();
+  buildTrackGraphs(ctx, ctx.createGain(), tracks, 0);
+  for (const node of ctx.created) {
+    for (const destination of node.connections) expect(ctx.created).toContain(destination);
+  }
+  return {
+    nodes: ctx.created.map((node) => node.name),
+    connections: ctx.connections,
+  };
+}
+
+describe('shared return routing', () => {
+  it('keeps the node list and connections captured from US-027 HEAD', () => {
+    const source: Track = {
+      ...track('source'),
+      automation: { volume: { points: [{ beat: 0, value: 0.5 }] } },
+    };
+    const bus = track('return', { type: 'bus', effects: [effect('reverb')] });
+    const legacyRouting = routing([source, bus]);
+    expect(routing([{ ...source, sends: { return: 0 } }, bus])).toEqual(legacyRouting);
+    expect(legacyRouting).toMatchInlineSnapshot(`
+      {
+        "connections": [
+          "Gain#5->Gain#1",
+          "Gain#5->Analyser#6",
+          "Gain#2->Gain#3",
+          "Gain#3->StereoPanner#4",
+          "StereoPanner#4->Gain#5",
+          "Gain#9->Gain#1",
+          "Gain#9->Analyser#10",
+          "Gain#7->StereoPanner#8",
+          "Gain#11->Gain#12",
+          "Gain#12->Gain#15",
+          "Gain#11->Convolver#13",
+          "Convolver#13->Gain#14",
+          "Gain#14->Gain#15",
+          "StereoPanner#8->Gain#11",
+          "Gain#15->Gain#9",
+        ],
+        "nodes": [
+          "Gain#1",
+          "Gain#2",
+          "Gain#3",
+          "StereoPanner#4",
+          "Gain#5",
+          "Analyser#6",
+          "Gain#7",
+          "StereoPanner#8",
+          "Gain#9",
+          "Analyser#10",
+          "Gain#11",
+          "Gain#12",
+          "Convolver#13",
+          "Gain#14",
+          "Gain#15",
+        ],
+      }
+    `);
+  });
+
+  it('keeps a soloed source and its positive sends audible unless muted', () => {
+    const room = track('room', { type: 'bus' });
+    const echo = track('echo', { type: 'bus' });
+    const source = { ...track('solo', { solo: true }), sends: { room: 0.5, echo: 0 } };
+    const other = { ...track('other'), sends: { echo: 1 } };
+    expect(resolveMuteSolo([source, other, room, echo])).toEqual(new Set(['solo', 'room']));
+    expect(resolveMuteSolo([source, other, { ...room, mute: true }, echo])).toEqual(new Set(['solo']));
+    expect(resolveMuteSolo([{ ...source, mute: true }, other, room, echo]))
+      .toEqual(new Set(['other', 'room', 'echo']));
+  });
+
+  it('feeds the return from after automation and pan and preserves it across FX edits', () => {
+    const source: Track = {
+      ...track('source'),
+      automation: { volume: { points: [{ beat: 0, value: 0.5 }] } },
+      sends: { room: 0.5 },
+    };
+    const room = track('room', { type: 'bus', effects: [effect('reverb')] });
+    const ctx = fakeContext();
+    const graphs = buildTrackGraphs(ctx, ctx.createGain(), [room, source], 0);
+    const input = graphs.get(source.id)!.input as unknown as FakeGainNode;
+    const automation = input.connections[0] as FakeGainNode;
+    const panner = automation.connections[0] as FakeStereoPannerNode;
+    const send = panner.connections[1] as FakeGainNode;
+    expect(panner.kind).toBe('StereoPanner');
+    expect(send.gain.value).toBe(0.5);
+    expect(send.connections).toEqual([graphs.get(room.id)!.input]);
+    const next = { ...source, mute: true, effects: [effect('filter')], sends: { room: 0.75 } };
+    applyMixState(graphs, [room, next], 1);
+    expect(input.gain.value).toBe(0);
+    expect(panner.connections).toContain(send);
+    expect(send.gain.value).toBe(0.75);
+    const returnMeterTap = ctx.created.find((node) => node.connections.includes(graphs.get(room.id)!.analyser as unknown as FakeNode)) as FakeGainNode;
+    applyMixState(graphs, [{ ...room, mute: true }, { ...next, sends: { room: 0 } }], 2);
+    expect(returnMeterTap.gain.value).toBe(0);
+    expect(panner.connections).not.toContain(send);
+    expect(send.connections).toEqual([]);
+    expect(panner.connections.map((node) => node.kind)).toEqual(['BiquadFilter']);
+  });
+
+  it('builds valid graphs for 300 seeded projects (seed 0x034)', () => {
+    const random = mulberry32(0x034);
+    const flag = () => random() < 0.3;
+    for (let i = 0; i < 300; i += 1) {
+      const returns = Array.from({ length: Math.floor(random() * 3) }, (_, index) =>
+        track(`return-${index}`, { type: 'bus', mute: flag(), solo: flag() }));
+      const sources = Array.from({ length: 1 + Math.floor(random() * 6) }, (_, index): Track => ({
+        ...track(`source-${index}`, { type: index % 2 === 0 ? 'instrument' : 'drum', mute: flag(), solo: flag() }),
+        sends: Object.fromEntries(returns.map(({ id }) => [id, flag() ? 0 : random()])),
+      }));
+      const tracks = [...sources, ...returns, track('master', { type: 'master' })];
+      const project = { ...createEmptyProject(), tracks };
+      expect(validateProject(project).errors).toEqual([]);
+      routing(tracks);
+      const zero = tracks.map((track) => track.sends
+        ? { ...track, sends: Object.fromEntries(Object.keys(track.sends).map((key) => [key, 0])) }
+        : track);
+      const absent = tracks.map(({ sends: _sends, ...track }) => track);
+      expect(routing(zero)).toEqual(routing(absent));
+
+      // Include malformed saved sends as well as valid mixes.
+      const malformed: unknown[] = [null, true, { toString: null }, { constructor: random() }, { [returns[0]?.id ?? 'missing']: NaN }];
+      project.tracks[0] = { ...sources[0]!, sends: malformed[i % malformed.length] as Track['sends'] };
+      expect(validateProject(project).ok).toBe(false);
     }
   });
 });

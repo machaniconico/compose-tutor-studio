@@ -109,6 +109,8 @@ export type Clip = {
   audioAssetId?: string;
 };
 
+export const MAX_RETURN_TRACKS = 2;
+
 export type TrackType = 'instrument' | 'drum' | 'audio' | 'bus' | 'master';
 
 export type TrackRole = 'chords' | 'bass' | 'melody' | 'drums';
@@ -130,6 +132,8 @@ export type Track = {
   instrument?: InstrumentConfig;
   effects: EffectConfig[];
   automation?: { volume?: AutomationLane };
+  /** Post-fader send levels (0–1), keyed by return track id. */
+  sends?: Record<string, number>;
 };
 
 export type Project = {

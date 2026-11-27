@@ -4,6 +4,7 @@ import {
   songEndBeat,
   createDefaultProject,
   createEmptyProject,
+  createTrack,
   PPQ,
   setTimeSignature,
   type Clip,
@@ -648,5 +649,32 @@ describe('renderProjectToWav', () => {
     stubOfflineContext(cutoffs);
     await renderProjectToWav(keysProject());
     expect(cutoffs).toEqual([1400]);
+  });
+});
+
+describe('songTailSeconds: shared returns', () => {
+  const project = createEmptyProject();
+  const source = project.tracks[0]!;
+  const room: Track = {
+    ...createTrack('Room', 'bus', undefined, undefined, undefined, 'room'),
+    effects: [{ id: 'reverb', type: 'reverb', enabled: true, params: { mix: 1 } }],
+  };
+  const echo: Track = {
+    ...createTrack('Echo', 'bus', undefined, undefined, undefined, 'echo'),
+    effects: [{ id: 'delay', type: 'delay', enabled: true, params: { timeSeconds: 0.5, feedback: 0.5, mix: 1 } }],
+  };
+  const tail = (tracks: Track[]) => songTailSeconds({ ...project, tracks }, { liveReleaseOverhang: 0 });
+  const sends = { room: 0.5, echo: 0.5 };
+
+  it('includes reachable reverb and delay feedback and preserves the legacy tail for silent sends', () => {
+    expect(tail([{ ...source, solo: true, sends }, room])).toBeCloseTo(2.4);
+    expect(tail([{ ...source, sends }, room, echo])).toBeCloseTo(6);
+    expect(tail([{ ...source, sends }, room, { ...echo, mute: true }])).toBeCloseTo(2.4);
+    expect(tail([{ ...source, sends, mute: true }, room, echo])).toBe(1.5);
+    expect(tail([{ ...source, sends: { room: 0, echo: 0 } }, room, echo])).toBe(tail([source, room, echo]));
+  });
+
+  it('includes the full tail of serial effects on a reachable return', () => {
+    expect(tail([{ ...source, sends }, { ...room, effects: [...echo.effects, ...room.effects] }])).toBeCloseTo(7.4);
   });
 });

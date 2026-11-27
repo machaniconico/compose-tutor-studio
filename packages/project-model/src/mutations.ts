@@ -8,6 +8,7 @@ import { createDrumClip, createMidiClip, createTrack } from './factories';
 import { makeId } from './ids';
 import { PPQ, beatTick, beatsPerBar, clipTickSpan, drumStepsPerBar, tickSpansOverlap } from './time';
 import { clipEditSpan, MAX_SONG_BARS, MIN_LOOP_PERIOD_BEATS, songEndBeat, soundingEvents } from './sounding';
+import { MAX_RETURN_TRACKS } from './types';
 import type {
   ChordEvent,
   Clip,
@@ -79,6 +80,7 @@ export function addNoteToClip(
   note: Omit<NoteEvent, 'id'> & { id?: string },
   clock: Clock = systemClock,
 ): Project {
+  if (locateClip(project, clipId)?.track.type === 'bus') return project;
   const event: NoteEvent = { ...note, id: note.id ?? makeId('note') };
   const tracks = mapClip(project, clipId, (clip) => ({
     ...clip,
@@ -163,7 +165,7 @@ function locateClip(project: Project, clipId: string): { track: Track; clip: Cli
  * when the clip does not exist or its link is broken or circular.
  */
 export function resolveEditTarget(project: Project, clipId: string): Clip | undefined {
-  const all = project.tracks.flatMap((t) => t.clips);
+  const all = project.tracks.flatMap((t) => t.type === 'bus' ? [] : t.clips);
   const clip = all.find((c) => c.id === clipId);
   if (!clip) return undefined;
   const source = resolveLinkSource(clip, all);
@@ -255,7 +257,7 @@ export function addClip(
   clip: Omit<Clip, 'id' | 'trackId'> & { id?: string },
   clock: Clock = systemClock,
 ): Project {
-  if (!project.tracks.some((t) => t.id === trackId)) return project;
+  if (!project.tracks.some((t) => t.id === trackId && t.type !== 'bus')) return project;
   const allocateId = trackIdAllocator(project);
   const created: Clip = { ...clip, id: allocateId('clip', clip.id), trackId };
   if (clip.notes) created.notes = clip.notes.map((note) => ({ ...note, id: allocateId('note', note.id) }));
@@ -422,7 +424,7 @@ export function splitClip(
   const fail = (code: SplitClipFailure): SplitClipResult =>
     ({ ok: false, project, code, reason: SPLIT_FAILURE_MESSAGES[code] });
   const found = locateClip(project, clipId);
-  if (!found) return fail('missingClip');
+  if (!found || found.track.type === 'bus') return fail('missingClip');
   const { track, clip } = found;
   if (clip.loop) return fail('loopingClip');
   if (clip.aliasOf !== undefined) return fail('linkedClip');
@@ -547,7 +549,7 @@ export function duplicateClip(
   clock: Clock = systemClock,
 ): Project {
   const found = locateClip(project, clipId);
-  if (!found) return project;
+  if (!found || found.track.type === 'bus') return project;
   const { track, clip } = found;
   if (!trackInClipDomain(track)) return project;
   const requestedStart = opts.startBeat ?? clip.startBeat + clip.lengthBeats;
@@ -727,11 +729,59 @@ export function addTrack(
   return touch({ ...project, tracks: insertBeforeTrailingMaster(project.tracks, { ...track, clips: [clip] }) }, clock);
 }
 
+export function addReverbReturn(project: Project, clock: Clock = systemClock): Project {
+  const count = project.tracks.filter((track) => track.type === 'bus').length;
+  if (count >= MAX_RETURN_TRACKS) return project;
+  const allocateId = trackIdAllocator(project);
+  const name = nextAvailableReturnName(project.tracks);
+  const track: Track = {
+    ...createTrack(name, 'bus', undefined, undefined, undefined, allocateId('track')),
+    effects: [{ id: allocateId('fx'), type: 'reverb', enabled: true, params: { mix: 1 } }],
+  };
+  return touch({ ...project, tracks: insertBeforeTrailingMaster(project.tracks, track) }, clock);
+}
+
+function nextAvailableReturnName(tracks: readonly Track[]): string {
+  const base = '共有リバーブ';
+  let name = base;
+  for (let number = 2; tracks.some((track) => track.name === name); number += 1) {
+    name = `${base} ${number}`;
+  }
+  return name;
+}
+
+export function setTrackSend(
+  project: Project,
+  trackId: string,
+  returnId: string,
+  level: number,
+  clock: Clock = systemClock,
+): Project {
+  if (!Number.isFinite(level) || level < 0 || level > 1 || trackId === returnId) return project;
+  const source = project.tracks.find((track) => track.id === trackId);
+  if (!source || source.type === 'bus' || source.type === 'master') return project;
+  if (!project.tracks.some((track) => track.id === returnId && track.type === 'bus')) return project;
+  const previous = source.sends && Object.hasOwn(source.sends, returnId) ? source.sends[returnId] : 0;
+  if (level === previous) return project;
+  const tracks = mapTrack(project, trackId, (track) => ({
+    ...track,
+    sends: { ...track.sends, [returnId]: level },
+  }));
+  return touch({ ...project, tracks }, clock);
+}
+
 /** Remove a track and its clips. The master (or an unknown id) is left as is. */
 export function removeTrack(project: Project, trackId: string, clock: Clock = systemClock): Project {
   const track = project.tracks.find((t) => t.id === trackId);
   if (!track || track.type === 'master') return project;
-  return touch({ ...project, tracks: project.tracks.filter((t) => t.id !== trackId) }, clock);
+  const remaining = project.tracks.filter((t) => t.id !== trackId);
+  const tracks = track.type === 'bus' ? remaining.map((source) => {
+    if (!source.sends || !Object.hasOwn(source.sends, trackId)) return source;
+    const sends = { ...source.sends };
+    delete sends[trackId];
+    return { ...source, sends };
+  }) : remaining;
+  return touch({ ...project, tracks }, clock);
 }
 
 /**
@@ -748,6 +798,8 @@ export function duplicateTrack(
   const index = project.tracks.findIndex((t) => t.id === trackId);
   const track = project.tracks[index];
   if (!track || track.type === 'master') return project;
+  if (track.type === 'bus' && (track.clips.length ||
+    project.tracks.filter((candidate) => candidate.type === 'bus').length >= MAX_RETURN_TRACKS)) return project;
   const allocateId = trackIdAllocator(project);
   const newTrackId = allocateId('track', id);
   const clipIds = new Map(track.clips.map((c) => [c.id, allocateId('clip')] as const));

@@ -2,12 +2,10 @@
 //
 // Each non-master track gets:
 // trackGain (volume) -> automation gain (when present) -> panner (pan) -> FX -> meter tap -> master bus.
-// The master bus + soft limiter live on the AudioEngine. Mute/solo is resolved
-// by the pure `computeAudibleTracks` so the rule ("any solo => only solos; mute
-// always wins") is unit-testable without any audio nodes, then applied to the
-// live gain nodes.
+// Sends branch from the panner before track FX. Both the fader and volume
+// automation scale the signal sent to each shared return.
 
-import { computeAudibleTracks, type AutomationLane, type Track } from '@cts/project-model';
+import { computeAudibleTracks, resolveMuteSolo, sendLevel, type AutomationLane, type Track } from '@cts/project-model';
 import {
   buildTrackEffectChain,
   effectSignature,
@@ -19,7 +17,7 @@ import { METER_ANALYSER_FFT_SIZE } from './metering';
 
 const liveTrackAnalysers = new Map<string, AnalyserNode>();
 
-export { computeAudibleTracks };
+export { computeAudibleTracks, resolveMuteSolo };
 
 /** Clamp a volume into the supported 0..2 range. */
 export function clampVolume(volume: number): number {
@@ -46,8 +44,9 @@ export class TrackGraph {
   private readonly panner: StereoPannerNode;
   private readonly meterTap: GainNode;
   private effects: TrackEffectChain | null = null;
+  private readonly sends = new Map<string, GainNode>();
 
-  constructor(ctx: BaseAudioContext, master: AudioNode, track: Track) {
+  constructor(ctx: BaseAudioContext, master: AudioNode, track: Track, audible = true) {
     this.ctx = ctx;
     this.master = master;
     this.trackId = track.id;
@@ -56,6 +55,7 @@ export class TrackGraph {
     this.automationGain = this.volumeLane?.points.length ? ctx.createGain() : undefined;
     this.panner = ctx.createStereoPanner();
     this.meterTap = ctx.createGain();
+    if (track.type === 'bus' && !audible) this.meterTap.gain.value = 0;
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = METER_ANALYSER_FFT_SIZE;
     this.analyser.smoothingTimeConstant = 0;
@@ -91,7 +91,33 @@ export class TrackGraph {
     // Short ramp avoids zipper noise on live changes.
     this.gain.gain.setTargetAtTime(target, when, 0.01);
     this.panner.pan.setTargetAtTime(clampPan(track.pan), when, 0.01);
+    // Also gate the output so muting a return silences echoes already in its FX.
+    if (track.type === 'bus') this.meterTap.gain.setTargetAtTime(audible ? 1 : 0, when, 0.01);
     this.syncEffects(track, when);
+  }
+
+  syncSends(track: Track, returns: ReadonlyMap<string, TrackGraph>, when: number): void {
+    for (const [id, gain] of this.sends) {
+      if (!returns.has(id) || sendLevel(track, id) === 0) {
+        this.panner.disconnect(gain);
+        gain.disconnect();
+        this.sends.delete(id);
+      }
+    }
+    for (const [id, target] of returns) {
+      const level = sendLevel(track, id);
+      if (level === 0) continue;
+      const existing = this.sends.get(id);
+      if (existing) {
+        existing.gain.setTargetAtTime(level, when, 0.01);
+        continue;
+      }
+      const gain = this.ctx.createGain();
+      gain.gain.value = level;
+      this.panner.connect(gain);
+      gain.connect(target.input);
+      this.sends.set(id, gain);
+    }
   }
 
   /** Disconnect from the graph. */
@@ -102,6 +128,8 @@ export class TrackGraph {
       // already disconnected
     }
     this.automationGain?.disconnect();
+    for (const gain of this.sends.values()) gain.disconnect();
+    this.sends.clear();
     try {
       this.panner.disconnect();
     } catch {
@@ -135,13 +163,11 @@ export class TrackGraph {
   }
 
   private rebuildEffects(track: Track, when: number): void {
-    try {
-      this.panner.disconnect();
-    } catch {
-      // not connected yet
+    if (this.effects) {
+      this.panner.disconnect(this.effects.entry);
+      this.effects.dispose();
     }
-    this.effects?.dispose();
-    this.effects = buildTrackEffectChain(this.ctx, this.panner, this.meterTap, track.effects, when);
+    this.effects = buildTrackEffectChain(this.ctx, this.panner, this.meterTap, track.effects, when, track.type === 'bus');
   }
 }
 
@@ -156,13 +182,15 @@ export function buildTrackGraphs(
   when: number,
 ): Map<string, TrackGraph> {
   const graphs = new Map<string, TrackGraph>();
-  const audible = computeAudibleTracks(tracks);
+  const audible = resolveMuteSolo(tracks);
   for (const track of tracks) {
     if (track.type === 'master') continue;
-    const graph = new TrackGraph(ctx, master, track);
-    graph.apply(track, audible.has(track.id), when);
+    const isAudible = audible.has(track.id);
+    const graph = new TrackGraph(ctx, master, track, isAudible);
+    graph.apply(track, isAudible, when);
     graphs.set(track.id, graph);
   }
+  syncTrackSends(graphs, tracks, when);
   return graphs;
 }
 
@@ -172,12 +200,22 @@ export function applyMixState(
   tracks: readonly Track[],
   when: number,
 ): void {
-  const audible = computeAudibleTracks(tracks);
+  const audible = resolveMuteSolo(tracks);
   for (const track of tracks) {
     const graph = graphs.get(track.id);
     if (!graph) continue;
     graph.apply(track, audible.has(track.id), when);
   }
+  syncTrackSends(graphs, tracks, when);
+}
+
+function syncTrackSends(graphs: Map<string, TrackGraph>, tracks: readonly Track[], when: number): void {
+  const returns = new Map<string, TrackGraph>();
+  for (const track of tracks) {
+    const graph = graphs.get(track.id);
+    if (track.type === 'bus' && graph) returns.set(track.id, graph);
+  }
+  for (const track of tracks) graphs.get(track.id)?.syncSends(track, returns, when);
 }
 
 /** Return the live analyser for a track if playback has built one. */

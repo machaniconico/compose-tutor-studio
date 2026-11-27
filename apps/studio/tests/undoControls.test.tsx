@@ -747,3 +747,29 @@ describe('master fader', () => {
     expect(useStore.getState().project.tracks.find((t) => t.type === 'master')?.volume).toBe(1);
   });
 });
+
+it('edits the send knob as one fader gesture and offers it only on sources', () => {
+  const store = useStore.getState();
+  store.addReverbReturn();
+  const room = useStore.getState().project.tracks.find((track) => track.type === 'bus')!;
+  const source = firstTrack();
+  const before = useStore.getState();
+  render(<MixerStrip />);
+  const knob = screen.getByRole('slider', { name: `${source.name} から ${room.name} へ送る量` });
+  expect(knob.getAttribute('aria-valuetext')).toBe('0%');
+  expect(screen.getByText('1 つの響きを共有すると、同じ部屋で演奏しているように聞こえます')).toBeTruthy();
+  expect(screen.queryByRole('slider', { name: `${room.name} から ${room.name} へ送る量` })).toBeNull();
+  dragSlider(knob, [0.2, 0.4, 0.6]);
+  expect(knob.getAttribute('aria-valuetext')).toBe('60%');
+  expect(useStore.getState().past).toHaveLength(before.past.length + 1);
+  act(() => store.undo());
+  expect(knob.getAttribute('aria-valuetext')).toBe('0%');
+  expect(useStore.getState().project).toEqual(before.project);
+
+  fireEvent.click(screen.getByRole('checkbox', { name: `${room.name} リバーブ` }));
+  fireEvent.click(screen.getByRole('checkbox', { name: `${room.name} ディレイ` }));
+  expect(useStore.getState().project.tracks.find((track) => track.id === room.id)?.effects).toMatchObject([
+    { type: 'reverb', enabled: false },
+    { type: 'delay', enabled: true, params: { mix: 1 } },
+  ]);
+});

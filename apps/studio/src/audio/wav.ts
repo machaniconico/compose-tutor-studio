@@ -6,8 +6,8 @@
 // clamping are unit testable.
 
 import type { Project } from '@cts/project-model';
-import { beatTick, PPQ, songEndBeat } from '@cts/project-model';
-import { delaySettings, enabledSupportedEffects } from './effects';
+import { beatTick, PPQ, resolveMuteSolo, sendLevel, songEndBeat } from '@cts/project-model';
+import { delaySettings, enabledSupportedEffects, reverbSettings, REVERB_IMPULSE_SECONDS } from './effects';
 import { noteEnvelopeTiming } from './envelope';
 import { buildScheduleEvents, type SchedulePayload } from './events';
 import { buildTrackGraphs } from './graph';
@@ -63,19 +63,39 @@ export function songTailSeconds(
   const envelopes = new Map<string, Envelope>();
   let longestDelay = 0;
   let tail = RENDER_TAIL_SECONDS;
+  let returnTail = 0;
+  const audible = resolveMuteSolo(project.tracks);
   for (const track of project.tracks) {
     if (track.type !== 'drum') {
       const { env } = applyMacros(resolvePreset(track.instrument?.preset), track.instrument?.macros);
       envelopes.set(track.id, env);
       tail = Math.max(tail, env.release);
     }
-    for (const effect of enabledSupportedEffects(track.effects)) {
+    const effects = enabledSupportedEffects(track.effects);
+    // Keep the original WAV duration for projects that send no signal.
+    for (const effect of effects) {
       if (effect.type !== 'delay') continue;
       longestDelay = Math.max(longestDelay, delaySettings(effect).timeSeconds);
     }
+    if (track.type !== 'bus' || !audible.has(track.id)) continue;
+    if (!project.tracks.some((source) => audible.has(source.id) && sendLevel(source, track.id) > 0)) continue;
+    let effectTail = 0;
+    for (const effect of effects) {
+      if (effect.type === 'reverb' && reverbSettings(effect).mix > 0) {
+        effectTail += REVERB_IMPULSE_SECONDS;
+      }
+      if (effect.type === 'delay') {
+        const { mix, timeSeconds, feedback } = delaySettings(effect);
+        // The first repeat always plays. Keep feedback repeats through -60 dB.
+        const repeats = feedback > 0 ? Math.ceil(Math.log(0.001) / Math.log(feedback)) : 1;
+        if (mix > 0) effectTail += timeSeconds * repeats;
+      }
+    }
+    returnTail = Math.max(returnTail, effectTail);
   }
+  const effectTail = Math.max(longestDelay, returnTail);
   if (source && 'liveReleaseOverhang' in source) {
-    return longestDelay + Math.max(tail, source.liveReleaseOverhang);
+    return effectTail + Math.max(tail, source.liveReleaseOverhang);
   }
 
   const spb = secondsPerBeat(project.bpm);
@@ -87,7 +107,7 @@ export function songTailSeconds(
     const { releaseEnd } = noteEnvelopeTiming(env, time, payload.durationBeats * spb, payload.cut);
     tail = Math.max(tail, releaseEnd - endTime);
   }
-  return longestDelay + tail;
+  return effectTail + tail;
 }
 
 /** Render through the song end plus the release and echo tail. */
@@ -223,6 +243,7 @@ export async function renderProjectToWav(project: Project, options: WavExportOpt
     const graph = graphs.get(track.id);
     if (!graph) continue;
     if (track.automation?.volume?.points.length) graph.scheduleAutomation(automation);
+    if (track.type === 'bus') continue;
     if (track.type === 'drum') {
       drums.set(track.id, new DrumVoiceManager(ctx, graph.input));
     } else {
