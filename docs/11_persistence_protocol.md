@@ -186,7 +186,7 @@ Storeと起動前recovery controllerは同じbounded handoff helperを使う。m
 
 marker作成後のどこでprocessが停止しても、次回起動は通常のpersistence初期化より先にmarkerを検査する。`Pending`なら同じ`eraseId`で4〜6を再実行するため、databaseだけ消えてrenderer recoveryから内容が再出現する窓を作らない。失敗時もmodalを閉じず、同じstore actionから明示的に再試行する。markerが壊れている、未知versionである、または別`eraseId`と競合する場合は通常起動せずfail closedする。
 
-SQLite初期化はprocess-wideのguard VFSを使う。canonical main pathをconnection寿命だけregistryへ登録し、`MAIN_DB` / exact `-journal` / exact `-wal`の`xOpen`で、既存pathのno-follow検査→original VFS open→SQLiteがI/Oを始める前のactual OS handle検査を行う。pre/postで最終directoryとpath identityが変わらず、通常ファイル・単一link・検証済みidentityである場合だけopenを返す。Unixはexact bundled SQLite 3.53.2・original VFS名`unix`をruntimeで確認した上で、固定された`unixFile`先頭ABIのdescriptorを`fstat`する。Windowsは公開`SQLITE_FCNTL_WIN32_GET_HANDLE`と128-bit `FILE_ID_INFO`を使う。不一致、未知VFS、SQLite version差異はすべて`CANTOPEN`でfail closedする。
+SQLite初期化はprocess-wideのguard VFSを使う。canonical main pathをconnection寿命だけregistryへ登録し、`MAIN_DB` / exact `-journal` / exact `-wal`の`xOpen`で、既存pathのno-follow検査→original VFS open→SQLiteがI/Oを始める前のactual OS handle検査を行う。pre/postで最終directoryとpath identityが変わらず、通常ファイル・単一link・検証済みidentityである場合だけopenを返す。Unixはexact bundled SQLite 3.54.1・original VFS名`unix`をruntimeで確認した上で、固定された`unixFile`先頭ABIのdescriptorを`fstat`する。Windowsは公開`SQLITE_FCNTL_WIN32_GET_HANDLE`と128-bit `FILE_ID_INFO`を使う。不一致、未知VFS、SQLite version差異はすべて`CANTOPEN`でfail closedする。
 
 main actual handleを検証した直後、最初のschema/WAL accessより前に`locking_mode=EXCLUSIVE`と`temp_store=MEMORY`を設定する。process lockにより単一process利用なのでWALのshared-memory indexはprocess内に置かれ、`-shm`を開かない。これにより永続sidecarはguard VFSを通るWAL/rollback journalだけになる。rusqlite/libsqlite3-sys/SQLiteを更新する場合、private `unixFile` prefix、VFS名、xOpen flag、exclusive-WALの`xShm`不使用を再監査し、瞬間差替えtestを更新するまでreleaseしてはならない。
 

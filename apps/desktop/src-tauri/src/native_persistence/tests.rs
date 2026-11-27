@@ -3802,10 +3802,10 @@ fn guarded_vfs_runtime_and_dependency_contract_is_exact() {
 
     let cargo_manifest = include_str!("../../Cargo.toml");
     assert!(cargo_manifest.contains(
-        "rusqlite = { version = \"=0.40.1\", default-features = false, features = [\"bundled\"] }"
+        "rusqlite = { version = \"=0.41.0\", default-features = false, features = [\"bundled\"] }"
     ));
     let cargo_lock = include_str!("../../Cargo.lock").replace("\r\n", "\n");
-    assert!(cargo_lock.contains("name = \"libsqlite3-sys\"\nversion = \"0.38.1\""));
+    assert!(cargo_lock.contains("name = \"libsqlite3-sys\"\nversion = \"0.39.1\""));
 }
 
 #[test]
@@ -8880,6 +8880,21 @@ fn refuses_future_database_schema_without_migrating_it() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, 99);
+}
+
+#[test]
+fn future_schema_with_pragma_list_shadow_table_is_still_unsupported_version() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("future-shadow.sqlite3");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch("CREATE TABLE pragma_pragma_list (name TEXT); PRAGMA user_version = 99;")
+        .unwrap();
+    drop(connection);
+
+    let repository = NativeRepository::new(path);
+    let error = repository.initialize().unwrap_err();
+    assert_eq!(error.code, PersistenceErrorCode::UnsupportedVersion);
 }
 
 #[test]
