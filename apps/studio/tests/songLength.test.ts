@@ -461,6 +461,9 @@ describe('schedule diff is authoritative (Codex round 1)', () => {
       ...grown.project,
       tracks: grown.project.tracks.map((t) => ({ ...t, clips: [] })),
       chordTrack: [], sections: [],
+      // The groove resolver (default choke on) drops hits past a clip's end; the
+      // legacy projection is what leaves a raw onset past the song end.
+      hiHatChoke: false,
     };
     const drums = project.tracks.find((t) => t.type === 'drum')!;
     const alias = {
