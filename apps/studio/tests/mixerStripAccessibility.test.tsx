@@ -60,7 +60,7 @@ describe('Mixer mute/solo accessibility', () => {
     expect(html).toContain(`id="${masterDescriptionId}"`);
     expect(html).toContain('Master出力音量。');
     expect(html).toContain(
-      '再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。',
+      'Touch、Latch、Writeの記録中はキーボードで調整できます。ドラッグするには再生を止めてください。',
     );
     expect(html).not.toContain('aria-label="Master ミュート"');
     expect(html).not.toContain('aria-label="Master ソロ"');

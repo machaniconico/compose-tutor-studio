@@ -150,7 +150,24 @@ Piano Rollの固定編集音域はMIDI 36〜84（C2〜C6）とする。現在cli
 3. 複数移動は掴んだノートを基準に共通beat deltaとscale補正前の共通pitch deltaを算出し、グループ全体の開始・終了・音域境界でdeltaを制限する。Scale Snap有効時は最終音を個別にスケール内へ補正し、元の音程間隔維持よりスケール内化を優先する
 4. 一致する`pointerup`で最終座標を再計算し、`commitNoteUpdates`または`duplicateNotesAt`を1回だけ呼ぶ
 5. batch actionは全候補を先に検証し、1回のproject commitで履歴・revision・autosaveを進め、採用済み最終値のイベントだけを発行する
-6. `pointercancel`、予期しない`lostpointercapture`、clip切替ではプレビューを捨てる。補償commitは行わない
+6. `pointercancel`、予期しない`lostpointercapture`、ドラッグ中の`Escape`（IME変換中を除く）、clip切替ではプレビューを捨てる。補償commitは行わない
+
+### 5.1.2 Store gesture transaction（フェーダー / パン）
+
+ローカルプレビューを持たず、音を聞きながら値を変えるrange control（ミキサー / Track Listの音量・パン）は、Storeのgesture transactionで1ドラッグをUndo 1回にする。
+
+1. フェーダー / パンのpointer gestureはアプリ全体で同時に1つだけとする。新しい`pointerdown`ごとに固有のtokenを作り、Store transactionを`{token, pointerId, projectId, activationId}`に束縛する。2本目のポインターや別フェーダーには所有権を移さない。
+2. どのTrackでもTouch / Latch / Writeの記録pass中は、全Trackのpointer dragを拒否する。値も履歴も変えず、transactionを作らずに「オートメーションを記録中です」と理由と次の操作を通知する。音声録音中、Project操作中、local data消去中もtransactionを開かない。記録pass中のキーボード操作は従来どおりとする。
+3. adapterの更新と終了は開始時のtokenで照合する。終了したtokenの`change`、`pointercancel`、`lostpointercapture`などは破棄する。ネイティブのrange入力イベントにpointer IDがない場合は、対応するpointerイベントからtokenを解決する。次の`pointerdown`には別のtokenを割り当てる。
+4. transaction中の編集は通常の`commitProject`のgateを通し、live Projectだけを差し替える。一致する`pointerup` / `lostpointercapture`、control blur、window blur、`visibilitychange`、unmountで確定する。変更があれば履歴・revision・自動保存を各1回進める。window blurと`visibilitychange`ではadapterの操作状態も解除し、`pointerup`が届かなくても次のキー操作を通常の編集として処理する。
+5. 一致する`pointercancel`、または共通keymapが受理した`Escape`で取り消す。開始時Projectの参照を復元し、履歴・revision・自動保存・transport・再生状態は維持する。再生中のRead scalarの復元はその再生sessionへ反映する。
+6. Undo / Redo、音声録音開始（`tryBeginAudioRecordingOperation`）、Touch / Latch / Writeのpass開始、automation passのpunch-out commitは、開いているtransactionを先に確定する。Project切替・読込・新規作成・削除・取り込み（`runProjectOperation`）は開いているtransactionを取り消してから進み、activationで旧tokenを破棄する。同じProject ID・Track IDでも旧tokenのイベントは適用しない。
+7. 自動保存とflushはtransaction中も開始時Projectだけを扱う。明示保存（Cmd/Ctrl+S）と緊急バックアップは`committedProject()`を書き出す。
+8. `Escape`、`Delete`、Space、Cmd/Ctrl+Zのショートカットは、イベントの対象がinput / textarea / select / 編集可能要素の場合やIME変換中（`isComposing`または`keyCode` 229）は発火しない。window capture listenerとオートメーション点などのcontrol内Undoも共通keymapのガードを通す。WindowsのCtrl+Alt+Z（AltGr）はUndoに割り当てない。
+
+### 5.1.3 Keymap
+
+ウィンドウ単位のショートカットは`apps/studio/src/features/common/keymap.ts`の1表に置き、listenerは`matchShortcut`で解決する。Undo / RedoはmacOSでCmd+Z / Cmd+Shift+Z、それ以外でCtrl+Z / Ctrl+Shift+Zとする。既存のSpace（修飾キー不問）、Cmd/Ctrl+S（両OSでCtrl / Cmdどちらも可）、Piano RollのDelete / Backspaceは割り当てを維持する。§5.1.2の入力・IMEガードは全ショートカットに適用する。グローバル操作はmodal dialog表示中に抑止し、Spaceはボタンなどの操作要素にフォーカス中も再生を切り替えない。フォーカス中のオートメーション点や鼻歌候補のUndo / Redoは同じkeymapから解決し、`preventDefault`済みのイベントをウィンドウ側で無視する。
 
 Alt/Option複製は移動閾値と最終配置差分を満たすまで永続IDを作らない。ベロシティと長さだけの確定は`note.moved`を発行しない。
 
@@ -259,7 +276,7 @@ schema v10 aggregateとAudio Asset repositoryは正本を分離する。Project 
 
 1. Storeはautomation対応Trackごとの`AutomationWriteMode = read | touch | latch | write`、Armed / Writing、touch中target、pass ownershipをrenderer runtimeだけに保持する。Project activationは全TrackをReadで初期化し、modeをProject codec、history、SQLite、`.ctsproj.json`、OpenAPIへ投影しない。
 2. 再生graphのattach時に1件でもRead以外の対応Trackがあれば、project-modelの`beginAutomationPass`へnon-Masterとeffective Masterのmode、有限な開始beat、exact Project参照を渡す。passは開始時Projectのcanonical fingerprintとdeep-frozen snapshotを所有し、live操作中はProject / history / revisionを変更しない。音声録音中、stale activation / playback、無効Track / modeではgraph override前にfail closedする。
-3. Mixer / Track Listのnon-Master volume / panとeffective Master volumeは共通gesture adapterを通す。pointerdown / move / up / cancel / lost captureと、矢印 / Home / End / PageUp / PageDownのkeydown / keyup / blurを同じpending identityへ正規化し、各targetのbegin / update / endをexactly once呼ぶ。live graphは対象AudioParamだけのscheduled curveをcancelしてmanual overrideを所有し、Touch releaseはtempo map上の100 ms後に開始前curveへ復帰、Latch / Writeはパンチアウトまでoverrideを維持する。両Master faderは同じruntime gesture値を購読し、片方の操作中も表示を一致させる。
+3. Mixer / Track Listのnon-Master volume / panとeffective Master volumeは共通gesture adapterを通す。記録pass中は§5.1.2に従いpointer dragを拒否する。矢印 / Home / End / PageUp / PageDownの記録操作はkeydownで開始し、keyupまたはblurで終了する。live graphは対象AudioParamだけのscheduled curveをcancelしてmanual overrideを所有し、Touch releaseはtempo map上の100 ms後に開始前curveへ復帰、Latch / Writeはパンチアウトまでoverrideを維持する。両Master faderは同じruntime gesture値を購読し、片方の操作中も表示を一致させる。
 4. Touchは接触区間だけを置換し、release後100 msのlinear return boundaryで開始前curveへ戻す。Latchは最初の接触からhalf-open punch-outまで最後のsampleを保持する。Writeはpass開始時にnon-Masterのvolume / pan両target、effective Masterのvolume targetを開始時Track scalarでcaptureし、接触がなくても対応curveを置換する。既存laneの`bypassed`、Global / TrackまたはMaster Read、対象外point object / IDは保持し、sampleはvolume 0.001、pan 0.0005の最大再構成誤差で決定的に削減する。
 5. 停止、自然終了、seek、loop右端、mode / Read / Bypass変更、Undo / Redo、Project activation、native close、pagehideは同じpunch-out pathを使う。終了beatをProject範囲へclampし、source exact参照 / fingerprint、lane / point上限、fresh global ID、candidate codecを検証してから、開始時Projectへのstrict CASをProject変更・Undo・save revision各1回として採用する。commit拒否ではpassをretry可能なまま保持し、pagehideだけは同期確定できなければProject no-opでcancelする。
 6. active pass中に許す並行Project変更は、開始時Readだった別Trackのvolume / pan scalarだけである。exact source参照とfingerprintに対する2段階rebaseでpassのfrozen baselineを維持する。effective Read laneがないtargetだけをlive graphへ反映し、laneがあるtargetはcommit後にsessionを停止して古いbase予約を破棄する。Write / Touch / Latch Trackのscalar、lane / routing / effect / noteなどとの混在候補はpassを失わずatomicに拒否する。

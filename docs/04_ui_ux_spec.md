@@ -130,7 +130,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - lane編集でactive playbackが停止した場合は、再生位置を保持して次回再生から新しいcurveを使うことを通知する。保存・再読込、Undo / Redo、transport loop、可変tempo、offline WAVで同じlaneを使う
 - laneが存在する時は最低44×44 CSS pxのnative Read / Bypass controlを表示し、`aria-pressed`と文字で状態を伝える。Bypass中もcurve / pointは表示・編集可能なままmuted表示し、「点は保持され、再生 / WAVはTrackの基準値を使う」と明示する。laneがない時は最初のpointがRead状態でlaneを作ることだけを説明し、保存先のないtoggleを表示しない
 - non-Master Trackと最初のeffective Masterではlaneの有無にかかわらず、Global Readと選択TrackのTrackまたはMaster Readを独立した最低44pxのnative buttonで表示する。`aria-pressed`、オン / オフの文字、両方とlane Bypassから決まるeffective Readの説明を持たせ、GlobalまたはTrack / Masterを切ってもlane Bypassやpointを暗黙変更しない。これら2状態はProjectへ保存される。later Masterにはautomation未対応を明示し、操作controlを出さない
-- Read / Touch / Latch / WriteはTrack名を含むnative radiogroupにし、ArmedとWritingを文字とlive regionで区別する。Touchは操作中だけ記録して100 msで元curveへ戻ること、Latchは最初の操作後も停止・seekなどのパンチアウトまで最後の値を書き続けることを初心者向けに説明する。non-Masterの音量 / パンとeffective Masterの出力音量range controlはpointer、矢印、Home / End、PageUp / PageDownのどの調整gestureでも開始・更新・終了をexactly once扱いにする。Track ListとMixerの両Master faderは同じRead曲線またはgesture値を表示する
+- Read / Touch / Latch / WriteはTrack名を含むnative radiogroupにし、ArmedとWritingを文字とlive regionで区別する。Touchは操作中だけ記録して100 msで元curveへ戻ること、Latchは最初の操作後も停止・seekなどのパンチアウトまで最後の値を書き続けることを初心者向けに説明する。記録pass中は全Trackの音量 / パンのドラッグを拒否し、理由を通知する。non-Masterの音量 / パンとeffective Masterの出力音量range controlは矢印、Home / End、PageUp / PageDownで調整できる。Track ListとMixerの両Master faderは同じRead曲線またはgesture値を表示する
 - Write選択時は即座にmodeを変えず、modal dialogでnon-Masterなら「触れなくても音量とパンの両方」、effective Masterなら「触れなくてもMaster出力音量」を再生位置から置き換え、パンチアウト後はTouchへ戻ると警告する。取消はWrite controlへfocusを戻して以前のmodeを保ち、確認だけがWriteをArmedにする。pass確定後はTouchを選択状態にし、確定curveだけが保存されることをstatusで伝える
 - point / lane上限、CAS競合などでpassを確定できない時はassertive alertに理由と最低44pxの「記録を破棄して停止」を表示する。破棄は部分curveを採用せず、pass / overrideを解放してtransportを停止し、通常編集へ戻れるようにする
 - 最大20,000 pointの正当なlaneでもnative point controlはviewportと選択pointを合わせて最大400件、curveは意味を保った最大3本のSVG pathへまとめる。30 Hzの再生位置購読はplayheadだけへ隔離し、lane全体を再renderしない。keyboardでviewport外を選択した場合もそのpointをrenderしてfocus / scrollを回復する
@@ -263,6 +263,9 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 | S | 実装済み | スケールスナップボタンにフォーカス中、切替 |
 | Q | 実装済み | クオンタイズボタンにフォーカス中、選択ノートを量子化 |
 | Cmd/Ctrl+S | 実装済み | 保存 |
+| Cmd+Z（macOS）/ Ctrl+Z（その他） | 実装済み | 元に戻す（入力欄への入力中・IME変換中・ダイアログ表示中は無効） |
+| Cmd+Shift+Z（macOS）/ Ctrl+Shift+Z（その他） | 実装済み | やり直す（同上） |
+| Escape（ドラッグ中） | 実装済み | ノート・オートメーション点・フェーダーのドラッグを取り消し、ドラッグ前に戻す（入力欄にフォーカス中・IME変換中は無効。Undo履歴に残さない） |
 | R | 現行未実装（予約） | 録音/入力開始 |
 | B | 現行未実装（予定） | Browser表示切替 |
 | L | 現行未実装（予定） | Learn Panel表示切替 |

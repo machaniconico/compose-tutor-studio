@@ -6,6 +6,7 @@ import {
   resolveAutomationGestureDisplayValue,
   shouldFollowAutomationRead,
   type AutomationGestureAdapterOptions,
+  type GestureToken,
 } from '../src/features/automation/useAutomationGesture';
 
 function fixture(capturing = true) {
@@ -16,12 +17,24 @@ function fixture(capturing = true) {
     update: vi.fn(() => true),
     end: vi.fn(() => true),
   };
+  let pointer: GestureToken | null = null;
   const options: AutomationGestureAdapterOptions = {
     shouldCapture: () => shouldCapture,
     setScalar: calls.scalar,
     beginCapture: calls.begin,
     updateCapture: calls.update,
     endCapture: calls.end,
+    transaction: {
+      begin: (token) => {
+        if (shouldCapture || pointer !== null) return false;
+        pointer = token;
+        return true;
+      },
+      owns: (token) => pointer === token,
+      anyActive: () => pointer !== null,
+      commit: () => { pointer = null; },
+      cancel: () => { pointer = null; },
+    },
   };
   return {
     adapter: createAutomationGestureAdapter(options),
@@ -82,153 +95,82 @@ describe('shared automation gesture adapter', () => {
     expect(shouldFollowAutomationRead(true, 'stopped', 'write')).toBe(true);
   });
 
-  it.each([
-    ['pointerup', (end: ReturnType<typeof fixture>['adapter']) => end.pointerUp(7)],
-    ['pointercancel', (end: ReturnType<typeof fixture>['adapter']) => end.pointerCancel(7)],
-    [
-      'lostpointercapture',
-      (end: ReturnType<typeof fixture>['adapter']) => end.lostPointerCapture(7),
-    ],
-    ['blur', (end: ReturnType<typeof fixture>['adapter']) => end.blur()],
-  ])('ends a pointer gesture once across %s and later terminal events', (_, terminate) => {
+  it('drops retired tokens, including events with a recycled pointer ID', () => {
+    const { adapter, calls } = fixture(false);
+    const first = { kind: 'pointer', pointerId: 7 } as const;
+    const second = { kind: 'pointer', pointerId: 7 } as const;
+
+    expect(adapter.begin(first, 1)).toBe(true);
+    expect(adapter.change(first, 1.25)).toBe(true);
+    expect(adapter.finish(first)).toBe(true);
+    expect(adapter.begin(second, 1.25)).toBe(true);
+    expect(adapter.change(first, 0.5)).toBe(false);
+    expect(adapter.finish(first, 'cancel')).toBe(false);
+    expect(adapter.change(second, 1.5)).toBe(true);
+    expect(adapter.finish(second)).toBe(true);
+    expect(adapter.begin(first, 1)).toBe(false);
+    expect(calls.scalar.mock.calls).toEqual([[1.25], [1.5]]);
+  });
+
+  it('keeps the owning pointer while a second pointer tries to edit or cancel', () => {
+    const { adapter, calls } = fixture(false);
+    const first = { kind: 'pointer', pointerId: 7 } as const;
+    const second = { kind: 'pointer', pointerId: 8 } as const;
+    expect(adapter.begin(first, 1)).toBe(true);
+    expect(adapter.begin(second, 1)).toBe(false);
+    expect(adapter.change(second, 0.5)).toBe(false);
+    expect(adapter.finish(second, 'cancel')).toBe(false);
+    expect(adapter.change(first, 1.5)).toBe(true);
+    expect(adapter.finish(first)).toBe(true);
+    expect(calls.scalar.mock.calls).toEqual([[1.5]]);
+  });
+
+  it('ends keyboard capture once and ignores repeated terminal events', () => {
     const { adapter, calls } = fixture();
-    adapter.pointerDown(7, 1);
-    adapter.change(1.25);
+    const token = { kind: 'keyboard' } as const;
+    expect(adapter.begin(token, 0.5)).toBe(true);
+    expect(adapter.change(token, 0.51)).toBe(true);
+    expect(adapter.finish(token)).toBe(true);
+    expect(adapter.finish(token)).toBe(false);
+    expect(adapter.change(token, 0.52)).toBe(false);
 
-    terminate(adapter);
-    adapter.pointerUp(7);
-    adapter.pointerCancel(7);
-    adapter.lostPointerCapture(7);
-    adapter.blur();
-
-    expect(calls.begin).toHaveBeenCalledOnce();
-    expect(calls.begin).toHaveBeenCalledWith(1);
-    expect(calls.update).toHaveBeenCalledOnce();
-    expect(calls.update).toHaveBeenCalledWith(1.25);
+    expect(calls.begin.mock.calls).toEqual([[0.5]]);
+    expect(calls.update.mock.calls).toEqual([[0.51]]);
     expect(calls.end).toHaveBeenCalledOnce();
   });
 
-  it('ends a keyboard gesture once on keyup even when blur follows', () => {
+  it('retries a rejected keyboard capture begin with the same token', () => {
     const { adapter, calls } = fixture();
-    adapter.keyDown('ArrowUp', 0.5);
-    adapter.keyDown('ArrowUp', 0.5, true);
-    adapter.change(0.51);
-    adapter.keyUp('ArrowUp');
-    adapter.blur();
-    adapter.keyUp('ArrowUp');
-
-    expect(calls.begin).toHaveBeenCalledOnce();
-    expect(calls.update).toHaveBeenCalledOnce();
+    calls.begin.mockReturnValueOnce(false);
+    const token = { kind: 'keyboard' } as const;
+    expect(adapter.begin(token, 0.5)).toBe(true);
+    expect(adapter.change(token, 0.51)).toBe(true);
+    expect(adapter.finish(token)).toBe(true);
+    expect(calls.begin.mock.calls).toEqual([[0.5], [0.51]]);
     expect(calls.end).toHaveBeenCalledOnce();
   });
 
-  it('retries a rejected terminal end and releases exactly once', () => {
+  it('never calls end if keyboard capture never began', () => {
     const { adapter, calls } = fixture();
-    calls.end
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
-    adapter.pointerDown(7, 1);
-
-    adapter.pointerUp(7);
-    expect(adapter.isActive()).toBe(true);
-    expect(calls.end).toHaveBeenCalledOnce();
-
-    adapter.lostPointerCapture(7);
-    adapter.pointerCancel(7);
-    adapter.blur();
-
-    expect(adapter.isActive()).toBe(false);
-    expect(calls.end).toHaveBeenCalledTimes(2);
-  });
-
-  it('keeps pointer identity when a change retries a rejected begin', () => {
-    const { adapter, calls } = fixture();
-    calls.begin
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
-
-    adapter.pointerDown(7, 1);
-    adapter.change(1.25);
-    expect(adapter.isActive()).toBe(true);
-
-    adapter.pointerUp(7);
-    adapter.lostPointerCapture(7);
-
-    expect(calls.begin).toHaveBeenNthCalledWith(1, 1);
-    expect(calls.begin).toHaveBeenNthCalledWith(2, 1.25);
-    expect(calls.end).toHaveBeenCalledOnce();
-    expect(adapter.isActive()).toBe(false);
-  });
-
-  it('keeps keyboard identity when a change retries a rejected begin', () => {
-    const { adapter, calls } = fixture();
-    calls.begin
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
-
-    adapter.keyDown('ArrowUp', 0.5);
-    adapter.change(0.51);
-    adapter.keyUp('ArrowUp');
-
-    expect(calls.end).toHaveBeenCalledOnce();
-    expect(adapter.isActive()).toBe(false);
-
-    adapter.blur();
-    expect(calls.end).toHaveBeenCalledOnce();
-  });
-
-  it('ignores unrelated pointer ids and non-adjustment keyboard keys', () => {
-    const { adapter, calls } = fixture();
-    adapter.keyDown('Tab', 1);
-    adapter.pointerDown(12, 1);
-    adapter.pointerUp(13);
-    expect(adapter.isActive()).toBe(true);
+    calls.begin.mockReturnValue(false);
+    const token = { kind: 'keyboard' } as const;
+    expect(adapter.begin(token, 1)).toBe(true);
+    expect(adapter.finish(token)).toBe(true);
     expect(calls.end).not.toHaveBeenCalled();
-
-    adapter.pointerUp(12);
-    expect(calls.end).toHaveBeenCalledOnce();
   });
 
-  it('keeps stopped/Read changes scalar and captures playing write changes', () => {
-    const { adapter, calls, setCapturing } = fixture(false);
-    adapter.pointerDown(7, 0.5);
-    adapter.change(0.75);
-    adapter.pointerUp(7);
-    expect(calls.scalar).toHaveBeenCalledWith(0.75);
+  it('blocks pointer capture while recording and accepts a fresh pointer after recording', () => {
+    const { adapter, calls, setCapturing } = fixture();
+    const refused = { kind: 'pointer', pointerId: 7 } as const;
+    expect(adapter.begin(refused, 1)).toBe(false);
+    setCapturing(false);
+    expect(adapter.change(refused, 1.25)).toBe(false);
+    expect(adapter.begin(refused, 1)).toBe(false);
     expect(calls.begin).not.toHaveBeenCalled();
-    expect(calls.end).not.toHaveBeenCalled();
 
-    setCapturing(true);
-    adapter.change(1.1);
-    adapter.change(1.2);
-    adapter.blur();
-
-    expect(calls.begin).toHaveBeenCalledWith(1.1);
-    expect(calls.update).toHaveBeenCalledWith(1.2);
-    expect(calls.end).toHaveBeenCalledOnce();
-    expect(calls.scalar).toHaveBeenCalledOnce();
-  });
-
-  it('does not arm an end when runtime capture rejects begin', () => {
-    const calls = {
-      scalar: vi.fn(),
-      begin: vi.fn(() => false),
-      update: vi.fn(() => false),
-      end: vi.fn(() => false),
-    };
-    const adapter = createAutomationGestureAdapter({
-      shouldCapture: () => true,
-      setScalar: calls.scalar,
-      beginCapture: calls.begin,
-      updateCapture: calls.update,
-      endCapture: calls.end,
-    });
-
-    adapter.pointerDown(1, 1);
-    adapter.pointerUp(1);
-    adapter.blur();
-
-    expect(calls.begin).toHaveBeenCalledOnce();
-    expect(calls.end).not.toHaveBeenCalled();
+    const fresh = { kind: 'pointer', pointerId: 7 } as const;
+    expect(adapter.begin(fresh, 1)).toBe(true);
+    expect(adapter.change(fresh, 1.25)).toBe(true);
+    expect(calls.scalar.mock.calls).toEqual([[1.25]]);
   });
 });

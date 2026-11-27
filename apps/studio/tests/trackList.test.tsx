@@ -88,7 +88,7 @@ describe('TrackList mixer controls', () => {
     );
     expect(masterRowRemainder).toContain('Master出力音量。');
     expect(masterRowRemainder).toContain(
-      '再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。',
+      'Touch、Latch、Writeの記録中はキーボードで調整できます。ドラッグするには再生を止めてください。',
     );
     expect(masterRowRemainder).not.toContain('aria-label="Master パン"');
     expect(masterRowRemainder).not.toContain('title="ミュート"');

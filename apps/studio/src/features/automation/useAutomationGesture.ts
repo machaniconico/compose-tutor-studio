@@ -18,6 +18,7 @@ import {
   isAutomationReadEnabled,
 } from '../../audio/automation';
 import { useStore } from '../../state/store';
+import { isImeComposing, matchShortcut } from '../common/keymap';
 
 const RANGE_ADJUSTMENT_KEYS = new Set([
   'ArrowDown',
@@ -30,23 +31,12 @@ const RANGE_ADJUSTMENT_KEYS = new Set([
   'PageUp',
 ]);
 
-type GestureSource =
-  | Readonly<{ kind: 'pointer'; pointerId: number }>
-  | Readonly<{ kind: 'keyboard' }>
-  | Readonly<{ kind: 'implicit' }>;
+type PointerGestureToken = Readonly<{ kind: 'pointer'; pointerId: number }>;
 
-export type AutomationGestureAdapter = Readonly<{
-  pointerDown: (pointerId: number, value: number) => void;
-  pointerUp: (pointerId: number) => void;
-  pointerCancel: (pointerId: number) => void;
-  lostPointerCapture: (pointerId: number) => void;
-  keyDown: (key: string, value: number, repeat?: boolean) => void;
-  keyUp: (key: string) => void;
-  change: (value: number) => void;
-  blur: () => void;
-  dispose: () => void;
-  isActive: () => boolean;
-}>;
+/** Each gesture owns a fresh object. Pointer IDs alone can be reused by the DOM. */
+export type GestureToken =
+  | PointerGestureToken
+  | Readonly<{ kind: 'keyboard' | 'implicit' }>;
 
 export type AutomationGestureAdapterOptions = Readonly<{
   shouldCapture: () => boolean;
@@ -54,110 +44,98 @@ export type AutomationGestureAdapterOptions = Readonly<{
   beginCapture: (value: number) => boolean;
   updateCapture: (value: number) => boolean;
   endCapture: () => boolean;
+  transaction: Readonly<{
+    begin: (token: PointerGestureToken) => boolean;
+    owns: (token: PointerGestureToken) => boolean;
+    anyActive: () => boolean;
+    commit: (token: PointerGestureToken) => void;
+    cancel: (token: PointerGestureToken) => void;
+  }>;
 }>;
 
-/**
- * Event-order-independent gesture state machine. Every terminal browser event
- * goes through finish(), so pointerup followed by lostpointercapture (or keyup
- * followed by blur) releases a runtime automation target exactly once.
- */
-export function createAutomationGestureAdapter(
-  options: AutomationGestureAdapterOptions,
-): AutomationGestureAdapter {
-  let active: GestureSource | null = null;
-  let pending: GestureSource | null = null;
+export function createAutomationGestureAdapter({
+  shouldCapture,
+  setScalar,
+  beginCapture,
+  updateCapture,
+  endCapture,
+  transaction,
+}: AutomationGestureAdapterOptions) {
+  let gesture: { token: GestureToken; capturing: boolean } | null = null;
+  const retired = new WeakSet<GestureToken>();
 
-  const begin = (source: GestureSource, value: number): boolean => {
-    if (active !== null) return false;
-    if (!options.shouldCapture()) {
-      pending = null;
+  const discard = (token: GestureToken): void => {
+    retired.add(token);
+    if (gesture?.token === token) gesture = null;
+  };
+
+  const owns = (token: GestureToken): boolean => {
+    if (gesture?.token !== token) return false;
+    if (token.kind === 'pointer' && !transaction.owns(token)) {
+      discard(token);
       return false;
     }
-    if (!options.beginCapture(value)) {
-      pending = source;
-      return false;
-    }
-    active = source;
-    pending = null;
     return true;
   };
 
-  const finish = (): boolean => {
-    if (active === null) return true;
-    if (!options.endCapture()) return false;
-    active = null;
-    return true;
-  };
-
-  const finishPointer = (pointerId: number): void => {
-    if (
-      active?.kind === 'pointer'
-      && active.pointerId === pointerId
-    ) {
-      finish();
-      return;
-    }
-    if (
-      pending?.kind === 'pointer'
-      && pending.pointerId === pointerId
-    ) {
-      pending = null;
-    }
-  };
-
-  const finishAll = (): void => {
-    if (active !== null) {
-      finish();
-      return;
-    }
-    pending = null;
-  };
-
-  return Object.freeze({
-    pointerDown(pointerId, value) {
-      begin({ kind: 'pointer', pointerId }, value);
-    },
-    pointerUp: finishPointer,
-    pointerCancel: finishPointer,
-    lostPointerCapture: finishPointer,
-    keyDown(key, value, repeat = false) {
-      if (!RANGE_ADJUSTMENT_KEYS.has(key) || repeat) return;
-      begin({ kind: 'keyboard' }, value);
-    },
-    keyUp(key) {
-      if (!RANGE_ADJUSTMENT_KEYS.has(key)) return;
-      if (active?.kind === 'keyboard') {
-        finish();
-        return;
-      }
-      if (pending?.kind === 'keyboard') pending = null;
-    },
-    change(value) {
-      if (!Number.isFinite(value)) return;
-      if (!options.shouldCapture()) {
-        if (active !== null) {
-          finish();
-          return;
+  return {
+    begin(token: GestureToken, value: number): boolean {
+      if (retired.has(token) || gesture?.token === token) return false;
+      if (token.kind === 'pointer') {
+        // The store arbitrates every pointer begin, including attempts during
+        // a keyboard recording gesture that must show the recording notice.
+        if (!transaction.begin(token)) {
+          discard(token);
+          return false;
         }
-        pending = null;
-        options.setScalar(value);
-        return;
+        if (gesture !== null) discard(gesture.token);
+      } else if ((gesture !== null && owns(gesture.token)) || transaction.anyActive()) {
+        discard(token);
+        return false;
       }
-      if (active === null) {
-        begin(pending ?? { kind: 'implicit' }, value);
-        return;
-      }
-      options.updateCapture(value);
+      gesture = {
+        token,
+        capturing: token.kind !== 'pointer' && shouldCapture() && beginCapture(value),
+      };
+      return true;
     },
-    blur: finishAll,
-    dispose: finishAll,
-    isActive: () => active !== null,
-  });
+
+    change(token: GestureToken, value: number): boolean {
+      if (gesture?.token !== token || !owns(token) || !Number.isFinite(value)) return false;
+      if (token.kind === 'pointer') {
+        setScalar(value);
+      } else if (shouldCapture()) {
+        if (gesture.capturing) return updateCapture(value);
+        return (gesture.capturing = beginCapture(value));
+      } else {
+        if (gesture.capturing || transaction.anyActive()) return false;
+        setScalar(value);
+      }
+      return true;
+    },
+
+    finish(token: GestureToken, mode: 'commit' | 'cancel' = 'commit'): boolean {
+      if (gesture?.token !== token || !owns(token)) return false;
+      const { capturing } = gesture;
+      discard(token);
+      if (token.kind === 'pointer') {
+        if (mode === 'commit') transaction.commit(token);
+        else transaction.cancel(token);
+      } else if (capturing) {
+        endCapture();
+      }
+      return true;
+    },
+
+    discard,
+    owns,
+  };
 }
 
 export type AutomationGestureInputProps = Readonly<{
   displayValue: number;
   onPointerDown: PointerEventHandler<HTMLInputElement>;
+  onPointerMove: PointerEventHandler<HTMLInputElement>;
   onPointerUp: PointerEventHandler<HTMLInputElement>;
   onPointerCancel: PointerEventHandler<HTMLInputElement>;
   onLostPointerCapture: PointerEventHandler<HTMLInputElement>;
@@ -262,8 +240,6 @@ export function useAutomationGesture(input: Readonly<{
   });
   const [previewValue, setPreviewValue] = useState<number | null>(null);
   const latest = useRef({
-    phase,
-    mode,
     target: { trackId, type: targetType } satisfies AutomationTarget,
     setScalar,
     beginAutomationGesture,
@@ -271,8 +247,6 @@ export function useAutomationGesture(input: Readonly<{
     endAutomationGesture,
   });
   latest.current = {
-    phase,
-    mode,
     target: { trackId, type: targetType },
     setScalar,
     beginAutomationGesture,
@@ -280,13 +254,16 @@ export function useAutomationGesture(input: Readonly<{
     endAutomationGesture,
   };
 
-  const adapterRef = useRef<AutomationGestureAdapter | null>(null);
+  const shouldCapture = () => {
+    const state = useStore.getState();
+    return state.transport.phase === 'playing'
+      && (state.automationRecording.trackModes[latest.current.target.trackId] ?? 'read') !== 'read';
+  };
+
+  const adapterRef = useRef<ReturnType<typeof createAutomationGestureAdapter> | null>(null);
   if (adapterRef.current === null) {
     adapterRef.current = createAutomationGestureAdapter({
-      shouldCapture: () => {
-        const current = latest.current;
-        return current.phase === 'playing' && current.mode !== 'read';
-      },
+      shouldCapture,
       setScalar: (value) => latest.current.setScalar(value),
       beginCapture: (value) => {
         const current = latest.current;
@@ -300,11 +277,77 @@ export function useAutomationGesture(input: Readonly<{
         const current = latest.current;
         return current.endAutomationGesture(current.target);
       },
+      transaction: {
+        begin: (token) =>
+          useStore.getState().beginProjectTransaction(token, token.pointerId),
+        owns: (token) =>
+          useStore.getState().ownsProjectTransaction(token, token.pointerId),
+        anyActive: () => useStore.getState().isProjectTransactionOpen(),
+        commit: (token) => useStore.getState().commitProjectTransaction(token),
+        cancel: (token) => useStore.getState().cancelProjectTransaction(token),
+      },
     });
   }
   const adapter = adapterRef.current;
 
-  useEffect(() => () => adapter.dispose(), [adapter]);
+  const activeToken = useRef<GestureToken | null>(null);
+  // Native range input/change events may omit pointerId. Use the companion
+  // pointer event for provenance, with null suppressing unattributed changes
+  // after a refused or completed drag. Keyboard adjustment establishes its
+  // own source even when the old pointer never comes back.
+  const rangeSource = useRef<GestureToken | null | undefined>(undefined);
+  const sawPointer = useRef(false);
+
+  const [lifecycle] = useState(() => {
+    const end = (mode: 'commit' | 'cancel' | 'discard' = 'commit'): void => {
+      const token = activeToken.current;
+      activeToken.current = null;
+      rangeSource.current = sawPointer.current ? null : undefined;
+      if (token === null) return;
+      if (mode === 'discard') adapter.discard(token);
+      else adapter.finish(token, mode);
+    };
+    return {
+      end,
+      clear: (mode: 'commit' | 'cancel' | 'discard' = 'commit') => {
+        end(mode);
+        setPreviewValue(null);
+      },
+    };
+  });
+
+  useEffect(() => {
+    const reset = () => lifecycle.clear();
+    const onEscape = (event: KeyboardEvent) => {
+      const token = activeToken.current;
+      if (
+        token?.kind !== 'pointer' || !adapter.owns(token)
+        || matchShortcut(event, 'gesture') !== 'cancelGesture'
+      ) return;
+      event.preventDefault();
+      event.stopPropagation();
+      lifecycle.clear('cancel');
+    };
+    const unsubscribe = useStore.subscribe((state, previous) => {
+      const token = activeToken.current;
+      if (
+        state.saveState.activationId !== previous.saveState.activationId
+        || (token?.kind === 'pointer' && !state.ownsProjectTransaction(token, token.pointerId))
+      ) {
+        lifecycle.clear('discard');
+      }
+    });
+    window.addEventListener('blur', reset);
+    document.addEventListener('visibilitychange', reset);
+    window.addEventListener('keydown', onEscape, true);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('blur', reset);
+      document.removeEventListener('visibilitychange', reset);
+      window.removeEventListener('keydown', onEscape, true);
+      lifecycle.end();
+    };
+  }, [adapter, lifecycle, trackId, targetType]);
   useEffect(() => {
     setPreviewValue(null);
   }, [trackId, targetType, mode]);
@@ -312,17 +355,13 @@ export function useAutomationGesture(input: Readonly<{
     if (phase !== 'playing') setPreviewValue(null);
   }, [phase]);
 
-  const clearCompletedPreview = (): void => {
-    if (
-      !adapter.isActive()
-      && (
-        phase !== 'playing'
-        || mode === 'read'
-        || mode === 'touch'
-      )
-    ) {
-      setPreviewValue(null);
-    }
+  const pointerToken = (pointerId: number): PointerGestureToken | null => {
+    const token = activeToken.current;
+    return token?.kind === 'pointer' && token.pointerId === pointerId ? token : null;
+  };
+
+  const finishPointer = (pointerId: number, mode?: 'cancel'): void => {
+    if (pointerToken(pointerId) !== null) lifecycle.clear(mode);
   };
 
   return {
@@ -333,48 +372,78 @@ export function useAutomationGesture(input: Readonly<{
       followLiveRead,
     ),
     onPointerDown: (event) => {
-      setPreviewValue(event.currentTarget.valueAsNumber);
+      if (event.button !== 0) return;
+      const token = { kind: 'pointer', pointerId: event.pointerId } as const;
+      sawPointer.current = true;
+      rangeSource.current = null;
+      if (!adapter.begin(token, event.currentTarget.valueAsNumber)) {
+        event.preventDefault();
+        return;
+      }
+      activeToken.current = token;
+      rangeSource.current = token;
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {
-        // Pointer capture can be unavailable in SSR/test DOMs; terminal events
-        // still share the same exactly-once state machine.
+        // Some DOMs do not provide pointer capture.
       }
-      adapter.pointerDown(event.pointerId, event.currentTarget.valueAsNumber);
     },
-    onPointerUp: (event) => {
-      adapter.pointerUp(event.pointerId);
-      clearCompletedPreview();
+    onPointerMove: (event) => {
+      // Ignore hover. Track a competing pressed pointer so a following
+      // untagged native input cannot be attributed to the owner.
+      if (event.buttons !== 0 || pointerToken(event.pointerId) !== null) {
+        sawPointer.current = true;
+        rangeSource.current = pointerToken(event.pointerId);
+      }
     },
-    onPointerCancel: (event) => {
-      adapter.pointerCancel(event.pointerId);
-      clearCompletedPreview();
-    },
-    onLostPointerCapture: (event) => {
-      adapter.lostPointerCapture(event.pointerId);
-      clearCompletedPreview();
-    },
+    onPointerUp: (event) => finishPointer(event.pointerId),
+    onPointerCancel: (event) => finishPointer(event.pointerId, 'cancel'),
+    onLostPointerCapture: (event) => finishPointer(event.pointerId),
     onKeyDown: (event) => {
-      if (RANGE_ADJUSTMENT_KEYS.has(event.key) && !event.repeat) {
-        setPreviewValue(event.currentTarget.valueAsNumber);
+      if (!RANGE_ADJUSTMENT_KEYS.has(event.key) || isImeComposing(event.nativeEvent)) return;
+      const current = activeToken.current;
+      if (current?.kind === 'keyboard' && adapter.owns(current)) {
+        rangeSource.current = current;
+        return;
       }
-      adapter.keyDown(
-        event.key,
-        event.currentTarget.valueAsNumber,
-        event.repeat,
-      );
+      if (current?.kind === 'implicit') lifecycle.clear();
+      const token = { kind: 'keyboard' } as const;
+      if (adapter.begin(token, event.currentTarget.valueAsNumber)) {
+        activeToken.current = token;
+        rangeSource.current = token;
+      } else {
+        event.preventDefault();
+      }
     },
     onKeyUp: (event) => {
-      adapter.keyUp(event.key);
-      clearCompletedPreview();
+      if (RANGE_ADJUSTMENT_KEYS.has(event.key) && activeToken.current?.kind === 'keyboard') {
+        lifecycle.clear();
+      }
     },
     onChange: (event) => {
-      setPreviewValue(event.currentTarget.valueAsNumber);
-      adapter.change(event.currentTarget.valueAsNumber);
+      const value = event.currentTarget.valueAsNumber;
+      const native = event.nativeEvent;
+      const token = 'pointerId' in native && typeof native.pointerId === 'number'
+        ? pointerToken(native.pointerId)
+        : rangeSource.current;
+      if (token !== undefined) {
+        if (token !== null && adapter.change(token, value)) setPreviewValue(value);
+        return;
+      }
+
+      // Some controls (for example, assistive technologies) send a range
+      // change without a corresponding pointer or keyboard event.
+      const implicit = { kind: 'implicit' } as const;
+      if (!adapter.begin(implicit, value)) return;
+      if (shouldCapture()) {
+        activeToken.current = implicit;
+        rangeSource.current = implicit;
+        setPreviewValue(value);
+      } else {
+        adapter.change(implicit, value);
+        adapter.finish(implicit);
+      }
     },
-    onBlur: () => {
-      adapter.blur();
-      clearCompletedPreview();
-    },
+    onBlur: () => lifecycle.clear(),
   };
 }

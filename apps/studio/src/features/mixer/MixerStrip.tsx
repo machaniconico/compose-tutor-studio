@@ -370,7 +370,7 @@ function ChannelStrip(props: {
       >
         {accessibleName}、トラックID {track.id}。
         {isMaster ? 'Master出力音量。' : ''}
-        再生中のTouch、Latch、Writeではオートメーションジェスチャーとして記録します。
+        Touch、Latch、Writeの記録中はキーボードで調整できます。ドラッグするには再生を止めてください。
       </span>
 
       {!isMaster ? (

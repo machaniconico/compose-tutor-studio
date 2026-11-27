@@ -1,3 +1,4 @@
+import { canHandleShortcut, matchShortcut } from '../common/keymap';
 import {
   useEffect,
   useId,
@@ -408,7 +409,7 @@ export function HummingPitchEditor({
     event: ReactKeyboardEvent<HTMLButtonElement>,
     segment: HummingPitchSegment,
   ): void {
-    if (event.ctrlKey || event.metaKey) return;
+    if (event.ctrlKey || event.metaKey || !canHandleShortcut(event.nativeEvent ?? event)) return;
     const index = segments.findIndex((candidate) => candidate.id === segment.id);
     const isSelectionNavigation =
       !event.altKey &&
@@ -484,13 +485,8 @@ export function HummingPitchEditor({
   function handleEditorUndoRedo(
     event: ReactKeyboardEvent<HTMLElement>,
   ): void {
-    if (
-      event.altKey ||
-      (!event.ctrlKey && !event.metaKey) ||
-      event.key.toLowerCase() !== 'z'
-    ) {
-      return;
-    }
+    const action = matchShortcut(event.nativeEvent, 'control');
+    if (action !== 'undo' && action !== 'redo') return;
     event.preventDefault();
     event.stopPropagation();
     if (event.repeat || disabled) return;
@@ -512,7 +508,7 @@ export function HummingPitchEditor({
       recoverMissingFocus.current = true;
     };
 
-    if (event.shiftKey) {
+    if (action === 'redo') {
       if (!canRedo) {
         setAnnouncement('やり直せる候補編集はありません。');
         return;

@@ -16,22 +16,11 @@ import {
 import { useStore } from './state/store';
 import { startLesson } from './state/tutorialBridge';
 import { isAnyDialogOpen } from './features/common/dialogState';
+import { matchShortcut } from './features/common/keymap';
 import { registerPersistenceLifecycle } from './state/persistenceLifecycle';
 import {
   registerRecordingLatencyCalibrationInvalidation,
 } from './state/recordingLatencyCalibrationLifecycle';
-
-/** True when focus is in a text-entry field, where shortcuts must not fire. */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    target.isContentEditable
-  );
-}
 
 /** Native/custom controls own Space while focused; the transport shortcut does not. */
 function isInteractiveTarget(target: EventTarget | null): boolean {
@@ -45,7 +34,6 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
         'select',
         'a[href]',
         'summary',
-        '[contenteditable="true"]',
         '[role="button"]',
         '[role="checkbox"]',
         '[role="menuitem"]',
@@ -208,30 +196,47 @@ export function App() {
     }
   }, [guideOpen, rightTab]);
 
-  // Global keyboard shortcuts: Space = play/stop, Cmd/Ctrl+S = save. Skipped
-  // while typing in a field or while a modal dialog (incl. onboarding) is open.
+  // Global keyboard shortcuts from the central keymap (Space, Cmd/Ctrl+S,
+  // Undo/Redo). Skipped during IME composition, while typing in a field, and
+  // while a modal dialog (incl. onboarding) is open.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || isAnyDialogOpen()) return;
+      const action = matchShortcut(e, 'global');
+      if (action === null) return;
+      const s = useStore.getState();
 
-      if (e.key === ' ' || e.code === 'Space') {
+      if (action === 'togglePlayback') {
         if (isInteractiveTarget(e.target)) return;
         e.preventDefault();
-        const s = useStore.getState();
         if (s.transport.phase !== 'stopped') s.stop();
         else s.play();
         return;
       }
 
-      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
-        if (isTypingTarget(e.target)) return;
-        e.preventDefault();
-        void useStore.getState().saveToLocalStorage();
-      }
+      e.preventDefault();
+      if (action === 'save') void s.saveToLocalStorage();
+      else if (action === 'undo') s.undo();
+      else if (action === 'redo') s.redo();
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // A drag whose pointerup never arrives (window switch or hidden tab
+  // mid-gesture) must not stay open: commit it as one Undo step and end it.
+  useEffect(() => {
+    const onBlur = () => useStore.getState().finalizeProjectTransaction();
+    const onVisibility = () => {
+      onBlur();
+    };
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   // A measured profile is bound to the physical device route, not a Project or

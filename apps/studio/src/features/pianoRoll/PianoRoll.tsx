@@ -22,6 +22,7 @@ import {
 import { midiToNoteName } from '@cts/theory-engine';
 import { pxPerBeat } from '../timeline';
 import { isAnyDialogOpen } from '../common/dialogState';
+import { canHandleShortcut, matchShortcut } from '../common/keymap';
 import { useScaleInfo } from './useScaleInfo';
 import {
   GRID_SNAP_OPTIONS,
@@ -527,9 +528,7 @@ export function PianoRoll() {
     function isInteractiveTarget(t: EventTarget | null): boolean {
       if (!(t instanceof HTMLElement)) return false;
       return (
-        t.closest(
-          'button, input, textarea, select, a[href], summary, [contenteditable="true"], [data-shortcuts-suspended]',
-        ) !== null
+        t.closest('button, a[href], summary, [data-shortcuts-suspended]') !== null
       );
     }
     function onKey(e: KeyboardEvent) {
@@ -537,7 +536,7 @@ export function PianoRoll() {
       if (isAnyDialogOpen()) return;
       if (editor.activeView !== 'pianoRoll') return;
       const ids = liveSelectedNoteIds;
-      if ((e.key === 'Delete' || e.key === 'Backspace') && clip && ids.length > 0) {
+      if (matchShortcut(e, 'pianoRoll') === 'deleteSelectedNotes' && clip && ids.length > 0) {
         e.preventDefault();
         removeNotes(clip.id, ids);
         selectNotes([]);
@@ -764,6 +763,23 @@ export function PianoRoll() {
     [selectNotes],
   );
 
+  // Escape during a note drag or marquee cancels it like pointercancel: the
+  // preview is dropped, nothing is committed, and the later pointerup is a no-op.
+  useEffect(() => {
+    function onEscape(e: KeyboardEvent) {
+      const drag = dragRef.current;
+      if (!drag || matchShortcut(e, 'gesture') !== 'cancelGesture') return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragRef.current = null;
+      setMarquee(null);
+      setNotePreview(null);
+      if (drag.kind !== 'marquee') selectNotes(drag.selectionBefore);
+    }
+    window.addEventListener('keydown', onEscape, true);
+    return () => window.removeEventListener('keydown', onEscape, true);
+  }, [selectNotes]);
+
   const onGridDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       if (!clip || clip.type !== 'midi') return;
@@ -822,7 +838,7 @@ export function PianoRoll() {
 
   const onNoteKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>, note: NoteEvent) => {
-      if (event.altKey) return;
+      if (event.altKey || !canHandleShortcut(event.nativeEvent)) return;
       const commandKey = (event.ctrlKey || event.metaKey) && !event.shiftKey;
       const isSelectAll = commandKey && event.key.toLowerCase() === 'a';
       const isDuplicate = commandKey && event.key.toLowerCase() === 'd';
@@ -1076,7 +1092,10 @@ export function PianoRoll() {
 
   const onGridKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey) {
+      if (
+        event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey
+        || !canHandleShortcut(event.nativeEvent)
+      ) {
         return;
       }
       const recognized =

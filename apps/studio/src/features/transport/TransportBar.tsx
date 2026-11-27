@@ -831,7 +831,8 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
     emergencyExportLock.current = true;
     setEmergencyExportBusy(true);
     try {
-      const result = await exportEmergencyProjectBackup(project, {
+      // Mid-gesture, back up the last committed project, never the drag's live value.
+      const result = await exportEmergencyProjectBackup(useStore.getState().committedProject(), {
         runtime: studioRuntime.kind,
         exportNative: async (bytes, fileName) => {
           const { nativeFileGateway } = await import('../../platform/nativeFileGateway');

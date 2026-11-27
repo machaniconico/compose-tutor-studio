@@ -3,6 +3,9 @@
 // Holds the project, transport, editor UI state, panel state, and an
 // undo/redo history of project snapshots. Project mutations always bump
 // `updatedAt`, push history, and schedule a debounced localStorage save.
+// Inside a gesture transaction (one fader drag) mutations keep every normal
+// gate but only replace the live project; the commit adds a single undo step
+// and the first autosave, and a cancel restores the pre-gesture project.
 
 import { create } from 'zustand';
 import {
@@ -482,6 +485,21 @@ export type StoreState = {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  /**
+   * Open the one app-wide fader transaction with a fresh gesture token.
+   * Every edit keeps the normal gates. Commit records one Undo step and
+   * schedules one autosave. Audio and automation recording refuse a begin.
+   */
+  beginProjectTransaction: (token: object, pointerId: number) => boolean;
+  commitProjectTransaction: (token: object) => boolean;
+  /** Restore the pre-gesture project without changing history or transport. */
+  cancelProjectTransaction: (token: object) => boolean;
+  /** Commit the app-wide transaction at a lifecycle boundary. */
+  finalizeProjectTransaction: () => void;
+  isProjectTransactionOpen: () => boolean;
+  ownsProjectTransaction: (token: object, pointerId?: number) => boolean;
+  /** The last committed project: the pre-gesture project while a transaction is open. */
+  committedProject: () => Project;
 
   // persistence
   initializePersistence: () => Promise<void>;
@@ -1741,12 +1759,38 @@ export function createStudioStore(
     };
   };
 
+  /**
+   * The open gesture transaction. Runtime-only: it is never persisted, and
+   * `base` is exactly the project the coordinator last received, so a flush
+   * during the gesture writes the pre-gesture state.
+   */
+  let openProjectTransaction: {
+    token: object;
+    pointerId: number;
+    base: Project;
+    projectId: string;
+    activationId: string;
+    /** Read-scalar targets edited during playback, republished on cancel. */
+    readScalarTargets: AutomationTarget[];
+  } | null = null;
+
+  const transactionMatchesActiveProject = (): boolean => {
+    const transaction = openProjectTransaction;
+    if (transaction === null) return false;
+    const state = get();
+    return transaction.projectId === state.project.id
+      && transaction.activationId === state.saveState.activationId;
+  };
+
   const runProjectOperation = async (
     operation: () => Promise<boolean>,
   ): Promise<boolean> => {
     const current = get();
     if (current.projectOperationBusy || current.audioRecordingOperationId !== null) return false;
     if (!current.finalizeAutomationRecording('project-activation')) return false;
+    // A gesture left open must never be applied to the next project, and its
+    // mid-drag state must not be flushed by the switch.
+    closeProjectTransaction('cancel');
     set({ projectOperationBusy: true });
     try {
       return await operation();
@@ -2227,6 +2271,7 @@ export function createStudioStore(
     clearSaveTimers();
     firstDirtyAt = null;
     retryAttempt = 0;
+    openProjectTransaction = null;
     automationCoordinator.activate(project, activationId);
     set({
       project,
@@ -2368,6 +2413,54 @@ export function createStudioStore(
     });
   };
 
+  /** Close the open transaction. Returns true when the requested outcome took effect. */
+  const closeProjectTransaction = (mode: 'commit' | 'cancel'): boolean => {
+    const transaction = openProjectTransaction;
+    if (transaction === null) return false;
+    const matches = transactionMatchesActiveProject();
+    openProjectTransaction = null;
+    // Stale (another project was activated): never touch the current one.
+    if (!matches) return false;
+    const state = get();
+    const current = state.project;
+    if (current === transaction.base) return true;
+    if (mode === 'commit') {
+      if (scheduleSave(current, state.saveState.revision + 1)) {
+        set({
+          past: [...get().past, transaction.base].slice(-HISTORY_CAP),
+          future: [],
+        });
+        return true;
+      }
+      // Persistence refused the gesture result; restore the base instead.
+    }
+    const base = transaction.base;
+    const playing = state.transport.phase !== 'stopped';
+    // Project data only: transport and playback state stay exactly as they are.
+    set((latest) => ({
+      project: base,
+      editor: reconcileEditorSelection(latest.editor, base),
+      armedAudioTrackId: reconcileArmedAudioTrackId(latest.armedAudioTrackId, base),
+      audioWarpAuditionClipId: hasAuditionableAudioWarp(
+        base,
+        latest.audioWarpAuditionClipId,
+      )
+        ? latest.audioWarpAuditionClipId
+        : null,
+      automationReadScalarCommit: playing && transaction.readScalarTargets.length > 0
+        ? {
+            playbackRequestId: latest.transport.playbackRequestId,
+            targets: transaction.readScalarTargets.map((target) =>
+              Object.freeze({ ...target })),
+          }
+        : latest.automationReadScalarCommit,
+    }));
+    if (base.key !== current.key || base.scale !== current.scale) {
+      publishScaleSnapStateIfEnabled();
+    }
+    return mode === 'cancel';
+  };
+
   /** Apply an immutable project change: bump updatedAt, push history, save. */
   const commitProject = (
     next: Project,
@@ -2379,10 +2472,18 @@ export function createStudioStore(
     automationAuthorization?: AutomationRecordingOwnership,
     automationReadScalarTarget?: AutomationTarget,
   ): boolean => {
-    const stateAtCommit = get();
-    if (stateAtCommit.projectOperationBusy) return false;
+    if (get().projectOperationBusy) return false;
     if (
-      automationCoordinator.hasActivePass()
+      openProjectTransaction !== null
+      && (recordingAuthorization !== undefined || automationAuthorization !== undefined)
+    ) {
+      // Recording and automation punch-outs own their own history boundaries.
+      closeProjectTransaction('commit');
+    }
+    const stateAtCommit = get();
+    const hasAutomationPass = automationCoordinator.hasActivePass();
+    if (
+      hasAutomationPass
       && automationAuthorization === undefined
       && automationReadScalarTarget === undefined
     ) {
@@ -2437,9 +2538,9 @@ export function createStudioStore(
       });
       return false;
     }
-    const preparedReadScalarRebase = automationReadScalarTarget === undefined
-      ? null
-      : automationCoordinator.prepareReadScalarRebase(current, stamped);
+    const preparedReadScalarRebase = hasAutomationPass && automationReadScalarTarget !== undefined
+      ? automationCoordinator.prepareReadScalarRebase(current, stamped)
+      : null;
     if (preparedReadScalarRebase !== null && !preparedReadScalarRebase.ok) {
       return false;
     }
@@ -2456,9 +2557,24 @@ export function createStudioStore(
     ) {
       return false;
     }
-    const past = [...get().past, current].slice(-HISTORY_CAP);
-    const revision = get().saveState.revision + 1;
-    if (!scheduleSave(stamped, revision)) return false;
+    // Inside a transaction only the live project changes; the commit adds the
+    // one history entry and the first autosave of the gesture.
+    const inTransaction = openProjectTransaction !== null;
+    if (
+      openProjectTransaction !== null
+      && automationReadScalarTarget !== undefined
+      && !openProjectTransaction.readScalarTargets.some((target) =>
+        target.trackId === automationReadScalarTarget.trackId
+        && target.type === automationReadScalarTarget.type)
+    ) {
+      openProjectTransaction.readScalarTargets.push({ ...automationReadScalarTarget });
+    }
+    const past = inTransaction
+      ? get().past
+      : [...get().past, current].slice(-HISTORY_CAP);
+    if (!inTransaction && !scheduleSave(stamped, get().saveState.revision + 1)) {
+      return false;
+    }
     automationCoordinator.adoptPreparedReadScalarRebase(
       preparedReadScalarRebase?.ok
         ? preparedReadScalarRebase.preparation
@@ -2468,7 +2584,7 @@ export function createStudioStore(
     set((state) => ({
       project: stamped,
       past,
-      future: [],
+      future: inTransaction ? state.future : [],
       editor: reconcileEditorSelection(state.editor, stamped),
       armedAudioTrackId: reconcileArmedAudioTrackId(state.armedAudioTrackId, stamped),
       audioWarpAuditionClipId: hasAuditionableAudioWarp(
@@ -3054,8 +3170,11 @@ export function createStudioStore(
       ) {
         return false;
       }
+      if (Object.values(state.automationRecording.trackModes).some((mode) => mode !== 'read')) {
+        closeProjectTransaction('commit');
+      }
       const result = automationCoordinator.attachPlayback({
-        project: state.project,
+        project: get().project,
         activationId: state.saveState.activationId,
         playbackRequestId: requestId,
         currentBeat,
@@ -3709,6 +3828,9 @@ export function createStudioStore(
       ) {
         return null;
       }
+      // Like Undo finalizing an automation pass: an open gesture becomes one
+      // committed step before recording freezes its snapshot.
+      closeProjectTransaction('commit');
       const operationId = nextAudioRecordingOperationId;
       nextAudioRecordingOperationId =
         nextAudioRecordingOperationId === Number.MAX_SAFE_INTEGER
@@ -3733,6 +3855,7 @@ export function createStudioStore(
     undo: () => {
       if (get().projectOperationBusy || get().audioRecordingOperationId !== null) return;
       if (!finalizeAutomationPass('undo')) return;
+      closeProjectTransaction('commit');
       const { past, project, future } = get();
       const previous = past[past.length - 1];
       if (!previous) return;
@@ -3762,6 +3885,7 @@ export function createStudioStore(
     redo: () => {
       if (get().projectOperationBusy || get().audioRecordingOperationId !== null) return;
       if (!finalizeAutomationPass('redo')) return;
+      closeProjectTransaction('commit');
       const { past, project, future } = get();
       const next = future[0];
       if (!next) return;
@@ -3790,6 +3914,58 @@ export function createStudioStore(
     },
     canUndo: () => get().audioRecordingOperationId === null && get().past.length > 0,
     canRedo: () => get().audioRecordingOperationId === null && get().future.length > 0,
+    beginProjectTransaction: (token, pointerId) => {
+      const state = get();
+      if (automationCoordinator.hasActivePass()) {
+        set({
+          persistenceNotice: {
+            kind: 'warning',
+            message: 'オートメーションを記録中です。ドラッグで音量やパンを変えるには、再生を止めてください。',
+          },
+        });
+        return false;
+      }
+      if (
+        state.projectOperationBusy
+        || state.audioRecordingOperationId !== null
+        || state.localDataErase.phase !== 'idle'
+      ) {
+        return false;
+      }
+      if (openProjectTransaction !== null) {
+        if (transactionMatchesActiveProject()) return false;
+        openProjectTransaction = null;
+      }
+      openProjectTransaction = {
+        token,
+        pointerId,
+        base: state.project,
+        projectId: state.project.id,
+        activationId: state.saveState.activationId,
+        readScalarTargets: [],
+      };
+      return true;
+    },
+    commitProjectTransaction: (token) => {
+      if (openProjectTransaction?.token !== token) return false;
+      return closeProjectTransaction('commit');
+    },
+    cancelProjectTransaction: (token) => {
+      if (openProjectTransaction?.token !== token) return false;
+      return closeProjectTransaction('cancel');
+    },
+    finalizeProjectTransaction: () => {
+      closeProjectTransaction('commit');
+    },
+    isProjectTransactionOpen: () => transactionMatchesActiveProject(),
+    ownsProjectTransaction: (token, pointerId) =>
+      openProjectTransaction?.token === token
+      && (pointerId === undefined || openProjectTransaction.pointerId === pointerId)
+      && transactionMatchesActiveProject(),
+    committedProject: () =>
+      transactionMatchesActiveProject() && openProjectTransaction !== null
+        ? openProjectTransaction.base
+        : get().project,
 
     // --- persistence ---
     initializePersistence: () => {
@@ -3809,7 +3985,8 @@ export function createStudioStore(
       const state = get();
       if (state.projectOperationBusy) return false;
       if (!coordinator.markDirty({
-        project: state.project,
+        // Mid-gesture, the last committed project is what gets saved.
+        project: get().committedProject(),
         activationId: state.saveState.activationId,
         revision: state.saveState.revision,
       })) {
