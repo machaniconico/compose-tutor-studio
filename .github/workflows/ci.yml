@@ -70,6 +70,14 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --dir apps/studio exec playwright install --with-deps chromium
 
+      - name: Check network, secret, asset and web size policies
+        run: |
+          pnpm test:scripts
+          pnpm check:network
+          pnpm check:release-secrets
+          pnpm check:source-assets
+          pnpm check:size
+
       - name: Run browser release gate
         run: pnpm e2e
 
