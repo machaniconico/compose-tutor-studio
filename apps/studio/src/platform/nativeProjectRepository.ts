@@ -152,7 +152,7 @@ function isTimestamp(value: unknown): value is string {
 }
 
 function decodeProjectFailure(code: ProjectDecodeErrorCode): DecodeResult<never> {
-  if (code === 'future-schema-version') {
+  if (code === 'future-schema-version' || code === 'legacy-wave5-format') {
     return { ok: false, code: 'unsupported-version', retry: 'never' };
   }
   if (code === 'migration-failed' || code === 'migration-unavailable') {

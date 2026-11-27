@@ -1,5 +1,6 @@
 import { CURRENT_SCHEMA_VERSION } from './factories';
 import { migrateProject, ProjectMigrationError } from './migrations';
+import { detectProjectFormat, LEGACY_WAVE5_FORMAT_MESSAGE } from './project-format';
 import type {
   AudioAsset,
   AudioCompSegment,
@@ -31,12 +32,13 @@ import type {
 } from './types';
 import { validateProject } from './validation';
 
+export { detectProjectFormat, LEGACY_WAVE5_FORMAT_MESSAGE } from './project-format';
+
 export const DEFAULT_MAX_PROJECT_JSON_BYTES = 16 * 1024 * 1024;
 export const MAX_PROJECT_CODEC_ISSUES = 100;
 export const MAX_PROJECT_COLLECTION_ITEMS = 100_000;
 export const MAX_PROJECT_TOTAL_ITEMS = 200_000;
 export const MAX_PROJECT_STRING_LENGTH = 4_096;
-
 export type ProjectCodecIssueCode =
   | 'required'
   | 'invalid-type'
@@ -60,6 +62,7 @@ export type ProjectDecodeErrorCode =
   | 'invalid-root'
   | 'invalid-schema-version'
   | 'future-schema-version'
+  | 'legacy-wave5-format'
   | 'migration-unavailable'
   | 'migration-failed'
   | 'invalid-project'
@@ -1505,8 +1508,46 @@ function schemaVersionOf(input: unknown):
 
 /** Decode an untrusted project value into a detached, validated Project. */
 export function decodeProject(input: unknown): ProjectDecodeResult {
+  try {
+    return decodeProjectValue(input);
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: 'invalid-project',
+        issues: [{ path: '', code: 'invalid-type', message: 'project properties could not be read' }],
+      },
+    };
+  }
+}
+
+function decodeProjectValue(input: unknown): ProjectDecodeResult {
   const version = schemaVersionOf(input);
   if (!version.ok) return version.result;
+
+  const format = detectProjectFormat(input);
+  if (format === 'wave5-v3') {
+    return {
+      ok: false,
+      error: {
+        code: 'legacy-wave5-format',
+        issues: [{
+          path: 'schemaVersion',
+          code: 'invalid-type',
+          message: LEGACY_WAVE5_FORMAT_MESSAGE,
+        }],
+      },
+    };
+  }
+  if (format === 'invalid-project') {
+    return {
+      ok: false,
+      error: {
+        code: 'invalid-project',
+        issues: [{ path: '', code: 'required', message: 'expected all five required v3 project fields' }],
+      },
+    };
+  }
 
   let current: unknown = input;
   if (version.version < CURRENT_SCHEMA_VERSION) {

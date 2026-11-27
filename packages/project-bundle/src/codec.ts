@@ -81,7 +81,11 @@ export type PortableProjectBundleErrorCode =
   (typeof PORTABLE_PROJECT_BUNDLE_ERROR_CODES)[number];
 
 export class PortableProjectBundleError extends Error {
-  constructor(readonly code: PortableProjectBundleErrorCode, message: string = code) {
+  constructor(
+    readonly code: PortableProjectBundleErrorCode,
+    message: string = code,
+    readonly reason?: 'legacy-wave5-format',
+  ) {
     super(message);
     this.name = 'PortableProjectBundleError';
   }
@@ -537,10 +541,14 @@ export async function decodePortableProjectBundle(
     maxBytes: DEFAULT_MAX_PROJECT_JSON_BYTES,
   });
   if (!decodedProject.ok) {
+    const code = decodedProject.error.code;
+    if (code === 'legacy-wave5-format') {
+      throw new PortableProjectBundleError('unsupported-version', undefined, code);
+    }
     throw new PortableProjectBundleError(
-      decodedProject.error.code === 'too-large'
+      code === 'too-large'
         ? 'too-large'
-        : decodedProject.error.code === 'future-schema-version'
+        : code === 'future-schema-version'
           ? 'unsupported-version'
           : 'invalid-project',
     );

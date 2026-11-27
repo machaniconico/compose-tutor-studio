@@ -32,6 +32,10 @@
 
 Project JSON transactionとAudio Asset objectは正本を分離する。production import / Audio Track録音は入力を48 kHz mono/stereo PCM16 WAVへ正規化し、binaryをSHA-256 content-addressed repositoryへ確定してから、開始時Projectがcurrentの場合だけready metadataとAudio Clipを1回のProject CASへ採用する。importと録音待機なしの録音ではAudio Trackも作り、Record Armされた既存Audio Trackへの録音ではそのTrack / routingを変えずClipを追記する。Record Armと入力device IDはruntime-onlyでJSON transactionへ含めない。JSON transactionへbinaryを埋め込まないため単一filesystem transactionではないが、Projectが存在しないobjectを先に参照する順序を作らない。binary確定後にcancel / stale CAS / codec拒否となったobjectはorphanとして安全に残し、native起動時のgeneration-aware GCで回収する。
 
+### 2.2 wave5 v3 の検出と保全
+
+JSON 読み込みと localStorage の旧データ走査では、構造検証と移行の前に v3 の必須5キーを確認する。すべて欠けている v3 は未公開版 wave5 の形式として `legacy-wave5-format` を返す。旧データ走査では `unsupported-version` として記録し、移行用バックアップに元のデータを保存する。元の localStorage キーはバックアップ用のキーも含めて保全する。Rust の移行証明とネイティブへのプロジェクト取り込みは、必須キーが欠けている v3 をプロジェクトとして受け付けない。
+
 ## 3. localStorageレコード
 
 論理キーは次の4種類。IDとoperation IDはURL encodingしてキーへ格納する。

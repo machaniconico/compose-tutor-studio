@@ -1,4 +1,5 @@
 import { CURRENT_SCHEMA_VERSION } from './factories';
+import { detectProjectFormat, LEGACY_WAVE5_FORMAT_MESSAGE } from './project-format';
 
 /** A single, consecutive project-schema migration. */
 export type Migration = Readonly<{
@@ -455,6 +456,15 @@ function assertNoLegacyMasterAutomation(
 export function migrateProject(raw: Readonly<Record<string, unknown>>): Record<string, unknown> {
   assertMigrationRegistry();
   let current = cloneRecord(raw);
+  const format = detectProjectFormat(current);
+  if (format !== 'main') {
+    throw new ProjectMigrationError(
+      'migration-failed',
+      format === 'wave5-v3'
+        ? LEGACY_WAVE5_FORMAT_MESSAGE
+        : 'Project format could not be verified before migration',
+    );
+  }
   const initialVersion = current.schemaVersion;
   if (!Number.isSafeInteger(initialVersion) || (initialVersion as number) < 1) {
     throw new ProjectMigrationError(

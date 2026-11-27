@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  LEGACY_WAVE5_FORMAT_MESSAGE,
   PROJECT_TEMPLATES,
   instantiateTemplate,
   type TemplateId,
@@ -824,11 +825,13 @@ function SavedProjectList({ onDone }: { onDone: () => void }) {
               <div className="saved-item__main" role="status">
                 <span className="saved-item__title">読み込みに注意が必要です</span>
                 <span className="saved-item__date">
-                  {summary.errorCode === 'unsupported-version'
-                    ? '新しいアプリ版で作成されています'
-                    : summary.errorCode === 'conflict'
-                      ? '複数画面の未保存変更が競合しています'
-                    : '保存データを検証できませんでした'}
+                  {summary.reason === 'legacy-wave5-format'
+                    ? LEGACY_WAVE5_FORMAT_MESSAGE
+                    : summary.errorCode === 'unsupported-version'
+                      ? '新しいアプリ版で作成されています'
+                      : summary.errorCode === 'conflict'
+                        ? '複数画面の未保存変更が競合しています'
+                        : '保存データを検証できませんでした'}
                 </span>
               </div>
               <button

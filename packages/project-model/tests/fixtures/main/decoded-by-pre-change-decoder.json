@@ -1,0 +1,2422 @@
+{
+  "v1": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 1,
+    "migrated": true
+  },
+  "v2": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 2,
+    "migrated": true
+  },
+  "v3": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 3,
+    "migrated": true
+  },
+  "v4": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 4,
+    "migrated": true
+  },
+  "v5": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 5,
+    "migrated": true
+  },
+  "v6": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 6,
+    "migrated": true
+  },
+  "v7": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 7,
+    "migrated": true
+  },
+  "v8": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 8,
+    "migrated": true
+  },
+  "v9": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 9,
+    "migrated": true
+  },
+  "v10": {
+    "ok": true,
+    "project": {
+      "id": "main-fixture",
+      "schemaVersion": 10,
+      "title": "Main fixture",
+      "bpm": 96,
+      "timeSignature": [
+        4,
+        4
+      ],
+      "key": "C",
+      "scale": "major",
+      "lengthBars": 8,
+      "lengthBeats": 32,
+      "tempoMap": [
+        {
+          "id": "migrated-tempo-1",
+          "beat": 0,
+          "bpm": 96
+        }
+      ],
+      "timeSignatureMap": [
+        {
+          "id": "migrated-signature-1",
+          "beat": 0,
+          "numerator": 4,
+          "denominator": 4
+        }
+      ],
+      "audioAssets": [
+        {
+          "id": "migrated-audio-1",
+          "availability": "unresolved",
+          "legacyAssetId": "legacy-asset-1",
+          "reason": "legacy-reference"
+        }
+      ],
+      "audioTakeFolders": [],
+      "automationLanes": [],
+      "automationReadState": {
+        "globalEnabled": true,
+        "disabledTrackIds": []
+      },
+      "audioRouting": {
+        "outputs": [
+          {
+            "sourceTrackId": "trk-lead",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-drums",
+            "destination": {
+              "type": "master"
+            }
+          },
+          {
+            "sourceTrackId": "trk-audio",
+            "destination": {
+              "type": "master"
+            }
+          }
+        ],
+        "sends": []
+      },
+      "tracks": [
+        {
+          "id": "trk-lead",
+          "name": "Melody",
+          "type": "instrument",
+          "role": "learning.melody",
+          "clips": [
+            {
+              "id": "clip-lead",
+              "trackId": "trk-lead",
+              "type": "midi",
+              "startBeat": 0,
+              "lengthBeats": 8,
+              "loop": false,
+              "notes": [
+                {
+                  "id": "n1",
+                  "pitch": 60,
+                  "startBeat": 0,
+                  "durationBeats": 1,
+                  "velocity": 90
+                },
+                {
+                  "id": "n2",
+                  "pitch": 64,
+                  "startBeat": 1,
+                  "durationBeats": 1,
+                  "velocity": 80
+                },
+                {
+                  "id": "n3",
+                  "pitch": 67,
+                  "startBeat": 2,
+                  "durationBeats": 2,
+                  "velocity": 100
+                }
+              ]
+            }
+          ],
+          "volume": 0.8,
+          "pan": -0.25,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "synth",
+            "preset": "saw-lead"
+          },
+          "effects": [
+            {
+              "id": "fx-1",
+              "type": "reverb",
+              "enabled": true,
+              "params": {
+                "mix": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "id": "trk-drums",
+          "name": "Drums",
+          "type": "drum",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-drums",
+              "trackId": "trk-drums",
+              "type": "drum",
+              "startBeat": 0,
+              "lengthBeats": 4,
+              "loop": true,
+              "drumEvents": [
+                {
+                  "id": "d1",
+                  "lane": "kick",
+                  "stepIndex": 0,
+                  "velocity": 110
+                },
+                {
+                  "id": "d2",
+                  "lane": "snare",
+                  "stepIndex": 4,
+                  "velocity": 100
+                },
+                {
+                  "id": "d3",
+                  "lane": "closedHat",
+                  "stepIndex": 2,
+                  "velocity": 70
+                }
+              ],
+              "stepsPerBar": 16
+            }
+          ],
+          "volume": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false,
+          "instrument": {
+            "type": "drumkit",
+            "preset": "basic-kit"
+          },
+          "effects": []
+        },
+        {
+          "id": "trk-audio",
+          "name": "Vocal",
+          "type": "audio",
+          "role": "general",
+          "clips": [
+            {
+              "id": "clip-audio",
+              "trackId": "trk-audio",
+              "type": "audio",
+              "startBeat": 4,
+              "lengthBeats": 4,
+              "loop": false,
+              "audioAssetId": "migrated-audio-1",
+              "sourceStartFrame": 0,
+              "sourceFrameCount": 0,
+              "fadeInFrames": 0,
+              "fadeOutFrames": 0,
+              "gainDb": 0
+            }
+          ],
+          "volume": 0.9,
+          "pan": 0.1,
+          "mute": false,
+          "solo": false,
+          "effects": []
+        }
+      ],
+      "chordTrack": [
+        {
+          "id": "ch1",
+          "startBeat": 0,
+          "durationBeats": 4,
+          "symbol": "C",
+          "root": "C",
+          "quality": "major",
+          "notes": [
+            60,
+            64,
+            67
+          ]
+        },
+        {
+          "id": "ch2",
+          "startBeat": 4,
+          "durationBeats": 4,
+          "symbol": "G",
+          "root": "G",
+          "quality": "major",
+          "notes": [
+            55,
+            59,
+            62
+          ]
+        }
+      ],
+      "sections": [
+        {
+          "id": "sec1",
+          "name": "Verse",
+          "type": "verse",
+          "startBar": 0,
+          "lengthBars": 4
+        }
+      ],
+      "createdAt": "2026-07-10T00:00:00.000Z",
+      "updatedAt": "2026-07-10T00:05:00.000Z"
+    },
+    "sourceSchemaVersion": 10,
+    "migrated": false
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "id": "wave5-full",
+  "schemaVersion": 3,
+  "title": "Wave5 full song",
+  "bpm": 108,
+  "timeSignature": [4, 4],
+  "key": "A",
+  "scale": "naturalMinor",
+  "lengthBars": 8,
+  "loopRange": { "startBeat": 0, "endBeat": 16 },
+  "swing": 30,
+  "tracks": [
+    {
+      "id": "w5-chords", "name": "Chords", "type": "instrument", "role": "chords",
+      "color": "#5b8def", "volume": 0.8, "pan": 0, "mute": false, "solo": false,
+      "instrument": {
+        "type": "synth", "preset": "warm-pad",
+        "macros": { "brightness": 0.6, "release": 0.4, "width": 0.5, "attack": 0.2 }
+      },
+      "effects": [{ "id": "w5-fx1", "type": "reverb", "enabled": true, "params": { "mix": 0.25 } }],
+      "automation": { "volume": { "points": [{ "beat": 0, "value": 0.5 }, { "beat": 8, "value": 1 }] } },
+      "sends": { "w5-return": 0.3 },
+      "clips": [{
+        "id": "w5-clip-chords", "trackId": "w5-chords", "type": "midi",
+        "startBeat": 0, "lengthBeats": 8, "loop": true, "contentLengthBeats": 4,
+        "notes": [
+          { "id": "w5-n1", "pitch": 57, "startBeat": 0, "durationBeats": 2, "velocity": 90 },
+          { "id": "w5-n2", "pitch": 60, "startBeat": 0, "durationBeats": 2, "velocity": 90 }
+        ]
+      }]
+    },
+    {
+      "id": "w5-drums", "name": "Drums", "type": "drum", "role": "drums",
+      "volume": 1, "pan": 0, "mute": false, "solo": false,
+      "instrument": { "type": "drumkit", "preset": "basic-kit" },
+      "effects": [],
+      "clips": [{
+        "id": "w5-clip-drums", "trackId": "w5-drums", "type": "drum",
+        "startBeat": 0, "lengthBeats": 4, "loop": true, "stepsPerBar": 16,
+        "drumEvents": [
+          { "id": "w5-d1", "lane": "kick", "stepIndex": 0, "velocity": 110 },
+          { "id": "w5-d2", "lane": "closedHat", "stepIndex": 2, "velocity": 70 }
+        ]
+      }]
+    },
+    {
+      "id": "w5-return", "name": "Reverb return", "type": "bus",
+      "volume": 1, "pan": 0, "mute": false, "solo": false, "effects": [], "clips": []
+    }
+  ],
+  "chordTrack": [
+    { "id": "w5-ch1", "startBeat": 0, "durationBeats": 4, "symbol": "Am", "root": "A", "quality": "minor", "notes": [57, 60, 64], "degree": "i", "function": "T" }
+  ],
+  "sections": [{ "id": "w5-sec1", "name": "Intro", "type": "intro", "startBar": 0, "lengthBars": 2 }],
+  "createdAt": "2026-06-01T00:00:00.000Z",
+  "updatedAt": "2026-06-02T00:00:00.000Z"
+}

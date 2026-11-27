@@ -4710,6 +4710,56 @@ fn legacy_import_rejects_explicit_null_optional_fields_before_staging() {
     );
 }
 
+const WAVE5_V3_FIXTURE: &str =
+    include_str!("../../../../../packages/project-model/tests/fixtures/wave5-v3/project-full.json");
+
+/// P02 acceptance: a wave5 v3 snapshot (schemaVersion 3 with none of the five main-v3
+/// map keys) must never enter the main migration chain or the native store.
+/// Contract: `migrate_project_for_legacy_proof` returns None for every reachable target
+/// version, and `import_legacy_project` fails with `InvalidProject` without staging rows.
+#[test]
+fn legacy_proof_rejects_wave5_v3_snapshot() {
+    let wave5: Value = serde_json::from_str(WAVE5_V3_FIXTURE).expect("wave5 fixture parses");
+    for key in [
+        "lengthBeats",
+        "tempoMap",
+        "timeSignatureMap",
+        "audioAssets",
+        "automationLanes",
+    ] {
+        assert!(
+            wave5.get(key).is_none(),
+            "fixture must be a wave5 v3 file: {key}"
+        );
+    }
+    for target_version in 4..=PROJECT_SCHEMA_VERSION {
+        assert!(
+            migrate_project_for_legacy_proof(wave5.clone(), target_version).is_none(),
+            "wave5 v3 must not migrate to v{target_version}"
+        );
+    }
+
+    let (_directory, repository) = initialized_repository();
+    let snapshot = legacy_snapshot(&[("cts.project.wave5-full", WAVE5_V3_FIXTURE)], CREATED_AT);
+    repository.backup_legacy_snapshot(snapshot.clone()).unwrap();
+    let mut request = legacy_head_request(&snapshot, "wave5-full", "Wave5 full song", 1);
+    request.project_json = Some(WAVE5_V3_FIXTURE.to_owned());
+    assert_eq!(
+        repository.import_legacy_project(request).unwrap_err().code,
+        PersistenceErrorCode::InvalidProject
+    );
+    assert_eq!(
+        connection_value(&repository, |connection| {
+            connection
+                .query_row("SELECT COUNT(*) FROM legacy_project_staging", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+        }),
+        0
+    );
+}
+
 #[test]
 fn predecessor_allows_only_a_causal_newer_revision_in_the_same_activation() {
     let (_directory, repository) = initialized_repository();

@@ -95,6 +95,7 @@ export type UnreadableNativeRecoveryEntry = NativeRecoveryIdentity &
       PersistenceErrorCode,
       'corrupt-data' | 'unsupported-version' | 'migration-failed'
     >;
+    reason?: PersistenceError['reason'];
   }>;
 
 export type NativeRecoveryEntry =
@@ -133,6 +134,7 @@ function failure(
   operation: RepositoryOperation,
   code: PersistenceErrorCode,
   projectId?: string,
+  reason?: PersistenceError['reason'],
 ): FailedRepositoryResult {
   return {
     ok: false,
@@ -140,6 +142,7 @@ function failure(
       operation,
       code,
       retry: retryFor(code),
+      ...(reason ? { reason } : {}),
       ...(projectId !== undefined ? { projectId } : {}),
     },
   };
@@ -233,7 +236,7 @@ function recoveryChecksum(value: Omit<NativeRecoveryRecord, 'checksum'>): string
 function decodeErrorCode(
   code: ProjectDecodeErrorCode,
 ): UnreadableNativeRecoveryEntry['errorCode'] {
-  if (code === 'future-schema-version') return 'unsupported-version';
+  if (code === 'future-schema-version' || code === 'legacy-wave5-format') return 'unsupported-version';
   if (code === 'migration-failed' || code === 'migration-unavailable') return 'migration-failed';
   return 'corrupt-data';
 }
@@ -262,7 +265,7 @@ function parseRecoveryRecord(
   key: string,
 ):
   | { status: 'ready'; record: NativeRecoveryRecord; project: Project }
-  | { status: 'unreadable'; errorCode: UnreadableNativeRecoveryEntry['errorCode'] } {
+  | Pick<UnreadableNativeRecoveryEntry, 'status' | 'errorCode' | 'reason'> {
   const keyParts = parseNativeRecoveryKey(key);
   if (!keyParts) return { status: 'unreadable', errorCode: 'corrupt-data' };
   let value: unknown;
@@ -326,7 +329,12 @@ function parseRecoveryRecord(
     maxBytes: DEFAULT_MAX_PROJECT_JSON_BYTES,
   });
   if (!decoded.ok) {
-    return { status: 'unreadable', errorCode: decodeErrorCode(decoded.error.code) };
+    const code = decoded.error.code;
+    return {
+      status: 'unreadable',
+      errorCode: decodeErrorCode(code),
+      ...(code === 'legacy-wave5-format' ? { reason: code } : {}),
+    };
   }
   if (decoded.project.id !== content.projectId) {
     return { status: 'unreadable', errorCode: 'corrupt-data' };
@@ -464,6 +472,7 @@ export class NativeRecoveryJournal implements SynchronousRecoveryCapability {
             ? { activationId: parsedKey.activationId }
             : {}),
           errorCode: parsed.errorCode,
+          ...(parsed.reason ? { reason: parsed.reason } : {}),
         };
       }
       const { record } = parsed;
@@ -539,7 +548,7 @@ export class NativeRecoveryJournal implements SynchronousRecoveryCapability {
     if (existing) {
       const parsed = parseRecoveryRecord(existing.raw, key);
       if (parsed.status === 'unreadable') {
-        return failure('save', parsed.errorCode, projectId);
+        return failure('save', parsed.errorCode, projectId, parsed.reason);
       }
       if (parsed.record.revision > request.revision) {
         return failure('save', 'conflict', projectId);
