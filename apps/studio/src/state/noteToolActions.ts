@@ -8,8 +8,8 @@
 // - 同じ高さの音の重なりと「選んだ音以外は鳴り方が変わらない」ことは、P33 と同じ
 //   scheduleProblem(buildScheduleEvents の多重集合で完全一致、スウィング込み)で確かめる。
 // - ループするクリップでは、ループの周期(最後の音の終わり)が変わる操作は断る。
-// - レガート: 選んだ音を、それより後に始まる最初の選んだ音(高さは問わない。和音は同じ始まり)の
-//   始まりまで伸ばす(縮めることもある)。いちばん後ろの音は変えない。クリップの終わりは超えない。
+// - レガート(鳴る時間で定義): 長さ = 次に鳴り始める選んだ音(高さは問わない)の鳴り始め − 自分の鳴り始め
+//   (スウィング込み、P20 の resolveGrooveNoteSpan)。いちばん後ろの音は変えない。
 // - スタッカート: 長さを半分(STACCATO_RATIO)にする。tick に四捨五入し、最低 1 tick。
 //   すでに 1 tick の音は変えない。
 // - 連結: 同じ高さで、次の音が前の音の終わりと接するか重なる選んだ音を 1 つにする。
@@ -26,6 +26,9 @@ import {
   PPQ,
   beatTick,
   midiClipNaturalPatternLength,
+  resolveGrooveNoteSpan,
+  type Clip,
+  type GrooveNoteSpan,
   type NoteEvent,
   type Project,
 } from '@cts/project-model';
@@ -72,6 +75,20 @@ function ticksOf(note: NoteEvent): { start: number; duration: number } | null {
   const start = exactTicks(note.startBeat);
   const duration = exactTicks(note.durationBeats);
   return start === null || duration === null ? null : { start, duration };
+}
+
+function placementOf(target: EditTarget, clipId: string): Clip {
+  return target.placements.find((clip) => clip.id === clipId) ?? target.placements[0]!;
+}
+
+/** 実際に鳴る区間(スウィング込み、P20 の resolveGrooveNoteSpan)。鳴らない音は null。編集中の配置の 1 回目で数える。 */
+function soundingSpan(project: Project, placement: Clip, note: NoteEvent): GrooveNoteSpan | null {
+  return resolveGrooveNoteSpan(
+    project,
+    placement.startBeat + note.startBeat,
+    note.durationBeats,
+    placement.startBeat + placement.lengthBeats,
+  );
 }
 
 /** 変えた項目だけ整数 tick を求め、クリップ・曲の終わりに収まるか(tick で数える)確かめる。 */
@@ -153,20 +170,26 @@ function runTool(
 // 純粋関数(Project を受け取って結果を返す)
 // ---------------------------------------------------------------------------
 
-/** レガート: 選んだ音を、次に始まる選んだ音の始まりまで。 */
+/**
+ * レガート(鳴る時間で定義): 選んだ音の長さを、「次に鳴り始める選んだ音の鳴り始め − 自分の鳴り始め」に
+ * する(スウィング込み。高さは問わず、同じ鳴り始めの音は 1 つと数える)。鳴らない音があれば断る。
+ */
 export function legatoNotesInProject(project: Project, clipId: string, noteIds: readonly string[]): NoteEditOutcome {
-  return runTool(project, clipId, noteIds, (ordered) => {
-    const starts = ordered.map((note) => exactTicks(note.startBeat));
-    if (starts.some((start) => start === null)) return OFF_GRID;
-    const onsets = [...new Set(starts as number[])].sort((a, b) => a - b);
+  return runTool(project, clipId, noteIds, (ordered, target) => {
+    const placement = placementOf(target, clipId);
+    const spans = ordered.map((note) => soundingSpan(project, placement, note));
+    if (spans.some((span) => span === null)) return 'スウィングなどで鳴らない音が含まれるため、レガートはできません。';
+    const onsets = [...new Set(spans.map((span) => span!.onsetTick))].sort((a, b) => a - b);
     const replace = new Map<string, readonly NoteEvent[]>();
-    ordered.forEach((note, index) => {
-      const start = starts[index] as number;
-      const next = onsets[onsets.indexOf(start) + 1];
-      if (next === undefined) return;
-      const durationBeats = (next - start) / PPQ;
+    for (const [index, note] of ordered.entries()) {
+      const own = spans[index]!.onsetTick;
+      const next = onsets[onsets.indexOf(own) + 1];
+      if (next === undefined) continue;
+      const ticks = next - own;
+      if (!Number.isSafeInteger(ticks) || ticks <= 0) return OFF_GRID;
+      const durationBeats = ticks / PPQ;
       if (durationBeats !== note.durationBeats) replace.set(note.id, [{ ...note, durationBeats }]);
-    });
+    }
     return {
       replace,
       message: (count) => `${count}個の音を、次の音の始まりまでのばしました(レガート)。`,
