@@ -1217,6 +1217,7 @@ function trimLeadingFrames(
     }
   }
   return trimmed;
+}
 
 function scaleInPlace(channels: readonly Float32Array[], gainDb: number): void {
   if (gainDb === 0) return;

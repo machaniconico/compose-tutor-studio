@@ -4,6 +4,7 @@ import {
   compileAudioRouting,
   CURRENT_SCHEMA_VERSION,
   MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
+  resolveExportRange,
   ScheduleEventLimitError,
   splitClip,
 } from '@cts/project-model';
@@ -2272,6 +2273,7 @@ describe('renderProjectToWav graph ownership', () => {
     const channels = [signal, Float32Array.from(signal)];
     const audioBuffer = {
       numberOfChannels: 2,
+      length: signal.length,
       sampleRate: 44_100,
       getChannelData: (channel: number) => channels[channel]!,
     } as unknown as AudioBuffer;
@@ -2331,6 +2333,20 @@ describe('renderProjectToWav graph ownership', () => {
     expect(result.levels?.limitedByPeak).toBe(false);
     // 0.1 amplitude doubled.
     expect(result.peak / 32767).toBeCloseTo(0.2, 2);
+  });
+
+  it('measures and normalizes only the exported range when combined with a loop range', async () => {
+    // 0-3 s loud (−20 dB), 3-6 s quiet (−40 dB); beats 6..12 at 120 BPM are the quiet half.
+    const signal = Float32Array.from([...sineSignal(-20, 3), ...sineSignal(-40, 3)]);
+    const resolved = resolveExportRange({ enabled: true, startBeat: 6, endBeat: 12 }, 32);
+    if (!resolved.ok) throw new Error(resolved.message);
+    // The relative gate lets the loud half dominate a whole-song measurement.
+    const whole = await renderSignal(signal, { measureLoudness: true });
+    const ranged = await renderSignal(signal, { normalize: true, range: resolved.range });
+    expect(whole.levels?.loudness).toBeCloseTo(-20, 0);
+    expect(ranged.levels?.loudness).toBeCloseTo(-40, 0);
+    expect(ranged.levels?.outputLoudness).toBeCloseTo(-14, 0);
+    expect(ranged.levels?.appliedGainDb).toBeCloseTo(26, 0);
   });
 
   it('reduces the gain to keep −1 dBTP instead of limiting', async () => {
