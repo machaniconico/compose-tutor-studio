@@ -2586,10 +2586,18 @@ export function applyRuntimeScheduleContentEdit(
     else soundingByKey.set(voice.sourceKey, [voice]);
   }
   for (const [sourceKey, voices] of soundingByKey) {
-    const dropped = (sourcesBefore.get(sourceKey) ?? 0) - (sourcesAfter.get(sourceKey) ?? 0);
-    if (dropped <= 0) continue;
-    voices.sort((left, right) => right.time - left.time);
-    for (const voice of voices.slice(0, dropped)) cancelled.add(voice);
+    const after = sourcesAfter.get(sourceKey) ?? 0;
+    if ((sourcesBefore.get(sourceKey) ?? 0) - after <= 0) continue;
+    // 周(発音時刻)ごとに、残ってよい声は編集後の元ノート数まで。消えたノートは全周で止める。
+    const byPass = new Map<number, FiredVoice[]>();
+    for (const voice of voices) {
+      const list = byPass.get(voice.time);
+      if (list) list.push(voice);
+      else byPass.set(voice.time, [voice]);
+    }
+    for (const group of byPass.values()) {
+      for (const voice of group.slice(after)) cancelled.add(voice);
+    }
   }
   for (const voice of cancelled) {
     if (voice.handle) session.synths.get(voice.trackId)?.releaseVoice(voice.handle, now);

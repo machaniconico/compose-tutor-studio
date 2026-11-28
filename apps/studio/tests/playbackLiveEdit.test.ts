@@ -505,6 +505,19 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(rec.releasedVoices.filter((v) => v.pitch === 60)).toEqual([]);
   });
 
+  it('ループの2周が重なって鳴る長いノートそのものを消すと、両方の周の音を止める - live-edit fix H2', async () => {
+    setClips([melody([[60, 0, 8], [64, 1, 1]], 0, 8)]);
+    store().setLoopRange(0, 4);
+    await play();
+    await runFor(2.5);
+    expect(rec.notes.filter((n) => n.pitch === 60).map((n) => n.start)).toEqual([10, 12]);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 60));
+    await runFor(0.1);
+
+    expect(rec.releasedVoices.filter((v) => v.pitch === 60)).toHaveLength(2);
+  });
+
   it('再生の準備中にトラック名だけを変えても、開始時に作り直さない - live-edit fix A (critic minor 1)', async () => {
     setClips([melody(TWO_NOTES_THEN_TAIL)]);
     const before = vi.mocked(buildScheduleEvents).mock.calls.length;
