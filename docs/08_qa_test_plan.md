@@ -15,6 +15,7 @@
 | audio-warp | unit/component/e2e | marker / pitch region domain、schema v10 migration、off / preserve、Worker protocol / cancel、WSOLA DSP、cache / resource、A/B runtime分離、live / full / selected WAV parity、keyboard / focus / minimum viewport |
 | vocal-cut | unit/integration/e2e | container検証、中央軽減DSP、cancel、A/B試聴、WAV出力、Project分離 |
 | track-management | unit/component/e2e | ID再発行、alias remap、Master / learning role削除保護、名前とroleの独立、atomic拒否、Undo / autosave / selection / playback |
+| journeys | e2e | 通し操作3本(`journey-chords-to-song` / `journey-record-and-edit` / `journey-mix-and-export`、`apps/studio/e2e/`)。コード配置→おまかせ伴奏(3トラックがUndo 1段)→曲の長さ→クリップ分割、PC鍵盤のMIDI録音(カウントインなし。音数と音名だけを見て、位置はクオンタイズ後に確認)→Undo/Redo→コピー/貼り付け→ステップ入力、スウィング→音色とマクロ(ドラッグ1回がUndo 1段)→ループ範囲WAV(RIFFと長さ)・ラウドネス表示・ステムZIP(`01_…wav`とCRC-32) |
 | midi-io | unit/integration | Format 0 / 1 import、Format 1 export、lossy境界、攻撃的fileの上限制御 |
 | export | integration | MIDI/WAVの独立playerでの読み出し可能性 |
 
