@@ -102,7 +102,7 @@ vi.mock('../src/audio/events', async (importOriginal) => {
 });
 
 import { buildScheduleEvents } from '../src/audio/events';
-import { initAudioBridge } from '../src/audio/playback';
+import { applyRuntimeScheduleContentEdit, initAudioBridge } from '../src/audio/playback';
 import { useStore } from '../src/state/store';
 
 const store = () => useStore.getState();
@@ -585,3 +585,49 @@ describe('clip layout and tempo edit while playing (US-012b, main: topology chan
 
   it.todo('クリップの移動・削除・テンポ変更後も再生が止まらず即時に反映される(main は停止する設計) - docs/05 §6.1.6.1 G5');
 });
+
+describe('live-edit session state stays bounded (live-edit fix I)', () => {
+  /** Sizes of every collection a session holds, keyed by field name. */
+  const collectionSizes = (session: Record<string, unknown>): Record<string, number> =>
+    Object.fromEntries(Object.entries(session).flatMap(([key, value]) => (
+      Array.isArray(value) ? [[key, value.length]]
+        : value instanceof Set || value instanceof Map ? [[key, value.size]]
+          : []
+    )));
+
+  it('1000回ドラッグしても、セッションが持つ状態の大きさは変わらない - live-edit fix I', () => {
+    setClips([melody([[60, 0, 1]])]);
+    const base = store().project;
+    const id = melodyId();
+    const at = (startBeat: number): Project => ({
+      ...base,
+      tracks: base.tracks.map((t) => (t.id !== id ? t : {
+        ...t,
+        clips: t.clips.map((c) => ({ ...c, notes: [{ ...c.notes![0]!, startBeat }] })),
+      })),
+    });
+    const session: Record<string, unknown> = {
+      scheduler: { scheduledThroughBeat: 0, replaceEventIndex: vi.fn() },
+      loop: null,
+      anchorBeat: 0,
+      // The audio clock (0) is before the anchor, so nothing is in the look-ahead window.
+      anchorTime: 100,
+      scheduleEvents: [],
+      scheduleProject: base,
+      firedVoices: [],
+      synths: new Map(),
+      planTail: (events: readonly unknown[]) => ({ tailSeconds: events.length, postLimiterTailSeconds: 0.5 }),
+      plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },
+    };
+    const apply = applyRuntimeScheduleContentEdit as unknown as
+      (session: Record<string, unknown>, project: Project, now: number) => void;
+
+    apply(session, at(0), 0);
+    const first = collectionSizes(session);
+    for (let drag = 1; drag <= 1000; drag += 1) apply(session, at(drag * 0.007), 0);
+
+    expect(collectionSizes(session)).toEqual(first);
+    expect(session.plannedTail).toEqual({ tailSeconds: 1, postLimiterTailSeconds: 0.5 });
+  });
+});
+

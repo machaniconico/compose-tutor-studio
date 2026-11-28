@@ -2071,7 +2071,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 2. 採用済みProjectから起動時と同じ`buildScheduleEvents`でeventを作り直し、ループ時は同じdensity preflightを通してから`Scheduler.replaceEventIndex`で差し替える。anchorと先読みの境界(`scheduledThroughBeat`)は動かさないので、以後のwindowとループの次のpassは新しい内容になる。予算超過は部分適用せず`audio-resource-limit`で停止する。
 3. 先読みで既にvoiceへ渡したeventは、内容(トラック・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。開始時刻がまだ先のvoiceは、gainの予定を`cancelScheduledValues`で消して0にし、sourceをその場でstop・切断するため、1 sampleも鳴らない。
 4. 発音中のvoiceは、元のノート(トラック・音色・音高・元の開始拍)ごとに、編集の前と後でそのノートが何個あるかを数える。減った数だけ、遅く始まったvoiceから止める。同じノートが2つ鳴っていて1つを消せば、止まるのは1つだけである。ループの周どうしで重なって鳴る長いノートのように、数が変わらなければ何も止めない。ノートが消えた時(音高を変えた時を含む)だけ、同じ`releaseVoice`の短いfade(30ms)で止め、クリックを出さない。強さや長さだけが変わった時(隣の編集でスイングの切り詰めが変わった時を含む)は触れず、最初に予定した通りに鳴り終わる。鳴らし直しもしない。
-5. 曲末の残響(tail): sessionは一度でもscheduleしたeventをすべて覚えておき、自然終了のtailはその全体から計画する。ノートを消しても計画したtailは縮まず、もう鳴っているディレイやリバーブの残響を途中で切らない(古い計画と新しい計画の大きい方)。
+5. 曲末の残響(tail): 編集で差し替える直前に、それまでのscheduleが必要としたtailの長さを計画し、sessionはその最大値(秒数2つ)だけを持つ。自然終了のtailは、今のscheduleの計画とこの最大値の大きい方にする。ノートを消しても計画したtailは縮まず、もう鳴っているディレイやリバーブの残響を途中で切らない。何回編集しても持つ状態の大きさは変わらない。ループ再生は自然終了しないので計画しない。
 6. 処理はtimer turnとstore購読の中だけで行い、AudioWorkletなどaudio realtime callbackでは重い処理をしない。WAV / MIDI exportは変更しない。
 
 `apps/studio/tests/playbackLiveEdit.test.ts`は、セッション継続、未編集ノートの二重発音・脱落なし、playhead保持、undoの整合、topology変更時の停止に加え、下記G1〜G4を固定する。再現手順は、そのテストファイルの`setClips`と`play`で`melody([[60,0,1],[62,4,1],[64,7,1]])`を再生し、1秒後に下記の編集を行うこと(120bpm、モックのAudioContext、手動クロック)。

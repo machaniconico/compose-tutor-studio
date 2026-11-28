@@ -165,12 +165,16 @@ type RuntimeSession = PlaybackSession & {
   /** Project the current scheduleEvents were built from. */
   scheduleProject: Project;
   /**
-   * Every event this session has scheduled at any point. The natural-drain
-   * tail is planned from it so a live edit can only grow the planned tail,
-   * never cut sound (delay, reverb, release) that is already circulating.
+   * Plans the natural-drain tail for a schedule; null for loop sessions,
+   * which never drain.
    */
-  readonly tailEvents: ScheduledEvent[];
-  readonly tailEventKeys: Set<string>;
+  readonly planTail: ((events: readonly ScheduledEvent[]) => PlannedTail) | null;
+  /**
+   * Largest tail planned for any schedule this session has played. A live
+   * edit can only grow it, so the drain never cuts sound (delay, reverb,
+   * release) that is already circulating. Two scalars, constant size.
+   */
+  plannedTail: PlannedTail;
   /** Note / drum events already handed to a voice and not yet finished. */
   firedVoices: FiredVoice[];
   readonly everAudibleTrackIds: Set<string>;
@@ -178,6 +182,15 @@ type RuntimeSession = PlaybackSession & {
   positionTimer: ReturnType<typeof setInterval> | null;
   automationCycleBoundaryHandled: boolean;
 };
+
+type PlannedTail = Readonly<{ tailSeconds: number; postLimiterTailSeconds: number }>;
+
+function maxPlannedTail(left: PlannedTail, right: PlannedTail): PlannedTail {
+  return {
+    tailSeconds: Math.max(left.tailSeconds, right.tailSeconds),
+    postLimiterTailSeconds: Math.max(left.postLimiterTailSeconds, right.postLimiterTailSeconds),
+  };
+}
 
 /** One event the scheduler already fired, kept until its sound ends. */
 type FiredVoice = {
@@ -2062,22 +2075,15 @@ async function createRuntimeSessionImpl(
     const everAudibleEdgeIds = new Set(startupRoutingMix.activeEdgeIds);
     let naturalDrainStarted = false;
 
-    const beginNaturalDrain = (onComplete: () => void): void => {
-      if (naturalDrainStarted) return;
-      naturalDrainStarted = true;
-      if (!session || disposed) {
-        onComplete();
-        return;
-      }
-
+    const planTail = (events: readonly ScheduledEvent[]): PlannedTail => {
       const latestProject = useStore.getState().project;
       const latestTracks = latestProject.id === project.id
         ? latestProject.tracks
         : project.tracks;
-      const tail = planRuntimeAudioTail(
+      return planRuntimeAudioTail(
         project,
         latestTracks,
-        session?.tailEvents ?? scheduleEvents,
+        events,
         startBeat,
         lengthBeats,
         everAudibleTrackIds,
@@ -2087,6 +2093,16 @@ async function createRuntimeSessionImpl(
           ? latestProject.audioRouting
           : project.audioRouting,
       );
+    };
+    const beginNaturalDrain = (onComplete: () => void): void => {
+      if (naturalDrainStarted) return;
+      naturalDrainStarted = true;
+      if (!session || disposed) {
+        onComplete();
+        return;
+      }
+
+      const tail = maxPlannedTail(session.plannedTail, planTail(session.scheduleEvents));
       const projectEndTime = beatToTime(
         lengthBeats,
         tempo,
@@ -2136,10 +2152,8 @@ async function createRuntimeSessionImpl(
       routingPlan,
       scheduleEvents,
       scheduleProject: project,
-      tailEvents: [...scheduleEvents],
-      tailEventKeys: new Set(scheduleEvents.map((event) => (
-        scheduleEventKey(event.payload as SchedulePayload, event.beat)
-      ))),
+      planTail: loop ? null : planTail,
+      plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },
       firedVoices: [],
       everAudibleTrackIds,
       everAudibleEdgeIds,
@@ -2505,15 +2519,13 @@ export function applyRuntimeScheduleContentEdit(
     }
   }
   const previousEvents = session.scheduleEvents;
+  // Remember the tail the outgoing schedule needed before it is replaced.
+  if (session.planTail) {
+    session.plannedTail = maxPlannedTail(session.plannedTail, session.planTail(previousEvents));
+  }
   session.scheduler.replaceEventIndex(index);
   session.scheduleEvents = events;
   session.scheduleProject = project;
-  for (const event of events) {
-    const key = scheduleEventKey(event.payload as SchedulePayload, event.beat);
-    if (session.tailEventKeys.has(key)) continue;
-    session.tailEventKeys.add(key);
-    session.tailEvents.push(event);
-  }
 
   const { anchorBeat, anchorTime } = session;
   const playheadBeat = now < anchorTime
