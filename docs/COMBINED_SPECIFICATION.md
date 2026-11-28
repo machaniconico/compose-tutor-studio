@@ -2069,7 +2069,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 反映のしくみ:
 1. audio bridgeのstore購読が、topologyを保ったままclip内容かProject直下の値が変わった編集を検出し、`setTimeout(0)`で次のtimer turnへまとめる。ドラッグで連続する編集も1回の再構築になる。
 2. 採用済みProjectから起動時と同じ`buildScheduleEvents`でeventを作り直し、ループ時は同じdensity preflightを通してから`Scheduler.replaceEventIndex`で差し替える。anchorと先読みの境界(`scheduledThroughBeat`)は動かさないので、以後のwindowとループの次のpassは新しい内容になる。予算超過は部分適用せず`audio-resource-limit`で停止する。
-3. 先読みで既にvoiceへ渡したeventは、内容(トラック・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。
+3. 先読みで既にvoiceへ渡したeventは、内容(トラック・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。開始時刻がまだ先のvoiceは、gainの予定を`cancelScheduledValues`で消して0にし、sourceをその場でstop・切断するため、1 sampleも鳴らない。
 4. 発音中のノートのeventが消えた・変わった時は、同じ`releaseVoice`の短いfade(30ms)で止め、クリックを出さない。変わっていないvoiceには触れず、鳴らし直さない。
 5. 処理はtimer turnとstore購読の中だけで行い、AudioWorkletなどaudio realtime callbackでは重い処理をしない。WAV / MIDI exportは変更しない。
 

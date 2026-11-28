@@ -415,6 +415,46 @@ describe('SynthVoiceManager node ownership', () => {
     oscillator?.finish();
   });
 
+  it('cancels a not-yet-started voice hard so it never sounds - live-edit fix B', () => {
+    const fake = new FakeSynthContext();
+    const output = new FakeAudioNode();
+    const manager = new SynthVoiceManager(
+      fake as unknown as BaseAudioContext,
+      output as unknown as AudioNode,
+      'warmPad',
+    );
+    const handle = manager.noteOn(60, 0.11, 0.5, 100);
+    expect(handle).not.toBeNull();
+    fake.currentTime = 0.1013;
+
+    manager.releaseVoice(handle!, 0.1013);
+
+    // The voice envelope gain is allocated before the per-layer gains.
+    const gain = fake.gains[0]!.gain;
+    expect(gain.cancellations).toContain(0);
+    expect(gain.setEvents.at(-1)).toEqual({ value: 0, time: 0.1013 });
+    // A later stop() replaces the natural one: every source now stops before
+    // its 110 ms start, so no sample is rendered.
+    for (const oscillator of fake.oscillators) {
+      expect(oscillator.starts).toEqual([0.11]);
+      expect(oscillator.stops.at(-1)).toBeLessThan(0.11);
+      expect(oscillator.disconnectCalls).toBe(1);
+    }
+    expect(fake.gains[0]!.disconnectCalls).toBe(1);
+  });
+
+  it('keeps the short release ramp for a voice that is already sounding', () => {
+    const fake = new FakeSynthContext();
+    const manager = synthManager(fake, new FakeAudioNode());
+    const handle = manager.noteOn(60, 0, 2, 100);
+    fake.currentTime = 0.5;
+
+    manager.releaseVoice(handle!, 0.5);
+
+    expect(fake.oscillators[0]?.stops.at(-1)).toBeCloseTo(0.55, 9);
+    expect(fake.gains[0]?.disconnectCalls).toBe(0);
+  });
+
   it('hard-disposes scheduled voices synchronously and ignores stale note callbacks', () => {
     const fake = new FakeSynthContext();
     const output = new FakeAudioNode();
