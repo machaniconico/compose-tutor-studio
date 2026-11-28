@@ -143,6 +143,8 @@ type ActiveVoice = {
   filter: BiquadFilterNode;
   gain: GainNode;
   curve: AdsrCurve;
+  /** AudioContext time the sources start. */
+  startTime: number;
   /** Earliest currently scheduled source stop on the audio timeline. */
   stopAt: number;
   remainingEnded: number;
@@ -242,6 +244,7 @@ export class SynthVoiceManager {
         filter,
         gain,
         curve,
+        startTime,
         stopAt,
         remainingEnded: oscillators.length,
         disposed: false,
@@ -282,10 +285,27 @@ export class SynthVoiceManager {
     }
   }
 
-  /** Short release of one voice (a held live note); no-op once it is gone. */
+  /**
+   * Stop one voice; no-op once it is gone. A sounding voice (a held live note,
+   * or a note deleted mid-playback) gets a short release. A voice whose start
+   * is still ahead of `when` is cancelled hard so it never renders a sample.
+   */
   releaseVoice(handle: SynthVoiceHandle, when: number): void {
     if (this.disposed) return;
-    this.requestSoftStop(handle as ActiveVoice, when, 0.03, 0.05);
+    const voice = handle as ActiveVoice;
+    if (voice.disposed) return;
+    if (when >= voice.startTime) {
+      this.requestSoftStop(voice, when, 0.03, 0.05);
+      return;
+    }
+    try {
+      voice.gain.gain.cancelScheduledValues(0);
+      voice.gain.gain.setValueAtTime(0, when);
+    } catch {
+      // A closed context cannot automate; stopping and disconnecting still wins.
+    }
+    stopOscillators(voice.oscillators, Math.min(when, this.ctx.currentTime));
+    this.disposeVoice(voice);
   }
 
   /** Request a short release without disconnecting before the sources end. */

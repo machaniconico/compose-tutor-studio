@@ -1,17 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMidiClip, type Clip, type Project } from '@cts/project-model';
+import { createDrumClip, createMidiClip, type Clip, type DrumEvent, type Project } from '@cts/project-model';
 import type { TrackGraph } from '../src/audio/graph';
 
 // US-012b (wave5 playbackLiveEdit) invariants checked against main's playback.
-// Main's design differs: a clip-layout or tempo edit stops playback
-// (hasPlaybackTopologyChanged) and note-content edits are not applied to the
-// running session. Real Scheduler on a hand-driven audio clock; the synth mock
-// records what is actually triggered and what is released/disposed.
+// A clip-layout or tempo edit stops playback (hasPlaybackTopologyChanged);
+// note-content edits are applied to the running session (G1-G4). Real
+// Scheduler on a hand-driven audio clock; the synth mock records what is
+// actually triggered and what is released/disposed.
 const rec = vi.hoisted(() => ({
   now: 10,
   notes: [] as Array<{ pitch: number; start: number; duration: number }>,
   disposed: 0,
   released: 0,
+  releasedVoices: [] as Array<{ pitch: number; start: number; when: number }>,
+  drums: [] as Array<{ lane: string; time: number; velocity: number }>,
+  /** Scheduled duration (s) of each released voice, in release order. */
+  releasedDurations: [] as number[],
+  releasedVelocities: [] as number[],
+  handleVelocities: new Map<object, number>(),
+  handleDurations: new WeakMap<object, number>(),
 }));
 
 vi.mock('../src/audio/engine', () => {
@@ -61,6 +68,9 @@ vi.mock('../src/audio/graph', async (importOriginal) => {
   return {
     ...actual,
     assertRoutingGraphNodeBudget: vi.fn(),
+    // The read-mode mixer commit (fix B5) applies scalars to real nodes; the
+    // mocked graphs have none, so report the update as applied.
+    applyReadScalarMixState: vi.fn(() => true),
     buildTrackGraphs: vi.fn((_c: unknown, _o: unknown, project: Project) =>
       new Map(project.tracks.map((t) => [t.id, {
         input: {} as GainNode,
@@ -72,8 +82,17 @@ vi.mock('../src/audio/graph', async (importOriginal) => {
 });
 vi.mock('../src/audio/synth', () => ({
   SynthVoiceManager: class {
-    noteOn = vi.fn((pitch: number, start: number, duration: number) => {
+    noteOn = vi.fn((pitch: number, start: number, duration: number, velocity: number) => {
       rec.notes.push({ pitch, start, duration });
+      const handle = { pitch, start };
+      rec.handleDurations.set(handle, duration);
+      rec.handleVelocities.set(handle, velocity);
+      return handle;
+    });
+    releaseVoice = vi.fn((handle: { pitch: number; start: number }, when: number) => {
+      rec.releasedVoices.push({ ...handle, when });
+      rec.releasedDurations.push(rec.handleDurations.get(handle) ?? Number.NaN);
+      rec.releasedVelocities.push(rec.handleVelocities.get(handle) ?? Number.NaN);
     });
     releaseAll = vi.fn(() => { rec.released += 1; });
     dispose = vi.fn(() => { rec.disposed += 1; });
@@ -83,12 +102,26 @@ vi.mock('../src/audio/synth', () => ({
 vi.mock('../src/audio/drums', () => ({
   createNoiseBuffer: () => ({}),
   DrumVoiceManager: class {
-    trigger = vi.fn();
+    trigger = vi.fn((lane: string, time: number, velocity: number) => {
+      rec.drums.push({ lane, time, velocity });
+    });
     dispose = vi.fn();
   },
 }));
 
-import { initAudioBridge } from '../src/audio/playback';
+vi.mock('../src/audio/events', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/audio/events')>();
+  return { ...actual, buildScheduleEvents: vi.fn(actual.buildScheduleEvents) };
+});
+
+import { buildScheduleEvents } from '../src/audio/events';
+import {
+  applyRuntimeScheduleContentEdit,
+  buildLiveSchedule,
+  initAudioBridge,
+  noteIdentity,
+} from '../src/audio/playback';
+import type { NoteScheduleEvent, SchedulePayload } from '../src/audio/events';
 import { useStore } from '../src/state/store';
 
 const store = () => useStore.getState();
@@ -143,6 +176,11 @@ beforeEach(() => {
   rec.notes.length = 0;
   rec.disposed = 0;
   rec.released = 0;
+  rec.releasedVoices.length = 0;
+  rec.drums.length = 0;
+  rec.releasedDurations.length = 0;
+  rec.releasedVelocities.length = 0;
+  rec.handleVelocities.clear();
   useStore.setState((s) => ({
     project: initialProject,
     past: [],
@@ -191,7 +229,7 @@ const newNote = (pitch: number, startBeat: number) =>
 // Default tempo is 120 bpm: one beat is 0.5 s.
 const TWO_NOTES_THEN_TAIL = [[60, 0, 1], [62, 4, 1], [64, 7, 1]] as Array<[number, number, number]>;
 
-describe('note-content edit while playing (US-012b, main: session keeps its frozen snapshot)', () => {
+describe('note-content edit while playing (US-012b)', () => {
   it('keeps the same playback session running when a note is deleted', async () => {
     setClips([melody(TWO_NOTES_THEN_TAIL)]);
     const requestId = await play();
@@ -256,10 +294,500 @@ describe('note-content edit while playing (US-012b, main: session keeps its froz
     expect(count(60)).toBe(3);
   });
 
-  it.todo('削除した未再生ノートは鳴らない(main は再生開始時の凍結スナップショットのまま鳴る) - docs/05 known playback live-edit gaps G1');
-  it.todo('再生ヘッドより先に追加したノートが同じパスで鳴る(main は鳴らない) - docs/05 known playback live-edit gaps G2');
-  it.todo('鳴っている最中のノートを削除すると解放される(main は鳴り続ける) - docs/05 known playback live-edit gaps G3');
-  it.todo('ループ再生中のノート編集が次のパスで聞こえる(main は旧内容を繰り返す) - docs/05 known playback live-edit gaps G4');
+  it('削除した未再生ノートは鳴らない - docs/05 G1', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(6);
+
+    expect(count(62)).toBe(0);
+    expect(count(64)).toBe(1);
+  });
+
+  it('再生ヘッドより先に追加したノートが同じパスで鳴る - docs/05 G2', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.concat([newNote(71, 5)]));
+    await runFor(6);
+
+    expect(count(71)).toBe(1);
+    // Beat 5 at 120 bpm is 2.5 s after the 10 s start.
+    expect(rec.notes.find((n) => n.pitch === 71)?.start).toBeCloseTo(12.5, 6);
+    expect(count(62)).toBe(1);
+  });
+
+  it('鳴っている最中のノートを削除すると短いリリースで止まる - docs/05 G3', async () => {
+    setClips([melody([[60, 0, 1], [62, 2, 6]])]);
+    await play();
+    await runFor(2);
+    expect(count(62)).toBe(1);
+    const editAt = rec.now;
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(0.1);
+
+    const released = rec.releasedVoices.filter((v) => v.pitch === 62);
+    expect(released).toHaveLength(1);
+    // Released at the next tick with the synth's soft release, not a hard dispose.
+    expect(released[0]!.when).toBeGreaterThanOrEqual(editAt);
+    expect(released[0]!.when).toBeLessThan(editAt + 0.1);
+    expect(rec.disposed).toBe(0);
+    expect(rec.released).toBe(0);
+    expect(rec.releasedVoices.filter((v) => v.pitch !== 62)).toHaveLength(0);
+    expect(store().transport.phase).toBe('playing');
+  });
+
+  it('先読み済みのノートも差分で取り消し・追加し、未変更のノートは鳴らし直さない - docs/05 G1/G2', async () => {
+    setClips([melody([[60, 0, 1], [62, 4, 1], [64, 4, 1]])]);
+    await play();
+    await runFor(1);
+    // 11.9 s: the 120 ms lookahead has already handed beat 4 (12.0 s) to the synth.
+    rec.now = 11.9;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(rec.notes.filter((n) => n.start === 12)).toHaveLength(2);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62).concat([newNote(71, 3.95)]));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(rec.releasedVoices).toEqual([{ pitch: 62, start: 12, when: 11.9 }]);
+    expect(count(71)).toBe(1);
+    expect(count(64)).toBe(1);
+    await runFor(1);
+    expect(count(64)).toBe(1);
+    expect(count(71)).toBe(1);
+  });
+
+  it('再生の準備中に消したノートも、再生が始まったら鳴らない - live-edit fix A', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    store().play();
+    expect(store().transport.phase).toBe('starting');
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await vi.advanceTimersByTimeAsync(50);
+    expect(store().transport.phase).toBe('playing');
+
+    await runFor(6);
+
+    expect(count(62)).toBe(0);
+    expect(count(60)).toBe(1);
+    expect(count(64)).toBe(1);
+  });
+
+  it('同じ音のノートが2つ鳴っている時に1つ消すと、1つだけ止まる - live-edit fix C', async () => {
+    setClips([melody([[62, 0, 4], [62, 0, 4]])]);
+    await play();
+    await runFor(1);
+    expect(count(62)).toBe(2);
+
+    editNotes((ns) => ns.filter((n) => n.id !== 'n1'));
+    await runFor(0.1);
+
+    expect(rec.releasedVoices).toHaveLength(1);
+    expect(rec.releasedVoices[0]!.pitch).toBe(62);
+  });
+
+  it('隣の編集でスイングの切り詰めが変わっても、鳴っているノートは止めない - live-edit fix C', async () => {
+    store().applyProjectChange((p) => ({ ...p, swing: 50 }));
+    setClips([melody([[60, 0.25, 4.25]])]);
+    await play();
+    await runFor(1.5);
+    expect(count(60)).toBe(1);
+
+    editNotes((ns) => ns.concat([newNote(60, 4.5)]));
+    await runFor(3);
+
+    expect(rec.releasedVoices).toHaveLength(0);
+    expect(count(60)).toBe(2);
+  });
+
+  it('鳴っているノートの強さや長さだけを変えても止めず、鳴らし直さない - live-edit fix C', async () => {
+    setClips([melody([[62, 0, 4]])]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.map((n) => ({ ...n, velocity: 40, durationBeats: 3 })));
+    await runFor(0.5);
+
+    expect(rec.releasedVoices).toHaveLength(0);
+    expect(count(62)).toBe(1);
+  });
+
+  it('鳴っているノートの高さを変えると止めて、新しい高さは次の音から - live-edit fix C', async () => {
+    setClips([melody([[62, 0, 4]])]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.map((n) => ({ ...n, pitch: 65 })));
+    await runFor(0.1);
+
+    expect(rec.releasedVoices.map((v) => v.pitch)).toEqual([62]);
+    expect(count(65)).toBe(0);
+  });
+
+  it('先読み済みのドラムは差分を取らず、先読みより後のドラム編集だけが反映される - live-edit fix D', async () => {
+    const drumTrack = store().project.tracks.find((t) => t.type === 'drum');
+    if (!drumTrack) throw new Error('no drum track');
+    const hits = (events: Array<[number, number]>): DrumEvent[] =>
+      events.map(([stepIndex, velocity]) => ({ id: `d${stepIndex}`, lane: 'kick', stepIndex, velocity }));
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => ({
+        ...t,
+        clips: t.id === drumTrack.id
+          ? [{ ...createDrumClip(t.id, 0, 8), id: 'drum-live', drumEvents: hits([[8, 100], [16, 100]]) }]
+          : [],
+      })),
+    }));
+    useStore.setState({ past: [], future: [] });
+    await play();
+    await runFor(0.5);
+    // 10.9 s: the look-ahead has already handed the step-8 kick (beat 2, 11.0 s) over.
+    rec.now = 10.9;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(rec.drums.map((d) => d.time)).toEqual([11]);
+
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => (
+          c.id === 'drum-live' ? { ...c, drumEvents: hits([[8, 40], [20, 100]]) } : c
+        )),
+      })),
+    }));
+    await runFor(3);
+
+    // No second hit for the re-voiced step 8; step 16 removed; step 20 (12.5 s) added.
+    expect(rec.drums.map((d) => d.time)).toEqual([11, 12.5]);
+    expect(rec.drums[0]!.velocity).toBe(100);
+  });
+
+  it('曲末の直前に最後のノートを消しても、もう鳴っているディレイの残響を切らない - live-edit fix E', async () => {
+    const end = store().project.lengthBeats;
+    const id = melodyId();
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => ({
+        ...t,
+        effects: t.id === id
+          ? [{ id: 'fx', type: 'delay' as const, enabled: true, params: { delayTime: 1, feedback: 0.8, mix: 1 } }]
+          : t.effects,
+        clips: t.id === id ? [{ ...melody([[60, end - 1, 1]], 0, end), trackId: id }] : [],
+      })),
+    }));
+    useStore.setState((s) => ({ past: [], future: [], transport: { ...s.transport, positionBeat: end - 2 } }));
+    await play();
+    await runFor(0.9);
+    expect(count(60)).toBe(1);
+
+    editNotes(() => []);
+    await runFor(1.5);
+
+    // The song ended at 1.0 s; the delay tail keeps the graph alive past 2.4 s.
+    expect(store().transport.phase).toBe('stopped');
+    expect(rec.disposed).toBe(0);
+  });
+
+  it('トラック名の変更(updatedAtだけが変わる編集)ではスケジュールを作り直さない - live-edit fix F', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    await play();
+    await runFor(0.5);
+    const builds = vi.mocked(buildScheduleEvents).mock.calls.length;
+    const id = melodyId();
+
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => (t.id === id ? { ...t, name: 'メロディ2' } : t)),
+    }));
+    await runFor(0.5);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(vi.mocked(buildScheduleEvents).mock.calls.length).toBe(builds);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(0.1);
+    expect(vi.mocked(buildScheduleEvents).mock.calls.length).toBe(builds + 1);
+  });
+
+  it('ループの2周が重なって鳴る長いノートは、別の高さのノートを消しても止めない - live-edit fix H', async () => {
+    setClips([melody([[60, 0, 8], [64, 1, 1]], 0, 8)]);
+    store().setLoopRange(0, 4);
+    await play();
+    await runFor(2.5);
+    // Passes start at 10 s and 12 s; both 8-beat voices of pitch 60 are sounding.
+    expect(rec.notes.filter((n) => n.pitch === 60).map((n) => n.start)).toEqual([10, 12]);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 64));
+    await runFor(0.1);
+
+    // Only the deleted pitch may be released; both pitch-60 voices keep sounding.
+    expect(rec.releasedVoices.filter((v) => v.pitch === 60)).toEqual([]);
+  });
+
+  it('ループの2周が重なって鳴る長いノートそのものを消すと、両方の周の音を止める - live-edit fix H2', async () => {
+    setClips([melody([[60, 0, 8], [64, 1, 1]], 0, 8)]);
+    store().setLoopRange(0, 4);
+    await play();
+    await runFor(2.5);
+    expect(rec.notes.filter((n) => n.pitch === 60).map((n) => n.start)).toEqual([10, 12]);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 60));
+    await runFor(0.1);
+
+    expect(rec.releasedVoices.filter((v) => v.pitch === 60)).toHaveLength(2);
+  });
+
+  it('再生の準備中にトラック名だけを変えても、開始時に作り直さない - live-edit fix A (critic minor 1)', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    const before = vi.mocked(buildScheduleEvents).mock.calls.length;
+    store().play();
+    const id = melodyId();
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => (t.id === id ? { ...t, name: 'メロディ2' } : t)),
+    }));
+    await vi.advanceTimersByTimeAsync(50);
+    expect(store().transport.phase).toBe('playing');
+
+    // Exactly one build: the startup schedule.
+    expect(vi.mocked(buildScheduleEvents).mock.calls.length).toBe(before + 1);
+  });
+
+  it('高さと開始が同じで長さが違うノートの長い方を消すと、その音が止まる - live-edit fix B3', async () => {
+    setClips([melody([[62, 0, 1], [62, 0, 8]])]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.filter((n) => n.durationBeats !== 8));
+    await runFor(0.1);
+
+    // The 8-beat voice (4 s) is released; the 1-beat one already ended.
+    expect(rec.releasedDurations).toEqual([4]);
+  });
+
+  it('高さ・開始・長さが同じで強さだけ違うノートの片方を消すと、消した方だけが止まる - live-edit fix B3b', async () => {
+    const clip = melody([[62, 0, 4], [62, 0, 4]]);
+    setClips([{ ...clip, notes: (clip.notes ?? []).map((n, i) => ({ ...n, velocity: i === 0 ? 30 : 110 })) }]);
+    await play();
+    await runFor(0.5);
+    const playedVelocities = [...rec.handleVelocities.values()];
+
+    editNotes((ns) => ns.filter((n) => n.velocity !== 30));
+    await runFor(0.1);
+
+    expect(rec.releasedVelocities).toHaveLength(1);
+    // 消した方(強さ 30 の声)が止まる。合成器へ渡る強さは 30 側が小さい。
+    expect(rec.releasedVelocities[0]).toBe(Math.min(...playedVelocities));
+  });
+
+  it('高さと開始が同じで長さが違うノートの短い方を消すと、短い方だけが止まる - live-edit fix B3', async () => {
+    setClips([melody([[62, 0, 1], [62, 0, 8]])]);
+    await play();
+    await runFor(0.2);
+
+    editNotes((ns) => ns.filter((n) => n.durationBeats !== 1));
+    await runFor(0.1);
+
+    expect(rec.releasedDurations).toEqual([0.5]);
+  });
+
+  it('鳴っている重複ノートの片方を伸縮してから消すと、そのノートの音だけが止まる - live-edit P3', async () => {
+    setClips([melody([[60, 0.5, 6], [60, 0.5, 4]])]);
+    await play();
+    await runFor(2);
+    expect(count(60)).toBe(2);
+
+    editNotes((ns) => ns.map((n) => (n.id === 'n0' ? { ...n, durationBeats: 5 } : n)));
+    await runFor(0.1);
+    expect(rec.releasedDurations).toEqual([]);
+    editNotes((ns) => ns.filter((n) => n.id !== 'n0'));
+    await runFor(0.1);
+
+    // n0 was scheduled for 6 beats (3 s); n1 (4 beats, 2 s) keeps sounding.
+    expect(rec.releasedDurations).toEqual([3]);
+  });
+
+  it('1回の編集で重複ノートの片方を消し、もう片方を伸縮すると、消した方だけが止まる - live-edit P1', async () => {
+    setClips([melody([[60, 0.5, 6], [60, 0.5, 4]])]);
+    await play();
+    await runFor(2);
+
+    editNotes((ns) => ns
+      .filter((n) => n.id !== 'n0')
+      .map((n) => (n.id === 'n1' ? { ...n, durationBeats: 3 } : n)));
+    await runFor(0.1);
+
+    expect(rec.releasedDurations).toEqual([3]);
+  });
+
+  it('同じ和音が2つ重なっている時に長い方のコードを消すと、その音が止まる - live-edit fix J', async () => {
+    setClips([]);
+    const id = melodyId();
+    const chord = (chordId: string, durationBeats: number) => ({
+      id: chordId, startBeat: 0, durationBeats, symbol: 'C', root: 'C', quality: 'major', notes: [0, 4, 7],
+    });
+    store().applyProjectChange((p) => ({
+      ...p,
+      chordTrack: [chord('c-long', 8), chord('c-short', 2)],
+      tracks: p.tracks.map((t) => (t.id === id ? { ...t, role: 'learning.chords' as const } : t)),
+    }));
+    useStore.setState({ past: [], future: [] });
+    await play();
+    await runFor(0.6);
+    const voices = rec.notes.length;
+    expect(voices).toBeGreaterThan(0);
+
+    store().applyProjectChange((p) => ({ ...p, chordTrack: p.chordTrack.filter((c) => c.id !== 'c-long') }));
+    await runFor(0.1);
+
+    // Only the 8-beat (4 s) chord's voices stop, one per chord tone.
+    expect(rec.releasedDurations).toHaveLength(voices / 2);
+    expect(rec.releasedDurations.every((d) => d === 4)).toBe(true);
+  });
+
+  it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
+    setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
+    store().setLoopRange(0, 4);
+    await play();
+    await runFor(1.5);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62).concat([newNote(71, 3)]));
+    await runFor(3);
+
+    // One pass is 2 s: passes start at 10 s, 12 s and 14 s. The second pass
+    // (12-14 s) is the first one scheduled entirely after the edit.
+    const afterEdit = rec.notes.filter((n) => n.start > 11.6);
+    expect(afterEdit.filter((n) => n.pitch === 62)).toHaveLength(0);
+    expect(afterEdit.filter((n) => n.pitch === 71).map((n) => n.start))
+      .toEqual([expect.closeTo(13.5, 6)]);
+    expect(count(60)).toBe(3);
+  });
+});
+
+describe('note edits after a read-mode mixer commit kept the session (live-edit fix B5)', () => {
+  function withPanLane(): void {
+    const id = melodyId();
+    store().applyProjectChange((p) => ({
+      ...p,
+      automationLanes: [{
+        id: 'lane-pan',
+        bypassed: false,
+        target: { type: 'track-pan', trackId: id },
+        points: [
+          { id: 'p0', beat: 0, value: 0, interpolation: 'linear' },
+          { id: 'p1', beat: 8, value: 0.2, interpolation: 'linear' },
+        ],
+      }],
+    } as Project));
+    useStore.setState({ past: [], future: [] });
+  }
+
+  async function moveFaderKeepingSession(): Promise<void> {
+    const requestId = store().transport.playbackRequestId;
+    store().setTrackVolume(melodyId(), 0.5);
+    await runFor(0.05);
+    expect(store().project.tracks.find((t) => t.id === melodyId())!.volume).toBe(0.5);
+    expect(store().transport.phase).toBe('playing');
+    expect(store().transport.playbackRequestId).toBe(requestId);
+  }
+
+  it('オートメーションのある曲でレーンのない音量を動かした後も、消した未再生ノートは鳴らない - live-edit fix B5 (G1)', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    withPanLane();
+    await play();
+    await runFor(1);
+    await moveFaderKeepingSession();
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(4);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(count(62)).toBe(0);
+  });
+
+  it('オートメーションのある曲でレーンのない音量を動かした後も、先に足したノートは鳴る - live-edit fix B5 (G2)', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    withPanLane();
+    await play();
+    await runFor(1);
+    await moveFaderKeepingSession();
+
+    editNotes((ns) => ns.concat([newNote(71, 5)]));
+    await runFor(4);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(count(71)).toBe(1);
+  });
+
+  it('オートメーションのある曲でレーンのない音量を動かした後も、鳴っているノートを消すと止まる - live-edit fix B5 (G3)', async () => {
+    setClips([melody([[60, 0.5, 6]])]);
+    withPanLane();
+    await play();
+    await runFor(1);
+    await moveFaderKeepingSession();
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 60));
+    await runFor(0.2);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(rec.releasedVoices.map((v) => v.pitch)).toEqual([60]);
+  });
+
+  it('オートメーション記録の確定で再生が続いた後も、消した未再生ノートは鳴らない - live-edit fix B5 (automation write)', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    withPanLane();
+    const requestId = await play();
+    await runFor(1);
+    // The store's automation punch-out commit: the lane changes, the transport
+    // and session are kept, and the commit marker names this playback.
+    useStore.setState((state) => ({
+      project: {
+        ...state.project,
+        automationLanes: state.project.automationLanes.map((lane) => ({
+          ...lane,
+          points: lane.points.map((point) => ({ ...point, value: 0.4 })),
+        })),
+      },
+      automationRecordingCommitRequestId: requestId,
+    }));
+    // The next commit clears the marker, as commitProject does.
+    useStore.setState({ automationRecordingCommitRequestId: null });
+    await runFor(0.05);
+    expect(store().transport.phase).toBe('playing');
+    expect(store().transport.playbackRequestId).toBe(requestId);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(4);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(count(62)).toBe(0);
+  });
+
+  it('取り消しで戻した確定がクリップ位置を変えるなら、再生はすぐ止まる - live-edit fix B5b', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    withPanLane();
+    const token = {};
+    expect(store().beginProjectTransaction(token)).toBe(true);
+    moveClips(2);
+    const requestId = await play();
+    expect(store().transport.phase).toBe('playing');
+    await runFor(1);
+    store().setTrackVolume(melodyId(), 0.5);
+    await runFor(0.05);
+    expect(store().transport.playbackRequestId).toBe(requestId);
+    expect(store().transport.phase).toBe('playing');
+
+    // The rollback is a read-mode scalar commit that also moves the clip back to 0.
+    expect(store().cancelProjectTransaction(token)).toBe(true);
+
+    expect(store().project.tracks.find((t) => t.id === melodyId())!.clips[0]!.startBeat).toBe(0);
+    expect(store().transport.phase).toBe('stopped');
+    expect(store().transport.audioIssue).toBe('interrupted');
+    expect(rec.disposed).toBeGreaterThan(0);
+  });
 });
 
 describe('clip layout and tempo edit while playing (US-012b, main: topology change stops playback)', () => {
@@ -320,6 +848,125 @@ describe('clip layout and tempo edit while playing (US-012b, main: topology chan
 
     expect(store().transport.phase).toBe('stopped');
   });
-
-  it.todo('クリップの移動・削除・テンポ変更後も再生が止まらず即時に反映される(main は停止する設計) - docs/05 known playback live-edit gaps G5');
 });
+
+describe('live-edit session state stays bounded (live-edit fix I)', () => {
+  /** Sizes of every collection a session holds, keyed by field name. */
+  const collectionSizes = (session: Record<string, unknown>): Record<string, number> =>
+    Object.fromEntries(Object.entries(session).flatMap(([key, value]) => (
+      Array.isArray(value) ? [[key, value.length]]
+        : value instanceof Set || value instanceof Map ? [[key, value.size]]
+          : []
+    )));
+
+  it('1000回ドラッグしても、セッションが持つ状態の大きさは変わらない - live-edit fix I', () => {
+    setClips([melody([[60, 0, 1]])]);
+    const base = store().project;
+    const id = melodyId();
+    const at = (startBeat: number): Project => ({
+      ...base,
+      tracks: base.tracks.map((t) => (t.id !== id ? t : {
+        ...t,
+        clips: t.clips.map((c) => ({ ...c, notes: [{ ...c.notes![0]!, startBeat }] })),
+      })),
+    });
+    const session: Record<string, unknown> = {
+      scheduler: { scheduledThroughBeat: 0, replaceEventIndex: vi.fn() },
+      loop: null,
+      anchorBeat: 0,
+      // The audio clock (0) is before the anchor, so nothing is in the look-ahead window.
+      anchorTime: 100,
+      scheduleEvents: [],
+      scheduleProject: base,
+      firedVoices: [],
+      synths: new Map(),
+      planTail: (events: readonly unknown[]) => ({ tailSeconds: events.length, postLimiterTailSeconds: 0.5 }),
+      plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },
+    };
+    const apply = applyRuntimeScheduleContentEdit as unknown as
+      (session: Record<string, unknown>, project: Project, now: number) => void;
+
+    apply(session, at(0), 0);
+    const first = collectionSizes(session);
+    for (let drag = 1; drag <= 1000; drag += 1) apply(session, at(drag * 0.007), 0);
+
+    expect(collectionSizes(session)).toEqual(first);
+    expect(session.plannedTail).toEqual({ tailSeconds: 1, postLimiterTailSeconds: 0.5 });
+  });
+});
+
+describe('live note identity (live-edit fix J)', () => {
+  const payload = (trackId: string): NoteScheduleEvent =>
+    ({ kind: 'note', trackId, preset: 'warmPad', pitch: 60, durationBeats: 1, velocity: 100 });
+
+  it('連動コピーが同じ絶対位置を受け継いでも、元のクリップで動かしたノートの音は止まる - live-edit fix J', () => {
+    // Overlapping placements on one track are built directly: the store's
+    // overlap rule does not apply to imported or programmatic projects.
+    const track = initialProject.tracks.find((t) => t.type === 'instrument')!;
+    const at = (localBeat: number): Project => ({
+      ...initialProject,
+      chordTrack: [],
+      tracks: initialProject.tracks.map((t) => ({
+        ...t,
+        clips: t.id !== track.id ? [] : [
+          { ...createMidiClip(t.id, 0, 8), id: 'src',
+            notes: [{ id: 'n', pitch: 71, startBeat: localBeat, durationBeats: 4, velocity: 100 }] },
+          { ...createMidiClip(t.id, 1, 8), id: 'al', aliasOf: 'src' },
+        ],
+      })),
+    });
+    const before = buildLiveSchedule(at(1));
+    const sounding = before.events.find((e) => e.beat === 1)!;
+    const soundingPayload = sounding.payload as NoteScheduleEvent;
+    const releaseVoice = vi.fn();
+    const session: Record<string, unknown> = {
+      scheduler: { scheduledThroughBeat: 0, replaceEventIndex: vi.fn() },
+      loop: null,
+      anchorBeat: 0,
+      anchorTime: 0,
+      tempo: 120,
+      transportTempo: 120,
+      scheduleEvents: before.events,
+      scheduleProject: at(1),
+      noteSources: before.sources,
+      firedVoices: [{
+        key: 'k',
+        sourceKey: noteIdentity(soundingPayload, 1, before.sources.get(soundingPayload)!),
+        kind: 'note',
+        trackId: track.id,
+        time: 0.5,
+        endTime: 2.5,
+        handle: { voice: 'src' },
+      }],
+      synths: new Map([[track.id, { releaseVoice }]]),
+      planTail: null,
+      plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },
+    };
+    const apply = applyRuntimeScheduleContentEdit as unknown as
+      (session: Record<string, unknown>, project: Project, now: number) => void;
+
+    // Moving the note to local beat 0 makes the copy sound at absolute beat 1.
+    apply(session, at(0), 0.6);
+
+    expect(buildLiveSchedule(at(0)).events.map((e) => e.beat)).toContain(1);
+    expect(releaseVoice).toHaveBeenCalledTimes(1);
+    expect(releaseVoice).toHaveBeenCalledWith({ voice: 'src' }, 0.6);
+  });
+
+  it('区切り文字を含むIDでも別のノートの身元にならない - live-edit fix J', () => {
+    expect(noteIdentity(payload('a|b'), 0, { clipId: 'x', noteId: 'c' }))
+      .not.toBe(noteIdentity(payload('a'), 0, { clipId: 'x', noteId: 'b|c' }));
+    expect(noteIdentity(payload('a'), 0, { clipId: 'x|y', noteId: 'z' }))
+      .not.toBe(noteIdentity(payload('a'), 0, { clipId: 'x', noteId: 'y|z' }));
+  });
+
+  it('予定にあるすべてのノートに元のIDが記録される - live-edit fix J', () => {
+    const { events, sources } = buildLiveSchedule(initialProject);
+    const notes = events
+      .map((event) => event.payload as SchedulePayload)
+      .filter((p): p is NoteScheduleEvent => p.kind === 'note');
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes.filter((p) => !sources.has(p))).toEqual([]);
+  });
+});
+

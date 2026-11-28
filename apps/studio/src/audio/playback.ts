@@ -63,7 +63,7 @@ import {
 import { AudioClipVoiceManager } from './audioClipVoice';
 import { createNoiseBuffer, DrumVoiceManager } from './drums';
 import { getAudioEngine } from './engine';
-import { buildScheduleEvents, type SchedulePayload } from './events';
+import { buildScheduleEvents, type NoteScheduleEvent, type SchedulePayload } from './events';
 import {
   applyMixState,
   applyReadScalarMixState,
@@ -104,6 +104,7 @@ import {
   createScheduleEventIndex,
   LOOKAHEAD_S,
   loopBeatTimeMapping,
+  nextIndexedEventsInWindow,
   preflightLoopScheduleDensity,
   resolveDrumOccurrence,
   Scheduler,
@@ -113,7 +114,7 @@ import {
   type LoopRegion,
   type ScheduledEvent,
 } from './scheduler';
-import { SynthVoiceManager } from './synth';
+import { SynthVoiceManager, type SynthVoiceHandle } from './synth';
 import {
   DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
   FINAL_TAIL_FADE_SECONDS,
@@ -159,11 +160,59 @@ type RuntimeSession = PlaybackSession & {
   readonly projectSnapshot: Project;
   readonly contextGeneration: number;
   readonly routingPlan: CompiledAudioRoutingPlan;
-  readonly scheduleEvents: readonly ScheduledEvent[];
+  /** Current schedule; replaced in place by a live note-content edit. */
+  scheduleEvents: readonly ScheduledEvent[];
+  /** Project the current scheduleEvents were built from. */
+  scheduleProject: Project;
+  /**
+   * Latest Project this session was kept alive across. Starts as the startup
+   * snapshot and advances on every accepted commit that keeps the session
+   * (mixer edits, read-mode scalar commits, automation punch-out commits), so
+   * a live note edit is checked against the topology the session follows now.
+   */
+  topologyBaseline: Project;
+  /** Source placement and note of each note payload in scheduleEvents (see buildLiveSchedule). */
+  noteSources: NoteSourceIndex;
+  /**
+   * Plans the natural-drain tail for a schedule; null for loop sessions,
+   * which never drain.
+   */
+  readonly planTail: ((events: readonly ScheduledEvent[]) => PlannedTail) | null;
+  /**
+   * Largest tail planned for any schedule this session has played. A live
+   * edit can only grow it, so the drain never cuts sound (delay, reverb,
+   * release) that is already circulating. Two scalars, constant size.
+   */
+  plannedTail: PlannedTail;
+  /** Note / drum events already handed to a voice and not yet finished. */
+  firedVoices: FiredVoice[];
   readonly everAudibleTrackIds: Set<string>;
   readonly everAudibleEdgeIds: Set<string>;
   positionTimer: ReturnType<typeof setInterval> | null;
   automationCycleBoundaryHandled: boolean;
+};
+
+type PlannedTail = Readonly<{ tailSeconds: number; postLimiterTailSeconds: number }>;
+
+function maxPlannedTail(left: PlannedTail, right: PlannedTail): PlannedTail {
+  return {
+    tailSeconds: Math.max(left.tailSeconds, right.tailSeconds),
+    postLimiterTailSeconds: Math.max(left.postLimiterTailSeconds, right.postLimiterTailSeconds),
+  };
+}
+
+/** One event the scheduler already fired, kept until its sound ends. */
+type FiredVoice = {
+  /** scheduleEventKey of the source event (full content). */
+  readonly key: string;
+  /** noteIdentity of a note voice (track, note id, pitch, onset beat); the key for a drum hit. */
+  readonly sourceKey: string;
+  readonly kind: SchedulePayload['kind'];
+  readonly trackId: string;
+  readonly time: number;
+  readonly endTime: number;
+  /** Synth voice for a note; null for a drum hit, which cannot be cancelled. */
+  readonly handle: SynthVoiceHandle | null;
 };
 
 type NaturalDrainControls = Readonly<{
@@ -1050,7 +1099,17 @@ export function initAudioBridge(): () => void {
     },
     createSession: (requestId, handlers, isCurrent) =>
       createRuntimeSession(requestId, handlers, isCurrent),
-    confirmStarted: (requestId) => useStore.getState().confirmPlaybackStarted(requestId),
+    confirmStarted: (requestId) => {
+      useStore.getState().confirmPlaybackStarted(requestId);
+      // The session was built from the Project of its start request. A note
+      // edit adopted while it was starting is applied before the first audible
+      // look-ahead window can drift further; seek replacements start here too.
+      // A rename or mixer edit during startup changes nothing to rebuild.
+      const started = bridge.controller?.activeSession;
+      if (started && hasScheduleContentChanged(started.scheduleProject, useStore.getState().project)) {
+        applyPendingScheduleEdit();
+      }
+    },
     failStart: (requestId, error) => {
       const store = useStore.getState();
       store.failPlaybackStart(requestId, classifyPlaybackStartFailure(error));
@@ -1080,6 +1139,59 @@ export function initAudioBridge(): () => void {
     });
   });
 
+  // Note-content edits are coalesced to one rebuild on the next timer turn, so
+  // a drag that commits many Project states rebuilds the schedule once.
+  let scheduleEditTimer: ReturnType<typeof setTimeout> | null = null;
+  // The running session survived this Project commit: advance its topology
+  // baseline and queue a schedule rebuild when the commit changed content.
+  // Returns false when the commit changed topology beyond what its kind
+  // accepts: the baseline then stays put and playback stops right away.
+  function keepSessionAcross(
+    project: Project,
+    previousProject: Project,
+    accepted: KeptSessionChange,
+  ): boolean {
+    const session = bridge.controller?.activeSession;
+    if (!session?.scheduler.isRunning) return true;
+    if (keptSessionTopologyChanged(session.topologyBaseline, project, accepted)) {
+      useStore.getState().interruptPlayback(session.requestId, 'interrupted');
+      return false;
+    }
+    session.topologyBaseline = project;
+    if (scheduleEditTimer === null && hasScheduleContentChanged(previousProject, project)) {
+      scheduleEditTimer = setTimeout(applyPendingScheduleEdit, 0);
+    }
+    return true;
+  }
+  function applyPendingScheduleEdit(): void {
+    if (scheduleEditTimer !== null) clearTimeout(scheduleEditTimer);
+    scheduleEditTimer = null;
+    const session = bridge.controller?.activeSession;
+    if (!session?.scheduler.isRunning) return;
+    const state = useStore.getState();
+    if (
+      state.project === session.scheduleProject
+      || state.transport.phase !== 'playing'
+      || state.transport.playbackRequestId !== session.requestId
+      || state.project.id !== session.projectSnapshot.id
+    ) {
+      return;
+    }
+    if (hasPlaybackTopologyChanged(session.topologyBaseline, state.project)) {
+      // Every commit that keeps the session advances its baseline, so this is
+      // a topology change nothing else stopped. Never drop the edit silently.
+      useStore.getState().interruptPlayback(session.requestId, 'interrupted');
+      return;
+    }
+    try {
+      applyRuntimeScheduleContentEdit(session, state.project, getAudioEngine().now());
+    } catch {
+      // An edit past the schedule budget cannot be half-applied: stop the
+      // session like any other live resource failure.
+      useStore.getState().interruptPlayback(session.requestId, 'audio-resource-limit');
+    }
+  }
+
   // Dispose sessions captured from obsolete topology, including a natural
   // drain whose transport already reached stopped. Apply compatible mixer
   // changes to the accepted running session only.
@@ -1091,7 +1203,9 @@ export function initAudioBridge(): () => void {
       next.automationRecordingCommitRequestId,
     )) {
       // The active pass intentionally keeps playing its frozen session snapshot.
-      // This also preserves an already-started natural tail.
+      // This also preserves an already-started natural tail. Later note edits
+      // are checked against this commit, not the startup snapshot.
+      keepSessionAcross(next.project, previous.project, 'automation');
       return;
     }
     if (automationReadScalarCommitPreservesRuntimeSession(
@@ -1101,6 +1215,9 @@ export function initAudioBridge(): () => void {
     )) {
       const session = controller.activeSession;
       if (!session?.scheduler.isRunning) return;
+      // A transaction rollback is marked as a read-scalar commit too and may
+      // carry a clip move back: check topology before touching the mix.
+      if (!keepSessionAcross(next.project, previous.project, 'mix')) return;
       try {
         const applied = applyRuntimeReadScalarMixState(
           session,
@@ -1149,6 +1266,7 @@ export function initAudioBridge(): () => void {
     ) {
       return;
     }
+    if (!keepSessionAcross(next.project, previous.project, 'mix')) return;
     const trackMixChanged = hasLiveMixChanged(
       previous.project.tracks,
       next.project.tracks,
@@ -1226,6 +1344,8 @@ export function initAudioBridge(): () => void {
   controller.reconcile();
 
   return () => {
+    if (scheduleEditTimer !== null) clearTimeout(scheduleEditTimer);
+    scheduleEditTimer = null;
     for (const unsubscribe of bridge.unsub) unsubscribe();
     bridge.unsub = [];
     bridge.installed = false;
@@ -1654,7 +1774,7 @@ async function createRuntimeSessionImpl(
   const audioClipIndex = createAudioClipPlaybackIndex(project, { tempo });
   // Build and budget the immutable schedule before allocating per-track Web
   // Audio graphs. Oversized linked projects fail closed at this boundary.
-  const scheduleEvents: readonly ScheduledEvent[] = buildScheduleEvents(project);
+  const { events: scheduleEvents, sources: scheduleNoteSources } = buildLiveSchedule(project);
   const scheduleIndex = createScheduleEventIndex(scheduleEvents, loop);
   if (loop) {
     const density = preflightLoopScheduleDensity(
@@ -1993,22 +2113,15 @@ async function createRuntimeSessionImpl(
     const everAudibleEdgeIds = new Set(startupRoutingMix.activeEdgeIds);
     let naturalDrainStarted = false;
 
-    const beginNaturalDrain = (onComplete: () => void): void => {
-      if (naturalDrainStarted) return;
-      naturalDrainStarted = true;
-      if (!session || disposed) {
-        onComplete();
-        return;
-      }
-
+    const planTail = (events: readonly ScheduledEvent[]): PlannedTail => {
       const latestProject = useStore.getState().project;
       const latestTracks = latestProject.id === project.id
         ? latestProject.tracks
         : project.tracks;
-      const tail = planRuntimeAudioTail(
+      return planRuntimeAudioTail(
         project,
         latestTracks,
-        scheduleEvents,
+        events,
         startBeat,
         lengthBeats,
         everAudibleTrackIds,
@@ -2018,6 +2131,16 @@ async function createRuntimeSessionImpl(
           ? latestProject.audioRouting
           : project.audioRouting,
       );
+    };
+    const beginNaturalDrain = (onComplete: () => void): void => {
+      if (naturalDrainStarted) return;
+      naturalDrainStarted = true;
+      if (!session || disposed) {
+        onComplete();
+        return;
+      }
+
+      const tail = maxPlannedTail(session.plannedTail, planTail(session.scheduleEvents));
       const projectEndTime = beatToTime(
         lengthBeats,
         tempo,
@@ -2066,6 +2189,12 @@ async function createRuntimeSessionImpl(
       contextGeneration,
       routingPlan,
       scheduleEvents,
+      scheduleProject: project,
+      topologyBaseline: project,
+      noteSources: scheduleNoteSources,
+      planTail: loop ? null : planTail,
+      plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },
+      firedVoices: [],
       everAudibleTrackIds,
       everAudibleEdgeIds,
       positionTimer: null,
@@ -2282,18 +2411,27 @@ function scheduleAudioForWindow(
 
 /** Schedule a batch of due note/drum events for one generation only. */
 function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
+  const now = getAudioEngine().now();
+  session.firedVoices = session.firedVoices.filter((voice) => voice.endTime >= now);
   for (const event of due) {
     const payload = event.payload as SchedulePayload;
+    const source = payload.kind === 'note' ? noteSourceOf(session.noteSources, payload) : null;
+    const key = scheduleEventKey(payload, event.beat, source);
     if (payload.kind === 'note') {
       const synth = session.synths.get(payload.trackId);
       if (!synth) continue;
       const { transportTempo, anchorBeat, anchorTime, loop, tempoChangeBeats } = session;
       const startBeat = timeToBeat(event.time, transportTempo, anchorBeat, anchorTime);
       const cutoff = session.cutoffLanes.get(payload.trackId);
-      synth.noteOn(
+      const durationSeconds = mappedBeatDurationSeconds(
+        transportTempo,
+        startBeat,
+        payload.durationBeats,
+      );
+      const handle = synth.noteOn(
         payload.pitch,
         event.time,
-        mappedBeatDurationSeconds(transportTempo, startBeat, payload.durationBeats),
+        durationSeconds,
         payload.velocity,
         undefined,
         cutoff ? (detune, stopTime) => scheduleFilterCutoff(
@@ -2301,6 +2439,15 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
             session.projectSnapshot.lengthBeats, loop, tempoChangeBeats,
           ) : undefined,
       );
+      session.firedVoices.push({
+        key,
+        sourceKey: noteIdentity(payload, event.beat, noteSourceOf(session.noteSources, payload)),
+        kind: 'note',
+        trackId: payload.trackId,
+        time: event.time,
+        endTime: event.time + durationSeconds,
+        handle: handle ?? null,
+      });
     } else {
       const { anchorBeat, anchorTime, transportTempo } = session;
       let choke: { tick: number } | { stopTime: number } | undefined;
@@ -2319,8 +2466,265 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
       session.drums
         .get(payload.trackId)
         ?.trigger(payload.lane, event.time, payload.velocity, payload.voiceSeed, choke);
+      session.firedVoices.push({
+        key,
+        sourceKey: key,
+        kind: 'drum',
+        trackId: payload.trackId,
+        time: event.time,
+        endTime: event.time,
+        handle: null,
+      });
     }
   }
+}
+
+/** Stable identity of one schedule event: what sounds, where, at which source beat. */
+function scheduleEventKey(
+  payload: SchedulePayload,
+  sourceBeat: number,
+  source: NoteSource | null,
+): string {
+  return payload.kind === 'note'
+    ? JSON.stringify([
+      'n', payload.trackId, source?.clipId ?? null, source?.noteId ?? null, payload.preset,
+      payload.pitch, payload.velocity, payload.durationBeats, sourceBeat,
+    ])
+    : JSON.stringify(['d', payload, sourceBeat]);
+}
+
+/**
+ * Which source note a sounding voice plays: track, placement (clip) id, source
+ * note id (the Chord Track event id for a realized chord note), pitch and
+ * source onset beat, encoded without ambiguity. Velocity and length are left
+ * out, so a voice whose note only got softer, shorter or longer (also through
+ * a swing cut) is kept. Loop passes share it; duplicates differ by note id and
+ * linked placements by clip id.
+ */
+export function noteIdentity(
+  payload: NoteScheduleEvent,
+  sourceBeat: number,
+  source: NoteSource,
+): string {
+  return JSON.stringify([payload.trackId, source.clipId, source.noteId, payload.pitch, sourceBeat]);
+}
+
+/** Where a note payload came from: a clip note, or a Chord Track event (clipId null). */
+type NoteSource = Readonly<{ clipId: string | null; noteId: string }>;
+
+/** Source per note payload object; scheduling keeps payload identity. */
+type NoteSourceIndex = WeakMap<NoteScheduleEvent, NoteSource>;
+
+/**
+ * Stand-in for a payload that was not indexed. buildLiveSchedule asserts in
+ * development that this never happens; the sentinel can collide only with
+ * another unindexed payload, never with a real clip note or chord.
+ */
+const UNINDEXED_NOTE: NoteSource = Object.freeze({ clipId: null, noteId: '\u0000unindexed' });
+
+function noteSourceOf(sources: NoteSourceIndex, payload: NoteScheduleEvent): NoteSource {
+  return sources.get(payload) ?? UNINDEXED_NOTE;
+}
+
+/**
+ * buildScheduleEvents plus the source of every note event, taken from its
+ * onClipNote / onChordNote report. The payloads stay exactly as export and the
+ * pinned schedule goldens see them; the sources live only in this index.
+ */
+export function buildLiveSchedule(
+  project: Project,
+): { events: ScheduledEvent[]; sources: NoteSourceIndex } {
+  const sources: NoteSourceIndex = new WeakMap();
+  const events = buildScheduleEvents(project, {
+    onClipNote: (payload, source) => sources.set(payload, { clipId: source.clipId, noteId: source.noteId }),
+    onChordNote: (payload, source) => sources.set(payload, { clipId: null, noteId: source.chordId }),
+  });
+  if (import.meta.env.DEV) {
+    for (const event of events) {
+      const payload = event.payload as SchedulePayload;
+      if (payload.kind === 'note' && !sources.has(payload)) {
+        throw new Error('buildLiveSchedule: a note event was not reported by onClipNote / onChordNote.');
+      }
+    }
+  }
+  return { events, sources };
+}
+
+/**
+ * Project fields that buildScheduleEvents reads besides the tracks. Only the
+ * Chord Track can change live: swing, choke, length, tempo and meter are
+ * playback topology and stop the session first; they are listed so this check
+ * stays correct on its own.
+ */
+const SCHEDULE_PROJECT_FIELDS = [
+  'chordTrack',
+  'swing',
+  'hiHatChoke',
+  'lengthBeats',
+  'tempoMap',
+  'timeSignature',
+  'timeSignatureMap',
+] as const satisfies ReadonlyArray<keyof Project>;
+
+/**
+ * Whether an edit may change what buildScheduleEvents produces. During
+ * playback that means clip contents (notes, drum steps) or the Chord Track.
+ * `updatedAt`, names, colours and mixer values are ignored, so a rename or a
+ * fader drag never rebuilds the schedule.
+ */
+export function hasScheduleContentChanged(previous: Project, next: Project): boolean {
+  if (previous === next) return false;
+  if (SCHEDULE_PROJECT_FIELDS.some((key) => previous[key] !== next[key])) return true;
+  if (previous.tracks.length !== next.tracks.length) return true;
+  return next.tracks.some((track, index) => {
+    const prior = previous.tracks[index];
+    return !prior
+      || prior.id !== track.id
+      || prior.type !== track.type
+      || prior.role !== track.role
+      || prior.instrument?.preset !== track.instrument?.preset
+      || prior.clips !== track.clips;
+  });
+}
+
+/**
+ * What a commit that keeps the running session is accepted to change: live
+ * mix scalars (ordinary mixer edits and Read-mode scalar commits, also for
+ * targets that have a lane), or additionally the automation lanes and read
+ * state (an automation punch-out, whose pass keeps its frozen snapshot).
+ */
+type KeptSessionChange = 'mix' | 'automation';
+
+/**
+ * Whether a kept-session commit changed playback topology beyond its kind.
+ * The accepted fields are copied from the baseline before the standard
+ * topology check, so a clip move or tempo change still counts even when it
+ * arrives on a read-scalar commit (a transaction rollback).
+ */
+export function keptSessionTopologyChanged(
+  baseline: Project,
+  next: Project,
+  accepted: KeptSessionChange,
+): boolean {
+  const baselineTracks = new Map(baseline.tracks.map((track) => [track.id, track]));
+  const normalized: Project = {
+    ...next,
+    tracks: next.tracks.map((track) => {
+      const prior = baselineTracks.get(track.id);
+      return prior
+        ? {
+          ...track,
+          volume: prior.volume,
+          pan: prior.pan,
+          mute: prior.mute,
+          solo: prior.solo,
+          effects: prior.effects,
+        }
+        : track;
+    }),
+    ...(accepted === 'automation'
+      ? {
+        automationLanes: baseline.automationLanes,
+        automationReadState: baseline.automationReadState,
+      }
+      : {}),
+  };
+  return hasPlaybackTopologyChanged(baseline, normalized);
+}
+
+/**
+ * Apply a note-content edit to a running session without restarting it.
+ *
+ * The events are rebuilt with the same buildScheduleEvents used at startup
+ * and swapped into the scheduler, so later windows and loop passes play the
+ * edit. Events already handed to the lookahead (onset in the future) are
+ * diffed by key and onset time: removed or changed ones are cancelled and
+ * new ones fired. A sounding note whose event no longer exists gets the
+ * synth's short release. Unchanged voices are left alone.
+ */
+export function applyRuntimeScheduleContentEdit(
+  session: RuntimeSession,
+  project: Project,
+  now: number,
+): void {
+  const { events, sources } = buildLiveSchedule(project);
+  const index = createScheduleEventIndex(events, session.loop);
+  if (session.loop) {
+    const density = preflightLoopScheduleDensity(
+      index,
+      RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
+      MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
+    );
+    if (!density.ok) {
+      throw new ScheduleEventLimitError(
+        density.limit,
+        density.observed,
+        'density',
+        density.windowStartBeat,
+      );
+    }
+  }
+  const previousEvents = session.scheduleEvents;
+  // Remember the tail the outgoing schedule needed before it is replaced.
+  if (session.planTail) {
+    session.plannedTail = maxPlannedTail(session.plannedTail, session.planTail(previousEvents));
+  }
+  session.scheduler.replaceEventIndex(index);
+  session.scheduleEvents = events;
+  session.scheduleProject = project;
+  session.noteSources = sources;
+
+  const { anchorBeat, anchorTime } = session;
+  const playheadBeat = now < anchorTime
+    ? anchorBeat
+    : timeToBeat(now, session.transportTempo, anchorBeat, anchorTime);
+  const frontierBeat = session.scheduler.scheduledThroughBeat;
+  const due = frontierBeat > playheadBeat
+    ? nextIndexedEventsInWindow(index, playheadBeat, frontierBeat, session.tempo, anchorBeat, anchorTime)
+    : [];
+
+  const live = session.firedVoices.filter((voice) => voice.endTime >= now);
+  // Drum hits (and the choke stops computed when they fired) have no cancel
+  // handle. They are not diffed inside the already-scheduled window, so a
+  // drum edit is heard only after the frontier: no double hits, no orphan
+  // choke cut-offs.
+  const pending = new Map<string, FiredVoice[]>();
+  for (const voice of live) {
+    if (voice.time < now || voice.kind !== 'note') continue;
+    const slot = `${voice.key}@${voice.time}`;
+    const list = pending.get(slot);
+    if (list) list.push(voice);
+    else pending.set(slot, [voice]);
+  }
+  const added: DueEvent[] = [];
+  for (const event of due) {
+    if ((event.payload as SchedulePayload).kind !== 'note') continue;
+    const payload = event.payload as SchedulePayload;
+    const slot = `${scheduleEventKey(payload, event.beat, payload.kind === 'note' ? noteSourceOf(sources, payload) : null)}@${event.time}`;
+    if (!pending.get(slot)?.pop()) added.push(event);
+  }
+
+  const cancelled = new Set<FiredVoice>();
+  for (const list of pending.values()) for (const voice of list) cancelled.add(voice);
+  // A sounding voice is released only when the edited schedule no longer
+  // contains its note identity anywhere: the note was deleted, moved, or its
+  // pitch changed. A velocity- or length-only edit keeps it. Every loop pass
+  // of a deleted note is released, and of duplicate notes only the deleted
+  // one stops, because each has its own note id.
+  const identities = new Set<string>();
+  for (const event of events) {
+    const payload = event.payload as SchedulePayload;
+    if (payload.kind === 'note') identities.add(noteIdentity(payload, event.beat, noteSourceOf(sources, payload)));
+  }
+  for (const voice of live) {
+    if (voice.time >= now || !voice.handle || voice.kind !== 'note') continue;
+    if (!identities.has(voice.sourceKey)) cancelled.add(voice);
+  }
+  for (const voice of cancelled) {
+    if (voice.handle) session.synths.get(voice.trackId)?.releaseVoice(voice.handle, now);
+  }
+  session.firedVoices = live.filter((voice) => !cancelled.has(voice));
+  if (added.length > 0) fireEvents(session, added);
 }
 
 function frozenAutomationValueAt(

@@ -377,6 +377,7 @@ MIDIノート編集と同時に、スケール・コード・メロディ作法�
 - ノート上の矢印キーは選択群を移動し、Shift+左右矢印は長さ、PageUp/PageDownは強さを変更する。非repeatの1 keydownを1 batchとして確定し、Undo 1回で戻す
 - Enterは単独選択、Spaceは選択切替、Cmd/Ctrl+Aは現在clipの固定編集音域C2〜C6全体（水平viewport外を含む）を選択し、importされた音域外ノートは対象外とする。Cmd/Ctrl+Dは1グリッド先へ複製してコピーへフォーカスし、Delete/Backspaceは削除して次・前・空グリッドへフォーカスを戻す
 - 固定編集音域内にノートがない空グリッドでは、グリッド自体をTab順に入れ、矢印/Home/Endで入力位置を動かし、Enter/Spaceでノートを追加してその音へフォーカスする。coarse pointerの空グリッドはbrowser/WebViewのnative pan・scroll gestureを妨げない
+- 再生中にノートを追加・削除・変更すると、止めずにそのまま今の再生に反映される。まだ鳴っていない音を消せば鳴らず、再生ヘッドより先に足した音はその場で鳴る。鳴っている途中の音を消すと、プツッという音が出ないよう短くフェードして止まる。ループ再生中なら次の周から新しい内容になる。変えていない音は鳴らし直さない。取り消し(Undo)も同じように反映される。クリップの移動・削除やテンポの変更は、これまでどおり再生を止めて再生位置を保つ
 
 ### 3.3.1 選んだ音のコピー・移調・スケール合わせ
 
@@ -2059,23 +2060,37 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 - drain末尾fadeはProject Master faderとengine output gainを上書きせず、session output gainだけをabsolute cleanup deadlineの6ms前までautomationする。callbackがfade endより遅れた場合はsession outputを即時0にし、cleanup deadlineより遅れた場合はtimerなしで完了する。いずれも現在時刻からtailを延長しない。新しい再生、手動停止、Project activation、context interruption、controller / bridge disposeはtimerとsession graphを即時破棄し、pending fadeをcancelする。engine output/calibration gainには触れない
 - 停止状態からの`play()`は、拍子分母を含む`projectLengthBeats`に対し現在位置が有限かつ`0 <= positionBeat < songEnd`なら保持し、負値、非有限、曲末以上、または利用不能な曲長では0へ正規化する。位置補正、`starting`への遷移、request ID増加、audio issue解除を1つのstore更新で行い、loop bounds、Project identity、history、save stateは変更しない。曲末startが失敗しても、次のplayは新generationで再び0から開始できる
 
-### 6.1.6.1 再生中編集の既知ギャップ(known playback live-edit gaps)
+### 6.1.6.1 再生中のノート編集(playback live edit)
 
-mainの再生は、wave5の`playbackLiveEdit`(US-012b)とは設計が違う。再生中のProject編集は次の2通りに分かれる。
-- クリップ配置・テンポ・楽器・オートメーションなどplayback topologyに触れる編集(`hasPlaybackTopologyChanged`)は再生を停止する。playheadは保持され、再生は自動では再開しない。
-- ノート内容だけの編集はtopologyの外で、再生は止まらない。ただし再生セッションは開始時点のschedule event(凍結スナップショット)を使い続け、編集は反映されない。
+再生中のProject編集は次の2通りに分かれる。
+- クリップ配置・テンポ・拍子・曲の長さ・swing・hi-hat choke・楽器・オートメーションなどplayback topologyに触れる編集(`hasPlaybackTopologyChanged`)は再生を停止する。playheadは保持され、再生は自動では再開しない。
+- ノート内容(ノート、ドラムのステップ、コードトラック)だけの編集はtopologyの外で、再生は止まらず、今の再生に反映される。
 
-`apps/studio/tests/playbackLiveEdit.test.ts`は、mainで成り立つ不変条件(セッション継続、未編集ノートの二重発音・脱落なし、playhead保持、undoの整合、停止後の無発音)をテストで固定し、成り立たないものを`it.todo`で示す。再現手順は、そのテストファイルの`setClips`と`play`で`melody([[60,0,1],[62,4,1],[64,7,1]])`を再生し、1秒後に下記の編集を行うこと(120bpm、モックのAudioContext、手動クロック)。
+反映のしくみ:
+1. audio bridgeのstore購読が、topologyを保ったまま`buildScheduleEvents`の読む値(clipの中身とコードトラック)が変わった編集だけを検出し(`hasScheduleContentChanged`)、`setTimeout(0)`で次のtimer turnへまとめる。同じtask turnの中で続いた編集は1回の再構築にまとまる。ただしドラッグはpointermoveのたびに確定することがあり、その場合はイベントごとに1回ずつ再構築する。`updatedAt`、名前、色、ミキサーの値だけの変更(トラック名の変更など)では作り直さない。
+2. 採用済みProjectから起動時と同じ`buildScheduleEvents`でeventを作り直し、ループ時は同じdensity preflightを通してから`Scheduler.replaceEventIndex`で差し替える。anchorと先読みの境界(`scheduledThroughBeat`)は動かさないので、以後のwindowとループの次のpassは新しい内容になる。予算超過は部分適用せず`audio-resource-limit`で停止する。
+3. 先読みで既にvoiceへ渡したeventは、内容(トラック・配置(クリップ)ID・ノートID・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。開始時刻がまだ先のvoiceは、gainの予定を`cancelScheduledValues`で消して0にし、sourceをその場でstop・切断するため、1 sampleも鳴らない。
+4. 発音中のvoiceは、元のノートの身元(トラック・配置(クリップ)ID・ノートID・音高・元の開始拍)で見分ける。身元は`buildScheduleEvents`の`onClipNote`(クリップのノート)と`onChordNote`(コードトラックの音。ノートIDはコードのID、クリップIDはなし)の報告から、再生セッションだけが持つ索引に記録し、`JSON.stringify`で区切りの紛れなく文字列にする。scheduleのpayloadそのものは変えないので、WAV / MIDI exportと固定済みのschedule goldenは変わらない。索引にないnote eventは開発時に例外にし、本番では他の身元と重ならない専用の値で扱う。編集後のscheduleのどこにもその身元がない時、つまりノートやコードを消した・動かした・音高を変えた時だけ、`releaseVoice`の短いfade(30ms)で止め、クリックを出さない。強さや長さだけの変更(隣の編集でスイングの切り詰めが変わった時を含む)では止めず、最初に予定した通りに鳴り終わる。ループの各周は同じ身元、重複したノートはノートID、連動コピーは配置IDで区別されるので、数を数える必要はない。連動コピーが動かしたノートと同じ絶対位置を受け継いでも、元の配置の音は止まる。ノートを消せばすべての周でその音が止まり、重複したノートや重なった同じ和音は消した方だけが止まる。鳴らし直しはしない。
+5. 曲末の残響(tail): 編集で差し替える直前に、それまでのscheduleが必要としたtailの長さを計画し、sessionはその最大値(秒数2つ)だけを持つ。自然終了のtailは、今のscheduleの計画とこの最大値の大きい方にする。ノートを消しても計画したtailは縮まず、もう鳴っているディレイやリバーブの残響を途中で切らない。何回編集しても持つ状態の大きさは変わらない。ループ再生は自然終了しないので計画しない。
+6. 処理はtimer turnとstore購読の中だけで行い、AudioWorkletなどaudio realtime callbackでは重い処理をしない。WAV / MIDI exportは変更しない。
 
-| ID | 不変条件(wave5) | mainの挙動 | 観測 |
+`apps/studio/tests/playbackLiveEdit.test.ts`は、セッション継続、未編集ノートの二重発音・脱落なし、playhead保持、undoの整合、topology変更時の停止に加え、下記G1〜G4を固定する。再現手順は、そのテストファイルの`setClips`と`play`で`melody([[60,0,1],[62,4,1],[64,7,1]])`を再生し、1秒後に下記の編集を行うこと(120bpm、モックのAudioContext、手動クロック)。
+
+| ID | 不変条件 | 状態 | 観測 |
 |---|---|---|---|
-| G1 | 削除した未再生ノートは鳴らない | 鳴る | pitch 62を削除しても`noteOn(62)`が4拍目(2.0秒)に発火する |
-| G2 | 再生ヘッドより先に追加したノートが同じパスで聞こえる | 聞こえない | 5拍目にpitch 71を追加しても`noteOn(71)`は一度も発火しない |
-| G3 | 鳴っているノートの削除で解放される | 解放されない | 6拍のノートを再生1秒後に削除しても`releaseAll`は呼ばれず再生が続く |
-| G4 | ループ中の編集が次のパスで聞こえる | 旧内容を繰り返す | ループ0-4拍で62を削除し71を追加しても、以後のパスで62が鳴り続け71は鳴らない |
-| G5 | クリップ移動・削除・テンポ変更が再生を止めず即時に反映される | 再生が停止する | クリップ移動、削除、`setBpm(90)`のいずれも`transport.phase`が`stopped`になり、voice managerが`dispose`される |
+| G1 | 削除した未再生ノートは鳴らない | 対応済み | pitch 62を削除すると`noteOn(62)`は発火しない。先読み済みなら`releaseVoice`で取り消す |
+| G2 | 再生ヘッドより先に追加したノートが同じパスで聞こえる | 対応済み | 5拍目にpitch 71を追加すると`noteOn(71)`が2.5秒後に1回発火する |
+| G3 | 鳴っているノートの削除で解放される | 対応済み | 発音中の6拍のノートを削除すると、次のtickでそのvoiceだけ`releaseVoice`され、`dispose`や`releaseAll`は呼ばれない |
+| G4 | ループ中の編集が次のパスで聞こえる | 対応済み | ループ0-4拍で62を削除し71を追加すると、次のパスから62は鳴らず71が鳴る |
+| G5 | クリップ移動・削除・テンポ変更が再生を止めず即時に反映される | 対応しない(設計差) | クリップ移動、削除、`setBpm(90)`のいずれも`transport.phase`が`stopped`になり、voice managerが`dispose`される |
 
-G5は設計差であり、不具合とは限らない。G1〜G4は、ノート編集を再生へ反映する機能を移植するときの受け入れ条件にする。いずれも本番コードは変更していない。
+ドラム: ドラムの音とchokeの停止時刻は取り消し用のhandleを持たない。そのため既に先読みしたwindow(`scheduledThroughBeat`より前)ではドラムeventの差分を取らず、ドラムの編集は先読みの境界より後(最大120ms先)から反映する。二重に鳴ることも、相手のいないchokeで音が切れることもない。ただし、先読み済みのOpen Hatのchoke時刻は発音時に決まるため、境界より後のClosed Hatを消しても、そのOpen Hatは元の時刻で切れる。
+
+topologyの比較の基準: 再生セッションは「今従っているProject」を基準として持つ。開始時のsnapshotから始め、セッションを止めずに受け入れた確定のたびに、その時のProjectへ進める。受け入れる確定は、ミキサーの編集、Readモードで値を動かした確定(レーンのある対象も含む。取り消しで戻す確定もこの印が付く)、オートメーション記録の確定である。進める前に、その確定が受け入れる変更(音量・パン・ミュート・ソロ・エフェクト、オートメーション記録ならレーンとRead状態)を基準の値に戻した上でtopologyを比べ、それでもクリップ位置やテンポなどが変わっていれば基準を進めず、その場で再生を止める(`interrupted`)。ノート編集はこの基準と比べるので、オートメーションのある曲で音量を動かした後も反映される。基準と比べてtopologyが変わっていたのに止まっていない場合も、編集を黙って捨てず再生を止める。
+
+再生開始の準備中(`starting`)に行った編集は、sessionが動き始めた直後(`confirmStarted`)に、sessionを作ったProjectから今のProjectまでに`hasScheduleContentChanged`の変更があれば同じ手順で反映する。シーク後の作り直しのsessionも同じ。
+
+対応しないこと: ノートの終わり(note-off)を過ぎて、シンセの自然なリリースで減衰している最中の音は、そのノートを消してもそのまま鳴り終わる。すでに消えていく途中の音なので、取り消しの対象にしない。
 
 ### 6.1.7 Elastic Audio Worker / DSP / cache
 

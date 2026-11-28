@@ -924,6 +924,29 @@ export class Scheduler {
     if (this.running) this.timer = setInterval(() => this.tick(false), this.tickMs);
   }
 
+  /** Unwrapped beat the lookahead has already handed to `fire` (exclusive). */
+  get scheduledThroughBeat(): number {
+    return this.scheduledBeat;
+  }
+
+  /**
+   * Swap the event index of a running schedule without moving the anchor or
+   * the frontier. Later windows, including later loop passes, read the new
+   * index; events already handed to `fire` stay with the caller.
+   */
+  replaceEventIndex(eventIndex: ScheduleEventIndex): void {
+    const current = this.loop;
+    const next = eventIndex.loop;
+    if (
+      (current === null) !== (next === null)
+      || (current && next
+        && (current.startBeat !== next.startBeat || current.endBeat !== next.endBeat))
+    ) {
+      throw new RangeError('A replacement schedule index must keep the same loop region.');
+    }
+    this.eventIndex = eventIndex;
+  }
+
   /** Stop the timer. Does not release any already-scheduled audio. */
   stop(): void {
     if (this.timer != null) {
