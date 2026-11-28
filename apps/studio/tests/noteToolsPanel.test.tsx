@@ -73,7 +73,10 @@ describe('ノート操作(ピアノロール)', () => {
   });
 
   it('矢印キーで選んだ音がグリッド幅・半音・オクターブずつ動き、1 回の Undo で戻る。入力欄の中では動かない', () => {
-    render(<PianoRoll />);
+    const { container } = render(<PianoRoll />);
+    const root = container.querySelector<HTMLElement>('.pr')!;
+    root.tabIndex = -1;
+    root.focus();
     const first = () => notes().map((n) => [n.startBeat, n.pitch]);
     fireEvent.keyDown(window, { key: 'ArrowRight' });
     expect(first()[0]).toEqual([1, 60]); // 既定のグリッドは 1/4(1 拍)

@@ -442,6 +442,7 @@ export function PianoRoll() {
   const [pendingKeyboardFocus, setPendingKeyboardFocus] =
     useState<PendingKeyboardFocus | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const noteRefs = useRef(new Map<string, HTMLButtonElement>());
   const keyboardInstructionsId = useId();
@@ -637,9 +638,12 @@ export function PianoRoll() {
         pasteNotes(action === 'pasteNotes' ? 'auto' : 'original');
         return;
       }
-      // 矢印で動かす(P34)。フォーカスが音やグリッドにあるときの ←→↑↓ は、それぞれの要素が先に処理する。
-      // ここに届くのは、フォーカスがほかにあるときと Shift+↑↓(オクターブ)。
-      if (ids.length > 0 && !hasTextSelection()) {
+      // 矢印で動かす(P34)。フォーカスがピアノロールの中にあるときだけ(インスペクターなど外では動かさない)。
+      // 音やグリッドにフォーカスがあるときの ←→↑↓ は、それぞれの要素が先に処理する(ここへは届かない)。
+      // ここに届くのは、フォーカスがそのほかのピアノロール内にあるときと Shift+↑↓(オクターブ)。
+      const focused = document.activeElement;
+      const focusInRoll = focused instanceof Node && rootRef.current?.contains(focused) === true;
+      if (focusInRoll && ids.length > 0 && !hasTextSelection()) {
         const semitones = ARROW_SEMITONES[action ?? ''];
         if (action === 'nudgeLeft' || action === 'nudgeRight') {
           e.preventDefault();
@@ -1352,7 +1356,7 @@ export function PianoRoll() {
   }
 
   return (
-    <div className="pr">
+    <div className="pr" ref={rootRef}>
       <span id={keyboardInstructionsId} className="visually-hidden">
         ノートでは、矢印キーで移動、Shiftと左右矢印で長さ変更、PageUpとPageDownで強さ変更、ShiftとPageUpまたはPageDownで前後のノートへ移動します。Enterで単独選択、Spaceで選択切替、ControlまたはCommandとAで現在クリップの編集音域にある音をすべて選択、ControlまたはCommandとDで複製、Cでコピー、Xで切り取り、Vで貼り付け(再生ヘッドがクリップ内ならその位置、外ならコピーした位置。Shiftも押すと、いつもコピーした位置)、Deleteで削除します。Escapeで入力位置へ戻ります。
       </span>
