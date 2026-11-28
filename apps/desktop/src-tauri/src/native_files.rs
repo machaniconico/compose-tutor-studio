@@ -1068,11 +1068,22 @@ fn cancelled_open_envelope() -> Vec<u8> {
 
 fn opened_file_envelope(format: FileFormat, file_name: &str, bytes: &[u8]) -> FileResult<Vec<u8>> {
     validate_open_file_name(format, file_name)?;
-    validate_opened_file_bytes(format, file_name, bytes)?;
+    let tag = match validate_opened_file_bytes(format, file_name, bytes) {
+        Ok(()) => 1,
+        Err(error)
+            if format == FileFormat::Project
+                && error.code == NativeFileErrorCode::LegacyWave5Format =>
+        {
+            // The project validator classified the alternate v3 shape before
+            // main validation. Forward the original bytes for explicit import.
+            2
+        }
+        Err(error) => return Err(error),
+    };
     let file_name_length = u32::try_from(file_name.len())
         .map_err(|_| NativeFileErrorDto::new(NativeFileErrorCode::InvalidFilename))?;
     let mut envelope = Vec::with_capacity(5 + file_name.len() + bytes.len());
-    envelope.push(1);
+    envelope.push(tag);
     envelope.extend_from_slice(&file_name_length.to_le_bytes());
     envelope.extend_from_slice(file_name.as_bytes());
     envelope.extend_from_slice(bytes);
@@ -2665,3 +2676,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "native_files_p70_tests.rs"]
+mod p70_wave5_open_tests;

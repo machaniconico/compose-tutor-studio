@@ -1,0 +1,497 @@
+[
+  {
+    "name": "default-app",
+    "kind": "app-default",
+    "description": "apps/studio createDefaultProject() as the wave5 app starts",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "default-empty",
+    "kind": "package-default",
+    "description": "packages/project-model createEmptyProject() (Chords/Bass/Melody/Drums/Master)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "sample-song",
+    "kind": "app-sample",
+    "description": "apps/studio createSampleProject()",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 160,
+    "problemCount": 0
+  },
+  {
+    "name": "template-8bar-pop",
+    "kind": "template",
+    "description": "instantiateTemplate('8bar-pop')",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 96,
+    "problemCount": 0
+  },
+  {
+    "name": "template-16bar-pop",
+    "kind": "template",
+    "description": "instantiateTemplate('16bar-pop')",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 192,
+    "problemCount": 0
+  },
+  {
+    "name": "template-bgm-loop",
+    "kind": "template",
+    "description": "instantiateTemplate('bgm-loop')",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 96,
+    "problemCount": 0
+  },
+  {
+    "name": "template-jingle-15s",
+    "kind": "template",
+    "description": "instantiateTemplate('jingle-15s')",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 40,
+    "problemCount": 0
+  },
+  {
+    "name": "template-jingle-30s",
+    "kind": "template",
+    "description": "instantiateTemplate('jingle-30s')",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 80,
+    "problemCount": 0
+  },
+  {
+    "name": "template-jingle-60s",
+    "kind": "template",
+    "description": "instantiateTemplate('jingle-60s')",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 320,
+    "problemCount": 0
+  },
+  {
+    "name": "template-lofi-chill",
+    "kind": "template",
+    "description": "instantiateTemplate('lofi-chill')",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 72,
+    "problemCount": 0
+  },
+  {
+    "name": "template-game-loop",
+    "kind": "template",
+    "description": "instantiateTemplate('game-loop')",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 104,
+    "problemCount": 0
+  },
+  {
+    "name": "meter-6-8-bpm90",
+    "kind": "hand",
+    "description": "6/8, bpm 90, lengthBars 4 -> lengthBeats 12",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 4,
+    "problemCount": 0
+  },
+  {
+    "name": "roles",
+    "kind": "hand",
+    "description": "role mapping: chords x2, bass, melody x2, drums, none",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "lane-volume",
+    "kind": "hand",
+    "description": "volume lane on a fader of 0.5",
+    "laneGolden": true,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "lane-pan",
+    "kind": "hand",
+    "description": "pan lanes that saturate (pan 0.5 / -0.25) and one that does not",
+    "laneGolden": true,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "lane-cutoff",
+    "kind": "hand",
+    "description": "cutoff multiplier lane 1,2,0.5,10,0.1",
+    "laneGolden": true,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "lane-equal-beats",
+    "kind": "hand",
+    "description": "two points on the same beat make a jump",
+    "laneGolden": true,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "lane-equal-beats-at-zero",
+    "kind": "hand",
+    "description": "two points on beat 0",
+    "laneGolden": true,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "sends",
+    "kind": "hand",
+    "description": "two returns; sends of 0.5/0.25/0.75/1; a send to a missing return; a zero send",
+    "laneGolden": false,
+    "wave5Valid": false,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "loop-no-content-length",
+    "kind": "hand",
+    "description": "loop:true without contentLengthBeats: wave5 plays one pass",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 2,
+    "problemCount": 0
+  },
+  {
+    "name": "loop-content-length",
+    "kind": "hand",
+    "description": "clip 2..10, loop period 3: three passes, last one cut by the clip end",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 8,
+    "problemCount": 0
+  },
+  {
+    "name": "loop-drum-content-length",
+    "kind": "hand",
+    "description": "drum clip 0..8, loop period 2 beats = 8 steps, with an open hat the closed hat chokes",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 16,
+    "problemCount": 0
+  },
+  {
+    "name": "loop-drum-offgrid-period",
+    "kind": "hand",
+    "description": "drum clip 0..2, loop period 0.6 beat (2.4 steps): repeats land between steps",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 7,
+    "problemCount": 0
+  },
+  {
+    "name": "link-chain",
+    "kind": "hand",
+    "description": "A owns notes, B links A, C links B (same track, same type, same length)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 6,
+    "problemCount": 0
+  },
+  {
+    "name": "link-cross-track",
+    "kind": "hand",
+    "description": "a clip on another track links a clip of the first track",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 4,
+    "problemCount": 0
+  },
+  {
+    "name": "link-length-mismatch",
+    "kind": "hand",
+    "description": "same track, same type, but the link is shorter than its source",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 5,
+    "problemCount": 0
+  },
+  {
+    "name": "link-broken-cyclic",
+    "kind": "hand",
+    "description": "missing target, type mismatch, owns content, two-clip cycle, self link, plus one normal clip",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 3,
+    "problemCount": 0
+  },
+  {
+    "name": "link-of-looped-source",
+    "kind": "hand",
+    "description": "a link to a source that loops (source unrolled), and a link with its own loop",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 11,
+    "problemCount": 0
+  },
+  {
+    "name": "swing",
+    "kind": "hand",
+    "description": "project swing 35 with off-grid and on-grid material",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 10,
+    "problemCount": 0
+  },
+  {
+    "name": "macros",
+    "kind": "hand",
+    "description": "one instrument with macros and an existing param, one without",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "legacy-fields",
+    "kind": "hand",
+    "description": "legacyBarLimit, loopRange and legacyClipSettings",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 1,
+    "problemCount": 0
+  },
+  {
+    "name": "over-limit-steps",
+    "kind": "hand",
+    "description": "drum clip with 192 steps per bar (main allows at most 128)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 1,
+    "problemCount": 0
+  },
+  {
+    "name": "over-limit-events",
+    "kind": "hand",
+    "description": "6 notes looped every 1/16 beat for 256 beats = 24576 events (wave5 allows 100000, main runtime 20000)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 24576,
+    "problemCount": 0
+  },
+  {
+    "name": "audio-clips",
+    "kind": "hand",
+    "description": "audio clips: two share a legacy asset id, one has another, one has none",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "mixer-effects",
+    "kind": "hand",
+    "description": "mute, solo, fader, pan, the five wave5 effects at their wave5 defaults (eq +6/0/-3), a chord track and a section",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 2,
+    "problemCount": 0
+  },
+  {
+    "name": "effects-order-eq-enabled",
+    "kind": "hand",
+    "description": "saved order reverb, filter, eq(enabled): wave5 re-orders to eq, filter, reverb",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 1,
+    "problemCount": 0
+  },
+  {
+    "name": "effects-order-eq-disabled",
+    "kind": "hand",
+    "description": "saved order reverb, filter, eq(disabled): wave5 keeps the saved order",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 1,
+    "problemCount": 0
+  },
+  {
+    "name": "effects-adjusted",
+    "kind": "hand",
+    "description": "values main cannot hold (filter 0.7 Hz / Q 0.15, delay 1 s) and an effect type main does not have",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 1,
+    "problemCount": 0
+  },
+  {
+    "name": "return-reverb",
+    "kind": "wave5-edit",
+    "description": "addReverbReturn + setTrackSend(0.5) on the Melody track",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 1,
+    "problemCount": 0
+  },
+  {
+    "name": "lane-first-point-late",
+    "kind": "hand",
+    "description": "lanes whose first point is after beat 0 (wave5 holds the first value before it; main would use the fader)",
+    "laneGolden": true,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "lanes-unplayable",
+    "kind": "hand",
+    "description": "master lanes, a drum cutoff lane and a bus cutoff lane (wave5 never plays them) next to playable drum/bus volume+pan lanes",
+    "laneGolden": true,
+    "wave5Valid": false,
+    "eventCount": 0,
+    "problemCount": 0
+  },
+  {
+    "name": "swing-loop-cut",
+    "kind": "hand",
+    "description": "swing 50, clip 0..8, period 2, note at 1.75 for 1 beat (starts 900 ticks, ends 960)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 4,
+    "problemCount": 0
+  },
+  {
+    "name": "song-end",
+    "kind": "hand",
+    "description": "lengthBars 4: a clip crossing the end, a clip after it, chords and sections crossing / after the end",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 3,
+    "problemCount": 0
+  },
+  {
+    "name": "song-length-80",
+    "kind": "hand",
+    "description": "lengthBars 80 WITHOUT legacyBarLimit: wave5 loads it as 64 bars (256 beats); the note at 290 never sounds",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 1,
+    "problemCount": 0
+  },
+  {
+    "name": "overlap-clips",
+    "kind": "hand",
+    "description": "two overlapping clips on one track (wave5 load moves the later one to t-a-overlap-1)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 3,
+    "problemCount": 0
+  },
+  {
+    "name": "link-longer",
+    "kind": "hand",
+    "description": "a link LONGER than its source (4 beats vs 2): wave5 plays the source content once",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 4,
+    "problemCount": 0
+  },
+  {
+    "name": "link-drum",
+    "kind": "hand",
+    "description": "drum source with 12 steps per bar; an alias that wrongly carries stepsPerBar 16; a cross-track drum link",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 15,
+    "problemCount": 0
+  },
+  {
+    "name": "drum-no-steps-3-4",
+    "kind": "hand",
+    "description": "3/4, drum clip without stepsPerBar (wave5 and main both read 16)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 3,
+    "problemCount": 0
+  },
+  {
+    "name": "loop-false-with-content-length",
+    "kind": "hand",
+    "description": "loop:false but contentLengthBeats 2: wave5 plays all notes once",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 3,
+    "problemCount": 0
+  },
+  {
+    "name": "type-mismatch-content",
+    "kind": "hand",
+    "description": "notes on a drum track and drum hits on an instrument track (wave5 plays neither)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 0,
+    "problemCount": 2
+  },
+  {
+    "name": "drum-same-step-hits",
+    "kind": "hand",
+    "description": "kick step0 x2 (100,80), closedHat step2 x3 (60,110,70), snare step4 once: wave5 plays all 6",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 6,
+    "problemCount": 0
+  },
+  {
+    "name": "loop-drum-snap-collision",
+    "kind": "hand",
+    "description": "clip 0..2, period 0.6 beat (2.4 steps), kick step0 (100) and kick step2 (120): snapped repeats land on steps 2 and 7 twice",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 7,
+    "problemCount": 0
+  },
+  {
+    "name": "clip-type-mismatch-played",
+    "kind": "hand",
+    "description": "instrument track, clip type drum with one MIDI note (pitch 60, 1 beat) and no drumEvents: wave5 plays the one 480-tick note",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 1,
+    "problemCount": 0
+  },
+  {
+    "name": "over-limit-density",
+    "kind": "hand",
+    "description": "300 notes within 0.3 beat (total far below 20000)",
+    "laneGolden": false,
+    "wave5Valid": true,
+    "eventCount": 300,
+    "problemCount": 0
+  },
+  {
+    "name": "realistic-song",
+    "kind": "wave5-edit",
+    "description": "template 8bar-pop edited with wave5 mutations: swing, loop, link, copy, macros, cross-clip choke, return + sends, 5 effects, lanes",
+    "laneGolden": true,
+    "wave5Valid": true,
+    "eventCount": 150,
+    "problemCount": 0
+  }
+]

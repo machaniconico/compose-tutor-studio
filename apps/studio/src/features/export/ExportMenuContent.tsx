@@ -1,13 +1,12 @@
 // Export menu in the top bar: MIDI / WAV / project-file export, and project-file
 // import. Surfaces progress + errors as toasts and emits export app events.
 
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { MidiExportError, projectToMidi } from '@cts/midi-io';
 import {
   DEFAULT_MAX_PROJECT_JSON_BYTES,
-  LEGACY_WAVE5_FORMAT_MESSAGE,
   ScheduleEventLimitError,
-  decodeProjectJson,
+  type Project,
   resolveExportRange,
   serializeProject,
 } from '@cts/project-model';
@@ -62,12 +61,17 @@ import {
   nativeFileGateway,
 } from '../../platform/nativeFileGateway';
 import type { ExportOperation } from './ExportMenu';
+import { Wave5ImportDialog } from './Wave5ImportDialog';
+import { planProjectJsonImport, type ProjectJsonImportInput, type Wave5ConversionOffer } from './wave5Import';
 
-type ExportMenuContentProps = {
+export type ExportMenuContentProps = {
   onDone: () => void;
   activeOperation: ExportOperation | null;
   beginOperation: (operation: ExportOperation) => boolean;
   finishOperation: (operation: ExportOperation) => void;
+  renderMenu?: (content: ReactNode) => ReactNode;
+  conversionOffer?: Wave5ConversionOffer | null;
+  setConversionOffer?: (offer: Wave5ConversionOffer | null) => void;
 };
 
 export function midiExportFailureMessage(error: unknown): string {
@@ -261,6 +265,9 @@ export function ExportMenuContent({
   activeOperation,
   beginOperation,
   finishOperation,
+  renderMenu = (content) => content,
+  conversionOffer,
+  setConversionOffer,
 }: ExportMenuContentProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const portableFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -445,22 +452,8 @@ export function ExportMenuContent({
     }
   };
 
-  const importProjectJson = async (text: string) => {
-    const decoded = decodeProjectJson(text);
-    if (!decoded.ok) {
-      if (decoded.error.code === 'legacy-wave5-format') {
-        pushToast(LEGACY_WAVE5_FORMAT_MESSAGE, 'error');
-        return;
-      }
-      pushToast(
-        decoded.error.code === 'future-schema-version'
-          ? 'このファイルは新しいアプリ版で作成されています。アプリを更新してください。'
-          : 'プロジェクトファイルを安全に検証できませんでした。',
-        'error',
-      );
-      return;
-    }
-    const importedProject = cloneProjectForImport(decoded.project, uid('project'));
+  const adoptProject = async (decoded: Project) => {
+    const importedProject = cloneProjectForImport(decoded, uid('project'));
     if (!(await replaceProject(importedProject))) {
       pushToast('現在のプロジェクトを保存できないため、読み込みを中止しました。', 'error');
       return;
@@ -473,6 +466,26 @@ export function ExportMenuContent({
         : 'プロジェクトをコピーとして読み込みました。',
       saveFailed ? 'error' : 'success',
     );
+  };
+
+  const importProjectJson = async (input: ProjectJsonImportInput) => {
+    const plan = planProjectJsonImport(input);
+    if (plan.kind === 'error') pushToast(plan.message, 'error');
+    else if (plan.kind === 'offer-conversion') setConversionOffer?.(plan);
+    else await adoptProject(plan.project);
+  };
+
+  const openConvertedProject = async (converted: Project) => {
+    const operation = 'project-import' satisfies ExportOperation;
+    if (!beginOperation(operation)) return;
+    try {
+      await adoptProject(converted);
+    } catch {
+      pushToast('プロジェクトの読み込みに失敗しました。', 'error');
+    } finally {
+      setConversionOffer?.(null);
+      finishOperation(operation);
+    }
   };
 
   const onImportFile = async (file: File) => {
@@ -497,18 +510,15 @@ export function ExportMenuContent({
     try {
       const result = await nativeFileGateway.openProject();
       if (result.status === 'cancelled') return;
-      const text = new TextDecoder('utf-8', { fatal: true }).decode(result.bytes);
-      await importProjectJson(text);
+      const { bytes, legacyWave5 } = result;
+      await importProjectJson({ bytes, ...(legacyWave5 ? { legacyWave5 } : {}) });
     } catch (error) {
-      if (error instanceof NativeFileGatewayError && error.code === 'legacy-wave5-format') {
-        pushToast(LEGACY_WAVE5_FORMAT_MESSAGE, 'error');
-        return;
-      }
       pushToast(
         error instanceof NativeFileGatewayError && error.code === 'file-too-large'
           ? 'プロジェクトファイルが大きすぎます（上限16MB）。'
           : error instanceof NativeFileGatewayError &&
-              (error.code === 'invalid-file' ||
+              (error.code === 'legacy-wave5-format' ||
+                error.code === 'invalid-file' ||
                 error.code === 'invalid-envelope' ||
                 error.code === 'invalid-filename')
             ? 'プロジェクトファイルを安全に検証できませんでした。'
@@ -620,7 +630,17 @@ export function ExportMenuContent({
     }
   };
 
-  return (
+  if (conversionOffer) {
+    return (
+      <Wave5ImportDialog
+        plan={conversionOffer}
+        onOpen={(converted) => void openConvertedProject(converted)}
+        onCancel={() => setConversionOffer?.(null)}
+      />
+    );
+  }
+
+  return renderMenu(
     <div className="export-menu">
             <section className="export-menu__group">
               <p className="panel-section__title">音源として書き出す</p>

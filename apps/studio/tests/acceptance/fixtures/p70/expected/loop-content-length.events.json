@@ -1,0 +1,96 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 8,
+  "problems": [],
+  "events": [
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 960,
+      "endTick": 1440,
+      "startBeat": 2,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 1440,
+      "endTick": 2400,
+      "startBeat": 3,
+      "durationBeats": 2
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 64,
+      "velocity": 100,
+      "startTick": 2160,
+      "endTick": 2400,
+      "startBeat": 4.5,
+      "durationBeats": 0.5
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 2400,
+      "endTick": 2880,
+      "startBeat": 5,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 2880,
+      "endTick": 3840,
+      "startBeat": 6,
+      "durationBeats": 2
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 64,
+      "velocity": 100,
+      "startTick": 3600,
+      "endTick": 3840,
+      "startBeat": 7.5,
+      "durationBeats": 0.5
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 3840,
+      "endTick": 4320,
+      "startBeat": 8,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 4320,
+      "endTick": 4800,
+      "startBeat": 9,
+      "durationBeats": 1
+    }
+  ]
+}

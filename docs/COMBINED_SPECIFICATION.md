@@ -800,6 +800,11 @@ Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生pass�
 - importはheader、manifest canonicality、Project codec、exact lengths、全SHA-256、payload終端、Projectのready AudioAsset descriptorとの一致を全て検証してからrepository storeを始める。payload viewは入力bundleをborrowするため、decoderだけのためのwhole-bundle copyは作らない。全distinct payloadのstore receiptがchecksum / lengthと一致した後だけfresh Project IDへcloneし、現在Projectを1回のatomic adoptionで置換する
 - repositoryはcontent-addressed objectのdelete/rollback APIを持たない。full validation後の後続storeまたはadoption失敗ではimmutableな未参照objectが残り得るが、欠損objectを参照するProjectや部分採用Projectは作らない。nativeはgeneration-aware GCを持ち、Webのgeneration-aware orphan GCは既知の後続制約として明示する
 
+### 10.4 開発版 wave5 v3 の曲を読み込む（P70）
+
+- Web とデスクトップの「プロジェクト読み込み」で、開発版 wave5 v3 の曲ファイルに変換を案内する。変換後に変更や消える設定を確認し、利用者が「この内容で開く」を押した時だけ新しいプロジェクトとして開く。元のファイルはそのまま残る。
+- 音符やドラムの配置、音量・パン・明るさの変化を引き継ぐ。エフェクトは近い設定に変換し、響きが変わる場合がある。コードが新たに鳴る場合や、音声素材を復元できない場合は変換結果に表示する。現在のアプリで再生上限を超える曲は変換を中止する。
+
 ## 11. MIDI Import
 
 ### 11.1 加算読み込み
@@ -1357,6 +1362,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 ### 2.7 Project / Portable Project / MIDI交換
 
 - Project menuでは、metadata-onlyの操作を`編集情報のみ (.ctsproj.json)`、音声素材を含む操作を`音声素材を含む持ち運び用 (.ctsbundle)`として別section・別button・別file acceptへ分ける。`.ctsproj.json`は「曲の編集情報をexactに交換するが音声fileは含まない」、`.ctsbundle`は「利用中の音声素材を含む別端末用コピー」と操作前に説明する
+- 開発版 wave5 v3 の曲ファイルを選ぶと、変換するか確認する。「変換する」の後で、変わる項目と消える項目の件数と詳細を表示する。詳細にはトラック名と、必要に応じて小節・拍を示す。「元のファイルは変わりません。コピーとして開きます。」と案内し、「この内容で開く」で確定する。「やめる」で読み込みを取り消せる。変換に失敗した場合は理由を表示する。
 - `.ctsbundle` export/import中はProject dialog全体を`aria-busy`にし、384 MiB予約の取得からWeb downloadまたはnative saved/cancelled/error settlementまで他の重い音声処理とProject操作を競合させない。cancelは成功toastを出さず、import前の曲・選択・履歴を保つ
 - Project menuでは、MIDIを「他アプリとの音符中心の交換形式」と説明する。MIDIへclip / loop / alias / preset / effects / mute / solo / groove / section / chord semanticsの完全復元を示唆しない
 - Exportダイアログの「音源として書き出す」にWAV形式の1行(サンプルレート 44.1 / 48 kHz、ビット数 16 / 24 bit、ディザ checkbox)を置く。既定は44.1 kHz・16 bit・ディザOFFで、以前と同じファイルが出る。ディザは16 bitのときだけ選べ、24 bitではdisabledにする。書き出し中は3つとも無効化する。選択はダイアログを開いている間のUI状態でProjectには保存しない
@@ -2113,6 +2119,8 @@ native export commandはTauri `Request`のborrowed raw bodyをsize・header・ma
 
 renderer importはbundle全体を検証してからdistinct payloadをcontent-addressed repositoryへstoreし、全receiptのchecksum / byte length一致後だけfresh Project IDへcloneして1回のProject adoptionを行う。検証・store・receipt・adoptionの失敗またはcancelでは現在Project、history、revisionを変えない。repositoryにrollback/delete APIはないため、full validation後の後続store / adoption失敗ではimmutableな未参照objectが残り得る。nativeはgeneration-aware GCを持つが、Web generation-aware orphan GCは既知制約である。
 
+プロジェクト JSON の open では、Rust が wave5 v3 を判別した場合に `[0x02][filenameLengthLE u32][UTF-8 basename][元のファイル bytes]` を返す。通常の open は tag 1、キャンセルは tag 0 を使う。renderer が UTF-8 と形式を再確認し、同じ変換ダイアログを Web とデスクトップで使う。確認後は共通の `cloneProjectForImport` と `replaceProject` を通す。変換器は `project-model` 内の純粋関数で、wave5 の読み込み正規化（d85f796）と現行の codec・再生予算を使用する。
+
 ### 7.3 互換性
 
 - `schema_version` を持つ
@@ -2730,6 +2738,8 @@ exact snapshotから特定projectらしいbytesだけを抜くと、snapshot che
 ### 4.1 wave5 v3 の形式判定
 
 `schemaVersion: 3` の Project は、ルート自身にある `lengthBeats`、`tempoMap`、`timeSignatureMap`、`audioAssets`、`automationLanes` の5キーで判定する。5個そろっていれば通常の v3、0個なら未公開版 wave5 の v3、1〜4個なら `invalid-project` とする。wave5 v3 は `legacy-wave5-format` を返し、通常の移行には進まない。
+
+明示的なファイル読み込みで `convertWave5Project` を呼ぶと、wave5 の読み込み時のリンク修復、重なり分割、小節上限を反映した上で現行 v12 を生成する。BPM と拍子は beat 0 の map に、繰り返し部分は編集できるイベントに、対応するセンドは post-fader に、明るさの倍率はオクターブ差に変換する。音声参照は未解決の Audio Asset とする。変換結果には現行 Project と変更の報告が含まれる。変換は決定的で、現行 codec の検証と再生上限（2万イベント、0.75拍あたり256イベント）を通った場合に成功する。
 
 ## 5. Validationルール
 

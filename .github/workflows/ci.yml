@@ -181,7 +181,12 @@ jobs:
       - name: Lint Rust
         run: pnpm desktop:lint
 
+      - name: Generate P70 converted project fixtures
+        run: pnpm --dir apps/studio exec vitest run tests/acceptance/p70-converter.test.ts tests/wave5-converter-regression.test.ts
+
       - name: Test Rust
+        env:
+          CTS_P70_REQUIRE_CONVERTED: "1"
         run: pnpm desktop:test
 
       - name: Run native WebView smoke on Linux

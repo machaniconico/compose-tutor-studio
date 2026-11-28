@@ -45,3 +45,13 @@ export * from './ticks';
 export * from './drum-schedule';
 export * from './groove-schedule';
 export * from './export-range';
+export * from './legacy-wave5/converter';
+export {
+  WAVE5_REPORT_CODES,
+  type Report,
+  type Wave5ConvertErrorCode,
+  type Wave5ConvertResult,
+  type Wave5ReportCode,
+  type Wave5ReportItem,
+  type Wave5ReportSeverity,
+} from './legacy-wave5/report';

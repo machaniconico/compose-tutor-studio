@@ -1,0 +1,48 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 4,
+  "problems": [],
+  "events": [
+    {
+      "trackId": "t-drums",
+      "clipId": "c-drums",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 100,
+      "startTick": 0,
+      "startBeat": 0
+    },
+    {
+      "trackId": "t-piano",
+      "clipId": "c-piano",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 0,
+      "endTick": 480,
+      "startBeat": 0,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-drums",
+      "clipId": "c-drums",
+      "kind": "drum",
+      "lane": "snare",
+      "velocity": 100,
+      "startTick": 720,
+      "startBeat": 1.5
+    },
+    {
+      "trackId": "t-piano",
+      "clipId": "c-piano",
+      "kind": "note",
+      "pitch": 64,
+      "velocity": 100,
+      "startTick": 720,
+      "endTick": 1200,
+      "startBeat": 1.5,
+      "durationBeats": 1
+    }
+  ]
+}

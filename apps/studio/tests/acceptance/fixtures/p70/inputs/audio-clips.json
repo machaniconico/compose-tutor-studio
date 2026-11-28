@@ -1,0 +1,77 @@
+{
+  "id": "p-audio",
+  "schemaVersion": 3,
+  "title": "p-audio",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "t-au",
+      "name": "Audio",
+      "type": "audio",
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": [],
+      "clips": [
+        {
+          "id": "c-au1",
+          "trackId": "t-au",
+          "type": "audio",
+          "startBeat": 0,
+          "lengthBeats": 4,
+          "loop": false,
+          "audioAssetId": "wave-a"
+        },
+        {
+          "id": "c-au2",
+          "trackId": "t-au",
+          "type": "audio",
+          "startBeat": 4,
+          "lengthBeats": 4,
+          "loop": false,
+          "audioAssetId": "wave-a"
+        },
+        {
+          "id": "c-au3",
+          "trackId": "t-au",
+          "type": "audio",
+          "startBeat": 8,
+          "lengthBeats": 4,
+          "loop": false,
+          "audioAssetId": "wave-b"
+        },
+        {
+          "id": "c-au4",
+          "trackId": "t-au",
+          "type": "audio",
+          "startBeat": 12,
+          "lengthBeats": 4,
+          "loop": false
+        }
+      ]
+    },
+    {
+      "id": "master",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

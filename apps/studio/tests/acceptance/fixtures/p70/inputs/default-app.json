@@ -1,0 +1,269 @@
+{
+  "id": "project_mjuohs001x9om5z",
+  "schemaVersion": 3,
+  "title": "最初の1曲",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "track_mjuohs00283y5wi",
+      "name": "Chords",
+      "type": "instrument",
+      "role": "chords",
+      "color": "#5bb0a8",
+      "clips": [
+        {
+          "id": "clip_mjuohs003llq4qv",
+          "trackId": "track_mjuohs00283y5wi",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": []
+        }
+      ],
+      "volume": 0.8,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": []
+    },
+    {
+      "id": "track_mjuohs004x0an3h",
+      "name": "Bass",
+      "type": "instrument",
+      "role": "bass",
+      "color": "#c75b86",
+      "clips": [
+        {
+          "id": "clip_mjuohs005h2u9s1",
+          "trackId": "track_mjuohs004x0an3h",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": []
+        }
+      ],
+      "volume": 0.8,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "subBass"
+      },
+      "effects": []
+    },
+    {
+      "id": "track_mjuohs006mnkuis",
+      "name": "Melody",
+      "type": "instrument",
+      "role": "melody",
+      "color": "#6f9bd8",
+      "clips": [
+        {
+          "id": "clip_mjuohs007x22roa",
+          "trackId": "track_mjuohs006mnkuis",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": []
+        }
+      ],
+      "volume": 0.8,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "leadSine"
+      },
+      "effects": []
+    },
+    {
+      "id": "track_mjuohs008b5oro0",
+      "name": "Drums",
+      "type": "drum",
+      "role": "drums",
+      "color": "#d98a4b",
+      "clips": [
+        {
+          "id": "clip_mjuohs009j4irkp",
+          "trackId": "track_mjuohs008b5oro0",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "drumEvents": [],
+          "stepsPerBar": 16
+        }
+      ],
+      "volume": 0.85,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "basic"
+      },
+      "effects": []
+    },
+    {
+      "id": "track_mjuohs00agwd0gq",
+      "name": "Master",
+      "type": "master",
+      "color": "#7c83ff",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [
+    {
+      "id": "chord_mjuohs00brhrgz7",
+      "startBeat": 0,
+      "durationBeats": 4,
+      "symbol": "C",
+      "root": "C",
+      "quality": "major",
+      "notes": [
+        0,
+        4,
+        7
+      ],
+      "degree": "I",
+      "function": "T"
+    },
+    {
+      "id": "chord_mjuohs00c4imj83",
+      "startBeat": 4,
+      "durationBeats": 4,
+      "symbol": "G",
+      "root": "G",
+      "quality": "major",
+      "notes": [
+        7,
+        11,
+        2
+      ],
+      "degree": "V",
+      "function": "D"
+    },
+    {
+      "id": "chord_mjuohs00dsp1ylx",
+      "startBeat": 8,
+      "durationBeats": 4,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "minor",
+      "notes": [
+        9,
+        0,
+        4
+      ],
+      "degree": "vi",
+      "function": "T"
+    },
+    {
+      "id": "chord_mjuohs00enq6qnq",
+      "startBeat": 12,
+      "durationBeats": 4,
+      "symbol": "F",
+      "root": "F",
+      "quality": "major",
+      "notes": [
+        5,
+        9,
+        0
+      ],
+      "degree": "IV",
+      "function": "SD"
+    },
+    {
+      "id": "chord_mjuohs00fhp9kk0",
+      "startBeat": 16,
+      "durationBeats": 4,
+      "symbol": "C",
+      "root": "C",
+      "quality": "major",
+      "notes": [
+        0,
+        4,
+        7
+      ],
+      "degree": "I",
+      "function": "T"
+    },
+    {
+      "id": "chord_mjuohs00ga70sf7",
+      "startBeat": 20,
+      "durationBeats": 4,
+      "symbol": "G",
+      "root": "G",
+      "quality": "major",
+      "notes": [
+        7,
+        11,
+        2
+      ],
+      "degree": "V",
+      "function": "D"
+    },
+    {
+      "id": "chord_mjuohs00hy5t4yf",
+      "startBeat": 24,
+      "durationBeats": 4,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "minor",
+      "notes": [
+        9,
+        0,
+        4
+      ],
+      "degree": "vi",
+      "function": "T"
+    },
+    {
+      "id": "chord_mjuohs00ixofess",
+      "startBeat": 28,
+      "durationBeats": 4,
+      "symbol": "F",
+      "root": "F",
+      "quality": "major",
+      "notes": [
+        5,
+        9,
+        0
+      ],
+      "degree": "IV",
+      "function": "SD"
+    }
+  ],
+  "sections": [
+    {
+      "id": "section_mjuohs00j65wnrs",
+      "name": "メイン",
+      "type": "verse",
+      "startBar": 0,
+      "lengthBars": 8
+    }
+  ],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

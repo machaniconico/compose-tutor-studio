@@ -522,6 +522,8 @@ exact snapshotから特定projectらしいbytesだけを抜くと、snapshot che
 
 `schemaVersion: 3` の Project は、ルート自身にある `lengthBeats`、`tempoMap`、`timeSignatureMap`、`audioAssets`、`automationLanes` の5キーで判定する。5個そろっていれば通常の v3、0個なら未公開版 wave5 の v3、1〜4個なら `invalid-project` とする。wave5 v3 は `legacy-wave5-format` を返し、通常の移行には進まない。
 
+明示的なファイル読み込みで `convertWave5Project` を呼ぶと、wave5 の読み込み時のリンク修復、重なり分割、小節上限を反映した上で現行 v12 を生成する。BPM と拍子は beat 0 の map に、繰り返し部分は編集できるイベントに、対応するセンドは post-fader に、明るさの倍率はオクターブ差に変換する。音声参照は未解決の Audio Asset とする。変換結果には現行 Project と変更の報告が含まれる。変換は決定的で、現行 codec の検証と再生上限（2万イベント、0.75拍あたり256イベント）を通った場合に成功する。
+
 ## 5. Validationルール
 
 | 対象 | ルール |

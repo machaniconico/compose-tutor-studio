@@ -31,14 +31,17 @@
 - current snapshotでは`swing`（0〜60 の有限数）と`hiHatChoke`（boolean）を検証・保存する。v10→v11では版番号を進め、`swing: 0`と`hiHatChoke: false`を追加して既存の再生結果を維持する。新規プロジェクトの既定値は`swing: 0`と`hiHatChoke: true`。
 - `swing === 0 && hiHatChoke === false`をlegacy modeと呼ぶ。v10以前から移行した全Projectはこのmodeで、再生・WAV・MIDIはmain(v10)と同じ出力を保つ。`swing > 0 || hiHatChoke === true`(resolved mode)だけが480 PPQの共通groove resolverを使う(詳細は`06_data_model.md` §2.1)。
 - v11→v12は`schemaVersion`だけを更新する。TS / Rustはv12のinstrument Trackだけに`track-filter-cutoff`を各Track 1本まで許容し、値を有限の±log2(10)オクターブ差（両端を含む）に制限する。
-- TS / Rust 境界には、JSON の表記による既知の差がある。TS の JSON parser は `60.000000000000004` を 60 より大きい値に丸め、Rust の f64 parser は 60 に丸める。単独のサロゲートは TS の JSON parser が読み取れ、Rust の JSON parser は拒否する。`schemaVersion: 12.0` は TS で整数値 12 として扱われ、Rust の整数型による判定では受理されない。`track-filter-cutoff` の値の上限・下限である ±log2(10) の ±1 ulp 以内の表記（例: `3.3219280948873626`、`3.32192809488736234787`）は、serde_json の既定の浮動小数点 parse が正しい丸めを保証しないため、片側で受理され他方で拒否されうる。TS はこの表記を書き出さない。Rust は serde が構造体を配列（sequence）から読めるため、JSON 配列で書かれた自動化ターゲットを受理するが、TS は拒否する。これは P23 以前から既存のターゲットでも同様である。cutoff の上限・下限 ±log2(10) は実行時計算（`Math.log2(10)` / `10f64.log2()`）が環境により 1 ulp ずれうるため、TS は数値リテラル `3.321928094887362`、Rust は `std::f64::consts::LOG2_10` に固定し、両者が同じ正しく丸めた値になる。
+- TS / Rust 境界には、JSON の表記による既知の差がある。浮動小数点数は、Rust 側も serde_json の `float_roundtrip`(P70 で有効化)により TS と同じく正しく丸めて読むため、`60.000000000000004` のような表記は両側で同じ値になる。単独のサロゲートは TS の JSON parser が読み取れ、Rust の JSON parser は拒否する。`schemaVersion: 12.0` は TS で整数値 12 として扱われ、Rust の整数型による判定では受理されない。Rust は serde が構造体を配列（sequence）から読めるため、JSON 配列で書かれた自動化ターゲットを受理するが、TS は拒否する。これは P23 以前から既存のターゲットでも同様である。cutoff の上限・下限 ±log2(10) は実行時計算（`Math.log2(10)` / `10f64.log2()`）が環境により 1 ulp ずれうるため、TS は数値リテラル `3.321928094887362`、Rust は `std::f64::consts::LOG2_10` に固定し、両者が同じ正しく丸めた値になる。
+- wave5 v3 の明示変換では、読み込み時の正規化後にクリップ、ノート、ループ境界、ドラムの位置を 480 PPQ の整数 tick に丸める。各端を別々に丸めてから、クリップと曲の範囲内に収める。長さが 0 tick になったノートは取り除き、変換結果で知らせる。ループやクリップの境界では丸め後の位置で再生の有無を決めるため、tick 未満の差で wave5 とは異なる音が残る、または消える場合がある。繰り返したドラムは現行のドラムグリッドに合わせる。オートメーションの点も元の点は tick に丸めるため、手編集で異なる拍の点が同じ tick に入ると後の点だけが残る(wave5 の UI は点を tick に合わせるので UI で作ったファイルでは起きない)。パンの飽和で新しく作る交点は丸めず、正確な拍に置く。
 - v8→v9は`schemaVersion`だけを更新し、既存Clipの音を変えない。v9からready・非loop Audio Clipへ保存できる`audioWarp`はProject JSONの保護対象で、v9→v10は既存warpへ`formantMode: 'off'`を追加する。v10の`off | preserve`は保存transactionに含めるが、解析候補、waveform / pitch frame、Worker世代、派生PCM cache、補正前 / 補正後のA/Bはruntime-onlyである。
 
 Project JSON transactionとAudio Asset objectは正本を分離する。production import / Audio Track録音は入力を48 kHz mono/stereo PCM16 WAVへ正規化し、binaryをSHA-256 content-addressed repositoryへ確定してから、開始時Projectがcurrentの場合だけready metadataとAudio Clipを1回のProject CASへ採用する。importと録音待機なしの録音ではAudio Trackも作り、Record Armされた既存Audio Trackへの録音ではそのTrack / routingを変えずClipを追記する。Record Armと入力device IDはruntime-onlyでJSON transactionへ含めない。JSON transactionへbinaryを埋め込まないため単一filesystem transactionではないが、Projectが存在しないobjectを先に参照する順序を作らない。binary確定後にcancel / stale CAS / codec拒否となったobjectはorphanとして安全に残し、native起動時のgeneration-aware GCで回収する。
 
 ### 2.2 wave5 v3 の検出と保全
 
-JSON 読み込みと localStorage の旧データ走査では、構造検証と移行の前に v3 の必須5キーを確認する。すべて欠けている v3 は未公開版 wave5 の形式として `legacy-wave5-format` を返す。旧データ走査では `unsupported-version` として記録し、移行用バックアップに元のデータを保存する。元の localStorage キーはバックアップ用のキーも含めて保全する。Rust の移行証明とネイティブへのプロジェクト取り込みは、必須キーが欠けている v3 をプロジェクトとして受け付けない。
+Project codec と localStorage の旧データ走査では、構造検証と移行の前に v3 の必須5キーを確認する。すべて欠けている v3 は未公開版 wave5 の形式として `legacy-wave5-format` を返す。旧データ走査では `unsupported-version` として記録し、移行用バックアップに元のデータを保存する。元の localStorage キーはバックアップ用のキーも含めて保全する。Rust の移行証明と永続化では、必須キーが欠けている v3 をプロジェクトとして受け付けない。
+
+デスクトップのファイル選択では wave5 v3 に専用の open tag 2 を返し、ファイル名と元のバイト列を renderer に渡す。Rust の open は読み取り専用で、wave5 を現行 Project として検証・保存しない。Web と同じ明示変換を経て利用者が確定すると、現行 Project のコピーが新しい ID で通常の保存経路に入る。
 
 ## 3. localStorageレコード
 

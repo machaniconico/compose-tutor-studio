@@ -1,0 +1,63 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 5,
+  "problems": [],
+  "events": [
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 0,
+      "endTick": 480,
+      "startBeat": 0,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 720,
+      "endTick": 1200,
+      "startBeat": 1.5,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 64,
+      "velocity": 100,
+      "startTick": 1440,
+      "endTick": 1920,
+      "startBeat": 3,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-y",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 1920,
+      "endTick": 2400,
+      "startBeat": 4,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-y",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 2640,
+      "endTick": 2880,
+      "startBeat": 5.5,
+      "durationBeats": 0.5
+    }
+  ]
+}

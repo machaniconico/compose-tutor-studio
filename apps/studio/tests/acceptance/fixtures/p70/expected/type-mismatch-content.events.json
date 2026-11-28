@@ -1,0 +1,10 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 0,
+  "problems": [
+    "「Drums」: ドラムのトラックでは音符は鳴らないため、このクリップの音符 2 個は鳴りません。音符は楽器のトラックのクリップに置きましょう。",
+    "「Piano」: 楽器のトラックではドラムの音は鳴らないため、このクリップのドラムの音 2 個は鳴りません。ドラムの音はドラムのトラックのクリップに置きましょう。"
+  ],
+  "events": []
+}

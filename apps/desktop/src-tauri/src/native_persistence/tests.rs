@@ -10406,3 +10406,66 @@ fn validate_project_v12_rejects_second_cutoff_lane_on_the_same_track() {
         "v12 must allow only one cutoff lane per track"
     );
 }
+
+/// P70 acceptance (R3, wave5 v3 converter): every converted golden project must pass the native validator.
+///
+/// The converter is TypeScript. Its acceptance test
+/// `convert_output_passesDecodeCurrentProject_andRustValidate`
+/// (apps/studio/tests/acceptance/p70-converter.test.ts) writes the converted projects to
+/// apps/studio/tests/acceptance/fixtures/p70/converted/<name>.json (git-ignored, regenerated on every run).
+/// This test reads that directory.
+///
+/// Without `CTS_P70_REQUIRE_CONVERTED=1` the test SKIPS CLEANLY (prints why) when the directory is empty, so a plain
+/// `cargo test` works before the TS test has run. WITH `CTS_P70_REQUIRE_CONVERTED=1` a missing or short directory is a
+/// FAILURE: CI's desktop job must run the TS test first and then `cargo test` with this variable, otherwise the check
+/// would pass vacuously. Do not edit.
+#[test]
+fn p70_converted_fixtures_pass_native_validation() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../studio/tests/acceptance/fixtures/p70");
+    let required = std::env::var("CTS_P70_REQUIRE_CONVERTED").is_ok_and(|value| value == "1");
+
+    // Control: a wave5 v3 input is NOT a valid main project, so the validator is not trivially true.
+    let wave5 =
+        fs::read(fixtures.join("inputs/template-8bar-pop.json")).expect("wave5 input fixture");
+    assert!(
+        !validate_project_file_json(&wave5),
+        "a wave5 v3 file must be rejected by the native validator"
+    );
+
+    let converted_dir = fixtures.join("converted");
+    let mut files: Vec<_> = match fs::read_dir(&converted_dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    files.sort();
+    if files.is_empty() {
+        assert!(
+            !required,
+            "CTS_P70_REQUIRE_CONVERTED=1 but {} has no converted projects: run apps/studio/tests/acceptance/p70-converter.test.ts first",
+            converted_dir.display()
+        );
+        eprintln!(
+            "SKIP p70_converted_fixtures_pass_native_validation: {} has no converted projects yet; \
+             run apps/studio/tests/acceptance/p70-converter.test.ts first",
+            converted_dir.display()
+        );
+        return;
+    }
+    assert!(
+        files.len() >= 45,
+        "expected the converter test to write all convertible fixtures, found {}",
+        files.len()
+    );
+    for path in files {
+        let bytes = fs::read(&path).expect("converted fixture is readable");
+        assert!(
+            validate_project_file_json(&bytes),
+            "native validator rejected converted project {}",
+            path.display()
+        );
+    }
+}

@@ -1,0 +1,71 @@
+{
+  "id": "p-lane-cutoff",
+  "schemaVersion": 3,
+  "title": "p-lane-cutoff",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "t-a",
+      "name": "A",
+      "type": "instrument",
+      "clips": [],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": [],
+      "automation": {
+        "cutoff": {
+          "points": [
+            {
+              "beat": 0,
+              "value": 1
+            },
+            {
+              "beat": 4,
+              "value": 2
+            },
+            {
+              "beat": 8,
+              "value": 0.5
+            },
+            {
+              "beat": 12,
+              "value": 10
+            },
+            {
+              "beat": 16,
+              "value": 0.1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "master",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

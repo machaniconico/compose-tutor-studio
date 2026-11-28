@@ -1,0 +1,129 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 11,
+  "problems": [],
+  "events": [
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 0,
+      "endTick": 480,
+      "startBeat": 0,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 720,
+      "endTick": 960,
+      "startBeat": 1.5,
+      "durationBeats": 0.5
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 960,
+      "endTick": 1440,
+      "startBeat": 2,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 1680,
+      "endTick": 1920,
+      "startBeat": 3.5,
+      "durationBeats": 0.5
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-b",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 1920,
+      "endTick": 2400,
+      "startBeat": 4,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-b",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 2640,
+      "endTick": 3120,
+      "startBeat": 5.5,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-b",
+      "kind": "note",
+      "pitch": 64,
+      "velocity": 100,
+      "startTick": 3120,
+      "endTick": 3600,
+      "startBeat": 6.5,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-c",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 3840,
+      "endTick": 4320,
+      "startBeat": 8,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-c",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 4560,
+      "endTick": 4800,
+      "startBeat": 9.5,
+      "durationBeats": 0.5
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-c",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 4800,
+      "endTick": 5280,
+      "startBeat": 10,
+      "durationBeats": 1
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-c",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 5520,
+      "endTick": 5760,
+      "startBeat": 11.5,
+      "durationBeats": 0.5
+    }
+  ]
+}
