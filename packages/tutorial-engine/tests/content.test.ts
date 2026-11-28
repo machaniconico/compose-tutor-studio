@@ -8,21 +8,24 @@ import {
   COMPOSE_LESSONS,
   COMPOSE_PLUS_COURSE,
   COMPOSE_PLUS_LESSONS,
+  DAW_COURSE,
+  DAW_LESSONS,
   getLessonById,
 } from '../src/content/index.js';
 import type { TutorialLesson } from '../src/types.js';
 
 describe('content registry', () => {
-  it('ALL_COURSES contains 3 courses (basic, compose, compose-plus)', () => {
-    expect(ALL_COURSES).toHaveLength(3);
+  it('ALL_COURSES contains 4 courses (basic, compose, compose-plus, daw-course)', () => {
+    expect(ALL_COURSES).toHaveLength(4);
     const ids = ALL_COURSES.map((c) => c.id);
     expect(ids).toContain('basic');
     expect(ids).toContain('compose');
     expect(ids).toContain('compose-plus');
+    expect(ids).toContain('daw-course');
   });
 
-  it('ALL_LESSONS contains 14 lessons (4 basic + 5 compose + 5 compose-plus)', () => {
-    expect(ALL_LESSONS).toHaveLength(14);
+  it('ALL_LESSONS contains 18 lessons (4 basic + 5 compose + 5 compose-plus + 4 daw)', () => {
+    expect(ALL_LESSONS).toHaveLength(18);
   });
 
   it('BASIC_LESSONS contains 4 lessons', () => {
@@ -47,6 +50,15 @@ describe('content registry', () => {
 
   it('COMPOSE_COURSE.lessonIds matches COMPOSE_LESSONS ids in order', () => {
     expect(COMPOSE_COURSE.lessonIds).toEqual(COMPOSE_LESSONS.map((l) => l.id));
+  });
+
+  it('DAW_COURSE.lessonIds matches DAW_LESSONS ids in order', () => {
+    expect(DAW_COURSE.lessonIds).toEqual(DAW_LESSONS.map((l) => l.id));
+  });
+
+  it('every lesson id is unique across all courses', () => {
+    const ids = ALL_LESSONS.map((l) => l.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('getLessonById returns correct lesson', () => {

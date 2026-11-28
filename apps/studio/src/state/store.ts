@@ -2500,6 +2500,27 @@ export function createStudioStore(
     return mode === 'cancel';
   };
 
+  /**
+   * Tutorial events for what a committed change did to the project's structure.
+   * One shared point, so every path that creates a track or changes the song
+   * length (dialogs, imports, suggestions, assistants) reports it exactly once.
+   * Undo/redo never come through here: an event means "the user did this".
+   */
+  const publishCommittedStructureEvents = (before: Project, after: Project): void => {
+    if (before.id !== after.id) return;
+    const known = new Set(before.tracks.map((track) => track.id));
+    for (const track of after.tracks) {
+      if (known.has(track.id)) continue;
+      publishAppEvent({
+        type: 'track.added',
+        payload: { trackId: track.id, trackName: track.name, trackType: track.type },
+      });
+    }
+    if (before.lengthBars !== after.lengthBars) {
+      publishAppEvent({ type: 'song.lengthChanged', payload: { lengthBars: after.lengthBars } });
+    }
+  };
+
   /** Apply an immutable project change: bump updatedAt, push history, save. */
   const commitProject = (
     next: Project,
@@ -2650,6 +2671,7 @@ export function createStudioStore(
     if (stamped.audioAssets !== current.audioAssets && !verifiedAddition) {
       void refreshAudioAssetIssuesNow(stamped);
     }
+    publishCommittedStructureEvents(current, stamped);
     return true;
   };
 
@@ -2750,6 +2772,10 @@ export function createStudioStore(
         return fail('split-project-unavailable');
       }
       if (!state.commitProjectTransaction(token)) return fail('split-project-unavailable');
+      publishAppEvent({
+        type: 'clip.split',
+        payload: { trackId: result.trackId, clipId: result.clipId, rightClipId: result.rightClipId },
+      });
       return { ...result, project: get().project };
     },
     applyVerifiedAudioAssetAddition: (fn, verifiedAudioAssetId) => {

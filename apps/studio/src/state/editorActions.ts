@@ -278,19 +278,19 @@ export function addChordWithAnalysis(
   durationBeats: number,
 ): void {
   const captured: { project: Project; event: ChordEvent }[] = [];
-  useStore.getState().applyProjectChange((project) => {
+  const committed = useStore.getState().applyProjectChange((project) => {
     const event = buildChordEvent(project, symbol, startBeat, durationBeats);
     captured.push({ project, event });
     return { ...project, chordTrack: [...project.chordTrack, event] };
   });
   const first = captured[0];
-  if (first) emitChordAdded(first.project, first.event);
+  if (committed && first) emitChordAdded(first.project, first.event);
 }
 
 /** Update a chord's symbol and re-derive its full analysis fields. */
 export function updateChordSymbol(chordId: string, symbol: string): void {
   const captured: { project: Project; event: ChordEvent; previous: string }[] = [];
-  useStore.getState().applyProjectChange((project) => {
+  const committed = useStore.getState().applyProjectChange((project) => {
     const existing = project.chordTrack.find((c) => c.id === chordId);
     if (!existing) return project;
     const rebuilt = buildChordEvent(
@@ -307,7 +307,7 @@ export function updateChordSymbol(chordId: string, symbol: string): void {
     };
   });
   const first = captured[0];
-  if (first) {
+  if (committed && first) {
     publishAppEvent({
       type: 'chord.changed',
       payload: {
@@ -322,7 +322,7 @@ export function updateChordSymbol(chordId: string, symbol: string): void {
 /** Append a chord right after the last chord event (used by suggestions). */
 export function appendChordAfterLast(symbol: string): void {
   const captured: { project: Project; event: ChordEvent }[] = [];
-  useStore.getState().applyProjectChange((project) => {
+  const committed = useStore.getState().applyProjectChange((project) => {
     const sorted = [...project.chordTrack].sort((a, b) => a.startBeat - b.startBeat);
     const last = sorted[sorted.length - 1];
     const startBeat = last ? last.startBeat + last.durationBeats : 0;
@@ -342,7 +342,7 @@ export function appendChordAfterLast(symbol: string): void {
     };
   });
   const first = captured[0];
-  if (first) emitChordAdded(first.project, first.event);
+  if (committed && first) emitChordAdded(first.project, first.event);
 }
 
 /** Replace the entire chord track with a fresh set of chords. */
@@ -357,7 +357,7 @@ export function replaceChordTrack(chords: ChordEvent[]): void {
  */
 export function applyProgressionTemplate(templateId: string): void {
   const captured: { project: Project; chords: ChordEvent[] }[] = [];
-  useStore.getState().applyProjectChange((project) => {
+  const committed = useStore.getState().applyProjectChange((project) => {
     const template = getProgressionTemplate(templateId);
     if (!template) return project;
     const symbols = realizeDegrees(template.degrees, project.key, project.scale);
@@ -375,7 +375,7 @@ export function applyProgressionTemplate(templateId: string): void {
     return { ...project, chordTrack: chords };
   });
   const first = captured[0];
-  if (first) {
+  if (committed && first) {
     for (const chord of first.chords) emitChordAdded(first.project, chord);
   }
 }
@@ -638,7 +638,11 @@ export function quantizeNotesWithReport(
     }
     updates.push({ id: note.id, patch: { startBeat } });
   }
-  return { committed: commitNoteUpdates(clipId, updates), skippedForLoop };
+  const committed = commitNoteUpdates(clipId, updates);
+  if (committed.length > 0) {
+    publishAppEvent({ type: 'notes.quantized', payload: { clipId, noteCount: committed.length } });
+  }
+  return { committed, skippedForLoop };
 }
 
 /**

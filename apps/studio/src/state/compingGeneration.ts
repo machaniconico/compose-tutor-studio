@@ -39,6 +39,7 @@ import {
 import { compareVoicings, type CompingPattern } from '@cts/theory-engine';
 import { buildScheduleEvents } from '../audio/events';
 import { canonicalSynthPresetName } from '../audio/presets';
+import { publishAppEvent } from './appEvents';
 import { uid } from './ids';
 import { newClipScheduleProblem } from './noteEditActions';
 import { useStore } from './store';
@@ -351,6 +352,10 @@ export function generateCompingClip(request: CompingRequest): CompingResult {
   if (!applied || useStore.getState().project === snapshot) {
     return refuse('今は伴奏を反映できませんでした。曲はそのままです。もう一度お試しください。');
   }
+  publishAppEvent({
+    type: 'accompaniment.created',
+    payload: { trackId: outcome.trackId, noteCount: outcome.noteCount },
+  });
   return {
     ok: true,
     trackId: outcome.trackId,

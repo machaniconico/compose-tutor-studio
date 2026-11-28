@@ -87,6 +87,8 @@ flowchart LR
 - Feedback生成
 - 進捗保存用データ作成
 
+DAW操作コース用のAppEvent(`track.added`、`clip.split`、`song.lengthChanged`、`notes.quantized`、`accompaniment.created`、WAVの形式つき`export.wav`)は、UIでなくstate層が採用後に1回だけ`publishAppEvent`で発行する。トラック追加と曲の長さは、全経路共通の`commitProject`で変更前後を比べて発行し、Undo/Redoでは発行しない。
+
 Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/Redo、Project切替・読込をmicrotask単位でまとめて`TutorialEngine.reconcileProject`へ渡す。同期commit後のdomain AppEventを次stepへ再利用しない順序を保ち、lesson世代が変わった予約は無効化する。連続するstate-backed goalだけを最新状態で進め、最終stepの進捗を保存し、前stepのhintを消去する。
 
 ### 4.3 project-model

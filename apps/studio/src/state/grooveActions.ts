@@ -15,6 +15,7 @@ import {
   type Project,
 } from '@cts/project-model';
 import { buildScheduleEvents, type SchedulePayload } from '../audio/events';
+import { publishAppEvent } from './appEvents';
 import { findClip, projectBeatsPerBarAt } from './editorActions';
 import { retimeSelectedNotes, type NoteEditResult } from './noteEditActions';
 import { useStore } from './store';
@@ -98,13 +99,17 @@ export function quantizeNotesWithStrength(
     return refuse('強さは0〜100%で指定してください。');
   }
   const strength = Math.round(strengthPercent);
-  return toGrooveResult(retimeSelectedNotes(
+  const result = toGrooveResult(retimeSelectedNotes(
     clipId,
     noteIds,
     (selected) => quantize(selected, snapBeats, { strength, target: 'start' }),
     (count) => `${count}個のノートをグリッドへ寄せました。`,
     '変更はありません',
   ));
+  if (result.ok && result.changed > 0) {
+    publishAppEvent({ type: 'notes.quantized', payload: { clipId, noteCount: result.changed } });
+  }
+  return result;
 }
 
 /** ヒューマナイズ。seed が同じなら結果も同じ。seed は保存せず、呼び出し側が毎回渡す。 */

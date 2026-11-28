@@ -73,6 +73,12 @@ export type EventMatch = Partial<{
   trackName: string;
   format: 'midi' | 'wav';
   effectType: string;
+  /** Track kind of a `track.added` event, e.g. 'instrument' or 'drum'. */
+  trackType: string;
+  /** WAV export options: satisfied when payload.sampleRate equals this value. */
+  sampleRate: number;
+  /** WAV export options: satisfied when payload.bitDepth equals this value. */
+  bitDepth: number;
   /** Numeric threshold: satisfied when payload.swing >= this value. */
   swingAtLeast: number;
 }>;
@@ -93,7 +99,12 @@ export type AppEventType =
   | 'section.added'
   | 'bpm.changed'
   | 'effect.added'
-  | 'drum.grooveChanged';
+  | 'drum.grooveChanged'
+  | 'track.added'
+  | 'clip.split'
+  | 'song.lengthChanged'
+  | 'notes.quantized'
+  | 'accompaniment.created';
 
 export type StepGoal =
   | { kind: 'event'; eventType: AppEventType; count?: number; match?: EventMatch }
@@ -155,6 +166,36 @@ export interface TrackVolumeChangedPayload {
 
 export interface ExportPayload {
   format: 'midi' | 'wav';
+  /** WAV only: the sample rate (Hz) the file was rendered at. */
+  sampleRate?: number;
+  /** WAV only: the bit depth the file was rendered at. */
+  bitDepth?: number;
+}
+
+export interface TrackAddedPayload {
+  trackId: string;
+  trackName: string;
+  trackType: string;
+}
+
+export interface ClipSplitPayload {
+  trackId: string;
+  clipId: string;
+  rightClipId: string;
+}
+
+export interface SongLengthChangedPayload {
+  lengthBars: number;
+}
+
+export interface NotesQuantizedPayload {
+  clipId: string;
+  noteCount: number;
+}
+
+export interface AccompanimentCreatedPayload {
+  trackId: string;
+  noteCount: number;
 }
 
 export interface ScaleSnapPayload {
@@ -208,6 +249,11 @@ export type AppEventPayloadMap = {
   'bpm.changed': BpmChangedPayload;
   'effect.added': EffectAddedPayload;
   'drum.grooveChanged': DrumGrooveChangedPayload;
+  'track.added': TrackAddedPayload;
+  'clip.split': ClipSplitPayload;
+  'song.lengthChanged': SongLengthChangedPayload;
+  'notes.quantized': NotesQuantizedPayload;
+  'accompaniment.created': AccompanimentCreatedPayload;
 };
 
 export type AppEvent = {

@@ -272,9 +272,10 @@ export function ExportMenuContent({
     const operation = 'wav-export' satisfies ExportOperation;
     if (!beginOperation(operation)) return;
     try {
+      const format = { ...wavFormatRef.current };
       const exportRange = currentRange();
       const rendered = await renderProjectToWav(project, {
-        ...wavFormatRef.current,
+        ...format,
         ...(exportRange ? { range: exportRange } : {}),
       });
       const fileName = `${stem}.wav`;
@@ -285,7 +286,10 @@ export function ExportMenuContent({
         downloadWeb: downloadBlobAndWaitForHandoff,
       });
       if (result.status === 'cancelled') return;
-      publishAppEvent({ type: 'export.wav', payload: { format: 'wav' } });
+      publishAppEvent({
+        type: 'export.wav',
+        payload: { format: 'wav', sampleRate: format.sampleRate, bitDepth: format.bitDepth },
+      });
       pushToast('WAVファイルを書き出しました。', 'success');
     } catch (error) {
       pushToast(wavExportFailureMessage(error), 'error');
@@ -299,9 +303,10 @@ export function ExportMenuContent({
     const operation = 'track-wav-export' satisfies ExportOperation;
     if (!beginOperation(operation)) return;
     try {
+      const format = { ...wavFormatRef.current };
       const exportRange = currentRange();
       const rendered = await renderSelectedTrackToWav(project, selectedWav.track.id, {
-        ...wavFormatRef.current,
+        ...format,
         ...(exportRange ? { range: exportRange } : {}),
       });
       const fileName = selectedTrackWavFileName(project.title, selectedWav.track.name);
@@ -312,7 +317,10 @@ export function ExportMenuContent({
         downloadWeb: downloadBlobAndWaitForHandoff,
       });
       if (result.status === 'cancelled') return;
-      publishAppEvent({ type: 'export.wav', payload: { format: 'wav' } });
+      publishAppEvent({
+        type: 'export.wav',
+        payload: { format: 'wav', sampleRate: format.sampleRate, bitDepth: format.bitDepth },
+      });
       pushToast(`「${selectedWav.track.name}」をWAVファイルに書き出しました。`, 'success');
     } catch (error) {
       pushToast(wavExportFailureMessage(error), 'error');
