@@ -21,6 +21,12 @@ export type ShortcutAction =
   | 'cutNotes'
   | 'pasteNotes'
   | 'pasteNotesAtOriginal'
+  | 'nudgeLeft'
+  | 'nudgeRight'
+  | 'transposeUpSemitone'
+  | 'transposeDownSemitone'
+  | 'transposeUpOctave'
+  | 'transposeDownOctave'
   | 'stepRest'
   | 'stepBack'
   | 'cancelGesture'
@@ -64,6 +70,14 @@ export const KEYMAP: readonly ShortcutEntry[] = [
   { scope: 'pianoRoll', key: 'x', modifiers: ['mod'], action: 'cutNotes', labelJa: '選んだ音を切り取り' },
   { scope: 'pianoRoll', key: 'v', modifiers: ['mod'], action: 'pasteNotes', labelJa: '貼り付け(再生ヘッドがクリップ内ならその位置、外ならコピーした位置)' },
   { scope: 'pianoRoll', key: 'v', modifiers: ['mod', 'shift'], action: 'pasteNotesAtOriginal', labelJa: 'コピーした時と同じ位置に貼り付け' },
+  // 矢印で選んだ音を動かす(P34)。←→ はグリッド 1 つ分、↑↓ は半音、Shift+↑↓ は 1 オクターブ。
+  // 修飾キーはちょうど一致したときだけ(Ctrl・Cmd・Alt 付きは対象外)。PC 鍵盤・ステップ入力のキーとは重ならない。
+  { scope: 'pianoRoll', key: 'arrowleft', modifiers: [], action: 'nudgeLeft', labelJa: '選んだ音をグリッド 1 つ分、前へ' },
+  { scope: 'pianoRoll', key: 'arrowright', modifiers: [], action: 'nudgeRight', labelJa: '選んだ音をグリッド 1 つ分、後ろへ' },
+  { scope: 'pianoRoll', key: 'arrowup', modifiers: [], action: 'transposeUpSemitone', labelJa: '選んだ音を半音上げる' },
+  { scope: 'pianoRoll', key: 'arrowdown', modifiers: [], action: 'transposeDownSemitone', labelJa: '選んだ音を半音下げる' },
+  { scope: 'pianoRoll', key: 'arrowup', modifiers: ['shift'], action: 'transposeUpOctave', labelJa: '選んだ音を 1 オクターブ上げる' },
+  { scope: 'pianoRoll', key: 'arrowdown', modifiers: ['shift'], action: 'transposeDownOctave', labelJa: '選んだ音を 1 オクターブ下げる' },
   // ステップ入力(ピアノロールのステップ入力がオンの間だけ参照する。修飾キーなし = AltGr・Ctrl・Cmd 付きは対象外)。
   { scope: 'stepInput', key: 'enter', modifiers: [], action: 'stepRest', labelJa: 'ステップ入力: 休符(カーソルだけ進める)' },
   { scope: 'stepInput', key: 'backspace', modifiers: [], action: 'stepBack', labelJa: 'ステップ入力: 最後の入力を消して戻る' },

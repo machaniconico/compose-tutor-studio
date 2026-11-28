@@ -97,3 +97,46 @@ describe('note clipboard keys (P33)', () => {
     expect(matchShortcut(key('v', { ctrlKey: true, keyCode: 229 }), 'pianoRoll', false)).toBeNull();
   });
 });
+
+describe('piano-roll arrow keys (P34)', () => {
+  it('maps arrows with exact modifiers and ignores Ctrl / Cmd / Alt / IME', () => {
+    expect(matchShortcut(key('ArrowLeft'), 'pianoRoll', false)).toBe('nudgeLeft');
+    expect(matchShortcut(key('ArrowRight'), 'pianoRoll', false)).toBe('nudgeRight');
+    expect(matchShortcut(key('ArrowUp'), 'pianoRoll', false)).toBe('transposeUpSemitone');
+    expect(matchShortcut(key('ArrowDown'), 'pianoRoll', false)).toBe('transposeDownSemitone');
+    expect(matchShortcut(key('ArrowUp', { shiftKey: true }), 'pianoRoll', false)).toBe('transposeUpOctave');
+    expect(matchShortcut(key('ArrowDown', { shiftKey: true }), 'pianoRoll', false)).toBe('transposeDownOctave');
+    expect(matchShortcut(key('ArrowLeft', { shiftKey: true }), 'pianoRoll', false)).toBeNull();
+    for (const mods of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }] as const) {
+      for (const name of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) {
+        expect(matchShortcut(key(name, mods), 'pianoRoll', false)).toBeNull();
+        expect(matchShortcut(key(name, { ...mods, shiftKey: true }), 'pianoRoll', true)).toBeNull();
+      }
+    }
+    expect(matchShortcut(key('ArrowLeft', { isComposing: true }), 'pianoRoll', false)).toBeNull();
+    expect(matchShortcut(key('ArrowUp', { keyCode: 229 }), 'pianoRoll', false)).toBeNull();
+    expect(matchShortcut(key('ArrowLeft'), 'global', false)).toBeNull();
+  });
+
+  it('no two entries in one scope share a key and modifier set, and the arrows never collide with playing / step-input keys', async () => {
+    const { KEYMAP } = await import('../src/features/common/keymap');
+    const signature = (entry: (typeof KEYMAP)[number]) => `${entry.key}|${[...entry.modifiers].sort().join('+')}`;
+    for (const scope of new Set(KEYMAP.map((entry) => entry.scope))) {
+      const signatures = KEYMAP.filter((entry) => entry.scope === scope).map(signature);
+      expect(new Set(signatures).size).toBe(signatures.length);
+    }
+    const arrows = KEYMAP.filter((entry) => entry.key.startsWith('arrow'));
+    expect(arrows.every((entry) => entry.scope === 'pianoRoll')).toBe(true);
+    const others = KEYMAP.filter((entry) => entry.scope === 'playing' || entry.scope === 'stepInput');
+    for (const arrow of arrows) {
+      expect(others.some((entry) => entry.key === arrow.key)).toBe(false);
+    }
+    // 窓で同時に生きうる pianoRoll と stepInput の衝突は、Backspace(削除とステップ戻し)だけ。既存で、ステップ入力側が先に処理する。
+    const stepKeys = new Set(KEYMAP.filter((entry) => entry.scope === 'stepInput').map((entry) => entry.key));
+    const overlap = KEYMAP.filter((entry) => entry.scope === 'pianoRoll' && stepKeys.has(entry.key)).map((entry) => entry.key);
+    expect([...new Set(overlap)]).toEqual(['backspace']);
+    // PC 鍵盤の文字キー(装飾なし)と pianoRoll の文字キーは重ならない。
+    const playingKeys = new Set(KEYMAP.filter((entry) => entry.scope === 'playing').map((entry) => entry.key));
+    expect(KEYMAP.filter((entry) => entry.scope === 'pianoRoll' && entry.modifiers.length === 0 && playingKeys.has(entry.key))).toEqual([]);
+  });
+});

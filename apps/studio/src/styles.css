@@ -1900,6 +1900,31 @@ input[type='range'] {
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
+  max-height: min(70vh, 460px);
+  overflow-y: auto;
+}
+
+.pr__note-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.pr__note-tools-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-1);
+}
+
+.pr__note-tools-ramp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-1);
+}
+
+.pr__note-tools-ramp input {
+  width: 4.5em;
 }
 
 .pr__chord-suggestions {

@@ -1,11 +1,30 @@
 // Pure grid-geometry + quantization helpers for the piano roll and other
 // beat-based editors. No React, no store — easy to unit test.
 
+import { PPQ } from '@cts/project-model';
+
+/** Round a beat to the nearest whole tick (480 per beat), so triplet grids never drift off the tick grid. */
+function tickAligned(beat: number): number {
+  return Math.round(beat * PPQ) / PPQ;
+}
+
 /** Available snap resolutions, in beats. 1 = quarter note in 4/4. */
-export const GRID_SNAP_OPTIONS: readonly number[] = [0.25, 0.5, 1, 2];
+export const TRIPLET_EIGHTH_BEATS = 160 / PPQ;
+export const TRIPLET_SIXTEENTH_BEATS = 80 / PPQ;
+/** 1/16T (80 ticks) and 1/8T (160 ticks) are whole ticks, like every other option. */
+export const GRID_SNAP_OPTIONS: readonly number[] = [
+  TRIPLET_SIXTEENTH_BEATS,
+  0.25,
+  TRIPLET_EIGHTH_BEATS,
+  0.5,
+  1,
+  2,
+];
 
 /** Labels (Japanese) for each snap resolution. */
 export const GRID_SNAP_LABELS: Record<number, string> = {
+  [TRIPLET_SIXTEENTH_BEATS]: '1/16三連',
+  [TRIPLET_EIGHTH_BEATS]: '1/8三連',
   0.25: '1/16',
   0.5: '1/8',
   1: '1/4',
@@ -19,13 +38,13 @@ export const PIANO_HIGH_MIDI = 84; // C6
 /** Snap a beat value to the nearest grid line of `snap` beats. */
 export function snapBeat(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);
-  return Math.max(0, Math.round(beat / snap) * snap);
+  return Math.max(0, tickAligned(Math.round(beat / snap) * snap));
 }
 
 /** Snap a beat value DOWN to the grid line at or before it (for placement). */
 export function floorToGrid(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);
-  return Math.max(0, Math.floor(beat / snap) * snap);
+  return Math.max(0, tickAligned(Math.floor(beat / snap) * snap));
 }
 
 /** Quantize a note start to the grid; keeps non-negative. */

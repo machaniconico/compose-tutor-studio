@@ -61,6 +61,15 @@ import {
   type TransposeAmount,
 } from '../../state/noteEditActions';
 import { getNoteClipboard, useNoteClipboard } from '../../state/noteClipboard';
+import { nudgeSelectedNotes } from '../../state/noteToolActions';
+
+/** 矢印キーで動かす半音の数(↑↓ = 1 半音、Shift+↑↓ = 1 オクターブ)。 */
+const ARROW_SEMITONES: Readonly<Record<string, number>> = {
+  transposeUpSemitone: 1,
+  transposeDownSemitone: -1,
+  transposeUpOctave: 12,
+  transposeDownOctave: -12,
+};
 
 const PIANO_ROLL_HINT =
   'ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 / '
@@ -202,6 +211,12 @@ function capturePointer(element: HTMLElement | null, pointerId: number): boolean
   }
 }
 
+/** 三連符グリッドの足し算で出る 1e-9 拍未満のずれだけを、いちばん近い tick に直す(自由位置の音は動かさない)。 */
+function withoutTickDrift(beat: number): number {
+  const tick = Math.round(beat * PPQ);
+  return Math.abs(beat * PPQ - tick) < 1e-6 ? tick / PPQ : beat;
+}
+
 function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
   const { snapshot } = args;
   const anchor = snapshot.find((note) => note.id === args.anchorId) ?? snapshot[0];
@@ -247,7 +262,7 @@ function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
     }
     return {
       ...source,
-      startBeat: source.startBeat + beatDelta,
+      startBeat: withoutTickDrift(source.startBeat + beatDelta),
       pitch,
     };
   });
@@ -273,7 +288,7 @@ function resizeNoteGroup(
   );
   return snapshot.map((note) => ({
     ...note,
-    durationBeats: note.durationBeats + durationDelta,
+    durationBeats: withoutTickDrift(note.durationBeats + durationDelta),
   }));
 }
 
@@ -626,6 +641,21 @@ export function PianoRoll() {
         pasteNotes(action === 'pasteNotes' ? 'auto' : 'original');
         return;
       }
+      // 矢印で動かす(P34)。フォーカスが音やグリッドにあるときの ←→↑↓ は、それぞれの要素が先に処理する。
+      // ここに届くのは、フォーカスがほかにあるときと Shift+↑↓(オクターブ)。
+      if (ids.length > 0 && !hasTextSelection()) {
+        const semitones = ARROW_SEMITONES[action ?? ''];
+        if (action === 'nudgeLeft' || action === 'nudgeRight') {
+          e.preventDefault();
+          showEditResult(nudgeSelectedNotes(clip.id, ids, action === 'nudgeLeft' ? -1 : 1, gridSnap));
+          return;
+        }
+        if (semitones !== undefined) {
+          e.preventDefault();
+          transposeSelection({ semitones });
+          return;
+        }
+      }
       if (inGrid) return;
       if (action === 'deleteSelectedNotes' && ids.length > 0) {
         e.preventDefault();
@@ -635,7 +665,7 @@ export function PianoRoll() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editor.activeView, clip, liveSelectedNoteIds, selectNotes, copySelection, cutSelection, pasteNotes]);
+  }, [editor.activeView, clip, liveSelectedNoteIds, selectNotes, copySelection, cutSelection, pasteNotes, gridSnap, showEditResult, transposeSelection]);
 
   // --- step input (P43): Enter = rest, Backspace = step back; only while step input is on ---
   const stepActive = useStepInput((s) => s.active && clip !== null && s.clipId === clip.id);
