@@ -52,6 +52,8 @@ export const STACCATO_RATIO = 0.5;
 /** 1 回のグリッド移動で動かせる段数の上限。 */
 export const MAX_NUDGE_STEPS = 64;
 
+/** 別の編集(ドラッグなど)の途中は、その Undo 1 段に相乗りしない。P3A と同じ文。 */
+const BUSY_REASON = 'ほかの操作が終わってから試してください。';
 const OFF_GRID =
   '1/480 拍の目盛りに乗っていない音があるため、この操作はできません。先に「ゆらぎ…」のクオンタイズで位置をそろえてください。';
 const LOOP_PERIOD_CHANGED = 'ループしているクリップでは、ループの長さ(最後の音の終わり)が変わる操作はできません。';
@@ -329,6 +331,7 @@ export function rampVelocityInProject(
 function run(verb: string, make: (snapshot: Project) => NoteEditOutcome): NoteEditResult {
   const locked = editLockReason(verb);
   if (locked) return refuse(locked);
+  if (useStore.getState().isProjectTransactionOpen()) return refuse(BUSY_REASON);
   const snapshot = useStore.getState().project;
   return commit(make(snapshot), snapshot, verb);
 }
