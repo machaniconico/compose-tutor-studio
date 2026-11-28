@@ -240,6 +240,25 @@ describe('MIDI recording recovery', () => {
     expect(validateProject(result.project).ok).toBe(true);
   });
 
+  it('refuses play while a take is running, keeps the take, and allows play after stop', async () => {
+    const { store } = await readyStore();
+    captureNote(store);
+    const before = store.getState().transport;
+    store.getState().play();
+    expect(store.getState().transport).toBe(before);
+    expect(store.getState().transport.phase).toBe('stopped');
+    expect(store.getState().persistenceNotice).toEqual({
+      kind: 'warning',
+      message: '録音中は再生できません。録音を止めてから再生してください。',
+    });
+    expect(store.getState().midiRecordingActive).toBe(true);
+
+    expect(store.getState().stopMidiRecording({ timeSec: 0.5 })?.ok).toBe(true);
+    expect(ticksOf(melodyClip(store.getState().project))).toEqual([{ pitch: 60, startTick: 0, durTick: 240 }]);
+    store.getState().play();
+    expect(store.getState().transport.phase).toBe('starting');
+  });
+
   it('locks loop, punch, and tempo settings until stop', async () => {
     const { store } = await readyStore();
     captureNote(store);

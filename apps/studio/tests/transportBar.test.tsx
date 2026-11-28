@@ -51,6 +51,29 @@ function renderTransport(transport: TransportState): string {
   );
 }
 
+describe('PlaybackLifecycleControl during a MIDI take', () => {
+  it('disables Play with an explanatory title and aria-label', () => {
+    const html = renderToStaticMarkup(
+      <PlaybackLifecycleControl
+        transport={stopped}
+        onPlay={() => undefined}
+        onStop={() => undefined}
+        playDisabled
+        playDisabledReason="録音中は再生できません。録音を止めてから再生してください。"
+      />,
+    );
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('title="録音中は再生できません。録音を止めてから再生してください。"');
+    expect(html).toContain('aria-label="再生（録音中は使えません）"');
+  });
+
+  it('keeps the plain Play button when nothing blocks it', () => {
+    const html = renderTransport(stopped);
+    expect(html).not.toContain('disabled');
+    expect(html).not.toContain('aria-label="再生');
+  });
+});
+
 type ElementProps = {
   children?: ReactNode;
   type?: string;
