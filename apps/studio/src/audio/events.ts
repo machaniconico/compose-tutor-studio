@@ -86,18 +86,21 @@ export function drumStepToBeat(
  * Legacy mode (`swing === 0 && !hiHatChoke`) is main's v10 projection. In
  * resolved mode every onset, drop and end comes from the shared 480 PPQ groove
  * resolver in `@cts/project-model`, so WAV and MIDI hear the same events.
- * `options.onClipNote` reports which clip note each note event came from;
+ * `options.onClipNote` reports which clip note each note event came from and
+ * `options.onChordNote` which Chord Track event a realized chord note came from;
  * `options.skipSwingCut` returns the notes before the swing overlap cut.
  */
 export function buildScheduleEvents(
   project: Project,
   options: Readonly<{
     onClipNote?: (payload: NoteScheduleEvent, source: Readonly<{ clipId: string; noteId: string }>) => void;
+    /** Reports which Chord Track event a realized chord note came from. */
+    onChordNote?: (payload: NoteScheduleEvent, source: Readonly<{ chordId: string }>) => void;
     /** Edit checks compare "who sounds how" before the swing overlap cut. */
     skipSwingCut?: boolean;
   }> = {},
 ): ScheduledEvent[] {
-  const { onClipNote, skipSwingCut = false } = options;
+  const { onClipNote, onChordNote, skipSwingCut = false } = options;
   const musicalTime = compileMusicalTime(project);
   const clipIndex = buildClipIndex(project);
   assertScheduleEventBudget(project, {
@@ -148,6 +151,7 @@ export function buildScheduleEvents(
         };
         if (span) trackNotes.push({ payload, span });
         events.push({ beat, payload });
+        onChordNote?.(payload, { chordId: note.chordId });
       }
     }
 

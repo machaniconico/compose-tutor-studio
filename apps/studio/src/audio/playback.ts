@@ -164,8 +164,8 @@ type RuntimeSession = PlaybackSession & {
   scheduleEvents: readonly ScheduledEvent[];
   /** Project the current scheduleEvents were built from. */
   scheduleProject: Project;
-  /** Source note id of each note payload in scheduleEvents (see buildLiveSchedule). */
-  noteIds: NoteIdIndex;
+  /** Source placement and note of each note payload in scheduleEvents (see buildLiveSchedule). */
+  noteSources: NoteSourceIndex;
   /**
    * Plans the natural-drain tail for a schedule; null for loop sessions,
    * which never drain.
@@ -1742,7 +1742,7 @@ async function createRuntimeSessionImpl(
   const audioClipIndex = createAudioClipPlaybackIndex(project, { tempo });
   // Build and budget the immutable schedule before allocating per-track Web
   // Audio graphs. Oversized linked projects fail closed at this boundary.
-  const { events: scheduleEvents, noteIds: scheduleNoteIds } = buildLiveSchedule(project);
+  const { events: scheduleEvents, sources: scheduleNoteSources } = buildLiveSchedule(project);
   const scheduleIndex = createScheduleEventIndex(scheduleEvents, loop);
   if (loop) {
     const density = preflightLoopScheduleDensity(
@@ -2158,7 +2158,7 @@ async function createRuntimeSessionImpl(
       routingPlan,
       scheduleEvents,
       scheduleProject: project,
-      noteIds: scheduleNoteIds,
+      noteSources: scheduleNoteSources,
       planTail: loop ? null : planTail,
       plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },
       firedVoices: [],
@@ -2382,8 +2382,8 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
   session.firedVoices = session.firedVoices.filter((voice) => voice.endTime >= now);
   for (const event of due) {
     const payload = event.payload as SchedulePayload;
-    const noteId = payload.kind === 'note' ? noteIdOf(session.noteIds, payload) : '';
-    const key = scheduleEventKey(payload, event.beat, noteId);
+    const source = payload.kind === 'note' ? noteSourceOf(session.noteSources, payload) : null;
+    const key = scheduleEventKey(payload, event.beat, source);
     if (payload.kind === 'note') {
       const synth = session.synths.get(payload.trackId);
       if (!synth) continue;
@@ -2408,7 +2408,7 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
       );
       session.firedVoices.push({
         key,
-        sourceKey: noteIdentity(payload, event.beat, noteId),
+        sourceKey: noteIdentity(payload, event.beat, noteSourceOf(session.noteSources, payload)),
         kind: 'note',
         trackId: payload.trackId,
         time: event.time,
@@ -2447,43 +2447,74 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
 }
 
 /** Stable identity of one schedule event: what sounds, where, at which source beat. */
-function scheduleEventKey(payload: SchedulePayload, sourceBeat: number, noteId: string): string {
+function scheduleEventKey(
+  payload: SchedulePayload,
+  sourceBeat: number,
+  source: NoteSource | null,
+): string {
   return payload.kind === 'note'
-    ? `n|${payload.trackId}|${noteId}|${payload.preset}|${payload.pitch}|${payload.velocity}|${payload.durationBeats}|${sourceBeat}`
-    : `d|${payload.trackId}|${JSON.stringify(payload)}|${sourceBeat}`;
+    ? JSON.stringify([
+      'n', payload.trackId, source?.clipId ?? null, source?.noteId ?? null, payload.preset,
+      payload.pitch, payload.velocity, payload.durationBeats, sourceBeat,
+    ])
+    : JSON.stringify(['d', payload, sourceBeat]);
 }
 
 /**
- * Which source note a sounding voice plays: track, source note id, pitch and
- * source onset beat. Velocity and length are left out, so a voice whose note
- * only got softer, shorter or longer (also through a swing cut) is kept.
- * Loop passes share it; duplicates and linked placements differ by id or onset.
+ * Which source note a sounding voice plays: track, placement (clip) id, source
+ * note id (the Chord Track event id for a realized chord note), pitch and
+ * source onset beat, encoded without ambiguity. Velocity and length are left
+ * out, so a voice whose note only got softer, shorter or longer (also through
+ * a swing cut) is kept. Loop passes share it; duplicates differ by note id and
+ * linked placements by clip id.
  */
-function noteIdentity(payload: NoteScheduleEvent, sourceBeat: number, noteId: string): string {
-  return `${payload.trackId}|${noteId}|${payload.pitch}|${sourceBeat}`;
+export function noteIdentity(
+  payload: NoteScheduleEvent,
+  sourceBeat: number,
+  source: NoteSource,
+): string {
+  return JSON.stringify([payload.trackId, source.clipId, source.noteId, payload.pitch, sourceBeat]);
 }
 
-/** Source note id per note payload object; scheduling keeps payload identity. */
-type NoteIdIndex = WeakMap<NoteScheduleEvent, string>;
+/** Where a note payload came from: a clip note, or a Chord Track event (clipId null). */
+type NoteSource = Readonly<{ clipId: string | null; noteId: string }>;
 
-/** Id used for a realized Chord Track note, which has no clip note. */
-const CHORD_NOTE_ID = 'chord';
+/** Source per note payload object; scheduling keeps payload identity. */
+type NoteSourceIndex = WeakMap<NoteScheduleEvent, NoteSource>;
 
-function noteIdOf(noteIds: NoteIdIndex, payload: NoteScheduleEvent): string {
-  return noteIds.get(payload) ?? CHORD_NOTE_ID;
+/**
+ * Stand-in for a payload that was not indexed. buildLiveSchedule asserts in
+ * development that this never happens; the sentinel can collide only with
+ * another unindexed payload, never with a real clip note or chord.
+ */
+const UNINDEXED_NOTE: NoteSource = Object.freeze({ clipId: null, noteId: '\u0000unindexed' });
+
+function noteSourceOf(sources: NoteSourceIndex, payload: NoteScheduleEvent): NoteSource {
+  return sources.get(payload) ?? UNINDEXED_NOTE;
 }
 
 /**
- * buildScheduleEvents plus the source note id of every clip note event,
- * taken from its onClipNote report. The payloads stay exactly as export and
- * the pinned schedule goldens see them; the ids live only in this index.
+ * buildScheduleEvents plus the source of every note event, taken from its
+ * onClipNote / onChordNote report. The payloads stay exactly as export and the
+ * pinned schedule goldens see them; the sources live only in this index.
  */
-function buildLiveSchedule(project: Project): { events: ScheduledEvent[]; noteIds: NoteIdIndex } {
-  const noteIds: NoteIdIndex = new WeakMap();
+export function buildLiveSchedule(
+  project: Project,
+): { events: ScheduledEvent[]; sources: NoteSourceIndex } {
+  const sources: NoteSourceIndex = new WeakMap();
   const events = buildScheduleEvents(project, {
-    onClipNote: (payload, source) => noteIds.set(payload, source.noteId),
+    onClipNote: (payload, source) => sources.set(payload, { clipId: source.clipId, noteId: source.noteId }),
+    onChordNote: (payload, source) => sources.set(payload, { clipId: null, noteId: source.chordId }),
   });
-  return { events, noteIds };
+  if (import.meta.env.DEV) {
+    for (const event of events) {
+      const payload = event.payload as SchedulePayload;
+      if (payload.kind === 'note' && !sources.has(payload)) {
+        throw new Error('buildLiveSchedule: a note event was not reported by onClipNote / onChordNote.');
+      }
+    }
+  }
+  return { events, sources };
 }
 
 /**
@@ -2538,7 +2569,7 @@ export function applyRuntimeScheduleContentEdit(
   project: Project,
   now: number,
 ): void {
-  const { events, noteIds } = buildLiveSchedule(project);
+  const { events, sources } = buildLiveSchedule(project);
   const index = createScheduleEventIndex(events, session.loop);
   if (session.loop) {
     const density = preflightLoopScheduleDensity(
@@ -2563,7 +2594,7 @@ export function applyRuntimeScheduleContentEdit(
   session.scheduler.replaceEventIndex(index);
   session.scheduleEvents = events;
   session.scheduleProject = project;
-  session.noteIds = noteIds;
+  session.noteSources = sources;
 
   const { anchorBeat, anchorTime } = session;
   const playheadBeat = now < anchorTime
@@ -2591,7 +2622,7 @@ export function applyRuntimeScheduleContentEdit(
   for (const event of due) {
     if ((event.payload as SchedulePayload).kind !== 'note') continue;
     const payload = event.payload as SchedulePayload;
-    const slot = `${scheduleEventKey(payload, event.beat, payload.kind === 'note' ? noteIdOf(noteIds, payload) : '')}@${event.time}`;
+    const slot = `${scheduleEventKey(payload, event.beat, payload.kind === 'note' ? noteSourceOf(sources, payload) : null)}@${event.time}`;
     if (!pending.get(slot)?.pop()) added.push(event);
   }
 
@@ -2605,7 +2636,7 @@ export function applyRuntimeScheduleContentEdit(
   const identities = new Set<string>();
   for (const event of events) {
     const payload = event.payload as SchedulePayload;
-    if (payload.kind === 'note') identities.add(noteIdentity(payload, event.beat, noteIdOf(noteIds, payload)));
+    if (payload.kind === 'note') identities.add(noteIdentity(payload, event.beat, noteSourceOf(sources, payload)));
   }
   for (const voice of live) {
     if (voice.time >= now || !voice.handle || voice.kind !== 'note') continue;

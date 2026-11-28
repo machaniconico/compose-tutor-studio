@@ -112,7 +112,13 @@ vi.mock('../src/audio/events', async (importOriginal) => {
 });
 
 import { buildScheduleEvents } from '../src/audio/events';
-import { applyRuntimeScheduleContentEdit, initAudioBridge } from '../src/audio/playback';
+import {
+  applyRuntimeScheduleContentEdit,
+  buildLiveSchedule,
+  initAudioBridge,
+  noteIdentity,
+} from '../src/audio/playback';
+import type { NoteScheduleEvent, SchedulePayload } from '../src/audio/events';
 import { useStore } from '../src/state/store';
 
 const store = () => useStore.getState();
@@ -614,6 +620,31 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(rec.releasedDurations).toEqual([3]);
   });
 
+  it('同じ和音が2つ重なっている時に長い方のコードを消すと、その音が止まる - live-edit fix J', async () => {
+    setClips([]);
+    const id = melodyId();
+    const chord = (chordId: string, durationBeats: number) => ({
+      id: chordId, startBeat: 0, durationBeats, symbol: 'C', root: 'C', quality: 'major', notes: [0, 4, 7],
+    });
+    store().applyProjectChange((p) => ({
+      ...p,
+      chordTrack: [chord('c-long', 8), chord('c-short', 2)],
+      tracks: p.tracks.map((t) => (t.id === id ? { ...t, role: 'learning.chords' as const } : t)),
+    }));
+    useStore.setState({ past: [], future: [] });
+    await play();
+    await runFor(0.6);
+    const voices = rec.notes.length;
+    expect(voices).toBeGreaterThan(0);
+
+    store().applyProjectChange((p) => ({ ...p, chordTrack: p.chordTrack.filter((c) => c.id !== 'c-long') }));
+    await runFor(0.1);
+
+    // Only the 8-beat (4 s) chord's voices stop, one per chord tone.
+    expect(rec.releasedDurations).toHaveLength(voices / 2);
+    expect(rec.releasedDurations.every((d) => d === 4)).toBe(true);
+  });
+
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
     setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
     store().setLoopRange(0, 4);
@@ -735,6 +766,81 @@ describe('live-edit session state stays bounded (live-edit fix I)', () => {
 
     expect(collectionSizes(session)).toEqual(first);
     expect(session.plannedTail).toEqual({ tailSeconds: 1, postLimiterTailSeconds: 0.5 });
+  });
+});
+
+describe('live note identity (live-edit fix J)', () => {
+  const payload = (trackId: string): NoteScheduleEvent =>
+    ({ kind: 'note', trackId, preset: 'warmPad', pitch: 60, durationBeats: 1, velocity: 100 });
+
+  it('連動コピーが同じ絶対位置を受け継いでも、元のクリップで動かしたノートの音は止まる - live-edit fix J', () => {
+    // Overlapping placements on one track are built directly: the store's
+    // overlap rule does not apply to imported or programmatic projects.
+    const track = initialProject.tracks.find((t) => t.type === 'instrument')!;
+    const at = (localBeat: number): Project => ({
+      ...initialProject,
+      chordTrack: [],
+      tracks: initialProject.tracks.map((t) => ({
+        ...t,
+        clips: t.id !== track.id ? [] : [
+          { ...createMidiClip(t.id, 0, 8), id: 'src',
+            notes: [{ id: 'n', pitch: 71, startBeat: localBeat, durationBeats: 4, velocity: 100 }] },
+          { ...createMidiClip(t.id, 1, 8), id: 'al', aliasOf: 'src' },
+        ],
+      })),
+    });
+    const before = buildLiveSchedule(at(1));
+    const sounding = before.events.find((e) => e.beat === 1)!;
+    const soundingPayload = sounding.payload as NoteScheduleEvent;
+    const releaseVoice = vi.fn();
+    const session: Record<string, unknown> = {
+      scheduler: { scheduledThroughBeat: 0, replaceEventIndex: vi.fn() },
+      loop: null,
+      anchorBeat: 0,
+      anchorTime: 0,
+      tempo: 120,
+      transportTempo: 120,
+      scheduleEvents: before.events,
+      scheduleProject: at(1),
+      noteSources: before.sources,
+      firedVoices: [{
+        key: 'k',
+        sourceKey: noteIdentity(soundingPayload, 1, before.sources.get(soundingPayload)!),
+        kind: 'note',
+        trackId: track.id,
+        time: 0.5,
+        endTime: 2.5,
+        handle: { voice: 'src' },
+      }],
+      synths: new Map([[track.id, { releaseVoice }]]),
+      planTail: null,
+      plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },
+    };
+    const apply = applyRuntimeScheduleContentEdit as unknown as
+      (session: Record<string, unknown>, project: Project, now: number) => void;
+
+    // Moving the note to local beat 0 makes the copy sound at absolute beat 1.
+    apply(session, at(0), 0.6);
+
+    expect(buildLiveSchedule(at(0)).events.map((e) => e.beat)).toContain(1);
+    expect(releaseVoice).toHaveBeenCalledTimes(1);
+    expect(releaseVoice).toHaveBeenCalledWith({ voice: 'src' }, 0.6);
+  });
+
+  it('区切り文字を含むIDでも別のノートの身元にならない - live-edit fix J', () => {
+    expect(noteIdentity(payload('a|b'), 0, { clipId: 'x', noteId: 'c' }))
+      .not.toBe(noteIdentity(payload('a'), 0, { clipId: 'x', noteId: 'b|c' }));
+    expect(noteIdentity(payload('a'), 0, { clipId: 'x|y', noteId: 'z' }))
+      .not.toBe(noteIdentity(payload('a'), 0, { clipId: 'x', noteId: 'y|z' }));
+  });
+
+  it('予定にあるすべてのノートに元のIDが記録される - live-edit fix J', () => {
+    const { events, sources } = buildLiveSchedule(initialProject);
+    const notes = events
+      .map((event) => event.payload as SchedulePayload)
+      .filter((p): p is NoteScheduleEvent => p.kind === 'note');
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes.filter((p) => !sources.has(p))).toEqual([]);
   });
 });
 
