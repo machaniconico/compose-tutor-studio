@@ -396,8 +396,16 @@ describe('Compose Tutor Studio native shell', () => {
       await expect(await $('input[aria-label="プロジェクト名"]')).toHaveValue(
         PROJECT_BUNDLE_TITLE,
       );
+      // The title updates before the import operation finishes persisting and closes the
+      // dialog; reopening the menu earlier races the still-open (busy) dialog.
+      await (await $('button=音声込みポータブルを読み込み')).waitForDisplayed({
+        reverse: true,
+        timeout: 15_000,
+      });
       await openExportMenu();
-      await (await $('button=音声込みポータブルを書き出し')).click();
+      const saveButton = await $('button=音声込みポータブルを書き出し');
+      await saveButton.waitForEnabled({ timeout: 15_000 });
+      await saveButton.click();
       await waitForProjectBundlePickerProof('save');
       await waitForPath(PROJECT_BUNDLE_SAVE_PATH);
 
@@ -429,8 +437,16 @@ describe('Compose Tutor Studio native shell', () => {
       await expect(await $('input[aria-label="プロジェクト名"]')).toHaveValue(
         PROJECT_BUNDLE_TITLE,
       );
+      // The title updates before the import operation finishes persisting and closes the
+      // dialog; reopening the menu earlier races the still-open (busy) dialog.
+      await (await $('button=音声込みポータブルを読み込み')).waitForDisplayed({
+        reverse: true,
+        timeout: 15_000,
+      });
       await openExportMenu();
-      await (await $('button=音声込みポータブルを書き出し')).click();
+      const saveButton = await $('button=音声込みポータブルを書き出し');
+      await saveButton.waitForEnabled({ timeout: 15_000 });
+      await saveButton.click();
       await waitForProjectBundlePickerProof('save');
       await waitForPath(PROJECT_BUNDLE_SAVE_PATH);
 
