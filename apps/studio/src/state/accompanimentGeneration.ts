@@ -29,6 +29,7 @@ import {
   beatToBarPosition,
   compileMusicalTime,
   chordTones,
+  cutSwingOverlaps,
   isGrooveResolvedMode,
   pitchClassNumber,
   resolveGrooveNoteSpan,
@@ -251,17 +252,23 @@ export function accompanimentScheduleProblem(before: Project, after: Project, ex
 
   const resolved = isGrooveResolvedMode(after);
   const wantNotes: string[] = [];
-  for (const note of expected.notes) {
+  // 再生と同じ、スウィングで同じ高さの次の音に食い込む音を、次の鳴り始めで切る規則を期待値にもかける。
+  const spans = resolved
+    ? expected.notes.map((note) => resolveGrooveNoteSpan(after, note.beat, note.durationBeats, note.clipEndBeat))
+    : [];
+  if (spans.some((span) => span === null)) return SCHEDULE_REASON;
+  const cut = resolved
+    ? cutSwingOverlaps(expected.notes.map((note, i) => ({ group: `${note.trackId}:${note.pitch}`, span: spans[i]! })))
+    : [];
+  expected.notes.forEach((note, i) => {
     let beat = note.beat;
     let durationBeats = note.durationBeats;
     if (resolved) {
-      const span = resolveGrooveNoteSpan(after, beat, durationBeats, note.clipEndBeat);
-      if (!span) return SCHEDULE_REASON;
-      beat = span.onsetTick / GROOVE_RESOLVER_PPQ;
-      durationBeats = (span.endTick - span.onsetTick) / GROOVE_RESOLVER_PPQ;
+      beat = spans[i]!.onsetTick / GROOVE_RESOLVER_PPQ;
+      durationBeats = (cut[i]!.endTick - spans[i]!.onsetTick) / GROOVE_RESOLVER_PPQ;
     }
     wantNotes.push(JSON.stringify([beat, note.trackId, note.preset, note.pitch, durationBeats, note.velocity]));
-  }
+  });
   const gotNotes: string[] = [];
   const wantDrums = expected.drums.map((d) => JSON.stringify([d.trackId, d.lane, d.tick, d.velocity]));
   const gotDrums: string[] = [];
