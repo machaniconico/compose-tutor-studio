@@ -561,7 +561,7 @@ describe('note-content edit while playing (US-012b)', () => {
 
   it('高さ・開始・長さが同じで強さだけ違うノートの片方を消すと、消した方だけが止まる - live-edit fix B3b', async () => {
     const clip = melody([[62, 0, 4], [62, 0, 4]]);
-    setClips([{ ...clip, notes: clip.notes.map((n, i) => ({ ...n, velocity: i === 0 ? 30 : 110 })) }]);
+    setClips([{ ...clip, notes: (clip.notes ?? []).map((n, i) => ({ ...n, velocity: i === 0 ? 30 : 110 })) }]);
     await play();
     await runFor(0.5);
     const playedVelocities = [...rec.handleVelocities.values()];
