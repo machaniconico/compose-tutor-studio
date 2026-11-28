@@ -24,6 +24,7 @@ export { course0 } from './courses.js';
 // ─── Class-based engine ───────────────────────────────────────────────────────
 export { TutorialEngine } from './engine.js';
 export type {
+  AccompanimentCreatedPayload,
   AppEvent,
   AppEventPayloadMap,
   AppEventType,
@@ -31,6 +32,7 @@ export type {
   ChordAddedPayload,
   ChordChangedPayload,
   ClipCreatedPayload,
+  ClipSplitPayload,
   ClockFn,
   Course,
   DrumStepToggledPayload,
@@ -46,6 +48,7 @@ export type {
   MultipleChoiceExercise,
   NoteAddedPayload,
   NoteMovedPayload,
+  NotesQuantizedPayload,
   OrderChoicesAnswer,
   OrderChoicesExercise,
   ProjectCreatedPayload,
@@ -54,7 +57,9 @@ export type {
   SavedProgress,
   ScaleSnapPayload,
   SectionAddedPayload,
+  SongLengthChangedPayload,
   StepGoal,
+  TrackAddedPayload,
   TrackVolumeChangedPayload,
   TransportPlayedPayload,
   TutorialLesson,
@@ -83,5 +88,7 @@ export {
   BASIC_LESSONS,
   COMPOSE_COURSE,
   COMPOSE_LESSONS,
+  DAW_COURSE,
+  DAW_LESSONS,
   getLessonById,
 } from './content/index.js';

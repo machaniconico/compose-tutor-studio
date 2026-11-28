@@ -63,6 +63,24 @@
 | 3-6 | 盛り上げ | 密度、音域、音色を変える |
 | 3-7 | 仕上げ | 音量、パン、空間系を整える |
 
+### Course 4: DAW 操作コース
+
+音楽理論ではなく、画面の操作を一つずつ試すコース(`daw-course`、`packages/tutorial-engine/src/content/daw-course.ts`)。全ステップのゴールは確定操作のAppEventだけで判定し、Project状態の再照合に頼らない。文章はこのアプリの画面に合わせて書き下ろし、他のDAWの手引きや用語を写さない。
+
+| Lesson | 内容 | 判定するEvent |
+|---|---|---|
+| `daw-tracks-clips` | 楽器トラックを足す、クリップを分割する、曲の長さを変える | `track.added`(`trackType: instrument`)、`clip.split`、`song.lengthChanged` |
+| `daw-edit-notes` | 音を置く、Shiftを押しながらドラッグして格子からずらし、クオンタイズで寄せる、再生して聴く | `note.added`、`notes.quantized`、`transport.played` |
+| `daw-accompaniment` | コードを置く、伴奏パターンから伴奏トラックを作る、聴く | `chord.added`、`accompaniment.created`、`transport.played` |
+| `daw-mix-export` | イコライザーを足す、音量を変える、24 bit のWAVを書き出す | `effect.added`(`effectType: eq`)、`track.volumeChanged`、`export.wav`(`bitDepth: 24`) |
+
+**扱わない機能**(本体に無い、または完了を確かめる手段が無いため。実装後に、そのEventとあわせて足す):
+
+- MIDI録音、ステップ入力、ループ範囲の書き出し(本体に未実装)
+- オートメーション、セクションの複製、クリップの複製(本体にこれらを表すAppEventが無い。`clip.created` / `section.added` / `bpm.changed` は型だけで、現状どの操作からも発行されない)
+- PC鍵盤での演奏、音・コードの試聴(音を鳴らすだけで、確定する状態が無い)
+- コード検出(既存の`chord.added`で足りるため、専用Eventは足さない)
+
 ## 3. Lessonデータ仕様
 
 ```json
@@ -110,7 +128,21 @@
 | `note.added` | pitch, startBeat, durationBeats, trackId | ピアノロール課題 |
 | `scale_snap.enabled` | key, scale | 操作理解 |
 | `clip.created` | type, bars, trackId | パターン作成課題 |
-| `export.midi` / `export.wav` | format | 最終課題 |
+| `export.midi` / `export.wav` | format(WAVはsampleRate, bitDepthも) | 最終課題、書き出し形式の課題 |
+| `track.added` | trackId, trackName, trackType | トラック追加課題 |
+| `clip.split` | trackId, clipId, rightClipId | クリップ分割課題 |
+| `song.lengthChanged` | lengthBars | 曲の長さ課題 |
+| `notes.quantized` | clipId, noteCount | クオンタイズ課題 |
+| `accompaniment.created` | trackId, noteCount | 伴奏パターン課題 |
+
+イベントは「利用者がその操作をした」ことを表す。**元に戻す・やり直すは、元の操作のイベントを再発行しない**(Undo/Redoで教材が進まない)。
+
+- `track.added`と`song.lengthChanged`は、採用された変更をStoreが確定する1か所(`commitProject`)で、変更前後のProjectを比べて発行する。トラックの追加ダイアログ、複製、リバーブ用リターン、「ファイルから追加」の音声取り込み、MIDI取り込み(作ったトラックごとに1回)、伴奏パターンなど、どの経路でも1トラックにつちょうど1回で、断られた操作では出ない。曲の長さは、直接の変更に加え、コード提案が最終小節で曲を延ばした時やMIDI取り込みで長くなった時も、小節数が変わった時だけ1回出る。操作側では重ねて発行しない。
+- `clip.split`は分割の成功後、`notes.quantized`は1つ以上の音が実際に動いた時だけ、`accompaniment.created`は伴奏が採用された後に、それぞれちょうど1回発行する(伴奏の新しいトラックには`track.added`も出る)。
+- `chord.added` / `chord.changed`もStoreが採用した後にだけ発行する。録音中などで断られた編集では出ない。
+- `export.wav`は保存まで成功した後に、書き出しに使った形式を付けて発行し、キャンセルでは発行しない。
+
+一致条件の判定では、payloadを信用しない。payloadが`null`・配列・基本型・Proxyで、値の読み取りが例外を投げる場合は、例外にせず「一致しない」とする。
 
 プロジェクト編集を表すイベントは、候補が検証を通りStoreへ採用された後に、採用済みの値から発行する。対象が存在しない操作、同値変更、保存可能範囲を外れて拒否された候補では発行しない。生成IDを持つ`effect.added`等は、そのIDが採用済みProjectに実在することも確認する。これにより、画面に反映されなかった操作で教材だけが進む状態を禁止する。
 
@@ -126,7 +158,7 @@
 ### 4.2 判定DSL
 
 - Project predicate: `chordCountAtLeast`、`progressionEquals`、`drumLaneActive`、`noteCountAtLeast`、`hasSection`、`bpmInRange`、`trackVolumeInRange`
-- Event goal: `AppEventType`、任意の一致条件（`swingAtLeast`だけは下限判定）、必要event数
+- Event goal: `AppEventType`、任意の一致条件（`swingAtLeast`だけは下限判定。`trackType`・`sampleRate`・`bitDepth`は完全一致で、payload自身が持つ値だけを見る）、必要event数
 - Exercise goal: 選択、並べ替え、音名・コード等の回答を採点し、正解時だけ進行
 
 ### 4.3 フィードバック設計

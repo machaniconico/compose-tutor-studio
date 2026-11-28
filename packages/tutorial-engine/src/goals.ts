@@ -86,50 +86,42 @@ export function evaluateProjectPredicate(
 
 // ─── Event Matching ───────────────────────────────────────────────────────────
 
-function matchesEventMatch(event: AppEvent, match: EventMatch): boolean {
-  const p = event.payload as unknown as Record<string, unknown>;
+/** Match keys compared for equality against the payload field of the same name. */
+const EQUALITY_KEYS = [
+  'pitch', 'inScale', 'key', 'scale', 'lane', 'trackName', 'format',
+  'effectType', 'trackType', 'sampleRate', 'bitDepth',
+] as const;
 
-  if (match.chordSymbol !== undefined) {
-    const sym = (p['chordSymbol'] as string | undefined) ?? '';
-    if (sym !== match.chordSymbol) return false;
+/**
+ * Whether the event's payload satisfies every condition in `match`.
+ *
+ * The payload comes from app code but is treated as untrusted: it must be a
+ * non-null, non-array object, only its own properties count, and any throw
+ * (hostile getter, revoked Proxy) is a non-match rather than an exception.
+ */
+function matchesEventMatch(event: AppEvent, match: EventMatch): boolean {
+  try {
+    const payload: unknown = event.payload;
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return false;
+    const read = (key: string): unknown => (
+      Object.hasOwn(payload, key) ? (payload as Record<string, unknown>)[key] : undefined
+    );
+    if (match.chordSymbol !== undefined) {
+      const symbol = read('chordSymbol');
+      if ((symbol === undefined ? '' : symbol) !== match.chordSymbol) return false;
+    }
+    for (const key of EQUALITY_KEYS) {
+      const wanted = match[key];
+      if (wanted !== undefined && read(key) !== wanted) return false;
+    }
+    if (match.swingAtLeast !== undefined) {
+      const swing = read('swing');
+      if (typeof swing !== 'number' || swing < match.swingAtLeast) return false;
+    }
+    return true;
+  } catch {
+    return false;
   }
-  if (match.pitch !== undefined) {
-    const pitch = p['pitch'] as number | undefined;
-    if (pitch !== match.pitch) return false;
-  }
-  if (match.inScale !== undefined) {
-    const inScale = p['inScale'] as boolean | undefined;
-    if (inScale !== match.inScale) return false;
-  }
-  if (match.key !== undefined) {
-    const key = p['key'] as string | undefined;
-    if (key !== match.key) return false;
-  }
-  if (match.scale !== undefined) {
-    const scale = p['scale'] as string | undefined;
-    if (scale !== match.scale) return false;
-  }
-  if (match.lane !== undefined) {
-    const lane = p['lane'] as string | undefined;
-    if (lane !== match.lane) return false;
-  }
-  if (match.trackName !== undefined) {
-    const trackName = p['trackName'] as string | undefined;
-    if (trackName !== match.trackName) return false;
-  }
-  if (match.format !== undefined) {
-    const format = p['format'] as string | undefined;
-    if (format !== match.format) return false;
-  }
-  if (match.effectType !== undefined) {
-    const effectType = p['effectType'] as string | undefined;
-    if (effectType !== match.effectType) return false;
-  }
-  if (match.swingAtLeast !== undefined) {
-    const swing = p['swing'] as number | undefined;
-    if (swing === undefined || swing < match.swingAtLeast) return false;
-  }
-  return true;
 }
 
 // ─── Event-based goal evaluation ─────────────────────────────────────────────
@@ -145,7 +137,13 @@ export function evaluateEventGoal(
   event: AppEvent,
   currentCount: number,
 ): { matches: boolean; newCount: number } {
-  if (event.type !== eventType) {
+  let sameType = false;
+  try {
+    sameType = event.type === eventType;
+  } catch {
+    sameType = false;
+  }
+  if (!sameType) {
     return { matches: false, newCount: currentCount };
   }
   if (match && !matchesEventMatch(event, match)) {

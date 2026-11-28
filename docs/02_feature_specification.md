@@ -17,7 +17,7 @@
 | Mixer | 音量/パン/ミュート/ソロ/routing | Yes | 各トラックの基本操作、stereo Bus、main output、pre/post-fader sendを扱う。ルーティング欄の「リバーブ用リターンを追加」で、リバーブ入りのBus(リターン)の作成とpost-fader send(送り量0.3)の追加を1回のUndoで行う。有効なリバーブを含むBusが既にあれば再利用し、同じトラックからのセンドが既にあれば(無効にしてあっても)何も変えない |
 | Automation | Track音量/パンとMaster出力音量の時間変化 | Yes | non-Master Trackの音量 / パンとeffective Masterの出力音量について、beat snap付きlane editor、hold / linear、lane Bypass、Global / TrackまたはMaster Readを保存し、再生中はRead / Touch / Latch / Writeで対応操作を記録する。mode自体はruntime-only |
 | Effects | 基本エフェクト | Partial | Filter/Delay/Reverbを最小実装 |
-| Tutorial | 操作・状態連動チュートリアル | Yes | 確定操作イベントと採用済みProject/UI状態を再照合して進行 |
+| Tutorial | 操作・状態連動チュートリアル | Yes | 確定操作イベントと採用済みProject/UI状態を再照合して進行。「DAW 操作コース」(4レッスン)で、トラック追加・クリップ分割・曲の長さ・クオンタイズ・伴奏パターン・イコライザー・24 bit書き出しを実際に操作して覚える(docs/03 Course 4) |
 | Glossary | 用語集 | Yes | チュートリアルタブの「用語集をひらく」で、ひらがな・カタカナ・英字から検索できる。レッスンの「なぜ？」と、ミキサーのセンドの見出しの用語にカーソルかフォーカスを置くと説明が出る(Escで閉じる)。説明は全て初心者向けの1種類 |
 | Exercise | 理論演習 | Yes | コード判定、スケール判定、メロディ添削 |
 | AI Coach | 説明付き改善提案 | Optional | APIキー設定時のみ。MVPではモック可 |
