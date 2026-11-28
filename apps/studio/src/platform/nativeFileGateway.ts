@@ -18,6 +18,8 @@ export const NATIVE_PROJECT_FILE_MAX_BYTES = 16 * 1024 * 1024;
 export const NATIVE_MIDI_FILE_MAX_BYTES = 8 * 1024 * 1024;
 export const NATIVE_AUDIO_FILE_MAX_BYTES = MAX_SOURCE_AUDIO_FILE_BYTES;
 export const NATIVE_WAV_FILE_MAX_BYTES = 192 * 1024 * 1024;
+/** Stem ZIP: the IPC body is cloned once natively, so this is 1 GiB rather than ZIP32's 4 GiB. */
+export const NATIVE_ZIP_FILE_MAX_BYTES = 1024 * 1024 * 1024;
 export const NATIVE_PROJECT_BUNDLE_MAX_BYTES = MAX_PORTABLE_PROJECT_BUNDLE_BYTES;
 export const NATIVE_PROJECT_BUNDLE_MANIFEST_MAX_BYTES =
   MAX_PORTABLE_PROJECT_BUNDLE_MANIFEST_BYTES;
@@ -34,6 +36,7 @@ export const NATIVE_FILE_COMMANDS = {
   exportProjectBundle: 'file_export_project_bundle',
   exportMidi: 'file_export_midi',
   exportWav: 'file_export_wav',
+  exportZip: 'file_export_zip',
 } as const;
 
 export type NativeFileCommand =
@@ -87,7 +90,7 @@ export class NativeFileGatewayError extends Error {
   }
 }
 
-type FileFormat = 'project' | 'midi' | 'audio' | 'wav';
+type FileFormat = 'project' | 'midi' | 'audio' | 'wav' | 'zip';
 
 const OPEN_CANCELLED_TAG = 0;
 const OPEN_FILE_TAG = 1;
@@ -271,6 +274,9 @@ function validateFileMagic(
       throw error;
     }
   }
+  if (format === 'zip') {
+    return bytes.byteLength >= 30 && hasAscii(bytes, 0, 'PK\x03\x04');
+  }
   return (
     bytes.byteLength >= 12 &&
     hasAscii(bytes, 0, 'RIFF') &&
@@ -282,6 +288,7 @@ function maximumBytes(format: FileFormat): number {
   if (format === 'project') return NATIVE_PROJECT_FILE_MAX_BYTES;
   if (format === 'midi') return NATIVE_MIDI_FILE_MAX_BYTES;
   if (format === 'audio') return NATIVE_AUDIO_FILE_MAX_BYTES;
+  if (format === 'zip') return NATIVE_ZIP_FILE_MAX_BYTES;
   return NATIVE_WAV_FILE_MAX_BYTES;
 }
 
@@ -311,6 +318,7 @@ function extensionFor(format: FileFormat, fileName: string): string | null {
     const match = fileName.match(/\.(?:wav|mp3|m4a|aac)$/i);
     return match?.[0] ?? null;
   }
+  if (format === 'zip') return fileName.toLowerCase().endsWith('.zip') ? fileName.slice(-'.zip'.length) : null;
   return fileName.toLowerCase().endsWith('.wav') ? fileName.slice(-'.wav'.length) : null;
 }
 
@@ -354,6 +362,7 @@ function hasExpectedExtension(format: FileFormat, fileName: string): boolean {
   if (format === 'project') return fileName.toLowerCase().endsWith('.json');
   if (format === 'midi') return /\.(?:mid|midi)$/i.test(fileName);
   if (format === 'audio') return /\.(?:wav|mp3|m4a|aac)$/i.test(fileName);
+  if (format === 'zip') return fileName.toLowerCase().endsWith('.zip');
   return fileName.toLowerCase().endsWith('.wav');
 }
 
@@ -417,7 +426,7 @@ export function decodeNativeOpenEnvelope(
 ): NativeOpenFileResult;
 export function decodeNativeOpenEnvelope(
   value: unknown,
-  format: Exclude<FileFormat, 'wav'>,
+  format: Exclude<FileFormat, 'wav' | 'zip'>,
 ): NativeOpenFileResult | NativeOpenAudioFileResult {
   const maximumEnvelopeBytes = OPEN_FILE_HEADER_BYTES + MAX_FILENAME_UTF8_BYTES + maximumBytes(format);
   let envelope: Uint8Array;
@@ -537,6 +546,15 @@ export class NativeFileGateway {
     return this.exportFile(
       NATIVE_FILE_COMMANDS.exportWav,
       'wav',
+      bytes,
+      suggestedFileName,
+    );
+  }
+
+  exportZip(bytes: Uint8Array, suggestedFileName: string): Promise<NativeExportFileResult> {
+    return this.exportFile(
+      NATIVE_FILE_COMMANDS.exportZip,
+      'zip',
       bytes,
       suggestedFileName,
     );

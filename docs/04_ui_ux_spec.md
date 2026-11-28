@@ -405,6 +405,12 @@ Chord Track のコンテキスト内操作:
 - 保存済みmute/soloをbounce viewだけで無視すること、下流Bus/send/effects/automationを含むこと、個別WAVの加算では元mixを再現しないことを明示する
 - filenameはProject名とTrack名を別々にsanitizeし、制御文字と不正Unicodeを除いて`Project - Track.wav`とする
 
+### 7.3 ステムZIP
+
+- Exportの「音源として書き出す」に「ステムZIP」ボタンを1つ置く。WAV形式の行(サンプルレート・ビット数・ディザ)を共有し、書き出し中は「ステムを書き出し中…」とボタン文言で示し、他の書き出しを無効化する
+- mixerで鳴らないTrack(mute、solo対象外、muteされたBusだけに流れるTrack)は含めず、全ステムは同じ長さにそろえ、ノーマライズしないことを説明文で示す。対象Trackが0件、合計1 GiB超の時は理由を日本語で示し、何も書き出さない
+- ZIP名は`Project - stems.zip`、中のファイル名は`01_Track名.wav`(Track順の番号、同名は` (2)`)。パス区切り・`..`・制御文字・Windows予約名・末尾のドットや空白は除き、Track名部分は64文字以内、entry名全体は200 bytes以内にする
+
 ### 7.3 Audio Clipの音声補正
 
 - tab、timing point、pitch region、解析、A/B、確定 / resetはnative button / inputで操作でき、SVGの波形・pitch traceは装飾として扱う

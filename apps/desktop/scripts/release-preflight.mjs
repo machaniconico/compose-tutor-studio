@@ -117,6 +117,7 @@ const productionCapabilityPermissions = Object.freeze([
   'allow-file-export-project-bundle',
   'allow-file-export-midi',
   'allow-file-export-wav',
+  'allow-file-export-zip',
   'allow-app-claim-close-request',
   'allow-app-finish-close',
   'core:webview:allow-clear-all-browsing-data',
@@ -503,7 +504,7 @@ const productionViteConfigSha256 =
 const productionLocalAudioWarpThreadSha256 =
   'ec3118ff8f45fcbad112f027468aa7a3cf0fa20da5bcf5bff3be32a0e8c1e80f';
 const productionBuildScriptSha256 =
-  'c38904ca7aa2afdc95ba0de3bcb19c6d5e4554fb73fe9a82a8605215c4fc3ab0';
+  '4ef0717aaf83a145faa97d2b71140ae3654c68344f8afec23f3e5f65817f3ad0';
 const productionPnpmWorkspaceSha256 =
   'e4e2e1627c84ee9d6115222d07c5d3e9dd15c6412196602942cdb7131bdb6b6d';
 const productionPnpmLockSha256 =

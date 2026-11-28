@@ -80,6 +80,7 @@ pub fn run() {
             native_files::file_export_project_bundle,
             native_files::file_export_midi,
             native_files::file_export_wav,
+            native_files::file_export_zip,
             native_close::app_claim_close_request,
             native_close::app_finish_close,
             native_persistence::commands::persistence_initialize,

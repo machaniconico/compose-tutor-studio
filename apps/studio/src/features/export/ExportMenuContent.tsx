@@ -30,7 +30,9 @@ import {
   downloadBlobAndWaitForHandoff,
   safeFileStem,
 } from './download';
+import { ZipStoreLimitError } from './zipStore';
 import { saveWavRenderLease } from './wavExport';
+import { buildStemZip, StemExportError, stemZipFileName } from './exportStems';
 import {
   selectedTrackWavAvailability,
   selectedTrackWavFileName,
@@ -188,6 +190,7 @@ export function ExportMenuContent({
   const operationBusy = activeOperation !== null;
   const renderingMix = activeOperation === 'wav-export';
   const renderingTrack = activeOperation === 'track-wav-export';
+  const renderingStems = activeOperation === 'stem-zip-export';
   const selectedWav = selectedTrackWavAvailability(project, selectedTrackId);
 
   const exportMidi = async () => {
@@ -255,6 +258,34 @@ export function ExportMenuContent({
       pushToast(`「${selectedWav.track.name}」をWAVファイルに書き出しました。`, 'success');
     } catch (error) {
       pushToast(wavExportFailureMessage(error), 'error');
+    } finally {
+      finishOperation(operation);
+    }
+  };
+
+  const exportStemZip = async () => {
+    const operation = 'stem-zip-export' satisfies ExportOperation;
+    if (!beginOperation(operation)) return;
+    try {
+      const zip = await buildStemZip(project, { ...wavFormatRef.current });
+      const fileName = stemZipFileName(project.title);
+      if (isNative) {
+        const result = await nativeFileGateway.exportZip(
+          new Uint8Array(await zip.arrayBuffer()),
+          fileName,
+        );
+        if (result.status === 'cancelled') return;
+      } else {
+        await downloadBlobAndWaitForHandoff(zip, fileName);
+      }
+      pushToast('ステムをZIPファイルに書き出しました。', 'success');
+    } catch (error) {
+      pushToast(
+        error instanceof StemExportError || error instanceof ZipStoreLimitError
+          ? error.message
+          : wavExportFailureMessage(error),
+        'error',
+      );
     } finally {
       finishOperation(operation);
     }
@@ -485,6 +516,14 @@ export function ExportMenuContent({
                 >
                   {renderingTrack ? '選択トラックを書き出し中…' : '選択トラックをWAV'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void exportStemZip()}
+                  disabled={operationBusy}
+                  title="鳴っているトラックを1つずつWAVにして、ZIPにまとめます。"
+                >
+                  {renderingStems ? 'ステムを書き出し中…' : 'ステムZIP'}
+                </button>
               </div>
               <WavFormatControls formatRef={wavFormatRef} disabled={operationBusy} />
               <p className="export-menu__hint">
@@ -494,6 +533,7 @@ export function ExportMenuContent({
                 選択中: {selectedWav.track?.name ?? 'なし'}。楽器・ドラム・オーディオに対応します。
                 保存済みのミュート／ソロは無視し、下流Bus、センド、エフェクト、オートメーション込みで書き出します。
                 個別WAVを加算しても元のミックスを再現するものではありません。
+                ステムZIPは、ミキサーで鳴らないトラックを除き、全ステムを同じ長さ（最長のテール込み）にそろえ、ノーマライズはしません。
                 {selectedWav.reason ? ` ${selectedWav.reason}` : ''}
               </p>
             </section>

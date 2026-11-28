@@ -170,7 +170,7 @@ committed headまたは最新候補がfuture schemaの場合、古いgeneration�
 
 対象外:
 
-- ユーザーがapp data外へ書き出したproject、MIDI、WAV
+- ユーザーがapp data外へ書き出したproject、MIDI、WAV、ステムZIP
 - OSバックアップ、filesystem snapshot、SSD wear leveling等に残る複製・痕跡
 
 したがって、これはアプリが通常参照できるlocal dataの削除であり、媒体上のbytesを復元不能にするforensic/secure eraseを保証しない。

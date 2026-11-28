@@ -280,6 +280,7 @@ Compose Tutor Studio は、作曲初心者が「DAWの操作」と「作曲理�
 | Exercise | 理論演習 | Yes | コード判定、スケール判定、メロディ添削 |
 | AI Coach | 説明付き改善提案 | Optional | APIキー設定時のみ。MVPではモック可 |
 | Export | MIDI/WAV | Yes | MIDIはFormat 1の正規化projection、WAVは簡易レンダー |
+| Export | ステムZIP | Yes | 鳴るInstrument / Drum / Audio Trackごとに1つのWAVを書き出し、STOREのZIP 1つにまとめる。mixerのmute / solo / Bus経路で鳴らないTrack(soloされたBusの入力源は含み、muteされたBusだけに流れるTrackは除く)とMaster / Busは含めず、mix.wavも含めない。全ステムは同じ長さ(最長のtail込みrenderにそろえ、各ステムが自分のtailを含む)で、WAV形式(サンプルレート・ビット数・ディザ)は書き出しダイアログの選択に従い、ノーマライズはしない(ステム間の音量差を保つ)。合計1 GiB超は書き出す前に拒否する。ファイル名は`01_Melody.wav`の形式 |
 | Import | MIDI import | Yes | `.mid` / `.midi`を検証し、MTrkとchannelに応じた複数トラックを現在の曲へ追加する |
 | Vocal Cut | カラオケ作成 | Yes | ステレオ中央定位をローカル軽減し、A/B試聴後にPCM 16-bit WAVへ書き出す。ML stem分離ではない |
 | Track Management | Track追加・整理・音色 | Partial | production UIはinstrument / drum / stereo Busと音源fileからのAudio Trackを追加し、non-masterの複製・並べ替え、一般Trackの削除・改名、内蔵シンセ14音色と4つの音色調整を扱う。schema v4では学習role Trackも改名可能でroleを保持し、削除だけを保護する。Folder / Stackは未実装 |
@@ -1492,6 +1493,12 @@ Chord Track のコンテキスト内操作:
 - 保存済みmute/soloをbounce viewだけで無視すること、下流Bus/send/effects/automationを含むこと、個別WAVの加算では元mixを再現しないことを明示する
 - filenameはProject名とTrack名を別々にsanitizeし、制御文字と不正Unicodeを除いて`Project - Track.wav`とする
 
+### 7.3 ステムZIP
+
+- Exportの「音源として書き出す」に「ステムZIP」ボタンを1つ置く。WAV形式の行(サンプルレート・ビット数・ディザ)を共有し、書き出し中は「ステムを書き出し中…」とボタン文言で示し、他の書き出しを無効化する
+- mixerで鳴らないTrack(mute、solo対象外、muteされたBusだけに流れるTrack)は含めず、全ステムは同じ長さにそろえ、ノーマライズしないことを説明文で示す。対象Trackが0件、合計1 GiB超の時は理由を日本語で示し、何も書き出さない
+- ZIP名は`Project - stems.zip`、中のファイル名は`01_Track名.wav`(Track順の番号、同名は` (2)`)。パス区切り・`..`・制御文字・Windows予約名・末尾のドットや空白は除き、Track名部分は64文字以内、entry名全体は200 bytes以内にする
+
 ### 7.3 Audio Clipの音声補正
 
 - tab、timing point、pitch region、解析、A/B、確定 / resetはnative button / inputで操作でき、SVGの波形・pitch traceは装飾として扱う
@@ -2111,6 +2118,14 @@ renderer importはbundle全体を検証してからdistinct payloadをcontent-ad
 ### 選択Track WAV renderer
 
 full-mixとselected Trackは同じoffline renderer、export operation lock、lease handoffを使う。selected scopeはoriginal Projectからroutingを一度だけcompileし、pure downstream mixを`buildTrackGraphs`と`planAudioTail`へ供給する。schedule、asset preflight、decode lease、resource estimateはsource-only transient Project、graphとautomationはimmutableなoriginal Projectを参照する。schema、Rust command、permission、persistenceは変更しない。
+
+### ステムZIP
+
+- `features/export/exportStems.ts`が、鳴るInstrument / Drum / Audio Track(`computeAudibleTracks`でmute/soloを解決、Master / Busは除外)を1つずつ選択Track rendererで書き出し、`zipStore`(STORE、固定DOS日時1980-01-01、UTF-8 flag、CRC-32、Unix mode 0644)へ順に詰める。同じProjectと形式なら同じbytesになる
+- 対象Trackは、mixerと同じ`resolveAudioRoutingMix`(Bus経由のsolo / mute / sendを解決)で鳴り、Masterまで届くInstrument / Drum / Audio Trackである。soloされたBusはその入力源を残し、muteされたBusだけに流れるTrackは除く。
+- 全ステムの長さは、各Trackの`planSelectedTrackWavRender`(tail込み)のうち最長のframe数にそろえ、`WavRenderOptions.minFrames`で全ステムを同じ長さでrenderする。無音でpaddingするのではなく、各ステムは自分のdelay / reverb tailをその長さまで自然に含む。P50の形式options(サンプルレート・ビット数・ディザ)をそのまま渡し、P51のノーマライズは使わない。ループ範囲書き出し(P53)をマージした時は同じ範囲を全ステムへ渡す
+- メモリ: 事前にarchiveの正確なbyte数(各entryの`30 + 名前bytes + WAV bytes`のlocal entry、`46 + 名前bytes`のcentral entry、22 bytesの終端の合計)を計算し、1 GiB超とZIP32の限界(4 GiB、65,534ファイル)をrender前に拒否する。1度にrenderするのは1ステムだけで(そのステムのClipが使うdecode済み素材は、そのrenderの間だけ保持する)、rendererのFloat32 bufferは常に1ステム分で、各renderのleaseはZIPへ渡した直後に解放する。entry名は`NN_名前.wav`全体をUTF-8で200 bytes以内にcode point単位で切り詰め、重複解決の前に適用する。ZIPに残るのは符号化済みWAV bytesだけである
+- native: `file_export_zip`(専用permission `allow-file-export-zip`)は`file_export_wav`と同じ`export_file`を通り、候補名(`.zip`、240 bytes)、1 GiB上限、`PK\x03\x04`と最小30 bytesのheader、OS picker、temp write→atomic replaceを検証する。Webはbrowser downloadで、ネットワーク通信はしない。schema、persistenceは変更しない
 
 ---
 
