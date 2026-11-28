@@ -35,6 +35,32 @@ export const GRID_SNAP_LABELS: Record<number, string> = {
 export const PIANO_LOW_MIDI = 36; // C2
 export const PIANO_HIGH_MIDI = 84; // C6
 
+/** The whole tick of a beat, or null when the beat is not exactly on the 1/480-beat grid. */
+function wholeTick(beat: number): number | null {
+  if (typeof beat !== 'number' || !Number.isFinite(beat)) return null;
+  const tick = Math.round(beat * PPQ);
+  return Number.isSafeInteger(tick) && tick / PPQ === beat ? tick : null;
+}
+
+/**
+ * `beat + delta` for grid-derived values: when both are whole ticks the sum is
+ * done in integer ticks and converted once (so 1/3 + 1/3 is 320/480). Any other
+ * value, and a zero delta, is returned exactly as plain addition would.
+ */
+export function addGridBeats(beat: number, delta: number): number {
+  if (delta === 0) return beat;
+  const a = wholeTick(beat);
+  const b = wholeTick(delta);
+  return a === null || b === null ? beat + delta : (a + b) / PPQ;
+}
+
+/** `a - b` for grid-derived values, in integer ticks when both are whole ticks. */
+export function beatDifference(a: number, b: number): number {
+  const x = wholeTick(a);
+  const y = wholeTick(b);
+  return x === null || y === null ? a - b : (x - y) / PPQ;
+}
+
 /** Snap a beat value to the nearest grid line of `snap` beats. */
 export function snapBeat(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);

@@ -31,6 +31,8 @@ import { classifyNote, noteColorLabel } from './noteColor';
 import {
   GRID_SNAP_OPTIONS,
   GRID_SNAP_LABELS,
+  addGridBeats,
+  beatDifference,
   PIANO_HIGH_MIDI,
   PIANO_LOW_MIDI,
   beatToX,
@@ -256,7 +258,7 @@ export function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
     }
     return {
       ...source,
-      startBeat: source.startBeat + beatDelta,
+      startBeat: addGridBeats(source.startBeat, beatDelta),
       pitch,
     };
   });
@@ -282,7 +284,7 @@ export function resizeNoteGroup(
   );
   return snapshot.map((note) => ({
     ...note,
-    durationBeats: note.durationBeats + durationDelta,
+    durationBeats: addGridBeats(note.durationBeats, durationDelta),
   }));
 }
 
@@ -314,7 +316,7 @@ function noteAccessibilityLabel(
   return `${midiToNoteName(note.pitch)}。開始 ${displayBeat(note.startBeat + 1)} 拍目、長さ ${displayBeat(note.durationBeats)} 拍、強さ ${note.velocity}、${isInScale ? 'スケール内' : 'スケール外'}。${isSelected ? '選択中' : '未選択'}`;
 }
 
-function buildNoteGesturePreview(
+export function buildNoteGesturePreview(
   drag: NoteDragState,
   pointer: { clientX: number; clientY: number; shiftKey: boolean },
 ): NoteGesturePreview {
@@ -327,14 +329,14 @@ function buildNoteGesturePreview(
     const beatDelta = xToBeat(dx, drag.ppb);
     const remainingBeats = Math.max(
       MIN_EVENT_DURATION_BEATS,
-      drag.clipLengthBeats - source.startBeat,
+      beatDifference(drag.clipLengthBeats, source.startBeat),
     );
     let durationBeats = source.durationBeats + beatDelta;
     durationBeats = shiftKey
       ? Math.max(MIN_EVENT_DURATION_BEATS, durationBeats)
       : Math.max(
           MIN_EVENT_DURATION_BEATS,
-          snapBeat(source.startBeat + durationBeats, drag.gridSnap) - source.startBeat,
+          beatDifference(snapBeat(source.startBeat + durationBeats, drag.gridSnap), source.startBeat),
         );
     durationBeats = Math.min(remainingBeats, durationBeats);
     return {
@@ -348,7 +350,7 @@ function buildNoteGesturePreview(
   const rawBeatDelta = xToBeat(dx, drag.ppb);
   const requestedBeatDelta = shiftKey
     ? rawBeatDelta
-    : snapBeat(anchor.startBeat + rawBeatDelta, drag.gridSnap) - anchor.startBeat;
+    : beatDifference(snapBeat(anchor.startBeat + rawBeatDelta, drag.gridSnap), anchor.startBeat);
   const requestedPitchDelta = -Math.round((clientY - drag.startY) / drag.rowHeight);
   const previewNotes = translateNoteGroup({
     snapshot: drag.snapshot,
@@ -1263,7 +1265,7 @@ export function PianoRoll() {
       if (event.key === 'Enter' || event.key === ' ') {
         const durationBeats = Math.min(
           gridSnap,
-          clip.lengthBeats - keyboardCursor.startBeat,
+          beatDifference(clip.lengthBeats, keyboardCursor.startBeat),
         );
         if (durationBeats < MIN_EVENT_DURATION_BEATS) {
           setKeyboardAnnouncement('この位置にはノートを追加できません。');
@@ -1295,8 +1297,8 @@ export function PianoRoll() {
       let pitch = keyboardCursor.pitch;
       if (event.key === 'Home') startBeat = 0;
       else if (event.key === 'End') startBeat = maximumStart;
-      else if (event.key === 'ArrowLeft') startBeat = Math.max(0, startBeat - gridSnap);
-      else if (event.key === 'ArrowRight') startBeat = Math.min(maximumStart, startBeat + gridSnap);
+      else if (event.key === 'ArrowLeft') startBeat = Math.max(0, addGridBeats(startBeat, -gridSnap));
+      else if (event.key === 'ArrowRight') startBeat = Math.min(maximumStart, addGridBeats(startBeat, gridSnap));
       else {
         const direction = event.key === 'ArrowUp' ? 1 : -1;
         pitch = clampPitch(pitch + direction);
