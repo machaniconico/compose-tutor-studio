@@ -344,6 +344,57 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(count(64)).toBe(1);
   });
 
+  it('同じ音のノートが2つ鳴っている時に1つ消すと、1つだけ止まる - live-edit fix C', async () => {
+    setClips([melody([[62, 0, 4], [62, 0, 4]])]);
+    await play();
+    await runFor(1);
+    expect(count(62)).toBe(2);
+
+    editNotes((ns) => ns.filter((n) => n.id !== 'n1'));
+    await runFor(0.1);
+
+    expect(rec.releasedVoices).toHaveLength(1);
+    expect(rec.releasedVoices[0]!.pitch).toBe(62);
+  });
+
+  it('隣の編集でスイングの切り詰めが変わっても、鳴っているノートは止めない - live-edit fix C', async () => {
+    store().applyProjectChange((p) => ({ ...p, swing: 50 }));
+    setClips([melody([[60, 0.25, 4.25]])]);
+    await play();
+    await runFor(1.5);
+    expect(count(60)).toBe(1);
+
+    editNotes((ns) => ns.concat([newNote(60, 4.5)]));
+    await runFor(3);
+
+    expect(rec.releasedVoices).toHaveLength(0);
+    expect(count(60)).toBe(2);
+  });
+
+  it('鳴っているノートの強さや長さだけを変えても止めず、鳴らし直さない - live-edit fix C', async () => {
+    setClips([melody([[62, 0, 4]])]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.map((n) => ({ ...n, velocity: 40, durationBeats: 3 })));
+    await runFor(0.5);
+
+    expect(rec.releasedVoices).toHaveLength(0);
+    expect(count(62)).toBe(1);
+  });
+
+  it('鳴っているノートの高さを変えると止めて、新しい高さは次の音から - live-edit fix C', async () => {
+    setClips([melody([[62, 0, 4]])]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.map((n) => ({ ...n, pitch: 65 })));
+    await runFor(0.1);
+
+    expect(rec.releasedVoices.map((v) => v.pitch)).toEqual([62]);
+    expect(count(65)).toBe(0);
+  });
+
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
     setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
     store().setLoopRange(0, 4);

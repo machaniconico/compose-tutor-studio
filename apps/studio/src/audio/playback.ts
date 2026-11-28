@@ -63,7 +63,7 @@ import {
 import { AudioClipVoiceManager } from './audioClipVoice';
 import { createNoiseBuffer, DrumVoiceManager } from './drums';
 import { getAudioEngine } from './engine';
-import { buildScheduleEvents, type SchedulePayload } from './events';
+import { buildScheduleEvents, type NoteScheduleEvent, type SchedulePayload } from './events';
 import {
   applyMixState,
   applyReadScalarMixState,
@@ -174,8 +174,10 @@ type RuntimeSession = PlaybackSession & {
 
 /** One event the scheduler already fired, kept until its sound ends. */
 type FiredVoice = {
-  /** scheduleEventKey of the source event. */
+  /** scheduleEventKey of the source event (full content). */
   readonly key: string;
+  /** Source identity of a sounding note: track, preset, pitch, onset beat. */
+  readonly sourceKey: string;
   readonly trackId: string;
   readonly time: number;
   readonly endTime: number;
@@ -2372,6 +2374,7 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
       );
       session.firedVoices.push({
         key,
+        sourceKey: noteSourceKey(payload, event.beat),
         trackId: payload.trackId,
         time: event.time,
         endTime: event.time + durationSeconds,
@@ -2397,6 +2400,7 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
         ?.trigger(payload.lane, event.time, payload.velocity, payload.voiceSeed, choke);
       session.firedVoices.push({
         key,
+        sourceKey: key,
         trackId: payload.trackId,
         time: event.time,
         endTime: event.time,
@@ -2411,6 +2415,15 @@ function scheduleEventKey(payload: SchedulePayload, sourceBeat: number): string 
   return payload.kind === 'note'
     ? `n|${payload.trackId}|${payload.preset}|${payload.pitch}|${payload.velocity}|${payload.durationBeats}|${sourceBeat}`
     : `d|${payload.trackId}|${JSON.stringify(payload)}|${sourceBeat}`;
+}
+
+/**
+ * Which source note a sounding voice plays. Velocity and duration are left
+ * out: a sounding voice whose note only got softer, shorter or longer (also
+ * through a swing cut caused by a neighbour edit) finishes as scheduled.
+ */
+function noteSourceKey(payload: NoteScheduleEvent, sourceBeat: number): string {
+  return `${payload.trackId}|${payload.preset}|${payload.pitch}|${sourceBeat}`;
 }
 
 /**
@@ -2488,11 +2501,21 @@ export function applyRuntimeScheduleContentEdit(
 
   const cancelled = new Set<FiredVoice>();
   for (const list of pending.values()) for (const voice of list) cancelled.add(voice);
-  const currentKeys = new Set(events.map((event) => (
-    scheduleEventKey(event.payload as SchedulePayload, event.beat)
-  )));
+  // Sounding notes are matched one-to-one against the source notes that still
+  // exist, so deleting one of two identical notes releases exactly one voice.
+  // Only a removed note (a pitch change removes the old pitch) is released.
+  const remainingSources = new Map<string, number>();
+  for (const event of events) {
+    const payload = event.payload as SchedulePayload;
+    if (payload.kind !== 'note') continue;
+    const sourceKey = noteSourceKey(payload, event.beat);
+    remainingSources.set(sourceKey, (remainingSources.get(sourceKey) ?? 0) + 1);
+  }
   for (const voice of live) {
-    if (voice.time < now && voice.handle && !currentKeys.has(voice.key)) cancelled.add(voice);
+    if (voice.time >= now || !voice.handle) continue;
+    const remaining = remainingSources.get(voice.sourceKey) ?? 0;
+    if (remaining > 0) remainingSources.set(voice.sourceKey, remaining - 1);
+    else cancelled.add(voice);
   }
   for (const voice of cancelled) {
     // Drum hits have no handle; at most one lookahead window of them remains.
