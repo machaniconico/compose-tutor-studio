@@ -164,6 +164,8 @@ type RuntimeSession = PlaybackSession & {
   scheduleEvents: readonly ScheduledEvent[];
   /** Project the current scheduleEvents were built from. */
   scheduleProject: Project;
+  /** Source note id of each note payload in scheduleEvents (see buildLiveSchedule). */
+  noteIds: NoteIdIndex;
   /**
    * Plans the natural-drain tail for a schedule; null for loop sessions,
    * which never drain.
@@ -196,11 +198,9 @@ function maxPlannedTail(left: PlannedTail, right: PlannedTail): PlannedTail {
 type FiredVoice = {
   /** scheduleEventKey of the source event (full content). */
   readonly key: string;
-  /** Source identity of a sounding note: track, preset, pitch, onset beat. */
+  /** noteIdentity of a note voice (track, note id, pitch, onset beat); the key for a drum hit. */
   readonly sourceKey: string;
   readonly kind: SchedulePayload['kind'];
-  /** Scheduled length of the source note in beats (0 for a drum hit). */
-  readonly durationBeats: number;
   readonly trackId: string;
   readonly time: number;
   readonly endTime: number;
@@ -1742,7 +1742,7 @@ async function createRuntimeSessionImpl(
   const audioClipIndex = createAudioClipPlaybackIndex(project, { tempo });
   // Build and budget the immutable schedule before allocating per-track Web
   // Audio graphs. Oversized linked projects fail closed at this boundary.
-  const scheduleEvents: readonly ScheduledEvent[] = buildScheduleEvents(project);
+  const { events: scheduleEvents, noteIds: scheduleNoteIds } = buildLiveSchedule(project);
   const scheduleIndex = createScheduleEventIndex(scheduleEvents, loop);
   if (loop) {
     const density = preflightLoopScheduleDensity(
@@ -2158,6 +2158,7 @@ async function createRuntimeSessionImpl(
       routingPlan,
       scheduleEvents,
       scheduleProject: project,
+      noteIds: scheduleNoteIds,
       planTail: loop ? null : planTail,
       plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },
       firedVoices: [],
@@ -2381,7 +2382,8 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
   session.firedVoices = session.firedVoices.filter((voice) => voice.endTime >= now);
   for (const event of due) {
     const payload = event.payload as SchedulePayload;
-    const key = scheduleEventKey(payload, event.beat);
+    const noteId = payload.kind === 'note' ? noteIdOf(session.noteIds, payload) : '';
+    const key = scheduleEventKey(payload, event.beat, noteId);
     if (payload.kind === 'note') {
       const synth = session.synths.get(payload.trackId);
       if (!synth) continue;
@@ -2406,9 +2408,8 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
       );
       session.firedVoices.push({
         key,
-        sourceKey: noteSourceKey(payload, event.beat),
+        sourceKey: noteIdentity(payload, event.beat, noteId),
         kind: 'note',
-        durationBeats: payload.durationBeats,
         trackId: payload.trackId,
         time: event.time,
         endTime: event.time + durationSeconds,
@@ -2436,7 +2437,6 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
         key,
         sourceKey: key,
         kind: 'drum',
-        durationBeats: 0,
         trackId: payload.trackId,
         time: event.time,
         endTime: event.time,
@@ -2447,19 +2447,43 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
 }
 
 /** Stable identity of one schedule event: what sounds, where, at which source beat. */
-function scheduleEventKey(payload: SchedulePayload, sourceBeat: number): string {
+function scheduleEventKey(payload: SchedulePayload, sourceBeat: number, noteId: string): string {
   return payload.kind === 'note'
-    ? `n|${payload.trackId}|${payload.preset}|${payload.pitch}|${payload.velocity}|${payload.durationBeats}|${sourceBeat}`
+    ? `n|${payload.trackId}|${noteId}|${payload.preset}|${payload.pitch}|${payload.velocity}|${payload.durationBeats}|${sourceBeat}`
     : `d|${payload.trackId}|${JSON.stringify(payload)}|${sourceBeat}`;
 }
 
 /**
- * Which source note a sounding voice plays. Velocity and duration are left
- * out: a sounding voice whose note only got softer, shorter or longer (also
- * through a swing cut caused by a neighbour edit) finishes as scheduled.
+ * Which source note a sounding voice plays: track, source note id, pitch and
+ * source onset beat. Velocity and length are left out, so a voice whose note
+ * only got softer, shorter or longer (also through a swing cut) is kept.
+ * Loop passes share it; duplicates and linked placements differ by id or onset.
  */
-function noteSourceKey(payload: NoteScheduleEvent, sourceBeat: number): string {
-  return `${payload.trackId}|${payload.preset}|${payload.pitch}|${sourceBeat}`;
+function noteIdentity(payload: NoteScheduleEvent, sourceBeat: number, noteId: string): string {
+  return `${payload.trackId}|${noteId}|${payload.pitch}|${sourceBeat}`;
+}
+
+/** Source note id per note payload object; scheduling keeps payload identity. */
+type NoteIdIndex = WeakMap<NoteScheduleEvent, string>;
+
+/** Id used for a realized Chord Track note, which has no clip note. */
+const CHORD_NOTE_ID = 'chord';
+
+function noteIdOf(noteIds: NoteIdIndex, payload: NoteScheduleEvent): string {
+  return noteIds.get(payload) ?? CHORD_NOTE_ID;
+}
+
+/**
+ * buildScheduleEvents plus the source note id of every clip note event,
+ * taken from its onClipNote report. The payloads stay exactly as export and
+ * the pinned schedule goldens see them; the ids live only in this index.
+ */
+function buildLiveSchedule(project: Project): { events: ScheduledEvent[]; noteIds: NoteIdIndex } {
+  const noteIds: NoteIdIndex = new WeakMap();
+  const events = buildScheduleEvents(project, {
+    onClipNote: (payload, source) => noteIds.set(payload, source.noteId),
+  });
+  return { events, noteIds };
 }
 
 /**
@@ -2514,7 +2538,7 @@ export function applyRuntimeScheduleContentEdit(
   project: Project,
   now: number,
 ): void {
-  const events = buildScheduleEvents(project);
+  const { events, noteIds } = buildLiveSchedule(project);
   const index = createScheduleEventIndex(events, session.loop);
   if (session.loop) {
     const density = preflightLoopScheduleDensity(
@@ -2539,6 +2563,7 @@ export function applyRuntimeScheduleContentEdit(
   session.scheduler.replaceEventIndex(index);
   session.scheduleEvents = events;
   session.scheduleProject = project;
+  session.noteIds = noteIds;
 
   const { anchorBeat, anchorTime } = session;
   const playheadBeat = now < anchorTime
@@ -2565,79 +2590,26 @@ export function applyRuntimeScheduleContentEdit(
   const added: DueEvent[] = [];
   for (const event of due) {
     if ((event.payload as SchedulePayload).kind !== 'note') continue;
-    const slot = `${scheduleEventKey(event.payload as SchedulePayload, event.beat)}@${event.time}`;
+    const payload = event.payload as SchedulePayload;
+    const slot = `${scheduleEventKey(payload, event.beat, payload.kind === 'note' ? noteIdOf(noteIds, payload) : '')}@${event.time}`;
     if (!pending.get(slot)?.pop()) added.push(event);
   }
 
   const cancelled = new Set<FiredVoice>();
   for (const list of pending.values()) for (const voice of list) cancelled.add(voice);
-  // Sounding voices are released per source key (track, preset, pitch, onset
-  // beat) and per pass (voice start time). Nothing is released while the
-  // key's count of source notes does not drop, so loop passes, long notes and
-  // velocity / duration-only edits (also swing cuts) keep sounding. When it
-  // drops, each pass first releases the voices whose full content (length,
-  // velocity, ...: scheduleEventKey) matches a removed source note (before
-  // minus after, as a multiset of content keys), and
-  // then keeps at most the after-count, releasing the latest-started extras.
-  // Deleting a note therefore releases its voice on every pass, and of two
-  // same-pitch notes with one onset the one actually deleted stops.
-  const countSources = (list: readonly ScheduledEvent[]): Map<string, Map<string, number>> => {
-    const counts = new Map<string, Map<string, number>>();
-    for (const event of list) {
-      const payload = event.payload as SchedulePayload;
-      if (payload.kind !== 'note') continue;
-      const sourceKey = noteSourceKey(payload, event.beat);
-      const contentKey = scheduleEventKey(payload, event.beat);
-      const contents = counts.get(sourceKey) ?? new Map<string, number>();
-      contents.set(contentKey, (contents.get(contentKey) ?? 0) + 1);
-      counts.set(sourceKey, contents);
-    }
-    return counts;
-  };
-  const total = (lengths: Map<string, number> | undefined): number => {
-    let sum = 0;
-    for (const count of lengths?.values() ?? []) sum += count;
-    return sum;
-  };
-  const sourcesBefore = countSources(previousEvents);
-  const sourcesAfter = countSources(events);
-  const soundingByKey = new Map<string, FiredVoice[]>();
+  // A sounding voice is released only when the edited schedule no longer
+  // contains its note identity anywhere: the note was deleted, moved, or its
+  // pitch changed. A velocity- or length-only edit keeps it. Every loop pass
+  // of a deleted note is released, and of duplicate notes only the deleted
+  // one stops, because each has its own note id.
+  const identities = new Set<string>();
+  for (const event of events) {
+    const payload = event.payload as SchedulePayload;
+    if (payload.kind === 'note') identities.add(noteIdentity(payload, event.beat, noteIdOf(noteIds, payload)));
+  }
   for (const voice of live) {
     if (voice.time >= now || !voice.handle || voice.kind !== 'note') continue;
-    const list = soundingByKey.get(voice.sourceKey);
-    if (list) list.push(voice);
-    else soundingByKey.set(voice.sourceKey, [voice]);
-  }
-  for (const [sourceKey, voices] of soundingByKey) {
-    const before = sourcesBefore.get(sourceKey);
-    const afterLengths = sourcesAfter.get(sourceKey);
-    const after = total(afterLengths);
-    if (total(before) - after <= 0) continue;
-    const removedLengths = new Map<string, number>();
-    for (const [length, count] of before ?? []) {
-      const removed = count - (afterLengths?.get(length) ?? 0);
-      if (removed > 0) removedLengths.set(length, removed);
-    }
-    const byPass = new Map<number, FiredVoice[]>();
-    for (const voice of voices) {
-      const list = byPass.get(voice.time);
-      if (list) list.push(voice);
-      else byPass.set(voice.time, [voice]);
-    }
-    for (const group of byPass.values()) {
-      const removedHere = new Map(removedLengths);
-      const kept: FiredVoice[] = [];
-      for (const voice of [...group].reverse()) {
-        const left = removedHere.get(voice.key) ?? 0;
-        if (left > 0) {
-          removedHere.set(voice.key, left - 1);
-          cancelled.add(voice);
-        } else {
-          kept.unshift(voice);
-        }
-      }
-      for (const voice of kept.slice(after)) cancelled.add(voice);
-    }
+    if (!identities.has(voice.sourceKey)) cancelled.add(voice);
   }
   for (const voice of cancelled) {
     if (voice.handle) session.synths.get(voice.trackId)?.releaseVoice(voice.handle, now);

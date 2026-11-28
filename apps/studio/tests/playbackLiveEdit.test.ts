@@ -585,6 +585,35 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(rec.releasedDurations).toEqual([0.5]);
   });
 
+  it('鳴っている重複ノートの片方を伸縮してから消すと、そのノートの音だけが止まる - live-edit P3', async () => {
+    setClips([melody([[60, 0.5, 6], [60, 0.5, 4]])]);
+    await play();
+    await runFor(2);
+    expect(count(60)).toBe(2);
+
+    editNotes((ns) => ns.map((n) => (n.id === 'n0' ? { ...n, durationBeats: 5 } : n)));
+    await runFor(0.1);
+    expect(rec.releasedDurations).toEqual([]);
+    editNotes((ns) => ns.filter((n) => n.id !== 'n0'));
+    await runFor(0.1);
+
+    // n0 was scheduled for 6 beats (3 s); n1 (4 beats, 2 s) keeps sounding.
+    expect(rec.releasedDurations).toEqual([3]);
+  });
+
+  it('1回の編集で重複ノートの片方を消し、もう片方を伸縮すると、消した方だけが止まる - live-edit P1', async () => {
+    setClips([melody([[60, 0.5, 6], [60, 0.5, 4]])]);
+    await play();
+    await runFor(2);
+
+    editNotes((ns) => ns
+      .filter((n) => n.id !== 'n0')
+      .map((n) => (n.id === 'n1' ? { ...n, durationBeats: 3 } : n)));
+    await runFor(0.1);
+
+    expect(rec.releasedDurations).toEqual([3]);
+  });
+
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
     setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
     store().setLoopRange(0, 4);
