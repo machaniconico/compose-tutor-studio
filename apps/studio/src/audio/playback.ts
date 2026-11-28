@@ -2575,24 +2575,26 @@ export function applyRuntimeScheduleContentEdit(
   // beat) and per pass (voice start time). Nothing is released while the
   // key's count of source notes does not drop, so loop passes, long notes and
   // velocity / duration-only edits (also swing cuts) keep sounding. When it
-  // drops, each pass first releases the voices whose scheduled length matches
-  // a removed source note (before minus after, as a multiset of lengths), and
+  // drops, each pass first releases the voices whose full content (length,
+  // velocity, ...: scheduleEventKey) matches a removed source note (before
+  // minus after, as a multiset of content keys), and
   // then keeps at most the after-count, releasing the latest-started extras.
   // Deleting a note therefore releases its voice on every pass, and of two
   // same-pitch notes with one onset the one actually deleted stops.
-  const countSources = (list: readonly ScheduledEvent[]): Map<string, Map<number, number>> => {
-    const counts = new Map<string, Map<number, number>>();
+  const countSources = (list: readonly ScheduledEvent[]): Map<string, Map<string, number>> => {
+    const counts = new Map<string, Map<string, number>>();
     for (const event of list) {
       const payload = event.payload as SchedulePayload;
       if (payload.kind !== 'note') continue;
       const sourceKey = noteSourceKey(payload, event.beat);
-      const lengths = counts.get(sourceKey) ?? new Map<number, number>();
-      lengths.set(payload.durationBeats, (lengths.get(payload.durationBeats) ?? 0) + 1);
-      counts.set(sourceKey, lengths);
+      const contentKey = scheduleEventKey(payload, event.beat);
+      const contents = counts.get(sourceKey) ?? new Map<string, number>();
+      contents.set(contentKey, (contents.get(contentKey) ?? 0) + 1);
+      counts.set(sourceKey, contents);
     }
     return counts;
   };
-  const total = (lengths: Map<number, number> | undefined): number => {
+  const total = (lengths: Map<string, number> | undefined): number => {
     let sum = 0;
     for (const count of lengths?.values() ?? []) sum += count;
     return sum;
@@ -2611,7 +2613,7 @@ export function applyRuntimeScheduleContentEdit(
     const afterLengths = sourcesAfter.get(sourceKey);
     const after = total(afterLengths);
     if (total(before) - after <= 0) continue;
-    const removedLengths = new Map<number, number>();
+    const removedLengths = new Map<string, number>();
     for (const [length, count] of before ?? []) {
       const removed = count - (afterLengths?.get(length) ?? 0);
       if (removed > 0) removedLengths.set(length, removed);
@@ -2626,9 +2628,9 @@ export function applyRuntimeScheduleContentEdit(
       const removedHere = new Map(removedLengths);
       const kept: FiredVoice[] = [];
       for (const voice of [...group].reverse()) {
-        const left = removedHere.get(voice.durationBeats) ?? 0;
+        const left = removedHere.get(voice.key) ?? 0;
         if (left > 0) {
-          removedHere.set(voice.durationBeats, left - 1);
+          removedHere.set(voice.key, left - 1);
           cancelled.add(voice);
         } else {
           kept.unshift(voice);

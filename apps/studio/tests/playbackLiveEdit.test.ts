@@ -16,6 +16,8 @@ const rec = vi.hoisted(() => ({
   drums: [] as Array<{ lane: string; time: number; velocity: number }>,
   /** Scheduled duration (s) of each released voice, in release order. */
   releasedDurations: [] as number[],
+  releasedVelocities: [] as number[],
+  handleVelocities: new Map<object, number>(),
   handleDurations: new WeakMap<object, number>(),
 }));
 
@@ -77,15 +79,17 @@ vi.mock('../src/audio/graph', async (importOriginal) => {
 });
 vi.mock('../src/audio/synth', () => ({
   SynthVoiceManager: class {
-    noteOn = vi.fn((pitch: number, start: number, duration: number) => {
+    noteOn = vi.fn((pitch: number, start: number, duration: number, velocity: number) => {
       rec.notes.push({ pitch, start, duration });
       const handle = { pitch, start };
       rec.handleDurations.set(handle, duration);
+      rec.handleVelocities.set(handle, velocity);
       return handle;
     });
     releaseVoice = vi.fn((handle: { pitch: number; start: number }, when: number) => {
       rec.releasedVoices.push({ ...handle, when });
       rec.releasedDurations.push(rec.handleDurations.get(handle) ?? Number.NaN);
+      rec.releasedVelocities.push(rec.handleVelocities.get(handle) ?? Number.NaN);
     });
     releaseAll = vi.fn(() => { rec.released += 1; });
     dispose = vi.fn(() => { rec.disposed += 1; });
@@ -166,6 +170,8 @@ beforeEach(() => {
   rec.releasedVoices.length = 0;
   rec.drums.length = 0;
   rec.releasedDurations.length = 0;
+  rec.releasedVelocities.length = 0;
+  rec.handleVelocities.clear();
   useStore.setState((s) => ({
     project: initialProject,
     past: [],
@@ -551,6 +557,21 @@ describe('note-content edit while playing (US-012b)', () => {
 
     // The 8-beat voice (4 s) is released; the 1-beat one already ended.
     expect(rec.releasedDurations).toEqual([4]);
+  });
+
+  it('高さ・開始・長さが同じで強さだけ違うノートの片方を消すと、消した方だけが止まる - live-edit fix B3b', async () => {
+    const clip = melody([[62, 0, 4], [62, 0, 4]]);
+    setClips([{ ...clip, notes: clip.notes.map((n, i) => ({ ...n, velocity: i === 0 ? 30 : 110 })) }]);
+    await play();
+    await runFor(0.5);
+    const playedVelocities = [...rec.handleVelocities.values()];
+
+    editNotes((ns) => ns.filter((n) => n.velocity !== 30));
+    await runFor(0.1);
+
+    expect(rec.releasedVelocities).toHaveLength(1);
+    // 消した方(強さ 30 の声)が止まる。合成器へ渡る強さは 30 側が小さい。
+    expect(rec.releasedVelocities[0]).toBe(Math.min(...playedVelocities));
   });
 
   it('高さと開始が同じで長さが違うノートの短い方を消すと、短い方だけが止まる - live-edit fix B3', async () => {
