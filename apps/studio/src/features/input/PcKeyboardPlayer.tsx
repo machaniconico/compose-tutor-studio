@@ -3,6 +3,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import { useStore } from '../../state/store';
 import { DISCARD_MIDI_TAKE_LABEL } from '../../state/midiRecording';
+import { stepInputPlay, useStepInput } from '../../state/stepInput';
+import { pushToast } from '../../state/tutorialBridge';
 import { holdNote, releaseHeldNote, stopPreview } from '../../audio/livePreview';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { matchShortcut } from '../common/keymap';
@@ -82,8 +84,14 @@ function useKeyboardPlaying(active: boolean, noteInput: MidiRecordingNoteInput):
       if (assignment?.pitch == null) return;
       holdNote(event.code, track.instrument, assignment.pitch);
       if (useStore.getState().midiRecordingActive) {
+        // One rule when both are on: the take wins and step input is refused (it never inserts during a take).
         recordedKeys.set(event.code, assignment.pitch);
         noteInput({ type: 'on', pitch: assignment.pitch, velocity: 90 });
+      } else if (useStepInput.getState().active) {
+        // Piano-roll step input (P43): the same note-on also goes in at the step cursor.
+        // The key-down only (the repeat case returned above); failures are told, not silent.
+        const result = stepInputPlay(assignment.pitch);
+        if (!result.ok) pushToast(result.message, 'info');
       }
     };
     // Key-up always releases, whatever the focus or modifiers are by then.

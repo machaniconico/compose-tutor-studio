@@ -494,6 +494,62 @@ export function pasteNotesIntoProject(
   };
 }
 
+/** ステップ入力で置く音の強さ(ピアノロールの新規ノートと同じ)。 */
+export const STEP_INPUT_VELOCITY = 100;
+
+const STEP_END_REACHED =
+  'クリップの終わりまで来ました。これ以上は入力できません(クリップの長さは変わりません)。クリップを長くするか、別の場所から入力してください。';
+
+/**
+ * ステップ入力: 1 音を、クリップ内の `cursorTicks` に `stepTicks` の長さで置く。
+ * 貼り付けと同じ事後確認(クリップ・曲の終わり、同じ高さの重なり、予定イベントの完全一致、
+ * ループ周期の維持)を通らなければ全体を断り、クリップはそのまま。
+ */
+export function stepInsertNoteInProject(
+  project: Project,
+  clipId: string,
+  pitch: number,
+  cursorTicks: number,
+  stepTicks: number,
+  makeId: () => string = () => uid('note'),
+): NoteEditOutcome {
+  const target = locateTarget(project, clipId);
+  if (typeof target === 'string') return refuse(target);
+  const domain = clipDomainProblem(target);
+  if (domain !== null) return refuse(domain);
+  if (!Number.isInteger(pitch) || pitch < 0 || pitch > 127) return refuse('音の高さが 0〜127 の外のため、入力できません。');
+  if (!Number.isSafeInteger(cursorTicks) || cursorTicks < 0 || !Number.isSafeInteger(stepTicks) || stepTicks < 1) {
+    return refuse('入力する位置か長さを読み取れないため、入力できません。');
+  }
+  const existing = target.owner.notes ?? [];
+  if (existing.length + 1 > MAX_EVENTS_PER_CLIP) {
+    return refuse(`1 つのクリップに置ける音は ${MAX_EVENTS_PER_CLIP} 個までのため、入力できません。`);
+  }
+  const note: NoteEvent = {
+    id: makeId(),
+    pitch,
+    startBeat: cursorTicks / PPQ,
+    durationBeats: stepTicks / PPQ,
+    velocity: STEP_INPUT_VELOCITY,
+  };
+  if (note.durationBeats < MIN_EVENT_DURATION_BEATS) return refuse('短すぎて鳴らない長さのため、入力できません。');
+  if (placementProblem(project, target, note) !== null) return refuse(STEP_END_REACHED);
+  const notes = [...existing, note];
+  const loop = loopProblem(target, existing, notes);
+  if (loop !== null) return refuse(loop.replace('貼り付け・切り取り', '入力'));
+  const next = withOwnerNotes(project, target.owner.id, notes);
+  const problem = scheduleProblem(project, next, target, new Set(), new Set([note.id]), (overlap) =>
+    `ここに入力すると、このトラックで同じ高さの音(${noteName(overlap)})が重なってしまうため、入力できません。休符で先へ進むか、重なる音を先に消してください。`);
+  if (problem !== null) return refuse(problem);
+  return {
+    ok: true,
+    changed: true,
+    project: next,
+    noteIds: [note.id],
+    message: `${noteName(pitch)}を入力しました。`,
+  };
+}
+
 /** 高さだけを変える編集の共通部分。 */
 function applyPitches(
   project: Project,
@@ -683,7 +739,9 @@ export function retimeNotesInProject(
 
 function editLockReason(verb: string): string | null {
   const state = useStore.getState();
-  if (state.audioRecordingOperationId !== null) return `録音中は${verb}できません。録音を止めてからやり直してください。`;
+  if (state.audioRecordingOperationId !== null || state.midiRecordingActive) {
+    return `録音中は${verb}できません。録音を止めてからやり直してください。`;
+  }
   if (state.projectOperationBusy) return `プロジェクトを開いている途中のため、今は${verb}できません。`;
   return null;
 }
@@ -810,4 +868,23 @@ export function retimeSelectedNotes(
     snapshot,
     '編集',
   );
+}
+
+/** ステップ入力で 1 音置く。Undo 1 段。録音中は断る。成功時の noteIds[0] が置いた音の ID。 */
+export function stepInsertNote(clipId: string, pitch: number, cursorTicks: number, stepTicks: number): NoteEditResult {
+  const locked = editLockReason('入力');
+  if (locked) return refuse(locked);
+  const snapshot = useStore.getState().project;
+  return commit(stepInsertNoteInProject(snapshot, clipId, pitch, cursorTicks, stepTicks), snapshot, '入力');
+}
+
+/** ステップ入力で最後に置いた音 1 つを消す(クリップボードは触らない)。Undo 1 段。 */
+export function stepRemoveNote(clipId: string, noteId: string): NoteEditResult {
+  const locked = editLockReason('入力');
+  if (locked) return refuse(locked);
+  const snapshot = useStore.getState().project;
+  const outcome = cutNotesInProject(snapshot, clipId, [noteId]);
+  if (!outcome.ok) return outcome;
+  const result = commit({ ...outcome, message: '最後に入力した音を消して、1 つ戻りました。' }, snapshot, '入力');
+  return result;
 }

@@ -2182,6 +2182,15 @@ button.pr__note:hover {
   z-index: 4;
 }
 
+.pr__step-cursor {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  pointer-events: none;
+  z-index: 5;
+  background: var(--accent);
+}
+
 .pr__keyboard-cursor {
   position: absolute;
   pointer-events: none;

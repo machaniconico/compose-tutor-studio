@@ -11,6 +11,7 @@ import { useStore } from '../../state/store';
 import { instrumentForClip, previewNote } from '../../audio/livePreview';
 import {
   MIN_EVENT_DURATION_BEATS,
+  PPQ,
   barToBeatAt,
   beatToBarPosition,
   compileMusicalTime,
@@ -48,6 +49,7 @@ import {
   removeNotes,
 } from '../../state/editorActions';
 import { NoteGroovePopover } from './NoteGroovePopover';
+import { stepInputBack, stepInputPlay, stepInputRest, stopStepInput, useStepInput } from '../../state/stepInput';
 import {
   FIT_TO_SCALE_HELP,
   copySelectedNotes,
@@ -634,6 +636,38 @@ export function PianoRoll() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [editor.activeView, clip, liveSelectedNoteIds, selectNotes, copySelection, cutSelection, pasteNotes]);
+
+  // --- step input (P43): Enter = rest, Backspace = step back; only while step input is on ---
+  const stepActive = useStepInput((s) => s.active && clip !== null && s.clipId === clip.id);
+  const stepCursorTicks = useStepInput((s) => s.cursorTicks);
+  const activationId = useStore((s) => s.saveState.activationId);
+  useEffect(() => {
+    // A project switch or another clip ends the session; it is never saved.
+    const { clipId } = useStepInput.getState();
+    if (clipId !== null && clipId !== (clip?.id ?? null)) stopStepInput();
+  }, [clip?.id]);
+  useEffect(() => stopStepInput, [activationId]);
+  useEffect(() => {
+    if (!stepActive) return;
+    function onStepKey(e: KeyboardEvent) {
+      if (isAnyDialogOpen() || editor.activeView !== 'pianoRoll') return;
+      const action = matchShortcut(e, 'stepInput');
+      if (action === null) return;
+      const inGrid = e.target instanceof Node && gridRef.current?.contains(e.target) === true;
+      // A focused toolbar / popover button would otherwise take Enter as a click; during step input it is a rest.
+      const restOnToolbarButton = action === 'stepRest' && e.target instanceof HTMLElement
+        && e.target.closest('button') !== null && e.target.closest('.pr__toolbar') !== null;
+      if (!inGrid && !restOnToolbarButton && e.target instanceof HTMLElement && e.target.closest('button, a[href], summary, [data-shortcuts-suspended]')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const result = action === 'stepRest' ? stepInputRest() : stepInputBack();
+      setEditMessage(result.message);
+      setKeyboardAnnouncement(result.message);
+    }
+    // Capture phase so the grid's own Enter / Backspace handling does not also run.
+    window.addEventListener('keydown', onStepKey, true);
+    return () => window.removeEventListener('keydown', onStepKey, true);
+  }, [stepActive, editor.activeView]);
 
   const localPoint = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = gridRef.current?.getBoundingClientRect();
@@ -1387,6 +1421,7 @@ export function PianoRoll() {
           noteIds={liveSelectedNoteIds}
           gridSnap={gridSnap}
           onAnnounce={setEditMessage}
+          onStepStarted={() => gridRef.current?.focus()}
         />
         <div className="pr__zoom" role="group" aria-label="選んだ音の高さ">
           <button
@@ -1583,6 +1618,11 @@ export function PianoRoll() {
                 onPointerDown={(e) => {
                   if (e.button !== 0) return;
                   previewNote(instrumentForClip(useStore.getState().project, clip?.id ?? null), midi);
+                  if (stepActive) {
+                    const result = stepInputPlay(midi);
+                    setEditMessage(result.message);
+                    setKeyboardAnnouncement(result.message);
+                  }
                 }}
               >
                 {isC ? <span className="pr__key-label">{midiToNoteName(midi)}</span> : null}
@@ -1678,6 +1718,15 @@ export function PianoRoll() {
                 });
               })
             : null}
+
+          {stepActive ? (
+            <div
+              className="pr__step-cursor"
+              style={{ left: (stepCursorTicks / PPQ) * ppb, height: gridHeight }}
+              data-testid="step-cursor"
+              aria-hidden="true"
+            />
+          ) : null}
 
           {gridKeyboardFocused ? (
             <div
