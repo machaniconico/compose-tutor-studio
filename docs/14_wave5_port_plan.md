@@ -78,68 +78,70 @@
 
 ## 3. PR の順序
 
+2026-11-28 時点の進み具合: 全 PR を出しました(P34 は #85 で審査中、ほかは main に入りました)。各行の括弧は PR 番号です。計画外の後続 PR は §7 にあります。
+
 実装者は ~/.claude/CLAUDE.md §1 に従います。既存コードへの差分は Claude(Sonnet、難所は Opus)、新規モジュールは Codex Sol medium、R3 はレビュー 2 本と `deep-review` です。R3 の受け入れテストは `packages/project-model/tests/acceptance/` と `apps/studio/tests/acceptance/` に置き、実装者は編集しません。
 
 **土台**
 | PR | 内容 | 依存 | 等級 |
 |---|---|---|---|
-| P00 | `docs/07_development_plan.md` に本計画、`docs/16_daw_gap_analysis.md` を取り込み、wave5 に保存用タグ | なし | R1 |
-| P01 | DOM テスト基盤(US-000)。追加する依存は `pnpm audit` を通す | なし | R2 |
-| P02 | wave5 形式の検出器(§1-5) | なし | **R3** |
-| P03 | Undo トランザクションと keymap(US-003)。ドラッグ 1 回が Undo 1 段、録音ロック中は不可のまま、取引中の自動保存は確定後 | P01 | R2 |
-| P04 | v10 ゴールデン固定(テストのみ)。既定プロジェクト、全テンプレート、オートメーション・ルーティング・オーディオ入りの見本について、`encodeProjectJson` のバイトと `buildScheduleEvents` のスナップショット | なし | R2 |
-| P05 | CI に wave5 の検査 4 本(§4) | なし | R2 |
+| P00(完了 #42) | `docs/07_development_plan.md` に本計画、`docs/16_daw_gap_analysis.md` を取り込み、wave5 に保存用タグ | なし | R1 |
+| P01(完了 #43) | DOM テスト基盤(US-000)。追加する依存は `pnpm audit` を通す | なし | R2 |
+| P02(完了 #46) | wave5 形式の検出器(§1-5) | なし | **R3** |
+| P03(完了 #51) | Undo トランザクションと keymap(US-003)。ドラッグ 1 回が Undo 1 段、録音ロック中は不可のまま、取引中の自動保存は確定後 | P01 | R2 |
+| P04(完了 #44) | v10 ゴールデン固定(テストのみ)。既定プロジェクト、全テンプレート、オートメーション・ルーティング・オーディオ入りの見本について、`encodeProjectJson` のバイトと `buildScheduleEvents` のスナップショット | なし | R2 |
+| P05(完了 #48) | CI に wave5 の検査 4 本(§4) | なし | R2 |
 
 **純粋モジュール**(並行可、すべて R2)
-- P10: theory-engine の `voicing` / `transpose` / `note-role` / `chord-detect`。両側で変わった `chords.ts` / `parse-chord.ts` / `harmony.ts` は、必要な追加 export だけ main 版に足します。
-- P11: `comping` / `drum-patterns` / `accompaniment`。
-- P12: project-model の `tapTempo.ts`、`groove.ts`、新規 `ticks.ts`(`PPQ = 480`、`beatTick`)。main の `time.ts` は触りません。
-- P13: studio の `loudness.ts` / `zipStore.ts` / `noteColor.ts` / `keyboardMap.ts`。
-- P14: 用語集(US-029。R1、画面確認 1 段)。
+- P10(完了 #47): theory-engine の `voicing` / `transpose` / `note-role` / `chord-detect`。両側で変わった `chords.ts` / `parse-chord.ts` / `harmony.ts` は、必要な追加 export だけ main 版に足します。
+- P11(完了 #47): `comping` / `drum-patterns` / `accompaniment`。
+- P12(完了 #49): project-model の `tapTempo.ts`、`groove.ts`、新規 `ticks.ts`(`PPQ = 480`、`beatTick`)。main の `time.ts` は触りません。
+- P13(完了 #50): studio の `loudness.ts` / `zipStore.ts` / `noteColor.ts` / `keyboardMap.ts`。
+- P14(完了 #52): 用語集(US-029。R1、画面確認 1 段)。
 
 **スキーマ**(直列)
 | PR | 内容 | 依存 | 等級 |
 |---|---|---|---|
-| P20 | v11: `Project.swing`(0〜60)と `Project.hiHatChoke`。再生・WAV・MIDI の 3 経路まで。UI なし | P04, P12 | **R3** |
-| P21 | グルーヴの UI: スウィング、強さ付きクオンタイズ、ヒューマナイズ、チョーク切替、12 / 16 ステップ | P20, P03 | R2 |
-| P22 | プリセット 10 種以上とマクロ(US-020)。マクロ無しのトラックは現状とバイト一致 | P04 | R2 |
-| P23 | v12: `track-filter-cutoff` | P20 | **R3** |
-| P24 | リバーブ用リターンを 1 操作で追加(US-034) | なし | R2 |
+| P20(完了 #57) | v11: `Project.swing`(0〜60)と `Project.hiHatChoke`。再生・WAV・MIDI の 3 経路まで。UI なし | P04, P12 | **R3** |
+| P21(完了 #66) | グルーヴの UI: スウィング、強さ付きクオンタイズ、ヒューマナイズ、チョーク切替、12 / 16 ステップ | P20, P03 | R2 |
+| P22(完了 #54) | プリセット 10 種以上とマクロ(US-020)。マクロ無しのトラックは現状とバイト一致 | P04 | R2 |
+| P23(完了 #61) | v12: `track-filter-cutoff` | P20 | **R3** |
+| P24(完了 #53) | リバーブ用リターンを 1 操作で追加(US-034) | なし | R2 |
 
 **編集**(R2、P03 に依存)
-- P30: ルーラーのシークとループドラッグ、タップテンポ。
-- P31: 曲長の変更 UI。
-- P32: クリップ分割と D2 / D4 規則。
-- P33: クリップボード、半音・度数移調、スケール適合(P10)。
-- P34: レガート、スタッカート、連結、分割、矢印移動、3 連符グリッド、ベロシティランプ(P33)。
-- P35: 曲全体の移調。
-- P36: ゴーストノートと色分け(R1 相当、画面確認)。
-- P37: 試聴基盤とコード試聴(P10)。
-- P38: 伴奏パターン(P11)。
-- P39: コード検出の UI。
-- P3A: 伴奏おまかせ(P21, P38)。
-- P3B: 再生中編集の不変条件テスト。
+- P30(完了 #55): ルーラーのシークとループドラッグ、タップテンポ。
+- P31(完了 #67): 曲長の変更 UI。
+- P32(完了 #65): クリップ分割と D2 / D4 規則。
+- P33(完了 #60): クリップボード、半音・度数移調、スケール適合(P10)。
+- P34(#85): レガート、スタッカート、連結、分割、矢印移動、3 連符グリッド、ベロシティランプ(P33)。
+- P35(完了 #56): 曲全体の移調。
+- P36(完了 #59): ゴーストノートと色分け(R1 相当、画面確認)。
+- P37(完了 #58): 試聴基盤とコード試聴(P10)。
+- P38(完了 #71): 伴奏パターン(P11)。
+- P39(完了 #68): コード検出の UI。
+- P3A(完了 #77): 伴奏おまかせ(P21, P38)。
+- P3B(完了 #63): 再生中編集の不変条件テスト。
 
 P32〜P34 はプロジェクトメモの規則に従います。領域の上限チェック、`buildScheduleEvents` の前後比較、BLOCK 2 連続で実装者交代です。
 
 **入力・録音**
-- P40: PC 鍵盤演奏とスケールロック(R2。P03, P37)。
-- P41: Web MIDI 入力(R2)。
-- P42: MIDI 録音(**R3**。P21, P40)。
-- P43: ステップ入力と「今の演奏を拾う」(R2)。
+- P40(完了 #70): PC 鍵盤演奏とスケールロック(R2。P03, P37)。
+- P41(完了 #74): Web MIDI 入力(R2)。
+- P42(完了 #79): MIDI 録音(**R3**。P21, P40)。
+- P43(ステップ入力のみ完了 #73。「今の演奏を拾う」は後回し): ステップ入力と「今の演奏を拾う」(R2)。
 
 **書き出し**(R2)
-- P50: 48kHz・24bit・ディザ。16bit・ディザ OFF は現行 main とバイト一致。
-- P51: ラウドネス測定とノーマライズ。
-- P52: ステム ZIP。`native_files.rs` に `file_export_zip`、Rust テスト、`capabilities/main.json`。
-- P53: ループ範囲の書き出し。
-- P54: MIDI のプログラムチェンジと調号。
+- P50(完了 #62): 48kHz・24bit・ディザ。16bit・ディザ OFF は現行 main とバイト一致。
+- P51(完了 #72): ラウドネス測定とノーマライズ。
+- P52(完了 #76): ステム ZIP。`native_files.rs` に `file_export_zip`、Rust テスト、`capabilities/main.json`。
+- P53(完了 #69): ループ範囲の書き出し。
+- P54(完了 #64): MIDI のプログラムチェンジと調号。
 
 **学習・仕上げ**
-- P60: AppEvent 拡張と DAW 操作コース(R2)。
-- P61: E2E 3 本(R2)。
-- P62: 文書の最終同期(R1)。
-- P70: wave5 v3 変換器と取り込み UI(**R3**。P20, P22, P23)。
+- P60(完了 #82): AppEvent 拡張と DAW 操作コース(R2)。
+- P61(完了 #83): E2E 3 本(R2)。
+- P62(本 PR): 文書の最終同期(R1)。
+- P70(完了 #84): wave5 v3 変換器と取り込み UI(**R3**。P20, P22, P23)。
 
 **R3 の受け入れ基準**(テスト名の粒度)
 
@@ -285,3 +287,29 @@ P70 読み込みとネイティブ検証
 3. スウィング: 曲の値が既定で、ドラムクリップの値が 0 より大きいときはそちらを優先する。チョークは新規の曲で ON、既存の曲は OFF。
 4. セクション操作(US-013): 今回の列から外し、別の計画にする。
 5. Web MIDI: 推奨案(Windows / Linux のみ、未対応環境では項目を隠す)で進める。番号のない Wave 3a〜5a の機能(コーチ、スタート画面、診断ログ、書き出し履歴)は、移植の終盤に別途棚卸しする。
+
+## 7. 実施結果(2026-11-28)
+
+### 計画からの差分
+- **P34 は夜の作業で順番から漏れ、最後に #85 として追加**: Codex レビュー 2 回(1 回目 8 件、2 回目 3 件)を 1 件ずつ直しました。ループ+スイングのクリップでは、レガート・連結を断る範囲に絞っています。
+- **P43 の「今の演奏を拾う」は後回し**: ステップ入力だけ #73 で入れました。入口の `stepInputPlay(pitch)` は用意済みです。入力はツールバーではなく「ゆらぎ…」ポップオーバーから始めます。
+- **P60 のコースにステップ入力・MIDI 録音は無い**: #82 の時点で main に無かったため入れていません。PC 鍵盤とプレビューは状態が変わらず判定できないため外しました(理由は docs/03)。
+- **P41 の未対応環境**: 計画は「項目を隠す」でしたが、実装は「この環境では MIDI キーボードを使えません(Windows・Linux 版で使えます)」と表示します(#74)。
+- **P70 は読み込み経路に載せ替え**: 正解の基準を「wave5 の読み込み経路で鳴らした実イベント」に変えました。受け入れ基準に報告コード `drum-hits-merged` と `clip-type-changed` を追加しています(#84)。
+- **P70 の Rust 側**: `serde_json` に `float_roundtrip` を有効にしました。既存の main の曲 554 ファイルで受理・拒否は変わりません(#84)。
+- **サイズ上限の引き上げ(#75)**: JS raw 1600→1800 KiB、JS gzip 460→530 KiB、CSS raw 112→125 KiB。移植完了時に gzip が 500 KiB を超えていたらコード分割で見直す方針です。
+- **P20 / P23 のテスト名変更**: §3 の受け入れ基準に記録済みです。
+- **計画外の後続 PR**: #45 cargo-audit の脆弱性 3 件の解消、#78 スウィング時の `occurrenceKeys` 不具合(P33)、#80 ポータブル読み込み直後の書き出しで起きる e2e の競合、#81 スライダー 1 ドラッグを Undo 1 段にまとめる(P22 の後続)。
+
+### 残課題
+PR 本文の「判断をお願いしたい点」から集めました。いずれもユーザー判断待ちです。
+- [#67](https://github.com/machaniconico/compose-tutor-studio/pull/67)(P31): 曲を短くしたとき、範囲外のコードとセクションを自動で取り除く仕様でよいか。
+- [#75](https://github.com/machaniconico/compose-tutor-studio/pull/75): web のサイズ上限の引き上げ(方針変更)を認めるか。元に戻すか別の上限にするか。
+- [#78](https://github.com/machaniconico/compose-tutor-studio/pull/78)(P33): スウィング 50 で、隣り合う音を同じ高さへ移すと、スウィングで 60 tick 重なり断られる。再生・書き出し共通の規則(スウィング起因の重なりは前の音を止める等)を変えるか。
+- [#79](https://github.com/machaniconico/compose-tutor-studio/pull/79)(P42): 録音中に再生を押すと音が後ろにずれる。A 録音中は再生不可、B 伴奏を聞きながら録音、のどちらか。
+- [#79](https://github.com/machaniconico/compose-tutor-studio/pull/79)(P42): 「クリップの末尾まで繰り返す」オンのクリップへ重ね録りすると繰り返し周期が変わる(鉛筆ツールも同じで main からの挙動)。
+- [#84](https://github.com/machaniconico/compose-tutor-studio/pull/84)(P70): wave5 で鳴らなかったコードトラックが変換後は鳴る。
+- [#84](https://github.com/machaniconico/compose-tutor-studio/pull/84)(P70): 長さ 0 tick のノートは削除して報告している。wave5 のように 1 tick で残すか。
+- [#84](https://github.com/machaniconico/compose-tutor-studio/pull/84)(P70): audio 型クリップ内のノートは削除して報告している(手編集のファイルのみ)。
+- [#84](https://github.com/machaniconico/compose-tutor-studio/pull/84)(P70): プロジェクトメニュー等から開いた wave5 ファイルは「まだ開けません」と出る。読み込みメニューの変換へ案内するか。
+- [#84](https://github.com/machaniconico/compose-tutor-studio/pull/84)(P70): JS gzip が 498.8 KiB で、#75 の見直し目安 500 KiB に近い。コード分割をするか。
