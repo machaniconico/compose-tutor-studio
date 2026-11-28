@@ -1,9 +1,11 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import {
   DeferredFeature,
   type DeferredFeatureLoader,
 } from '../common/DeferredFeature';
 import { Dialog } from '../common/Dialog';
+import type { ExportMenuContentProps } from './ExportMenuContent';
+import type { Wave5ConversionOffer } from './wave5Import';
 
 export type ExportOperation =
   | 'midi-export'
@@ -15,13 +17,6 @@ export type ExportOperation =
   | 'portable-project-export'
   | 'portable-project-import';
 
-type ExportMenuContentProps = {
-  onDone: () => void;
-  activeOperation: ExportOperation | null;
-  beginOperation: (operation: ExportOperation) => boolean;
-  finishOperation: (operation: ExportOperation) => void;
-};
-
 const loadExportMenuContent: DeferredFeatureLoader<ExportMenuContentProps> = () =>
   import('./ExportMenuContent').then((module) => ({
     default: module.ExportMenuContent,
@@ -30,6 +25,7 @@ const loadExportMenuContent: DeferredFeatureLoader<ExportMenuContentProps> = () 
 /** Lightweight trigger; file encoders and native file UI load on demand. */
 export function ExportMenu() {
   const [open, setOpen] = useState(false);
+  const [conversionOffer, setConversionOffer] = useState<Wave5ConversionOffer | null>(null);
   const operationRef = useRef<ExportOperation | null>(null);
   const [activeOperation, setActiveOperation] = useState<ExportOperation | null>(null);
 
@@ -57,6 +53,16 @@ export function ExportMenu() {
     void loadExportMenuContent().catch(() => undefined);
   };
 
+  const renderMenu = (content: ReactNode) => (
+    <Dialog
+      title="書き出し / 読み込み"
+      onClose={closeMenu}
+      closeDisabled={activeOperation !== null}
+    >
+      {content}
+    </Dialog>
+  );
+
   return (
     <>
       <button
@@ -69,23 +75,21 @@ export function ExportMenu() {
       </button>
 
       {open ? (
-        <Dialog
-          title="書き出し / 読み込み"
-          onClose={closeMenu}
-          closeDisabled={activeOperation !== null}
-        >
-          <DeferredFeature
-            load={loadExportMenuContent}
-            componentProps={{
-              onDone: () => setOpen(false),
-              activeOperation,
-              beginOperation,
-              finishOperation,
-            }}
-            loadingLabel="書き出しメニューを読み込んでいます…"
-            errorLabel="書き出しメニューを読み込めませんでした。アプリを再読み込んでください。"
-          />
-        </Dialog>
+        <DeferredFeature
+          load={loadExportMenuContent}
+          componentProps={{
+            onDone: () => setOpen(false),
+            activeOperation,
+            beginOperation,
+            finishOperation,
+            renderMenu,
+            conversionOffer,
+            setConversionOffer,
+          }}
+          wrapFallback={renderMenu}
+          loadingLabel="書き出しメニューを読み込んでいます…"
+          errorLabel="書き出しメニューを読み込めませんでした。アプリを再読み込みしてください。"
+        />
       ) : null}
     </>
   );

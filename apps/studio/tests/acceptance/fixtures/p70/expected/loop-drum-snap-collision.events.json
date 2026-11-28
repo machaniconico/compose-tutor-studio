@@ -1,0 +1,71 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 7,
+  "problems": [],
+  "events": [
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 100,
+      "startTick": 0,
+      "startBeat": 0
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 120,
+      "startTick": 240,
+      "startBeat": 0.5
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 100,
+      "startTick": 288,
+      "startBeat": 0.6
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 120,
+      "startTick": 528,
+      "startBeat": 1.1
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 100,
+      "startTick": 576,
+      "startBeat": 1.2
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 120,
+      "startTick": 816,
+      "startBeat": 1.7
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 100,
+      "startTick": 864,
+      "startBeat": 1.7999999999999998
+    }
+  ]
+}

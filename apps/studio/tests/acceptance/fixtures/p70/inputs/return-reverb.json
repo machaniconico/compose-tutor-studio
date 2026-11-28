@@ -1,0 +1,170 @@
+{
+  "id": "project-1181",
+  "schemaVersion": 3,
+  "title": "Untitled",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "track-1172",
+      "name": "Chords",
+      "type": "instrument",
+      "role": "chords",
+      "color": "#7c9cf0",
+      "clips": [
+        {
+          "id": "clip-1177",
+          "trackId": "track-1172",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": []
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "pad"
+      },
+      "effects": []
+    },
+    {
+      "id": "track-1173",
+      "name": "Bass",
+      "type": "instrument",
+      "role": "bass",
+      "color": "#f0a07c",
+      "clips": [
+        {
+          "id": "clip-1178",
+          "trackId": "track-1173",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": []
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "bass"
+      },
+      "effects": []
+    },
+    {
+      "id": "track-1174",
+      "name": "Melody",
+      "type": "instrument",
+      "role": "melody",
+      "color": "#7cf0a0",
+      "clips": [
+        {
+          "id": "clip-1179",
+          "trackId": "track-1174",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": [
+            {
+              "pitch": 64,
+              "startBeat": 0,
+              "durationBeats": 1,
+              "velocity": 100,
+              "id": "note-1182"
+            }
+          ]
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "lead"
+      },
+      "effects": [],
+      "sends": {
+        "track-track-edit-1": 0.5
+      }
+    },
+    {
+      "id": "track-1175",
+      "name": "Drums",
+      "type": "drum",
+      "role": "drums",
+      "color": "#f07c9c",
+      "clips": [
+        {
+          "id": "clip-1180",
+          "trackId": "track-1175",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "stepsPerBar": 16,
+          "drumEvents": []
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "acoustic"
+      },
+      "effects": []
+    },
+    {
+      "id": "track-track-edit-1",
+      "name": "共有リバーブ",
+      "type": "bus",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": [
+        {
+          "id": "fx-track-edit-2",
+          "type": "reverb",
+          "enabled": true,
+          "params": {
+            "mix": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "track-1176",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

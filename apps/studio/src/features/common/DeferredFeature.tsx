@@ -23,9 +23,11 @@ type DeferredFeatureProps<Props extends object> = {
   loadingLabel: string;
   errorLabel: string;
   reloadLabel?: string;
+  wrapFallback?: (content: ReactNode) => ReactNode;
 };
 
 type BoundaryProps = {
+  wrapFallback: (content: ReactNode) => ReactNode;
   children: ReactNode;
   errorLabel: string;
   reloadLabel: string;
@@ -49,7 +51,7 @@ class DeferredFeatureErrorBoundary extends Component<BoundaryProps, BoundaryStat
 
   override render(): ReactNode {
     if (!this.state.failed) return this.props.children;
-    return (
+    return this.props.wrapFallback(
       <div className="deferred-feature-status" role="alert">
         <p>{this.props.errorLabel}</p>
         <button type="button" onClick={this.props.onReload}>
@@ -72,21 +74,23 @@ export function DeferredFeature<Props extends object>({
   loadingLabel,
   errorLabel,
   reloadLabel = 'アプリを再読み込み',
+  wrapFallback = (content) => content,
 }: DeferredFeatureProps<Props>) {
   const LazyComponent = useMemo(() => lazy(load), [load]);
 
   return (
     <DeferredFeatureErrorBoundary
+      wrapFallback={wrapFallback}
       errorLabel={errorLabel}
       reloadLabel={reloadLabel}
       onReload={() => window.location.reload()}
     >
       <Suspense
-        fallback={
+        fallback={wrapFallback(
           <div className="deferred-feature-status" role="status" aria-live="polite">
             <p>{loadingLabel}</p>
           </div>
-        }
+        )}
       >
         <LazyComponent {...componentProps} />
       </Suspense>

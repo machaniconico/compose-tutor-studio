@@ -529,6 +529,8 @@ native export commandはTauri `Request`のborrowed raw bodyをsize・header・ma
 
 renderer importはbundle全体を検証してからdistinct payloadをcontent-addressed repositoryへstoreし、全receiptのchecksum / byte length一致後だけfresh Project IDへcloneして1回のProject adoptionを行う。検証・store・receipt・adoptionの失敗またはcancelでは現在Project、history、revisionを変えない。repositoryにrollback/delete APIはないため、full validation後の後続store / adoption失敗ではimmutableな未参照objectが残り得る。nativeはgeneration-aware GCを持つが、Web generation-aware orphan GCは既知制約である。
 
+プロジェクト JSON の open では、Rust が wave5 v3 を判別した場合に `[0x02][filenameLengthLE u32][UTF-8 basename][元のファイル bytes]` を返す。通常の open は tag 1、キャンセルは tag 0 を使う。renderer が UTF-8 と形式を再確認し、同じ変換ダイアログを Web とデスクトップで使う。確認後は共通の `cloneProjectForImport` と `replaceProject` を通す。変換器は `project-model` 内の純粋関数で、wave5 の読み込み正規化（d85f796）と現行の codec・再生予算を使用する。
+
 ### 7.3 互換性
 
 - `schema_version` を持つ

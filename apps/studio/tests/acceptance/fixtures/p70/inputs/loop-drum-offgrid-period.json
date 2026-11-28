@@ -1,0 +1,70 @@
+{
+  "id": "p-loop-drum-snap",
+  "schemaVersion": 3,
+  "title": "p-loop-drum-snap",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 1,
+  "tracks": [
+    {
+      "id": "t-d",
+      "name": "Drums",
+      "type": "drum",
+      "clips": [
+        {
+          "id": "c-d",
+          "trackId": "t-d",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 2,
+          "loop": true,
+          "stepsPerBar": 16,
+          "drumEvents": [
+            {
+              "id": "d1",
+              "lane": "kick",
+              "stepIndex": 0,
+              "velocity": 100
+            },
+            {
+              "id": "d2",
+              "lane": "snare",
+              "stepIndex": 1,
+              "velocity": 100
+            }
+          ],
+          "contentLengthBeats": 0.6
+        }
+      ],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "acoustic"
+      },
+      "effects": []
+    },
+    {
+      "id": "master",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

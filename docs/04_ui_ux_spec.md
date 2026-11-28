@@ -221,6 +221,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 ### 2.7 Project / Portable Project / MIDI交換
 
 - Project menuでは、metadata-onlyの操作を`編集情報のみ (.ctsproj.json)`、音声素材を含む操作を`音声素材を含む持ち運び用 (.ctsbundle)`として別section・別button・別file acceptへ分ける。`.ctsproj.json`は「曲の編集情報をexactに交換するが音声fileは含まない」、`.ctsbundle`は「利用中の音声素材を含む別端末用コピー」と操作前に説明する
+- 開発版 wave5 v3 の曲ファイルを選ぶと、変換するか確認する。「変換する」の後で、変わる項目と消える項目の件数と詳細を表示する。詳細にはトラック名と、必要に応じて小節・拍を示す。「元のファイルは変わりません。コピーとして開きます。」と案内し、「この内容で開く」で確定する。「やめる」で読み込みを取り消せる。変換に失敗した場合は理由を表示する。
 - `.ctsbundle` export/import中はProject dialog全体を`aria-busy`にし、384 MiB予約の取得からWeb downloadまたはnative saved/cancelled/error settlementまで他の重い音声処理とProject操作を競合させない。cancelは成功toastを出さず、import前の曲・選択・履歴を保つ
 - Project menuでは、MIDIを「他アプリとの音符中心の交換形式」と説明する。MIDIへclip / loop / alias / preset / effects / mute / solo / groove / section / chord semanticsの完全復元を示唆しない
 - Exportダイアログの「音源として書き出す」にWAV形式の1行(サンプルレート 44.1 / 48 kHz、ビット数 16 / 24 bit、ディザ checkbox)を置く。既定は44.1 kHz・16 bit・ディザOFFで、以前と同じファイルが出る。ディザは16 bitのときだけ選べ、24 bitではdisabledにする。書き出し中は3つとも無効化する。選択はダイアログを開いている間のUI状態でProjectには保存しない

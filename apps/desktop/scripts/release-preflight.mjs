@@ -148,7 +148,7 @@ const productionCargoManifestIdentity = Object.freeze({
     fs4: { version: '=1.1.0', 'default-features': false, features: ['sync'] },
     rusqlite: { version: '=0.41.0', 'default-features': false, features: ['bundled'] },
     serde: { version: '=1.0.228', features: ['derive'] },
-    serde_json: '=1.0.150',
+    serde_json: { version: '=1.0.150', features: ['float_roundtrip'] },
     sha2: '=0.10.9',
     tauri: { version: '2.11.5', features: [] },
     'tauri-plugin-dialog': {

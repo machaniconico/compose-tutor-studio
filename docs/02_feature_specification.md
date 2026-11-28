@@ -542,6 +542,11 @@ Read / Touch / Latch / Writeの選択、Armed / Writing、gestureと再生pass�
 - importはheader、manifest canonicality、Project codec、exact lengths、全SHA-256、payload終端、Projectのready AudioAsset descriptorとの一致を全て検証してからrepository storeを始める。payload viewは入力bundleをborrowするため、decoderだけのためのwhole-bundle copyは作らない。全distinct payloadのstore receiptがchecksum / lengthと一致した後だけfresh Project IDへcloneし、現在Projectを1回のatomic adoptionで置換する
 - repositoryはcontent-addressed objectのdelete/rollback APIを持たない。full validation後の後続storeまたはadoption失敗ではimmutableな未参照objectが残り得るが、欠損objectを参照するProjectや部分採用Projectは作らない。nativeはgeneration-aware GCを持ち、Webのgeneration-aware orphan GCは既知の後続制約として明示する
 
+### 10.4 開発版 wave5 v3 の曲を読み込む（P70）
+
+- Web とデスクトップの「プロジェクト読み込み」で、開発版 wave5 v3 の曲ファイルに変換を案内する。変換後に変更や消える設定を確認し、利用者が「この内容で開く」を押した時だけ新しいプロジェクトとして開く。元のファイルはそのまま残る。
+- 音符やドラムの配置、音量・パン・明るさの変化を引き継ぐ。エフェクトは近い設定に変換し、響きが変わる場合がある。コードが新たに鳴る場合や、音声素材を復元できない場合は変換結果に表示する。現在のアプリで再生上限を超える曲は変換を中止する。
+
 ## 11. MIDI Import
 
 ### 11.1 加算読み込み

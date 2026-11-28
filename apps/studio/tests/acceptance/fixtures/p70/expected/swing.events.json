@@ -1,0 +1,108 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 10,
+  "problems": [],
+  "events": [
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 0,
+      "endTick": 96,
+      "startBeat": 0,
+      "durationBeats": 0.2
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 100,
+      "startTick": 0,
+      "startBeat": 0
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 62,
+      "velocity": 100,
+      "startTick": 162,
+      "endTick": 258,
+      "startBeat": 0.3375,
+      "durationBeats": 0.2
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "snare",
+      "velocity": 100,
+      "startTick": 162,
+      "startBeat": 0.3375
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 64,
+      "velocity": 100,
+      "startTick": 240,
+      "endTick": 336,
+      "startBeat": 0.5,
+      "durationBeats": 0.2
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 65,
+      "velocity": 100,
+      "startTick": 402,
+      "endTick": 498,
+      "startBeat": 0.8375,
+      "durationBeats": 0.2
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "closedHat",
+      "velocity": 100,
+      "startTick": 402,
+      "startBeat": 0.8375
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "closedHat",
+      "velocity": 100,
+      "startTick": 720,
+      "startBeat": 1.5
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 67,
+      "velocity": 100,
+      "startTick": 1120,
+      "endTick": 1216,
+      "startBeat": 2.3333333333333335,
+      "durationBeats": 0.2
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "perc",
+      "velocity": 100,
+      "startTick": 1122,
+      "startBeat": 2.3375
+    }
+  ]
+}

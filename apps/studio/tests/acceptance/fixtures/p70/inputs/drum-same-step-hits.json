@@ -1,0 +1,93 @@
+{
+  "id": "p-drum-merge",
+  "schemaVersion": 3,
+  "title": "p-drum-merge",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "t-d",
+      "name": "Drums",
+      "type": "drum",
+      "clips": [
+        {
+          "id": "c-d",
+          "trackId": "t-d",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 4,
+          "loop": false,
+          "stepsPerBar": 16,
+          "drumEvents": [
+            {
+              "id": "d1",
+              "lane": "kick",
+              "stepIndex": 0,
+              "velocity": 100
+            },
+            {
+              "id": "d2",
+              "lane": "kick",
+              "stepIndex": 0,
+              "velocity": 80
+            },
+            {
+              "id": "d3",
+              "lane": "closedHat",
+              "stepIndex": 2,
+              "velocity": 60
+            },
+            {
+              "id": "d4",
+              "lane": "closedHat",
+              "stepIndex": 2,
+              "velocity": 110
+            },
+            {
+              "id": "d5",
+              "lane": "closedHat",
+              "stepIndex": 2,
+              "velocity": 70
+            },
+            {
+              "id": "d6",
+              "lane": "snare",
+              "stepIndex": 4,
+              "velocity": 90
+            }
+          ]
+        }
+      ],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "acoustic"
+      },
+      "effects": []
+    },
+    {
+      "id": "master",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

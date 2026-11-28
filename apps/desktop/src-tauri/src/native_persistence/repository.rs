@@ -11341,3 +11341,7 @@ mod tests;
 #[cfg(test)]
 #[path = "format_detection_tests.rs"]
 mod format_detection_tests;
+
+#[cfg(test)]
+#[path = "p70_extra_tests.rs"]
+mod p70_extra_tests;

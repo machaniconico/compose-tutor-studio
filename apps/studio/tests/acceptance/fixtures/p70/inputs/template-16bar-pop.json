@@ -1,0 +1,1501 @@
+{
+  "id": "project-134",
+  "schemaVersion": 3,
+  "title": "16小節ポップス",
+  "bpm": 124,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 16,
+  "tracks": [
+    {
+      "id": "track-125",
+      "name": "Chords",
+      "type": "instrument",
+      "role": "chords",
+      "color": "#7c9cf0",
+      "clips": [
+        {
+          "id": "clip-130",
+          "trackId": "track-125",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 64,
+          "loop": false,
+          "notes": []
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "pad"
+      },
+      "effects": []
+    },
+    {
+      "id": "track-126",
+      "name": "Bass",
+      "type": "instrument",
+      "role": "bass",
+      "color": "#f0a07c",
+      "clips": [
+        {
+          "id": "clip-131",
+          "trackId": "track-126",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 64,
+          "loop": false,
+          "notes": []
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "bass"
+      },
+      "effects": []
+    },
+    {
+      "id": "track-127",
+      "name": "Melody",
+      "type": "instrument",
+      "role": "melody",
+      "color": "#7cf0a0",
+      "clips": [
+        {
+          "id": "clip-132",
+          "trackId": "track-127",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 64,
+          "loop": false,
+          "notes": []
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "lead"
+      },
+      "effects": []
+    },
+    {
+      "id": "track-128",
+      "name": "Drums",
+      "type": "drum",
+      "role": "drums",
+      "color": "#f07c9c",
+      "clips": [
+        {
+          "id": "clip-133",
+          "trackId": "track-128",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 64,
+          "loop": false,
+          "stepsPerBar": 16,
+          "drumEvents": [
+            {
+              "id": "drum-151",
+              "lane": "kick",
+              "stepIndex": 0,
+              "velocity": 110
+            },
+            {
+              "id": "drum-152",
+              "lane": "kick",
+              "stepIndex": 8,
+              "velocity": 110
+            },
+            {
+              "id": "drum-153",
+              "lane": "snare",
+              "stepIndex": 4,
+              "velocity": 110
+            },
+            {
+              "id": "drum-154",
+              "lane": "snare",
+              "stepIndex": 12,
+              "velocity": 110
+            },
+            {
+              "id": "drum-155",
+              "lane": "closedHat",
+              "stepIndex": 0,
+              "velocity": 90
+            },
+            {
+              "id": "drum-156",
+              "lane": "closedHat",
+              "stepIndex": 2,
+              "velocity": 90
+            },
+            {
+              "id": "drum-157",
+              "lane": "closedHat",
+              "stepIndex": 4,
+              "velocity": 90
+            },
+            {
+              "id": "drum-158",
+              "lane": "closedHat",
+              "stepIndex": 6,
+              "velocity": 90
+            },
+            {
+              "id": "drum-159",
+              "lane": "closedHat",
+              "stepIndex": 8,
+              "velocity": 90
+            },
+            {
+              "id": "drum-160",
+              "lane": "closedHat",
+              "stepIndex": 10,
+              "velocity": 90
+            },
+            {
+              "id": "drum-161",
+              "lane": "closedHat",
+              "stepIndex": 12,
+              "velocity": 90
+            },
+            {
+              "id": "drum-162",
+              "lane": "closedHat",
+              "stepIndex": 14,
+              "velocity": 90
+            },
+            {
+              "id": "drum-163",
+              "lane": "kick",
+              "stepIndex": 16,
+              "velocity": 110
+            },
+            {
+              "id": "drum-164",
+              "lane": "kick",
+              "stepIndex": 24,
+              "velocity": 110
+            },
+            {
+              "id": "drum-165",
+              "lane": "snare",
+              "stepIndex": 20,
+              "velocity": 110
+            },
+            {
+              "id": "drum-166",
+              "lane": "snare",
+              "stepIndex": 28,
+              "velocity": 110
+            },
+            {
+              "id": "drum-167",
+              "lane": "closedHat",
+              "stepIndex": 16,
+              "velocity": 90
+            },
+            {
+              "id": "drum-168",
+              "lane": "closedHat",
+              "stepIndex": 18,
+              "velocity": 90
+            },
+            {
+              "id": "drum-169",
+              "lane": "closedHat",
+              "stepIndex": 20,
+              "velocity": 90
+            },
+            {
+              "id": "drum-170",
+              "lane": "closedHat",
+              "stepIndex": 22,
+              "velocity": 90
+            },
+            {
+              "id": "drum-171",
+              "lane": "closedHat",
+              "stepIndex": 24,
+              "velocity": 90
+            },
+            {
+              "id": "drum-172",
+              "lane": "closedHat",
+              "stepIndex": 26,
+              "velocity": 90
+            },
+            {
+              "id": "drum-173",
+              "lane": "closedHat",
+              "stepIndex": 28,
+              "velocity": 90
+            },
+            {
+              "id": "drum-174",
+              "lane": "closedHat",
+              "stepIndex": 30,
+              "velocity": 90
+            },
+            {
+              "id": "drum-175",
+              "lane": "kick",
+              "stepIndex": 32,
+              "velocity": 110
+            },
+            {
+              "id": "drum-176",
+              "lane": "kick",
+              "stepIndex": 40,
+              "velocity": 110
+            },
+            {
+              "id": "drum-177",
+              "lane": "snare",
+              "stepIndex": 36,
+              "velocity": 110
+            },
+            {
+              "id": "drum-178",
+              "lane": "snare",
+              "stepIndex": 44,
+              "velocity": 110
+            },
+            {
+              "id": "drum-179",
+              "lane": "closedHat",
+              "stepIndex": 32,
+              "velocity": 90
+            },
+            {
+              "id": "drum-180",
+              "lane": "closedHat",
+              "stepIndex": 34,
+              "velocity": 90
+            },
+            {
+              "id": "drum-181",
+              "lane": "closedHat",
+              "stepIndex": 36,
+              "velocity": 90
+            },
+            {
+              "id": "drum-182",
+              "lane": "closedHat",
+              "stepIndex": 38,
+              "velocity": 90
+            },
+            {
+              "id": "drum-183",
+              "lane": "closedHat",
+              "stepIndex": 40,
+              "velocity": 90
+            },
+            {
+              "id": "drum-184",
+              "lane": "closedHat",
+              "stepIndex": 42,
+              "velocity": 90
+            },
+            {
+              "id": "drum-185",
+              "lane": "closedHat",
+              "stepIndex": 44,
+              "velocity": 90
+            },
+            {
+              "id": "drum-186",
+              "lane": "closedHat",
+              "stepIndex": 46,
+              "velocity": 90
+            },
+            {
+              "id": "drum-187",
+              "lane": "kick",
+              "stepIndex": 48,
+              "velocity": 110
+            },
+            {
+              "id": "drum-188",
+              "lane": "kick",
+              "stepIndex": 56,
+              "velocity": 110
+            },
+            {
+              "id": "drum-189",
+              "lane": "snare",
+              "stepIndex": 52,
+              "velocity": 110
+            },
+            {
+              "id": "drum-190",
+              "lane": "snare",
+              "stepIndex": 60,
+              "velocity": 110
+            },
+            {
+              "id": "drum-191",
+              "lane": "closedHat",
+              "stepIndex": 48,
+              "velocity": 90
+            },
+            {
+              "id": "drum-192",
+              "lane": "closedHat",
+              "stepIndex": 50,
+              "velocity": 90
+            },
+            {
+              "id": "drum-193",
+              "lane": "closedHat",
+              "stepIndex": 52,
+              "velocity": 90
+            },
+            {
+              "id": "drum-194",
+              "lane": "closedHat",
+              "stepIndex": 54,
+              "velocity": 90
+            },
+            {
+              "id": "drum-195",
+              "lane": "closedHat",
+              "stepIndex": 56,
+              "velocity": 90
+            },
+            {
+              "id": "drum-196",
+              "lane": "closedHat",
+              "stepIndex": 58,
+              "velocity": 90
+            },
+            {
+              "id": "drum-197",
+              "lane": "closedHat",
+              "stepIndex": 60,
+              "velocity": 90
+            },
+            {
+              "id": "drum-198",
+              "lane": "closedHat",
+              "stepIndex": 62,
+              "velocity": 90
+            },
+            {
+              "id": "drum-199",
+              "lane": "kick",
+              "stepIndex": 64,
+              "velocity": 110
+            },
+            {
+              "id": "drum-200",
+              "lane": "kick",
+              "stepIndex": 72,
+              "velocity": 110
+            },
+            {
+              "id": "drum-201",
+              "lane": "snare",
+              "stepIndex": 68,
+              "velocity": 110
+            },
+            {
+              "id": "drum-202",
+              "lane": "snare",
+              "stepIndex": 76,
+              "velocity": 110
+            },
+            {
+              "id": "drum-203",
+              "lane": "closedHat",
+              "stepIndex": 64,
+              "velocity": 90
+            },
+            {
+              "id": "drum-204",
+              "lane": "closedHat",
+              "stepIndex": 66,
+              "velocity": 90
+            },
+            {
+              "id": "drum-205",
+              "lane": "closedHat",
+              "stepIndex": 68,
+              "velocity": 90
+            },
+            {
+              "id": "drum-206",
+              "lane": "closedHat",
+              "stepIndex": 70,
+              "velocity": 90
+            },
+            {
+              "id": "drum-207",
+              "lane": "closedHat",
+              "stepIndex": 72,
+              "velocity": 90
+            },
+            {
+              "id": "drum-208",
+              "lane": "closedHat",
+              "stepIndex": 74,
+              "velocity": 90
+            },
+            {
+              "id": "drum-209",
+              "lane": "closedHat",
+              "stepIndex": 76,
+              "velocity": 90
+            },
+            {
+              "id": "drum-210",
+              "lane": "closedHat",
+              "stepIndex": 78,
+              "velocity": 90
+            },
+            {
+              "id": "drum-211",
+              "lane": "kick",
+              "stepIndex": 80,
+              "velocity": 110
+            },
+            {
+              "id": "drum-212",
+              "lane": "kick",
+              "stepIndex": 88,
+              "velocity": 110
+            },
+            {
+              "id": "drum-213",
+              "lane": "snare",
+              "stepIndex": 84,
+              "velocity": 110
+            },
+            {
+              "id": "drum-214",
+              "lane": "snare",
+              "stepIndex": 92,
+              "velocity": 110
+            },
+            {
+              "id": "drum-215",
+              "lane": "closedHat",
+              "stepIndex": 80,
+              "velocity": 90
+            },
+            {
+              "id": "drum-216",
+              "lane": "closedHat",
+              "stepIndex": 82,
+              "velocity": 90
+            },
+            {
+              "id": "drum-217",
+              "lane": "closedHat",
+              "stepIndex": 84,
+              "velocity": 90
+            },
+            {
+              "id": "drum-218",
+              "lane": "closedHat",
+              "stepIndex": 86,
+              "velocity": 90
+            },
+            {
+              "id": "drum-219",
+              "lane": "closedHat",
+              "stepIndex": 88,
+              "velocity": 90
+            },
+            {
+              "id": "drum-220",
+              "lane": "closedHat",
+              "stepIndex": 90,
+              "velocity": 90
+            },
+            {
+              "id": "drum-221",
+              "lane": "closedHat",
+              "stepIndex": 92,
+              "velocity": 90
+            },
+            {
+              "id": "drum-222",
+              "lane": "closedHat",
+              "stepIndex": 94,
+              "velocity": 90
+            },
+            {
+              "id": "drum-223",
+              "lane": "kick",
+              "stepIndex": 96,
+              "velocity": 110
+            },
+            {
+              "id": "drum-224",
+              "lane": "kick",
+              "stepIndex": 104,
+              "velocity": 110
+            },
+            {
+              "id": "drum-225",
+              "lane": "snare",
+              "stepIndex": 100,
+              "velocity": 110
+            },
+            {
+              "id": "drum-226",
+              "lane": "snare",
+              "stepIndex": 108,
+              "velocity": 110
+            },
+            {
+              "id": "drum-227",
+              "lane": "closedHat",
+              "stepIndex": 96,
+              "velocity": 90
+            },
+            {
+              "id": "drum-228",
+              "lane": "closedHat",
+              "stepIndex": 98,
+              "velocity": 90
+            },
+            {
+              "id": "drum-229",
+              "lane": "closedHat",
+              "stepIndex": 100,
+              "velocity": 90
+            },
+            {
+              "id": "drum-230",
+              "lane": "closedHat",
+              "stepIndex": 102,
+              "velocity": 90
+            },
+            {
+              "id": "drum-231",
+              "lane": "closedHat",
+              "stepIndex": 104,
+              "velocity": 90
+            },
+            {
+              "id": "drum-232",
+              "lane": "closedHat",
+              "stepIndex": 106,
+              "velocity": 90
+            },
+            {
+              "id": "drum-233",
+              "lane": "closedHat",
+              "stepIndex": 108,
+              "velocity": 90
+            },
+            {
+              "id": "drum-234",
+              "lane": "closedHat",
+              "stepIndex": 110,
+              "velocity": 90
+            },
+            {
+              "id": "drum-235",
+              "lane": "kick",
+              "stepIndex": 112,
+              "velocity": 110
+            },
+            {
+              "id": "drum-236",
+              "lane": "kick",
+              "stepIndex": 120,
+              "velocity": 110
+            },
+            {
+              "id": "drum-237",
+              "lane": "snare",
+              "stepIndex": 116,
+              "velocity": 110
+            },
+            {
+              "id": "drum-238",
+              "lane": "snare",
+              "stepIndex": 124,
+              "velocity": 110
+            },
+            {
+              "id": "drum-239",
+              "lane": "closedHat",
+              "stepIndex": 112,
+              "velocity": 90
+            },
+            {
+              "id": "drum-240",
+              "lane": "closedHat",
+              "stepIndex": 114,
+              "velocity": 90
+            },
+            {
+              "id": "drum-241",
+              "lane": "closedHat",
+              "stepIndex": 116,
+              "velocity": 90
+            },
+            {
+              "id": "drum-242",
+              "lane": "closedHat",
+              "stepIndex": 118,
+              "velocity": 90
+            },
+            {
+              "id": "drum-243",
+              "lane": "closedHat",
+              "stepIndex": 120,
+              "velocity": 90
+            },
+            {
+              "id": "drum-244",
+              "lane": "closedHat",
+              "stepIndex": 122,
+              "velocity": 90
+            },
+            {
+              "id": "drum-245",
+              "lane": "closedHat",
+              "stepIndex": 124,
+              "velocity": 90
+            },
+            {
+              "id": "drum-246",
+              "lane": "closedHat",
+              "stepIndex": 126,
+              "velocity": 90
+            },
+            {
+              "id": "drum-247",
+              "lane": "kick",
+              "stepIndex": 128,
+              "velocity": 110
+            },
+            {
+              "id": "drum-248",
+              "lane": "kick",
+              "stepIndex": 136,
+              "velocity": 110
+            },
+            {
+              "id": "drum-249",
+              "lane": "snare",
+              "stepIndex": 132,
+              "velocity": 110
+            },
+            {
+              "id": "drum-250",
+              "lane": "snare",
+              "stepIndex": 140,
+              "velocity": 110
+            },
+            {
+              "id": "drum-251",
+              "lane": "closedHat",
+              "stepIndex": 128,
+              "velocity": 90
+            },
+            {
+              "id": "drum-252",
+              "lane": "closedHat",
+              "stepIndex": 130,
+              "velocity": 90
+            },
+            {
+              "id": "drum-253",
+              "lane": "closedHat",
+              "stepIndex": 132,
+              "velocity": 90
+            },
+            {
+              "id": "drum-254",
+              "lane": "closedHat",
+              "stepIndex": 134,
+              "velocity": 90
+            },
+            {
+              "id": "drum-255",
+              "lane": "closedHat",
+              "stepIndex": 136,
+              "velocity": 90
+            },
+            {
+              "id": "drum-256",
+              "lane": "closedHat",
+              "stepIndex": 138,
+              "velocity": 90
+            },
+            {
+              "id": "drum-257",
+              "lane": "closedHat",
+              "stepIndex": 140,
+              "velocity": 90
+            },
+            {
+              "id": "drum-258",
+              "lane": "closedHat",
+              "stepIndex": 142,
+              "velocity": 90
+            },
+            {
+              "id": "drum-259",
+              "lane": "kick",
+              "stepIndex": 144,
+              "velocity": 110
+            },
+            {
+              "id": "drum-260",
+              "lane": "kick",
+              "stepIndex": 152,
+              "velocity": 110
+            },
+            {
+              "id": "drum-261",
+              "lane": "snare",
+              "stepIndex": 148,
+              "velocity": 110
+            },
+            {
+              "id": "drum-262",
+              "lane": "snare",
+              "stepIndex": 156,
+              "velocity": 110
+            },
+            {
+              "id": "drum-263",
+              "lane": "closedHat",
+              "stepIndex": 144,
+              "velocity": 90
+            },
+            {
+              "id": "drum-264",
+              "lane": "closedHat",
+              "stepIndex": 146,
+              "velocity": 90
+            },
+            {
+              "id": "drum-265",
+              "lane": "closedHat",
+              "stepIndex": 148,
+              "velocity": 90
+            },
+            {
+              "id": "drum-266",
+              "lane": "closedHat",
+              "stepIndex": 150,
+              "velocity": 90
+            },
+            {
+              "id": "drum-267",
+              "lane": "closedHat",
+              "stepIndex": 152,
+              "velocity": 90
+            },
+            {
+              "id": "drum-268",
+              "lane": "closedHat",
+              "stepIndex": 154,
+              "velocity": 90
+            },
+            {
+              "id": "drum-269",
+              "lane": "closedHat",
+              "stepIndex": 156,
+              "velocity": 90
+            },
+            {
+              "id": "drum-270",
+              "lane": "closedHat",
+              "stepIndex": 158,
+              "velocity": 90
+            },
+            {
+              "id": "drum-271",
+              "lane": "kick",
+              "stepIndex": 160,
+              "velocity": 110
+            },
+            {
+              "id": "drum-272",
+              "lane": "kick",
+              "stepIndex": 168,
+              "velocity": 110
+            },
+            {
+              "id": "drum-273",
+              "lane": "snare",
+              "stepIndex": 164,
+              "velocity": 110
+            },
+            {
+              "id": "drum-274",
+              "lane": "snare",
+              "stepIndex": 172,
+              "velocity": 110
+            },
+            {
+              "id": "drum-275",
+              "lane": "closedHat",
+              "stepIndex": 160,
+              "velocity": 90
+            },
+            {
+              "id": "drum-276",
+              "lane": "closedHat",
+              "stepIndex": 162,
+              "velocity": 90
+            },
+            {
+              "id": "drum-277",
+              "lane": "closedHat",
+              "stepIndex": 164,
+              "velocity": 90
+            },
+            {
+              "id": "drum-278",
+              "lane": "closedHat",
+              "stepIndex": 166,
+              "velocity": 90
+            },
+            {
+              "id": "drum-279",
+              "lane": "closedHat",
+              "stepIndex": 168,
+              "velocity": 90
+            },
+            {
+              "id": "drum-280",
+              "lane": "closedHat",
+              "stepIndex": 170,
+              "velocity": 90
+            },
+            {
+              "id": "drum-281",
+              "lane": "closedHat",
+              "stepIndex": 172,
+              "velocity": 90
+            },
+            {
+              "id": "drum-282",
+              "lane": "closedHat",
+              "stepIndex": 174,
+              "velocity": 90
+            },
+            {
+              "id": "drum-283",
+              "lane": "kick",
+              "stepIndex": 176,
+              "velocity": 110
+            },
+            {
+              "id": "drum-284",
+              "lane": "kick",
+              "stepIndex": 184,
+              "velocity": 110
+            },
+            {
+              "id": "drum-285",
+              "lane": "snare",
+              "stepIndex": 180,
+              "velocity": 110
+            },
+            {
+              "id": "drum-286",
+              "lane": "snare",
+              "stepIndex": 188,
+              "velocity": 110
+            },
+            {
+              "id": "drum-287",
+              "lane": "closedHat",
+              "stepIndex": 176,
+              "velocity": 90
+            },
+            {
+              "id": "drum-288",
+              "lane": "closedHat",
+              "stepIndex": 178,
+              "velocity": 90
+            },
+            {
+              "id": "drum-289",
+              "lane": "closedHat",
+              "stepIndex": 180,
+              "velocity": 90
+            },
+            {
+              "id": "drum-290",
+              "lane": "closedHat",
+              "stepIndex": 182,
+              "velocity": 90
+            },
+            {
+              "id": "drum-291",
+              "lane": "closedHat",
+              "stepIndex": 184,
+              "velocity": 90
+            },
+            {
+              "id": "drum-292",
+              "lane": "closedHat",
+              "stepIndex": 186,
+              "velocity": 90
+            },
+            {
+              "id": "drum-293",
+              "lane": "closedHat",
+              "stepIndex": 188,
+              "velocity": 90
+            },
+            {
+              "id": "drum-294",
+              "lane": "closedHat",
+              "stepIndex": 190,
+              "velocity": 90
+            },
+            {
+              "id": "drum-295",
+              "lane": "kick",
+              "stepIndex": 192,
+              "velocity": 110
+            },
+            {
+              "id": "drum-296",
+              "lane": "kick",
+              "stepIndex": 200,
+              "velocity": 110
+            },
+            {
+              "id": "drum-297",
+              "lane": "snare",
+              "stepIndex": 196,
+              "velocity": 110
+            },
+            {
+              "id": "drum-298",
+              "lane": "snare",
+              "stepIndex": 204,
+              "velocity": 110
+            },
+            {
+              "id": "drum-299",
+              "lane": "closedHat",
+              "stepIndex": 192,
+              "velocity": 90
+            },
+            {
+              "id": "drum-300",
+              "lane": "closedHat",
+              "stepIndex": 194,
+              "velocity": 90
+            },
+            {
+              "id": "drum-301",
+              "lane": "closedHat",
+              "stepIndex": 196,
+              "velocity": 90
+            },
+            {
+              "id": "drum-302",
+              "lane": "closedHat",
+              "stepIndex": 198,
+              "velocity": 90
+            },
+            {
+              "id": "drum-303",
+              "lane": "closedHat",
+              "stepIndex": 200,
+              "velocity": 90
+            },
+            {
+              "id": "drum-304",
+              "lane": "closedHat",
+              "stepIndex": 202,
+              "velocity": 90
+            },
+            {
+              "id": "drum-305",
+              "lane": "closedHat",
+              "stepIndex": 204,
+              "velocity": 90
+            },
+            {
+              "id": "drum-306",
+              "lane": "closedHat",
+              "stepIndex": 206,
+              "velocity": 90
+            },
+            {
+              "id": "drum-307",
+              "lane": "kick",
+              "stepIndex": 208,
+              "velocity": 110
+            },
+            {
+              "id": "drum-308",
+              "lane": "kick",
+              "stepIndex": 216,
+              "velocity": 110
+            },
+            {
+              "id": "drum-309",
+              "lane": "snare",
+              "stepIndex": 212,
+              "velocity": 110
+            },
+            {
+              "id": "drum-310",
+              "lane": "snare",
+              "stepIndex": 220,
+              "velocity": 110
+            },
+            {
+              "id": "drum-311",
+              "lane": "closedHat",
+              "stepIndex": 208,
+              "velocity": 90
+            },
+            {
+              "id": "drum-312",
+              "lane": "closedHat",
+              "stepIndex": 210,
+              "velocity": 90
+            },
+            {
+              "id": "drum-313",
+              "lane": "closedHat",
+              "stepIndex": 212,
+              "velocity": 90
+            },
+            {
+              "id": "drum-314",
+              "lane": "closedHat",
+              "stepIndex": 214,
+              "velocity": 90
+            },
+            {
+              "id": "drum-315",
+              "lane": "closedHat",
+              "stepIndex": 216,
+              "velocity": 90
+            },
+            {
+              "id": "drum-316",
+              "lane": "closedHat",
+              "stepIndex": 218,
+              "velocity": 90
+            },
+            {
+              "id": "drum-317",
+              "lane": "closedHat",
+              "stepIndex": 220,
+              "velocity": 90
+            },
+            {
+              "id": "drum-318",
+              "lane": "closedHat",
+              "stepIndex": 222,
+              "velocity": 90
+            },
+            {
+              "id": "drum-319",
+              "lane": "kick",
+              "stepIndex": 224,
+              "velocity": 110
+            },
+            {
+              "id": "drum-320",
+              "lane": "kick",
+              "stepIndex": 232,
+              "velocity": 110
+            },
+            {
+              "id": "drum-321",
+              "lane": "snare",
+              "stepIndex": 228,
+              "velocity": 110
+            },
+            {
+              "id": "drum-322",
+              "lane": "snare",
+              "stepIndex": 236,
+              "velocity": 110
+            },
+            {
+              "id": "drum-323",
+              "lane": "closedHat",
+              "stepIndex": 224,
+              "velocity": 90
+            },
+            {
+              "id": "drum-324",
+              "lane": "closedHat",
+              "stepIndex": 226,
+              "velocity": 90
+            },
+            {
+              "id": "drum-325",
+              "lane": "closedHat",
+              "stepIndex": 228,
+              "velocity": 90
+            },
+            {
+              "id": "drum-326",
+              "lane": "closedHat",
+              "stepIndex": 230,
+              "velocity": 90
+            },
+            {
+              "id": "drum-327",
+              "lane": "closedHat",
+              "stepIndex": 232,
+              "velocity": 90
+            },
+            {
+              "id": "drum-328",
+              "lane": "closedHat",
+              "stepIndex": 234,
+              "velocity": 90
+            },
+            {
+              "id": "drum-329",
+              "lane": "closedHat",
+              "stepIndex": 236,
+              "velocity": 90
+            },
+            {
+              "id": "drum-330",
+              "lane": "closedHat",
+              "stepIndex": 238,
+              "velocity": 90
+            },
+            {
+              "id": "drum-331",
+              "lane": "kick",
+              "stepIndex": 240,
+              "velocity": 110
+            },
+            {
+              "id": "drum-332",
+              "lane": "kick",
+              "stepIndex": 248,
+              "velocity": 110
+            },
+            {
+              "id": "drum-333",
+              "lane": "snare",
+              "stepIndex": 244,
+              "velocity": 110
+            },
+            {
+              "id": "drum-334",
+              "lane": "snare",
+              "stepIndex": 252,
+              "velocity": 110
+            },
+            {
+              "id": "drum-335",
+              "lane": "closedHat",
+              "stepIndex": 240,
+              "velocity": 90
+            },
+            {
+              "id": "drum-336",
+              "lane": "closedHat",
+              "stepIndex": 242,
+              "velocity": 90
+            },
+            {
+              "id": "drum-337",
+              "lane": "closedHat",
+              "stepIndex": 244,
+              "velocity": 90
+            },
+            {
+              "id": "drum-338",
+              "lane": "closedHat",
+              "stepIndex": 246,
+              "velocity": 90
+            },
+            {
+              "id": "drum-339",
+              "lane": "closedHat",
+              "stepIndex": 248,
+              "velocity": 90
+            },
+            {
+              "id": "drum-340",
+              "lane": "closedHat",
+              "stepIndex": 250,
+              "velocity": 90
+            },
+            {
+              "id": "drum-341",
+              "lane": "closedHat",
+              "stepIndex": 252,
+              "velocity": 90
+            },
+            {
+              "id": "drum-342",
+              "lane": "closedHat",
+              "stepIndex": 254,
+              "velocity": 90
+            }
+          ]
+        }
+      ],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "acoustic"
+      },
+      "effects": []
+    },
+    {
+      "id": "track-129",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [
+    {
+      "id": "chord-135",
+      "startBeat": 0,
+      "durationBeats": 4,
+      "symbol": "C",
+      "root": "C",
+      "quality": "major",
+      "notes": [
+        0,
+        4,
+        7
+      ]
+    },
+    {
+      "id": "chord-136",
+      "startBeat": 4,
+      "durationBeats": 4,
+      "symbol": "G",
+      "root": "G",
+      "quality": "major",
+      "notes": [
+        7,
+        11,
+        2
+      ]
+    },
+    {
+      "id": "chord-137",
+      "startBeat": 8,
+      "durationBeats": 4,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "minor",
+      "notes": [
+        9,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "chord-138",
+      "startBeat": 12,
+      "durationBeats": 4,
+      "symbol": "F",
+      "root": "F",
+      "quality": "major",
+      "notes": [
+        5,
+        9,
+        0
+      ]
+    },
+    {
+      "id": "chord-139",
+      "startBeat": 16,
+      "durationBeats": 4,
+      "symbol": "C",
+      "root": "C",
+      "quality": "major",
+      "notes": [
+        0,
+        4,
+        7
+      ]
+    },
+    {
+      "id": "chord-140",
+      "startBeat": 20,
+      "durationBeats": 4,
+      "symbol": "G",
+      "root": "G",
+      "quality": "major",
+      "notes": [
+        7,
+        11,
+        2
+      ]
+    },
+    {
+      "id": "chord-141",
+      "startBeat": 24,
+      "durationBeats": 4,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "minor",
+      "notes": [
+        9,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "chord-142",
+      "startBeat": 28,
+      "durationBeats": 4,
+      "symbol": "F",
+      "root": "F",
+      "quality": "major",
+      "notes": [
+        5,
+        9,
+        0
+      ]
+    },
+    {
+      "id": "chord-143",
+      "startBeat": 32,
+      "durationBeats": 4,
+      "symbol": "C",
+      "root": "C",
+      "quality": "major",
+      "notes": [
+        0,
+        4,
+        7
+      ]
+    },
+    {
+      "id": "chord-144",
+      "startBeat": 36,
+      "durationBeats": 4,
+      "symbol": "G",
+      "root": "G",
+      "quality": "major",
+      "notes": [
+        7,
+        11,
+        2
+      ]
+    },
+    {
+      "id": "chord-145",
+      "startBeat": 40,
+      "durationBeats": 4,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "minor",
+      "notes": [
+        9,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "chord-146",
+      "startBeat": 44,
+      "durationBeats": 4,
+      "symbol": "F",
+      "root": "F",
+      "quality": "major",
+      "notes": [
+        5,
+        9,
+        0
+      ]
+    },
+    {
+      "id": "chord-147",
+      "startBeat": 48,
+      "durationBeats": 4,
+      "symbol": "C",
+      "root": "C",
+      "quality": "major",
+      "notes": [
+        0,
+        4,
+        7
+      ]
+    },
+    {
+      "id": "chord-148",
+      "startBeat": 52,
+      "durationBeats": 4,
+      "symbol": "G",
+      "root": "G",
+      "quality": "major",
+      "notes": [
+        7,
+        11,
+        2
+      ]
+    },
+    {
+      "id": "chord-149",
+      "startBeat": 56,
+      "durationBeats": 4,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "minor",
+      "notes": [
+        9,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "chord-150",
+      "startBeat": 60,
+      "durationBeats": 4,
+      "symbol": "F",
+      "root": "F",
+      "quality": "major",
+      "notes": [
+        5,
+        9,
+        0
+      ]
+    }
+  ],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

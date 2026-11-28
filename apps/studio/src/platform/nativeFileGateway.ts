@@ -44,7 +44,7 @@ export type NativeFileCommand =
 
 export type NativeOpenFileResult =
   | Readonly<{ status: 'cancelled' }>
-  | Readonly<{ status: 'opened'; fileName: string; bytes: Uint8Array }>;
+  | Readonly<{ status: 'opened'; fileName: string; bytes: Uint8Array; legacyWave5?: true }>;
 
 export type NativeOpenAudioFileResult =
   | Readonly<{ status: 'cancelled' }>
@@ -94,6 +94,7 @@ type FileFormat = 'project' | 'midi' | 'audio' | 'wav' | 'zip';
 
 const OPEN_CANCELLED_TAG = 0;
 const OPEN_FILE_TAG = 1;
+const OPEN_LEGACY_WAVE5_TAG = 2;
 const OPEN_FILE_HEADER_BYTES = 5;
 const MAX_FILENAME_UTF8_BYTES = 1_024;
 export const NATIVE_AUDIO_OPEN_ENVELOPE_MAX_BYTES =
@@ -454,7 +455,8 @@ export function decodeNativeOpenEnvelope(
   if (tag === OPEN_CANCELLED_TAG && envelope.byteLength === 1) {
     return { status: 'cancelled' };
   }
-  if (tag !== OPEN_FILE_TAG || envelope.byteLength < OPEN_FILE_HEADER_BYTES) {
+  const legacyWave5 = tag === OPEN_LEGACY_WAVE5_TAG && format === 'project';
+  if ((!legacyWave5 && tag !== OPEN_FILE_TAG) || envelope.byteLength < OPEN_FILE_HEADER_BYTES) {
     throw new NativeFileGatewayError('invalid-envelope');
   }
 
@@ -481,6 +483,11 @@ export function decodeNativeOpenEnvelope(
   validateFileName(format, fileName);
 
   const bytes = envelope.subarray(dataOffset);
+  if (legacyWave5) {
+    if (bytes.byteLength > maximumBytes(format)) throw new NativeFileGatewayError('file-too-large');
+    if (bytes.byteLength === 0) throw new NativeFileGatewayError('invalid-file');
+    return { status: 'opened', fileName, bytes, legacyWave5: true };
+  }
   const descriptor = validateFileBytes(format, bytes, fileName);
   if (format === 'audio') {
     if (!descriptor) throw new NativeFileGatewayError('invalid-file');

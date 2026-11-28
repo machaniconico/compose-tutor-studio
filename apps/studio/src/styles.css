@@ -3350,6 +3350,12 @@ button.pr__note:hover {
   gap: var(--sp-5);
 }
 
+.wave5-import-report {
+  max-height: 30vh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
 .export-menu__group { display: flex; flex-direction: column; gap: var(--sp-2); }
 
 .export-menu__row {

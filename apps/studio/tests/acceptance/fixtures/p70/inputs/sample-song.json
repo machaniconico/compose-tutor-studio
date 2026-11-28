@@ -1,0 +1,1293 @@
+{
+  "id": "project_mjuohs00k20fogv",
+  "schemaVersion": 3,
+  "title": "サンプル曲：はじめてのポップス",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "track_mjuohs0019jccv40",
+      "name": "Chords",
+      "type": "instrument",
+      "color": "#5bb0a8",
+      "clips": [
+        {
+          "id": "clip_mjuohs001areaxzo",
+          "trackId": "track_mjuohs0019jccv40",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": [
+            {
+              "id": "note_mjuohs00l8swrez",
+              "pitch": 64,
+              "startBeat": 0,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00mgjqphh",
+              "pitch": 67,
+              "startBeat": 0,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00nqatnaa",
+              "pitch": 72,
+              "startBeat": 0,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00ofm8aw5",
+              "pitch": 62,
+              "startBeat": 4,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00pcos2gn",
+              "pitch": 67,
+              "startBeat": 4,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00qtnn6m8",
+              "pitch": 71,
+              "startBeat": 4,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00rwaw44k",
+              "pitch": 60,
+              "startBeat": 8,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00sb64fk6",
+              "pitch": 64,
+              "startBeat": 8,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00tcwrgg9",
+              "pitch": 69,
+              "startBeat": 8,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00uuu3e15",
+              "pitch": 60,
+              "startBeat": 12,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00v0cv00y",
+              "pitch": 65,
+              "startBeat": 12,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00wi5daxw",
+              "pitch": 69,
+              "startBeat": 12,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00x5i2p2l",
+              "pitch": 64,
+              "startBeat": 16,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00yv7cke9",
+              "pitch": 67,
+              "startBeat": 16,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00z12xkzs",
+              "pitch": 72,
+              "startBeat": 16,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs0010vuugmd",
+              "pitch": 62,
+              "startBeat": 20,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs0011ncby1p",
+              "pitch": 67,
+              "startBeat": 20,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00127sbwcg",
+              "pitch": 71,
+              "startBeat": 20,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs0013bz1s58",
+              "pitch": 60,
+              "startBeat": 24,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs0014469o2m",
+              "pitch": 64,
+              "startBeat": 24,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs0015jcwl3b",
+              "pitch": 69,
+              "startBeat": 24,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs0016d1rbvm",
+              "pitch": 60,
+              "startBeat": 28,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs00173p4rs2",
+              "pitch": 65,
+              "startBeat": 28,
+              "durationBeats": 4,
+              "velocity": 72
+            },
+            {
+              "id": "note_mjuohs0018s4svnw",
+              "pitch": 69,
+              "startBeat": 28,
+              "durationBeats": 4,
+              "velocity": 72
+            }
+          ]
+        }
+      ],
+      "volume": 0.7,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": []
+    },
+    {
+      "id": "track_mjuohs001rjdngyt",
+      "name": "Bass",
+      "type": "instrument",
+      "color": "#c75b86",
+      "clips": [
+        {
+          "id": "clip_mjuohs001sjhui45",
+          "trackId": "track_mjuohs001rjdngyt",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": [
+            {
+              "id": "note_mjuohs001bf0iwpj",
+              "pitch": 36,
+              "startBeat": 0,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001cwvb9xj",
+              "pitch": 36,
+              "startBeat": 2,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001dbp7cno",
+              "pitch": 43,
+              "startBeat": 4,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001e9pzwkm",
+              "pitch": 43,
+              "startBeat": 6,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001fc5vyu8",
+              "pitch": 45,
+              "startBeat": 8,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001g6iid39",
+              "pitch": 45,
+              "startBeat": 10,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001hmf97mp",
+              "pitch": 41,
+              "startBeat": 12,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001iy15yjm",
+              "pitch": 41,
+              "startBeat": 14,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001jlisozp",
+              "pitch": 36,
+              "startBeat": 16,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001k9l84sx",
+              "pitch": 36,
+              "startBeat": 18,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001l4msa8d",
+              "pitch": 43,
+              "startBeat": 20,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001md94i92",
+              "pitch": 43,
+              "startBeat": 22,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001npcanzi",
+              "pitch": 45,
+              "startBeat": 24,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001o6h3a70",
+              "pitch": 45,
+              "startBeat": 26,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001p8yrz64",
+              "pitch": 41,
+              "startBeat": 28,
+              "durationBeats": 2,
+              "velocity": 96
+            },
+            {
+              "id": "note_mjuohs001qw8w83o",
+              "pitch": 41,
+              "startBeat": 30,
+              "durationBeats": 2,
+              "velocity": 96
+            }
+          ]
+        }
+      ],
+      "volume": 0.8,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "subBass"
+      },
+      "effects": []
+    },
+    {
+      "id": "track_mjuohs002h7ar5di",
+      "name": "Melody",
+      "type": "instrument",
+      "color": "#6f9bd8",
+      "clips": [
+        {
+          "id": "clip_mjuohs002i0xczln",
+          "trackId": "track_mjuohs002h7ar5di",
+          "type": "midi",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "notes": [
+            {
+              "id": "note_mjuohs001tu5hz3w",
+              "pitch": 60,
+              "startBeat": 0,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs001uh469gf",
+              "pitch": 64,
+              "startBeat": 1,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs001vs8k6ze",
+              "pitch": 67,
+              "startBeat": 2,
+              "durationBeats": 2,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs001w37jtnr",
+              "pitch": 67,
+              "startBeat": 4,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs001xe2nrdf",
+              "pitch": 62,
+              "startBeat": 5,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs001ywutzrt",
+              "pitch": 59,
+              "startBeat": 6,
+              "durationBeats": 2,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs001zr827tb",
+              "pitch": 57,
+              "startBeat": 8,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0020xfx0xl",
+              "pitch": 60,
+              "startBeat": 9,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0021emdxwj",
+              "pitch": 64,
+              "startBeat": 10,
+              "durationBeats": 2,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0022qf6bzp",
+              "pitch": 65,
+              "startBeat": 12,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0023gjec1r",
+              "pitch": 69,
+              "startBeat": 13,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0024an2429",
+              "pitch": 65,
+              "startBeat": 14,
+              "durationBeats": 2,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0025uoaegj",
+              "pitch": 64,
+              "startBeat": 16,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0026197m6j",
+              "pitch": 67,
+              "startBeat": 17,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0027ym36ew",
+              "pitch": 72,
+              "startBeat": 18,
+              "durationBeats": 2,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0028u3uugr",
+              "pitch": 71,
+              "startBeat": 20,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs0029yhu92f",
+              "pitch": 67,
+              "startBeat": 21,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs002ayd71fe",
+              "pitch": 62,
+              "startBeat": 22,
+              "durationBeats": 2,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs002beefyco",
+              "pitch": 64,
+              "startBeat": 24,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs002coo8cd6",
+              "pitch": 62,
+              "startBeat": 25,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs002drvclqa",
+              "pitch": 60,
+              "startBeat": 26,
+              "durationBeats": 2,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs002enzonyy",
+              "pitch": 65,
+              "startBeat": 28,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs002f7fshul",
+              "pitch": 62,
+              "startBeat": 29,
+              "durationBeats": 1,
+              "velocity": 100
+            },
+            {
+              "id": "note_mjuohs002gudjqk5",
+              "pitch": 60,
+              "startBeat": 30,
+              "durationBeats": 2,
+              "velocity": 100
+            }
+          ]
+        }
+      ],
+      "volume": 0.85,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "leadSine"
+      },
+      "effects": []
+    },
+    {
+      "id": "track_mjuohs002jdhnmim",
+      "name": "Drums",
+      "type": "drum",
+      "color": "#d98a4b",
+      "clips": [
+        {
+          "id": "clip_mjuohs002kmpewfe",
+          "trackId": "track_mjuohs002jdhnmim",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 32,
+          "loop": false,
+          "drumEvents": [
+            {
+              "id": "drum_mjuohs002lgjhk27",
+              "lane": "kick",
+              "stepIndex": 0,
+              "velocity": 110
+            },
+            {
+              "id": "drum_mjuohs002m9kv2ao",
+              "lane": "kick",
+              "stepIndex": 8,
+              "velocity": 105
+            },
+            {
+              "id": "drum_mjuohs002nul4twt",
+              "lane": "snare",
+              "stepIndex": 4,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs002o7z487e",
+              "lane": "snare",
+              "stepIndex": 12,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs002p5uoofi",
+              "lane": "closedHat",
+              "stepIndex": 0,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs002qdsw744",
+              "lane": "closedHat",
+              "stepIndex": 2,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs002rd9q94c",
+              "lane": "closedHat",
+              "stepIndex": 4,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs002sjdyhhs",
+              "lane": "closedHat",
+              "stepIndex": 6,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs002ti6yker",
+              "lane": "closedHat",
+              "stepIndex": 8,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs002u3ku7by",
+              "lane": "closedHat",
+              "stepIndex": 10,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs002vbuvzl6",
+              "lane": "closedHat",
+              "stepIndex": 12,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs002w0cpq14",
+              "lane": "closedHat",
+              "stepIndex": 14,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs002x7r0b5z",
+              "lane": "kick",
+              "stepIndex": 16,
+              "velocity": 110
+            },
+            {
+              "id": "drum_mjuohs002yjm57u2",
+              "lane": "kick",
+              "stepIndex": 24,
+              "velocity": 105
+            },
+            {
+              "id": "drum_mjuohs002zijhp6x",
+              "lane": "snare",
+              "stepIndex": 20,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs0030ymi8p9",
+              "lane": "snare",
+              "stepIndex": 28,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs003192aob3",
+              "lane": "closedHat",
+              "stepIndex": 16,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs00321wq2rh",
+              "lane": "closedHat",
+              "stepIndex": 18,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0033r4jjkn",
+              "lane": "closedHat",
+              "stepIndex": 20,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0034ntamt1",
+              "lane": "closedHat",
+              "stepIndex": 22,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0035g32kca",
+              "lane": "closedHat",
+              "stepIndex": 24,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0036pcm9ea",
+              "lane": "closedHat",
+              "stepIndex": 26,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0037u8bepq",
+              "lane": "closedHat",
+              "stepIndex": 28,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs00389u9vkt",
+              "lane": "closedHat",
+              "stepIndex": 30,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0039jgyada",
+              "lane": "kick",
+              "stepIndex": 32,
+              "velocity": 110
+            },
+            {
+              "id": "drum_mjuohs003aif6ean",
+              "lane": "kick",
+              "stepIndex": 40,
+              "velocity": 105
+            },
+            {
+              "id": "drum_mjuohs003bar7grl",
+              "lane": "snare",
+              "stepIndex": 36,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs003c8wehxz",
+              "lane": "snare",
+              "stepIndex": 44,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs003dbfcn1n",
+              "lane": "closedHat",
+              "stepIndex": 32,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs003ee20bp3",
+              "lane": "closedHat",
+              "stepIndex": 34,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs003ftfj14i",
+              "lane": "closedHat",
+              "stepIndex": 36,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs003gwhbsjj",
+              "lane": "closedHat",
+              "stepIndex": 38,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs003hseyss5",
+              "lane": "closedHat",
+              "stepIndex": 40,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs003iapxq5c",
+              "lane": "closedHat",
+              "stepIndex": 42,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs003jf9iqrj",
+              "lane": "closedHat",
+              "stepIndex": 44,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs003k80y3zq",
+              "lane": "closedHat",
+              "stepIndex": 46,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs003ln1m171",
+              "lane": "kick",
+              "stepIndex": 48,
+              "velocity": 110
+            },
+            {
+              "id": "drum_mjuohs003m6s8beh",
+              "lane": "kick",
+              "stepIndex": 56,
+              "velocity": 105
+            },
+            {
+              "id": "drum_mjuohs003nqot1t7",
+              "lane": "snare",
+              "stepIndex": 52,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs003o4rv7ej",
+              "lane": "snare",
+              "stepIndex": 60,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs003pdfm7tc",
+              "lane": "closedHat",
+              "stepIndex": 48,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs003qo8cljz",
+              "lane": "closedHat",
+              "stepIndex": 50,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs003rw8k0df",
+              "lane": "closedHat",
+              "stepIndex": 52,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs003srczn59",
+              "lane": "closedHat",
+              "stepIndex": 54,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs003tve2619",
+              "lane": "closedHat",
+              "stepIndex": 56,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs003uisg6fv",
+              "lane": "closedHat",
+              "stepIndex": 58,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs003vwjlem6",
+              "lane": "closedHat",
+              "stepIndex": 60,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs003wgqi9v1",
+              "lane": "closedHat",
+              "stepIndex": 62,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs003xbp2sbc",
+              "lane": "kick",
+              "stepIndex": 64,
+              "velocity": 110
+            },
+            {
+              "id": "drum_mjuohs003yeiwn9m",
+              "lane": "kick",
+              "stepIndex": 72,
+              "velocity": 105
+            },
+            {
+              "id": "drum_mjuohs003zmhq63h",
+              "lane": "snare",
+              "stepIndex": 68,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs0040myirqi",
+              "lane": "snare",
+              "stepIndex": 76,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs0041pti0mx",
+              "lane": "closedHat",
+              "stepIndex": 64,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0042hz40id",
+              "lane": "closedHat",
+              "stepIndex": 66,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0043lbi4c2",
+              "lane": "closedHat",
+              "stepIndex": 68,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0044jfk809",
+              "lane": "closedHat",
+              "stepIndex": 70,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0045cd2m7d",
+              "lane": "closedHat",
+              "stepIndex": 72,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0046vvrq1u",
+              "lane": "closedHat",
+              "stepIndex": 74,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0047bhp0n9",
+              "lane": "closedHat",
+              "stepIndex": 76,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0048p58sqh",
+              "lane": "closedHat",
+              "stepIndex": 78,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs00491khqeg",
+              "lane": "kick",
+              "stepIndex": 80,
+              "velocity": 110
+            },
+            {
+              "id": "drum_mjuohs004atkz7kj",
+              "lane": "kick",
+              "stepIndex": 88,
+              "velocity": 105
+            },
+            {
+              "id": "drum_mjuohs004bw5px7t",
+              "lane": "snare",
+              "stepIndex": 84,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs004cmhbgti",
+              "lane": "snare",
+              "stepIndex": 92,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs004d46jazl",
+              "lane": "closedHat",
+              "stepIndex": 80,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs004ec4b16r",
+              "lane": "closedHat",
+              "stepIndex": 82,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs004fy09vfm",
+              "lane": "closedHat",
+              "stepIndex": 84,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs004gv5cs9b",
+              "lane": "closedHat",
+              "stepIndex": 86,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs004h3zi9k5",
+              "lane": "closedHat",
+              "stepIndex": 88,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs004ir55kcl",
+              "lane": "closedHat",
+              "stepIndex": 90,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs004jbbevgn",
+              "lane": "closedHat",
+              "stepIndex": 92,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs004kntbqo7",
+              "lane": "closedHat",
+              "stepIndex": 94,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs004lyc9k8u",
+              "lane": "kick",
+              "stepIndex": 96,
+              "velocity": 110
+            },
+            {
+              "id": "drum_mjuohs004m1nm8z3",
+              "lane": "kick",
+              "stepIndex": 104,
+              "velocity": 105
+            },
+            {
+              "id": "drum_mjuohs004n01c72p",
+              "lane": "snare",
+              "stepIndex": 100,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs004opzbo26",
+              "lane": "snare",
+              "stepIndex": 108,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs004p402znz",
+              "lane": "closedHat",
+              "stepIndex": 96,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs004q5o4eu8",
+              "lane": "closedHat",
+              "stepIndex": 98,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs004r7p4zq6",
+              "lane": "closedHat",
+              "stepIndex": 100,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs004svoo7tq",
+              "lane": "closedHat",
+              "stepIndex": 102,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs004tqkku4u",
+              "lane": "closedHat",
+              "stepIndex": 104,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs004uou2n83",
+              "lane": "closedHat",
+              "stepIndex": 106,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs004vlyq7vz",
+              "lane": "closedHat",
+              "stepIndex": 108,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs004wnkoe19",
+              "lane": "closedHat",
+              "stepIndex": 110,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs004x0uzc3w",
+              "lane": "kick",
+              "stepIndex": 112,
+              "velocity": 110
+            },
+            {
+              "id": "drum_mjuohs004yl3rqss",
+              "lane": "kick",
+              "stepIndex": 120,
+              "velocity": 105
+            },
+            {
+              "id": "drum_mjuohs004z1n8vma",
+              "lane": "snare",
+              "stepIndex": 116,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs0050yx9mxm",
+              "lane": "snare",
+              "stepIndex": 124,
+              "velocity": 108
+            },
+            {
+              "id": "drum_mjuohs00516hyxw6",
+              "lane": "closedHat",
+              "stepIndex": 112,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0052phu7rm",
+              "lane": "closedHat",
+              "stepIndex": 114,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0053ez5kea",
+              "lane": "closedHat",
+              "stepIndex": 116,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0054k5s0pu",
+              "lane": "closedHat",
+              "stepIndex": 118,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0055s3celj",
+              "lane": "closedHat",
+              "stepIndex": 120,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0056g0fc93",
+              "lane": "closedHat",
+              "stepIndex": 122,
+              "velocity": 80
+            },
+            {
+              "id": "drum_mjuohs0057ezac75",
+              "lane": "closedHat",
+              "stepIndex": 124,
+              "velocity": 88
+            },
+            {
+              "id": "drum_mjuohs0058tg4fjg",
+              "lane": "closedHat",
+              "stepIndex": 126,
+              "velocity": 80
+            }
+          ],
+          "stepsPerBar": 16
+        }
+      ],
+      "volume": 0.85,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "basic"
+      },
+      "effects": []
+    },
+    {
+      "id": "track_mjuohs0059e8roc4",
+      "name": "Master",
+      "type": "master",
+      "color": "#7c83ff",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [
+    {
+      "id": "chord_mjuohs005aqsesy1",
+      "startBeat": 0,
+      "durationBeats": 4,
+      "symbol": "C",
+      "root": "C",
+      "quality": "major",
+      "notes": [
+        0,
+        4,
+        7
+      ],
+      "degree": "I",
+      "function": "T"
+    },
+    {
+      "id": "chord_mjuohs005baq3vto",
+      "startBeat": 4,
+      "durationBeats": 4,
+      "symbol": "G",
+      "root": "G",
+      "quality": "major",
+      "notes": [
+        7,
+        11,
+        2
+      ],
+      "degree": "V",
+      "function": "D"
+    },
+    {
+      "id": "chord_mjuohs005c3wlvsa",
+      "startBeat": 8,
+      "durationBeats": 4,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "minor",
+      "notes": [
+        9,
+        0,
+        4
+      ],
+      "degree": "vi",
+      "function": "T"
+    },
+    {
+      "id": "chord_mjuohs005dqqulof",
+      "startBeat": 12,
+      "durationBeats": 4,
+      "symbol": "F",
+      "root": "F",
+      "quality": "major",
+      "notes": [
+        5,
+        9,
+        0
+      ],
+      "degree": "IV",
+      "function": "SD"
+    },
+    {
+      "id": "chord_mjuohs005e7ivvzl",
+      "startBeat": 16,
+      "durationBeats": 4,
+      "symbol": "C",
+      "root": "C",
+      "quality": "major",
+      "notes": [
+        0,
+        4,
+        7
+      ],
+      "degree": "I",
+      "function": "T"
+    },
+    {
+      "id": "chord_mjuohs005fyaf0ha",
+      "startBeat": 20,
+      "durationBeats": 4,
+      "symbol": "G",
+      "root": "G",
+      "quality": "major",
+      "notes": [
+        7,
+        11,
+        2
+      ],
+      "degree": "V",
+      "function": "D"
+    },
+    {
+      "id": "chord_mjuohs005gt0muku",
+      "startBeat": 24,
+      "durationBeats": 4,
+      "symbol": "Am",
+      "root": "A",
+      "quality": "minor",
+      "notes": [
+        9,
+        0,
+        4
+      ],
+      "degree": "vi",
+      "function": "T"
+    },
+    {
+      "id": "chord_mjuohs005hs9sgcu",
+      "startBeat": 28,
+      "durationBeats": 4,
+      "symbol": "F",
+      "root": "F",
+      "quality": "major",
+      "notes": [
+        5,
+        9,
+        0
+      ],
+      "degree": "IV",
+      "function": "SD"
+    }
+  ],
+  "sections": [
+    {
+      "id": "section_mjuohs005i59584c",
+      "name": "メイン",
+      "type": "verse",
+      "startBar": 0,
+      "lengthBars": 8
+    }
+  ],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

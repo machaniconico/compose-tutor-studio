@@ -205,7 +205,7 @@ P42 MIDI 録音:
 - `record_droppedNotes_areCounted_notWholeTakeDiscarded`
 - `record_resultPassesEncodeProjectJson`
 
-P70 変換器(wave5 の d85f796 で `soundingEvents` を実行して作った固定 fixture が正解):
+P70 変換器（wave5 の d85f796 の読み込み経路を通した発音イベントと設定値が基準）
 - `convert_output_passesDecodeCurrentProject_andRustValidate`
 - `convert_isDeterministic_sameInputSameBytes`
 - `convert_eventParity_defaultProjectAndAllWave5Templates_withinOneTick`
@@ -214,19 +214,38 @@ P70 変換器(wave5 の d85f796 で `soundingEvents` を実行して作った固
 - `convert_volumeLane_valueIsFaderTimesLane`
 - `convert_panLane_valueIsPanPlusLaneClamped_withPointsAtSaturation`
 - `convert_cutoffLane_valueIsLog2`
-- `convert_equalBeatPoints_becomeStepWithin1Over960Beat`
+- `convert_equalBeatPoints_keepOnlyLastPoint_curveMatchesWave5`
 - `convert_sends_becomePostFaderAudioSends_busRoutedToMaster`
 - `convert_loopWithoutContentLength_becomesLoopFalse`(main ではループ扱いで繰り返してしまうため)
 - `convert_loopWithContentLength_isUnrolled_eventParity`
 - `convert_linkChain_sameTrackSameType_becomesOneHopAlias`
 - `convert_linkAcrossTracks_isMaterializedCopy`
-- `convert_brokenOrCyclicLink_isSilentClip_andReported`
+- `convert_brokenOrCyclicLink_isDetached_keepsOwnContent_andReported`
 - `convert_swing_copied_drumClipsHaveNoOwnSwing`
 - `convert_macros_moveToInstrumentParams`
 - `convert_loopRange_legacyBarLimit_legacyClipSettings_dropped_andReported`
 - `convert_overLimit_stepsPerBarAbove128_orEventsOverBudget_failsWithReason_noPartialOutput`
 - `convert_audioClips_becomeUnresolvedAssets`(main の v2→v3 と同じ扱い)
 - `convert_doesNotMutateInput`
+- `convert_effects_mapToMainParams_physicalValuesMatch_orderFollowsWave5`
+- `convert_lanes_curveSamplesMatchWave5`
+- `convert_masterAndUnplayableLanes_areDropped`
+- `convert_swingLoop_cutNotesEndAtPassEnd_eventParity`
+- `convert_contentPastClipOrSongEnd_isTrimmed_andReported`
+- `convert_overlappingClips_splitLikeWave5Load_eventParity`
+- `convert_returnReverb_staysWet_sendLevelKept`
+- `convert_realisticSong_eventParity_lanes_decode`
+- `convert_overLimit_density_failsWithReason`
+- `extra_eventsExactlyAtBudget_isAccepted_andOneMoreIsRefused`
+- `convert_mutatedInputs_neverThrow_andOkImpliesDecodable`
+
+P70 読み込みとネイティブ検証
+
+- `ui_wave5File_isOfferedConversion_notRefused`
+- `dialog_afterConvert_showsTheReport_andOpensOnlyOnConfirm`
+- `ui_planFromNativeBytes_neverTrustsTheMarkerAlone`
+- `native_open_of_a_wave5_v3_file_returns_its_bytes_with_the_legacy_marker_and_writes_nothing`
+- `p70_converted_fixtures_pass_native_validation`（CI は TypeScript の変換テストを先に実行し、Rust に `CTS_P70_REQUIRE_CONVERTED=1` を渡す）
 
 ## 4. 重なりの裁定
 

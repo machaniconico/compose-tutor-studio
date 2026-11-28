@@ -1,0 +1,88 @@
+{
+  "id": "p-loop-drum",
+  "schemaVersion": 3,
+  "title": "p-loop-drum",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "t-d",
+      "name": "Drums",
+      "type": "drum",
+      "clips": [
+        {
+          "id": "c-d",
+          "trackId": "t-d",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 8,
+          "loop": true,
+          "stepsPerBar": 16,
+          "drumEvents": [
+            {
+              "id": "d1",
+              "lane": "kick",
+              "stepIndex": 0,
+              "velocity": 100
+            },
+            {
+              "id": "d2",
+              "lane": "snare",
+              "stepIndex": 4,
+              "velocity": 100
+            },
+            {
+              "id": "d3",
+              "lane": "openHat",
+              "stepIndex": 5,
+              "velocity": 100
+            },
+            {
+              "id": "d4",
+              "lane": "closedHat",
+              "stepIndex": 6,
+              "velocity": 100
+            },
+            {
+              "id": "d5",
+              "lane": "perc",
+              "stepIndex": 10,
+              "velocity": 100
+            }
+          ],
+          "contentLengthBeats": 2
+        }
+      ],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "acoustic"
+      },
+      "effects": []
+    },
+    {
+      "id": "master",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

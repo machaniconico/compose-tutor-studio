@@ -1,0 +1,52 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 4,
+  "problems": [],
+  "events": [
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 900,
+      "endTick": 960,
+      "startBeat": 1.875,
+      "durationBeats": 0.125
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 1860,
+      "endTick": 1920,
+      "startBeat": 3.875,
+      "durationBeats": 0.125
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 2820,
+      "endTick": 2880,
+      "startBeat": 5.875,
+      "durationBeats": 0.125
+    },
+    {
+      "trackId": "t-a",
+      "clipId": "c-a",
+      "kind": "note",
+      "pitch": 60,
+      "velocity": 100,
+      "startTick": 3780,
+      "endTick": 3840,
+      "startBeat": 7.875,
+      "durationBeats": 0.125
+    }
+  ]
+}

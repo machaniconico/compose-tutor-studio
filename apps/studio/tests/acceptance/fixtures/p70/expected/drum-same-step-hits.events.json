@@ -1,0 +1,62 @@
+{
+  "generatedBy": "wave5 d85f796 packages/project-model soundingEvents(project, { includeMuted: true })",
+  "ppq": 480,
+  "eventCount": 6,
+  "problems": [],
+  "events": [
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 80,
+      "startTick": 0,
+      "startBeat": 0
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "kick",
+      "velocity": 100,
+      "startTick": 0,
+      "startBeat": 0
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "closedHat",
+      "velocity": 60,
+      "startTick": 240,
+      "startBeat": 0.5
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "closedHat",
+      "velocity": 70,
+      "startTick": 240,
+      "startBeat": 0.5
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "closedHat",
+      "velocity": 110,
+      "startTick": 240,
+      "startBeat": 0.5
+    },
+    {
+      "trackId": "t-d",
+      "clipId": "c-d",
+      "kind": "drum",
+      "lane": "snare",
+      "velocity": 90,
+      "startTick": 480,
+      "startBeat": 1
+    }
+  ]
+}

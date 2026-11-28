@@ -1,0 +1,125 @@
+{
+  "id": "p-link-drum",
+  "schemaVersion": 3,
+  "title": "p-link-drum",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "t-d1",
+      "name": "Drums",
+      "type": "drum",
+      "clips": [
+        {
+          "id": "c-src",
+          "trackId": "t-d1",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 4,
+          "loop": false,
+          "stepsPerBar": 12,
+          "drumEvents": [
+            {
+              "id": "d1",
+              "lane": "kick",
+              "stepIndex": 0,
+              "velocity": 100
+            },
+            {
+              "id": "d2",
+              "lane": "snare",
+              "stepIndex": 3,
+              "velocity": 100
+            },
+            {
+              "id": "d3",
+              "lane": "closedHat",
+              "stepIndex": 6,
+              "velocity": 100
+            },
+            {
+              "id": "d4",
+              "lane": "openHat",
+              "stepIndex": 9,
+              "velocity": 100
+            },
+            {
+              "id": "d5",
+              "lane": "perc",
+              "stepIndex": 11,
+              "velocity": 100
+            }
+          ]
+        },
+        {
+          "id": "c-alias",
+          "trackId": "t-d1",
+          "type": "drum",
+          "startBeat": 4,
+          "lengthBeats": 4,
+          "loop": false,
+          "stepsPerBar": 16,
+          "drumEvents": [],
+          "aliasOf": "c-src"
+        }
+      ],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "acoustic"
+      },
+      "effects": []
+    },
+    {
+      "id": "t-d2",
+      "name": "Drums 2",
+      "type": "drum",
+      "clips": [
+        {
+          "id": "c-x",
+          "trackId": "t-d2",
+          "type": "drum",
+          "startBeat": 0,
+          "lengthBeats": 4,
+          "loop": false,
+          "stepsPerBar": 16,
+          "drumEvents": [],
+          "aliasOf": "c-src"
+        }
+      ],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "acoustic"
+      },
+      "effects": []
+    },
+    {
+      "id": "master",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

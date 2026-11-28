@@ -1,0 +1,141 @@
+{
+  "id": "p-roles",
+  "schemaVersion": 3,
+  "title": "p-roles",
+  "bpm": 120,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "key": "C",
+  "scale": "major",
+  "lengthBars": 8,
+  "tracks": [
+    {
+      "id": "t-chords-1",
+      "name": "Pad A",
+      "type": "instrument",
+      "clips": [],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": [],
+      "role": "chords"
+    },
+    {
+      "id": "t-chords-2",
+      "name": "Pad B",
+      "type": "instrument",
+      "clips": [],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": [],
+      "role": "chords"
+    },
+    {
+      "id": "t-bass",
+      "name": "Bass",
+      "type": "instrument",
+      "clips": [],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": [],
+      "role": "bass"
+    },
+    {
+      "id": "t-melody-1",
+      "name": "Lead A",
+      "type": "instrument",
+      "clips": [],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": [],
+      "role": "melody"
+    },
+    {
+      "id": "t-melody-2",
+      "name": "Lead B",
+      "type": "instrument",
+      "clips": [],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": [],
+      "role": "melody"
+    },
+    {
+      "id": "t-drums",
+      "name": "Drums",
+      "type": "drum",
+      "clips": [],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "drumkit",
+        "preset": "acoustic"
+      },
+      "effects": [],
+      "role": "drums"
+    },
+    {
+      "id": "t-plain",
+      "name": "Plain",
+      "type": "instrument",
+      "clips": [],
+      "volume": 0.5,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "instrument": {
+        "type": "synth",
+        "preset": "warmPad"
+      },
+      "effects": []
+    },
+    {
+      "id": "master",
+      "name": "Master",
+      "type": "master",
+      "clips": [],
+      "volume": 1,
+      "pan": 0,
+      "mute": false,
+      "solo": false,
+      "effects": []
+    }
+  ],
+  "chordTrack": [],
+  "sections": [],
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}
