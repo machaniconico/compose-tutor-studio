@@ -10,8 +10,8 @@
 // - ループするクリップでは、ループの周期(最後の音の終わり)が変わる操作は断る。
 // - レガート(鳴る時間で定義): 長さ = 次に鳴り始める選んだ音(高さは問わない)の鳴り始め − 自分の鳴り始め
 //   (スウィング込み、P20 の resolveGrooveNoteSpan)。いちばん後ろの音は変えない。
-// - スタッカート: 長さを半分(STACCATO_RATIO)にする。tick に四捨五入し、最低 1 tick。
-//   すでに 1 tick の音は変えない。
+// - スタッカート: 長さを半分(STACCATO_RATIO)にする。tick で Math.round(0.5 は切り上げ、123 → 62)、最低 1 tick。
+//   1 tick の音が 1 つでもあれば全体を断る。
 // - 連結: 同じ高さで、鳴る区間(スウィング込み)が接する・重なる選んだ音だけを 1 つにする。長さ =
 //   最後の終わりの鳴る時刻 − 最初の鳴り始め。いちばん早く鳴る音の id と強さを残す。
 // - 分割: 再生ヘッドの位置(クリップ内の tick)で、またぐ選んだ音を 2 つにする。
@@ -198,20 +198,23 @@ export function legatoNotesInProject(project: Project, clipId: string, noteIds: 
   });
 }
 
-/** スタッカート: 長さを STACCATO_RATIO 倍に(四捨五入、最低 1 tick)。 */
+/** スタッカート: 長さを STACCATO_RATIO 倍に(tick に四捨五入して 0.5 は切り上げ)。1 tick の音が 1 つでもあれば全体を断る。 */
 export function staccatoNotesInProject(project: Project, clipId: string, noteIds: readonly string[]): NoteEditOutcome {
   return runTool(project, clipId, noteIds, (ordered) => {
     const replace = new Map<string, readonly NoteEvent[]>();
     for (const note of ordered) {
-      const ticks = note.durationBeats * PPQ;
-      if (!Number.isFinite(ticks)) return SOUND_CHANGED;
+      const ticks = Math.round(note.durationBeats * PPQ);
+      if (!Number.isSafeInteger(ticks)) return SOUND_CHANGED;
       const shorter = Math.max(1, Math.round(ticks * STACCATO_RATIO));
-      if (shorter < ticks) replace.set(note.id, [{ ...note, durationBeats: shorter / PPQ }]);
+      if (!(shorter < ticks)) {
+        return '1 ティックしかない短い音は、これ以上短くできないため、取りやめました。どの音も変えていません。';
+      }
+      replace.set(note.id, [{ ...note, durationBeats: shorter / PPQ }]);
     }
     return {
       replace,
       message: (count) => `${count}個の音を短くしました(スタッカート)。`,
-      unchanged: 'これ以上短くできる音はありませんでした。',
+      unchanged: '',
     };
   });
 }

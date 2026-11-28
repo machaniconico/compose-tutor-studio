@@ -103,15 +103,16 @@ describe('レガート', () => {
 });
 
 describe('スタッカート', () => {
-  it('長さを半分にし、tick に四捨五入、最低 1 tick', () => {
-    const p = song([[60, 0, 1], [62, 2, 5 / PPQ], [64, 4, 1 / PPQ]]);
+  it('長さを半分にし、tick に四捨五入(0.5 は切り上げ)、最低 1 tick', () => {
+    const p = song([[60, 0, 1], [62, 2, 5 / PPQ], [64, 4, 2 / PPQ]]);
     const out = ok(staccatoNotesInProject(p, 'mel', ['n0', 'n1', 'n2']));
     expect(byId(out.project, 'n0')!.durationBeats).toBe(0.5);
-    expect(byId(out.project, 'n1')!.durationBeats * PPQ).toBe(3); // round(2.5)
-    expect(byId(out.project, 'n2')).toBe(byId(p, 'n2')); // すでに 1 tick
+    expect(Math.round(byId(out.project, 'n1')!.durationBeats * PPQ)).toBe(3); // round(2.5)
+    expect(Math.round(byId(out.project, 'n2')!.durationBeats * PPQ)).toBe(1);
   });
-  it('すべて 1 tick なら何も変えない', () => {
-    expect(ok(staccatoNotesInProject(song([[60, 0, 1 / PPQ]]), 'mel', ['n0'])).changed).toBe(false);
+  it('1 tick の音が 1 つでもあれば全体を断る', () => {
+    expect(refused(staccatoNotesInProject(song([[60, 0, 1 / PPQ]]), 'mel', ['n0']))).toMatch(/1 ティック/);
+    expect(staccatoNotesInProject(song([[60, 0, 1], [62, 2, 1 / PPQ]]), 'mel', ['n0', 'n1']).ok).toBe(false);
   });
 });
 
