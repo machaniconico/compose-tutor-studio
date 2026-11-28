@@ -7,6 +7,7 @@ import { useStore } from '../../state/store';
 import { useAutomationGesture } from '../automation/useAutomationGesture';
 import { AddTrackDialog } from './AddTrackDialog';
 import { PcKeyboardPlayer } from '../input/PcKeyboardPlayer';
+import { MidiKeyboardControl } from './MidiKeyboardControl';
 import { audioTrackAssetSummary } from '../audioTrack/audioAssetPresentation';
 import {
   TRACK_ADD_CONTROL_ID,
@@ -39,6 +40,7 @@ export function TrackList() {
       <header className="track-list__header">
         <h2>トラック</h2>
         <PcKeyboardPlayer />
+        <MidiKeyboardControl />
         <button
           id={TRACK_ADD_CONTROL_ID}
           type="button"

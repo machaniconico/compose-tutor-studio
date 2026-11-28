@@ -526,6 +526,23 @@ input[type='range'] {
   font-weight: 700;
 }
 
+.midi-keyboard__toggle {
+  font-size: 11px;
+}
+
+.midi-keyboard__panel {
+  position: fixed;
+  right: auto;
+  display: grid;
+  gap: var(--sp-2);
+  width: 220px;
+}
+
+.midi-keyboard__panel p {
+  margin: 0;
+  font-size: 12px;
+}
+
 .track-list__items {
   height: calc(100% - 48px);
   margin: 0;
@@ -1910,6 +1927,10 @@ input[type='range'] {
 /* トラック一覧の見出しにある ⌨ ボタン。パネルは一覧のスクロールに切られないよう画面に固定して出す。 */
 .track-list__header .pr__popover-anchor {
   margin-left: auto;
+}
+
+.track-list__header .pr__popover-anchor + .midi-keyboard {
+  margin-left: 0;
 }
 
 .pr__pckeys {
