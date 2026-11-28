@@ -91,6 +91,21 @@ function soundingSpan(project: Project, placement: Clip, note: NoteEvent): Groov
   );
 }
 
+const LOOP_SWING = 'ループしているクリップにスイングがかかっているため、この操作はできません。';
+
+/**
+ * ループするクリップで、スイングが選んだ音の鳴り始めを動かしているか。2 回目以降は鳴り方の関係が
+ * 1 回目と変わるので、レガート・連結は断る(周ごとの計算はしない)。
+ */
+function loopSwingProblem(project: Project, target: EditTarget, placement: Clip, ordered: readonly NoteEvent[]): string | null {
+  if (!target.placements.some((clip) => clip.loop)) return null;
+  const moved = ordered.some((note) => {
+    const span = soundingSpan(project, placement, note);
+    return span === null || span.onsetTick !== beatTick(placement.startBeat + note.startBeat);
+  });
+  return moved ? LOOP_SWING : null;
+}
+
 /** 変えた項目だけ整数 tick を求め、クリップ・曲の終わりに収まるか(tick で数える)確かめる。 */
 function resultProblem(project: Project, target: EditTarget, original: NoteEvent | undefined, note: NoteEvent): string | null {
   if (!Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127
@@ -177,6 +192,8 @@ function runTool(
 export function legatoNotesInProject(project: Project, clipId: string, noteIds: readonly string[]): NoteEditOutcome {
   return runTool(project, clipId, noteIds, (ordered, target) => {
     const placement = placementOf(target, clipId);
+    const loopSwing = loopSwingProblem(project, target, placement, ordered);
+    if (loopSwing !== null) return loopSwing;
     const spans = ordered.map((note) => soundingSpan(project, placement, note));
     if (spans.some((span) => span === null)) return 'スウィングなどで鳴らない音が含まれるため、レガートはできません。';
     const onsets = [...new Set(spans.map((span) => span!.onsetTick))].sort((a, b) => a - b);
@@ -226,6 +243,8 @@ export function staccatoNotesInProject(project: Project, clipId: string, noteIds
 export function joinNotesInProject(project: Project, clipId: string, noteIds: readonly string[]): NoteEditOutcome {
   return runTool(project, clipId, noteIds, (ordered, target) => {
     const placement = placementOf(target, clipId);
+    const loopSwing = loopSwingProblem(project, target, placement, ordered);
+    if (loopSwing !== null) return loopSwing;
     type Entry = { note: NoteEvent; span: GrooveNoteSpan };
     const byPitch = new Map<number, Entry[]>();
     for (const note of ordered) {
