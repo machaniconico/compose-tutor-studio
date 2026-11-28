@@ -15,6 +15,7 @@ import {
 } from '../../state/trackActions';
 import { pushToast } from '../../state/tutorialBridge';
 import { Dialog } from '../common/Dialog';
+import { useRangeTransaction } from '../common/useRangeTransaction';
 import {
   STUDIO_SYNTH_PRESETS,
   TRACK_TYPE_LABEL,
@@ -192,6 +193,7 @@ function TrackInspectorForm({
     if (result.changed) pushToast(message, 'success');
   };
 
+  const rangeTransaction = useRangeTransaction(track.id);
   const changeMacro = (adjustment: { key: InstrumentMacroKey; value: number } | null): void => {
     const result = setStudioTrackMacro(track.id, adjustment);
     if (!result.ok) {
@@ -319,7 +321,9 @@ function TrackInspectorForm({
                   aria-valuetext={`${Math.round(value * 100)}%`}
                   aria-describedby={helpId}
                   disabled={recordingControlsBusy}
-                  onChange={(event) => changeMacro({ key, value: event.currentTarget.valueAsNumber })}
+                  {...rangeTransaction.props}
+                  onChange={rangeTransaction.guard((event) =>
+                    changeMacro({ key, value: event.currentTarget.valueAsNumber }))}
                 />
                 <small id={helpId}>{help}</small>
               </label>

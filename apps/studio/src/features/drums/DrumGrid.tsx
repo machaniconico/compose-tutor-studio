@@ -18,6 +18,7 @@ import {
 } from '@cts/project-model';
 import { DRUM_PATTERNS, applyDrumPattern, setDrumStepVelocity } from '../../state/editorActions';
 import { publishAppEvent } from '../../state/appEvents';
+import { useRangeTransaction } from '../common/useRangeTransaction';
 import { DRUM_STEPS_PER_BAR_CHOICES, setDrumStepsPerBar } from '../../state/grooveActions';
 
 /** Six lanes shown top-to-bottom, with Japanese labels. */
@@ -239,6 +240,8 @@ export function DrumGrid() {
   const selectedClipId = useStore((s) => s.editor.selectedClipId);
   const applyProjectChange = useStore((s) => s.applyProjectChange);
   const recordingBusy = useStore((s) => s.audioRecordingOperationId !== null);
+  const selectedTrackId = useStore((s) => s.editor.selectedTrackId);
+  const rangeTransaction = useRangeTransaction(`${selectedTrackId ?? ''}:${selectedClipId ?? ''}`);
   const [stepsNotice, setStepsNotice] = useState('');
 
   const [bar, setBar] = useState(0);
@@ -451,7 +454,8 @@ export function DrumGrid() {
               max="1"
               step="0.01"
               value={groove.swing}
-              onChange={(event) => updateGroove({ swing: Number(event.currentTarget.value) })}
+              {...rangeTransaction.props}
+              onChange={rangeTransaction.guard((event) => updateGroove({ swing: Number(event.currentTarget.value) }))}
             />
             <span>{Math.round(groove.swing * 100)}%</span>
           </label>
@@ -463,7 +467,8 @@ export function DrumGrid() {
               max="1"
               step="0.01"
               value={groove.probability}
-              onChange={(event) => updateGroove({ probability: Number(event.currentTarget.value) })}
+              {...rangeTransaction.props}
+              onChange={rangeTransaction.guard((event) => updateGroove({ probability: Number(event.currentTarget.value) }))}
             />
             <span>{Math.round(groove.probability * 100)}%</span>
           </label>
@@ -475,9 +480,9 @@ export function DrumGrid() {
               max="127"
               step="1"
               value={groove.humanizeVelocity}
-              onChange={(event) =>
-                updateGroove({ humanizeVelocity: Number(event.currentTarget.value) })
-              }
+              {...rangeTransaction.props}
+              onChange={rangeTransaction.guard((event) =>
+                updateGroove({ humanizeVelocity: Number(event.currentTarget.value) }))}
             />
             <span>±{groove.humanizeVelocity}</span>
           </label>
@@ -620,7 +625,8 @@ export function DrumGrid() {
               max="1"
               step="0.01"
               value={eventProbability(selectedEvent, groove.probability)}
-              onChange={(event) => updateSelectedProbability(Number(event.currentTarget.value))}
+              {...rangeTransaction.props}
+              onChange={rangeTransaction.guard((event) => updateSelectedProbability(Number(event.currentTarget.value)))}
             />
             <span>{Math.round(eventProbability(selectedEvent, groove.probability) * 100)}%</span>
           </label>

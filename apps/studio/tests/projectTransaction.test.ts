@@ -183,3 +183,41 @@ describe('recording lock with transactions', () => {
     useStore.getState().finishAudioRecordingOperation(operationId!);
   });
 });
+
+describe('transactions around continuous controls', () => {
+  it('refuses a second begin while one is open and keeps the first owner', () => {
+    const first = {};
+    const second = {};
+    expect(useStore.getState().beginProjectTransaction(first, 1)).toBe(true);
+    expect(useStore.getState().beginProjectTransaction(second, 2)).toBe(false);
+    expect(useStore.getState().commitProjectTransaction(second)).toBe(false);
+    expect(useStore.getState().cancelProjectTransaction(first)).toBe(true);
+    expect(useStore.getState().isProjectTransactionOpen()).toBe(false);
+  });
+
+  it('a mixed-field drag through applyProjectChange is one step and undo restores it', () => {
+    const track = firstTrack();
+    const owner = {};
+    const pastBefore = useStore.getState().past.length;
+    expect(useStore.getState().beginProjectTransaction(owner, 1)).toBe(true);
+    for (const pan of [-0.2, 0.1, 0.5]) {
+      useStore.getState().applyProjectChange((project) => ({
+        ...project,
+        tracks: project.tracks.map((t) => (t.id === track.id ? { ...t, pan } : t)),
+      }));
+    }
+    expect(useStore.getState().commitProjectTransaction(owner)).toBe(true);
+    expect(useStore.getState().past).toHaveLength(pastBefore + 1);
+    useStore.getState().undo();
+    const restored = useStore.getState().project.tracks.find((t) => t.id === track.id);
+    expect(restored?.pan).toBe(track.pan);
+  });
+
+  it('cancel after commit by another path is a no-op, never reopening a transaction', () => {
+    const owner = {};
+    useStore.getState().beginProjectTransaction(owner, 1);
+    useStore.getState().finalizeProjectTransaction();
+    expect(useStore.getState().cancelProjectTransaction(owner)).toBe(false);
+    expect(useStore.getState().isProjectTransactionOpen()).toBe(false);
+  });
+});
