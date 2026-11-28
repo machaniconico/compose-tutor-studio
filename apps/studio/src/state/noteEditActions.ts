@@ -83,14 +83,14 @@ export type NoteEditResult =
 
 export type TransposeAmount = Readonly<{ semitones: number }> | Readonly<{ degrees: number }>;
 
-const SOUND_CHANGED =
+export const SOUND_CHANGED =
   'この編集をすると、選んだ音以外の鳴り方まで変わってしまうため、取りやめました。曲はそのままです。';
 
-function refuse(reason: string): NoteEditRefusal {
+export function refuse(reason: string): NoteEditRefusal {
   return { ok: false, reason };
 }
 
-function noteName(pitch: number): string {
+export function noteName(pitch: number): string {
   try {
     return midiToNoteName(pitch);
   } catch {
@@ -109,7 +109,7 @@ export function exactTicks(beat: number): number | null {
 // 対象のクリップと選んだ音
 // ---------------------------------------------------------------------------
 
-type EditTarget = Readonly<{
+export type EditTarget = Readonly<{
   owner: Clip;
   ownerTrack: Track;
   /** 元のクリップを鳴らす配置(元自身とリンク)。位置と長さは配置ごと。 */
@@ -117,7 +117,7 @@ type EditTarget = Readonly<{
   trackIds: ReadonlySet<string>;
 }>;
 
-function locateTarget(project: Project, clipId: string): EditTarget | string {
+export function locateTarget(project: Project, clipId: string): EditTarget | string {
   if (typeof clipId !== 'string') return 'MIDI クリップを選んでから編集してください。';
   const ownerId = clipContentOwnerId(project, clipId);
   let owner: Clip | undefined;
@@ -141,7 +141,7 @@ function locateTarget(project: Project, clipId: string): EditTarget | string {
   return { owner, ownerTrack, placements, trackIds: new Set(placements.map((clip) => clip.trackId)) };
 }
 
-function pickNotes(target: EditTarget, noteIds: readonly string[]): NoteEvent[] | string {
+export function pickNotes(target: EditTarget, noteIds: readonly string[]): NoteEvent[] | string {
   if (!Array.isArray(noteIds) || noteIds.length === 0) return '先に音を選んでください。';
   const byId = new Map((target.owner.notes ?? []).map((note) => [note.id, note]));
   const picked: NoteEvent[] = [];
@@ -229,7 +229,7 @@ function sane(events: readonly ScheduledEvent[]): boolean {
 const LOOP_LENGTH_CHANGED = 'ループしているクリップでは、ループの長さが変わる貼り付け・切り取りはできません。';
 
 /** D1: 音を編集できるクリップか(全配置の開始位置が整数 tick)。 */
-function clipDomainProblem(target: EditTarget): string | null {
+export function clipDomainProblem(target: EditTarget): string | null {
   if (target.placements.some((placement) => exactTicks(placement.startBeat) === null)) {
     return 'このクリップは開始位置が 1/480 拍の目盛りに乗っていないため、音を編集できません。クリップを目盛りの位置に置き直してください。';
   }
@@ -327,7 +327,7 @@ function scheduleOverlapPitch(events: readonly ScheduledEvent[], trackIds: Reado
  * `removedIds` は編集前の、`addedIds` は編集後の、元クリップの音の ID
  * (高さだけを変える編集では、変えた音が両方に入る)。
  */
-function scheduleProblem(
+export function scheduleProblem(
   before: Project,
   after: Project,
   target: EditTarget,
@@ -737,7 +737,7 @@ export function retimeNotesInProject(
 // 店(store)への反映。どれも Undo 1 段。
 // ---------------------------------------------------------------------------
 
-function editLockReason(verb: string): string | null {
+export function editLockReason(verb: string): string | null {
   const state = useStore.getState();
   if (state.audioRecordingOperationId !== null || state.midiRecordingActive) {
     return `録音中は${verb}できません。録音を止めてからやり直してください。`;
@@ -746,7 +746,7 @@ function editLockReason(verb: string): string | null {
   return null;
 }
 
-function commit(outcome: NoteEditOutcome, snapshot: Project, verb: string): NoteEditResult {
+export function commit(outcome: NoteEditOutcome, snapshot: Project, verb: string): NoteEditResult {
   if (!outcome.ok) return outcome;
   if (!outcome.changed) return { ok: true, changed: false, noteIds: outcome.noteIds, message: outcome.message };
   const state = useStore.getState();

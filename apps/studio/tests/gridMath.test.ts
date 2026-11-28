@@ -10,6 +10,7 @@ import {
   clampPitch,
   snapPitchToPitchClasses,
   rectsOverlap,
+  GRID_SNAP_OPTIONS,
   normalizeRect,
   PIANO_HIGH_MIDI,
   PIANO_LOW_MIDI,
@@ -124,5 +125,21 @@ describe('rect helpers (marquee)', () => {
 
   it('normalizes a backwards drag rectangle', () => {
     expect(normalizeRect(30, 40, 10, 20)).toEqual({ x: 10, y: 20, w: 20, h: 20 });
+  });
+});
+
+describe('triplet grids (P34)', () => {
+  it('1/8T = 160 ticks and 1/16T = 80 ticks are offered, and snapping lands on whole ticks', () => {
+    expect(GRID_SNAP_OPTIONS).toContain(160 / 480);
+    expect(GRID_SNAP_OPTIONS).toContain(80 / 480);
+    for (const snap of [160 / 480, 80 / 480]) {
+      for (let k = 0; k < 400; k += 1) {
+        const beat = snapBeat(k * 0.137, snap);
+        expect(Math.round(beat * 480) / 480).toBe(beat);
+        expect(Math.round(beat * 480) % Math.round(snap * 480)).toBe(0);
+        const floored = floorToGrid(k * 0.137, snap);
+        expect(Math.round(floored * 480) / 480).toBe(floored);
+      }
+    }
   });
 });

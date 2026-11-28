@@ -142,8 +142,9 @@ describe("keymap 'playing' scope", () => {
   it('is a separate scope: existing bindings and other scopes are unchanged', () => {
     expect(matchShortcut(ev({ key: 'a', code: 'KeyA' }), 'global')).toBeNull();
     expect(matchShortcut(ev({ key: 'z', code: 'KeyZ', ctrlKey: true }), 'global', false)).toBe('undo');
-    // 13 earlier entries + 2 step-input entries (P43: Enter, Backspace; neither is a playing key).
-    expect(KEYMAP.filter((e) => e.scope !== 'playing')).toHaveLength(15);
+    // 13 earlier entries + 2 step-input entries (P43: Enter, Backspace) + 6 piano-roll arrow entries (P34); none is a playing key.
+    expect(KEYMAP.filter((e) => e.scope !== 'playing')).toHaveLength(21);
+    expect(KEYMAP.filter((e) => e.key.startsWith('arrow') && e.scope === 'playing')).toHaveLength(0);
     const playingKeys = new Set(KEYMAP.filter((e) => e.scope === 'playing').map((e) => e.key));
     for (const e of KEYMAP.filter((e) => e.scope === 'stepInput')) expect(playingKeys.has(e.key)).toBe(false);
   });

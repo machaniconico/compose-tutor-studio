@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { useStore } from '../../state/store';
 import { useStepInput } from '../../state/stepInput';
+import { NoteToolsSection } from './NoteToolsSection';
 import { StepInputSection } from './StepInputSection';
 import {
   MAX_HUMANIZE_TIMING_TICKS,
@@ -49,7 +50,7 @@ export function NoteGroovePopover({ clipId, noteIds, gridSnap, onAnnounce, onSte
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        title="強さつきクオンタイズ・ヒューマナイズ、ステップ入力"
+        title="強さつきクオンタイズ・ヒューマナイズ、ノート操作(レガートなど)、ステップ入力"
         onClick={() => setOpen((value) => !value)}
       >
         {stepActive ? 'ゆらぎ●' : 'ゆらぎ…'}
@@ -118,6 +119,14 @@ export function NoteGroovePopover({ clipId, noteIds, gridSnap, onAnnounce, onSte
         >
           選択ノートをヒューマナイズ
         </button>
+        <NoteToolsSection
+          clipId={clipId}
+          noteIds={noteIds}
+          onAnnounce={(message) => {
+            setNotice(message);
+            onAnnounce(message);
+          }}
+        />
         <StepInputSection clipId={clipId} onAnnounce={onAnnounce} onStarted={onStepStarted} />
         <small id={statusId} role="status">
           {notice || 'ノートを選ぶと使えます。押すたびに違うゆれ方になり、元に戻すで取り消せます。'}

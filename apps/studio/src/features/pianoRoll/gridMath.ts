@@ -1,11 +1,30 @@
 // Pure grid-geometry + quantization helpers for the piano roll and other
 // beat-based editors. No React, no store — easy to unit test.
 
+import { PPQ } from '@cts/project-model';
+
+/** Round a beat to the nearest whole tick (480 per beat), so triplet grids never drift off the tick grid. */
+function tickAligned(beat: number): number {
+  return Math.round(beat * PPQ) / PPQ;
+}
+
 /** Available snap resolutions, in beats. 1 = quarter note in 4/4. */
-export const GRID_SNAP_OPTIONS: readonly number[] = [0.25, 0.5, 1, 2];
+export const TRIPLET_EIGHTH_BEATS = 160 / PPQ;
+export const TRIPLET_SIXTEENTH_BEATS = 80 / PPQ;
+/** 1/16T (80 ticks) and 1/8T (160 ticks) are whole ticks, like every other option. */
+export const GRID_SNAP_OPTIONS: readonly number[] = [
+  TRIPLET_SIXTEENTH_BEATS,
+  0.25,
+  TRIPLET_EIGHTH_BEATS,
+  0.5,
+  1,
+  2,
+];
 
 /** Labels (Japanese) for each snap resolution. */
 export const GRID_SNAP_LABELS: Record<number, string> = {
+  [TRIPLET_SIXTEENTH_BEATS]: '1/16三連',
+  [TRIPLET_EIGHTH_BEATS]: '1/8三連',
   0.25: '1/16',
   0.5: '1/8',
   1: '1/4',
@@ -16,16 +35,61 @@ export const GRID_SNAP_LABELS: Record<number, string> = {
 export const PIANO_LOW_MIDI = 36; // C2
 export const PIANO_HIGH_MIDI = 84; // C6
 
+/** The whole tick of a beat, or null when the beat is not exactly on the 1/480-beat grid. */
+function wholeTick(beat: number): number | null {
+  if (typeof beat !== 'number' || !Number.isFinite(beat)) return null;
+  const tick = Math.round(beat * PPQ);
+  return Number.isSafeInteger(tick) && tick / PPQ === beat ? tick : null;
+}
+
+/** True for a triplet grid (a whole number of ticks that is not a power-of-two fraction of a beat). */
+export function isTripletGrid(grid: number): boolean {
+  return typeof grid === 'number' && grid > 0 && wholeTick(grid) !== null && !Number.isInteger(Math.log2(grid));
+}
+
+/**
+ * `beat + delta` for a grid-derived value. On a triplet grid, when both are whole ticks the
+ * sum is done in integer ticks and converted once (1/3 + 1/3 is 320/480). On every other
+ * grid (and without a grid) it is main's plain float addition, bit for bit.
+ */
+export function addGridBeats(beat: number, delta: number, grid?: number): number {
+  if (grid === undefined || !isTripletGrid(grid)) return beat + delta;
+  if (delta === 0) return beat;
+  const a = wholeTick(beat);
+  const b = wholeTick(delta);
+  return a === null || b === null ? beat + delta : (a + b) / PPQ;
+}
+
+/** `a - b` for a grid-derived value: integer ticks on a triplet grid, main's float subtraction otherwise. */
+export function beatDifference(a: number, b: number, grid?: number): number {
+  if (grid === undefined || !isTripletGrid(grid)) return a - b;
+  const x = wholeTick(a);
+  const y = wholeTick(b);
+  return x === null || y === null ? a - b : (x - y) / PPQ;
+}
+
+/**
+ * The last cursor start that still fits one grid step in a clip (the End key). Main's float clamp
+ * on the existing grids; on a triplet grid it is computed in whole ticks.
+ */
+export function cursorEndStart(clipLengthBeats: number, grid: number): number {
+  if (isTripletGrid(grid)) {
+    const length = wholeTick(clipLengthBeats);
+    if (length !== null) return Math.max(0, length - Math.min(Math.round(grid * PPQ), length)) / PPQ;
+  }
+  return Math.max(0, clipLengthBeats - Math.min(grid, clipLengthBeats));
+}
+
 /** Snap a beat value to the nearest grid line of `snap` beats. */
 export function snapBeat(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);
-  return Math.max(0, Math.round(beat / snap) * snap);
+  return Math.max(0, isTripletGrid(snap) ? tickAligned(Math.round(beat / snap) * snap) : Math.round(beat / snap) * snap);
 }
 
 /** Snap a beat value DOWN to the grid line at or before it (for placement). */
 export function floorToGrid(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);
-  return Math.max(0, Math.floor(beat / snap) * snap);
+  return Math.max(0, isTripletGrid(snap) ? tickAligned(Math.floor(beat / snap) * snap) : Math.floor(beat / snap) * snap);
 }
 
 /** Quantize a note start to the grid; keeps non-negative. */

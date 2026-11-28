@@ -31,6 +31,9 @@ import { classifyNote, noteColorLabel } from './noteColor';
 import {
   GRID_SNAP_OPTIONS,
   GRID_SNAP_LABELS,
+  addGridBeats,
+  beatDifference,
+  cursorEndStart,
   PIANO_HIGH_MIDI,
   PIANO_LOW_MIDI,
   beatToX,
@@ -61,6 +64,15 @@ import {
   type TransposeAmount,
 } from '../../state/noteEditActions';
 import { getNoteClipboard, useNoteClipboard } from '../../state/noteClipboard';
+import { nudgeSelectedNotes } from '../../state/noteToolActions';
+
+/** 矢印キーで動かす半音の数(↑↓ = 1 半音、Shift+↑↓ = 1 オクターブ)。 */
+const ARROW_SEMITONES: Readonly<Record<string, number>> = {
+  transposeUpSemitone: 1,
+  transposeDownSemitone: -1,
+  transposeUpOctave: 12,
+  transposeDownOctave: -12,
+};
 
 const PIANO_ROLL_HINT =
   'ダブルクリックでノート追加 / ドラッグで移動（Shiftで自由位置）/ 右端で長さ変更 / '
@@ -186,6 +198,8 @@ type NoteTranslation = {
   scaleSnap: boolean;
   scalePcs: ReadonlySet<number>;
   scaleBias?: 'nearest' | 'up' | 'down';
+  /** 今のグリッド(三連符のときだけ整数 tick で足す)。 */
+  gridSnap?: number;
 };
 
 function crossedDragThreshold(drag: NoteDragState, clientX: number, clientY: number): boolean {
@@ -202,7 +216,7 @@ function capturePointer(element: HTMLElement | null, pointerId: number): boolean
   }
 }
 
-function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
+export function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
   const { snapshot } = args;
   const anchor = snapshot.find((note) => note.id === args.anchorId) ?? snapshot[0];
   if (!anchor) return [];
@@ -247,16 +261,17 @@ function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
     }
     return {
       ...source,
-      startBeat: source.startBeat + beatDelta,
+      startBeat: addGridBeats(source.startBeat, beatDelta, args.gridSnap),
       pitch,
     };
   });
 }
 
-function resizeNoteGroup(
+export function resizeNoteGroup(
   snapshot: readonly NoteEvent[],
   requestedDelta: number,
   clipLengthBeats: number,
+  gridSnap?: number,
 ): NoteEvent[] {
   if (snapshot.length === 0) return [];
   const minimumDelta = Math.max(
@@ -273,7 +288,7 @@ function resizeNoteGroup(
   );
   return snapshot.map((note) => ({
     ...note,
-    durationBeats: note.durationBeats + durationDelta,
+    durationBeats: addGridBeats(note.durationBeats, durationDelta, gridSnap),
   }));
 }
 
@@ -305,7 +320,7 @@ function noteAccessibilityLabel(
   return `${midiToNoteName(note.pitch)}。開始 ${displayBeat(note.startBeat + 1)} 拍目、長さ ${displayBeat(note.durationBeats)} 拍、強さ ${note.velocity}、${isInScale ? 'スケール内' : 'スケール外'}。${isSelected ? '選択中' : '未選択'}`;
 }
 
-function buildNoteGesturePreview(
+export function buildNoteGesturePreview(
   drag: NoteDragState,
   pointer: { clientX: number; clientY: number; shiftKey: boolean },
 ): NoteGesturePreview {
@@ -318,14 +333,14 @@ function buildNoteGesturePreview(
     const beatDelta = xToBeat(dx, drag.ppb);
     const remainingBeats = Math.max(
       MIN_EVENT_DURATION_BEATS,
-      drag.clipLengthBeats - source.startBeat,
+      beatDifference(drag.clipLengthBeats, source.startBeat, drag.gridSnap),
     );
     let durationBeats = source.durationBeats + beatDelta;
     durationBeats = shiftKey
       ? Math.max(MIN_EVENT_DURATION_BEATS, durationBeats)
       : Math.max(
           MIN_EVENT_DURATION_BEATS,
-          snapBeat(source.startBeat + durationBeats, drag.gridSnap) - source.startBeat,
+          beatDifference(snapBeat(source.startBeat + durationBeats, drag.gridSnap), source.startBeat, drag.gridSnap),
         );
     durationBeats = Math.min(remainingBeats, durationBeats);
     return {
@@ -339,7 +354,7 @@ function buildNoteGesturePreview(
   const rawBeatDelta = xToBeat(dx, drag.ppb);
   const requestedBeatDelta = shiftKey
     ? rawBeatDelta
-    : snapBeat(anchor.startBeat + rawBeatDelta, drag.gridSnap) - anchor.startBeat;
+    : beatDifference(snapBeat(anchor.startBeat + rawBeatDelta, drag.gridSnap), anchor.startBeat, drag.gridSnap);
   const requestedPitchDelta = -Math.round((clientY - drag.startY) / drag.rowHeight);
   const previewNotes = translateNoteGroup({
     snapshot: drag.snapshot,
@@ -349,6 +364,7 @@ function buildNoteGesturePreview(
     clipLengthBeats: drag.clipLengthBeats,
     scaleSnap: drag.scaleSnap,
     scalePcs: drag.scalePcs,
+    gridSnap: drag.gridSnap,
     scaleBias:
       requestedPitchDelta > 0 ? 'up' : requestedPitchDelta < 0 ? 'down' : 'nearest',
   });
@@ -431,6 +447,7 @@ export function PianoRoll() {
   const [pendingKeyboardFocus, setPendingKeyboardFocus] =
     useState<PendingKeyboardFocus | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const noteRefs = useRef(new Map<string, HTMLButtonElement>());
   const keyboardInstructionsId = useId();
@@ -626,6 +643,24 @@ export function PianoRoll() {
         pasteNotes(action === 'pasteNotes' ? 'auto' : 'original');
         return;
       }
+      // 矢印で動かす(P34)。フォーカスがピアノロールの中にあるときだけ(インスペクターなど外では動かさない)。
+      // 音やグリッドにフォーカスがあるときの ←→↑↓ は、それぞれの要素が先に処理する(ここへは届かない)。
+      // ここに届くのは、フォーカスがそのほかのピアノロール内にあるときと Shift+↑↓(オクターブ)。
+      const focused = document.activeElement;
+      const focusInRoll = focused instanceof Node && rootRef.current?.contains(focused) === true;
+      if (focusInRoll && ids.length > 0 && !hasTextSelection()) {
+        const semitones = ARROW_SEMITONES[action ?? ''];
+        if (action === 'nudgeLeft' || action === 'nudgeRight') {
+          e.preventDefault();
+          showEditResult(nudgeSelectedNotes(clip.id, ids, action === 'nudgeLeft' ? -1 : 1, gridSnap));
+          return;
+        }
+        if (semitones !== undefined) {
+          e.preventDefault();
+          transposeSelection({ semitones });
+          return;
+        }
+      }
       if (inGrid) return;
       if (action === 'deleteSelectedNotes' && ids.length > 0) {
         e.preventDefault();
@@ -635,7 +670,7 @@ export function PianoRoll() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editor.activeView, clip, liveSelectedNoteIds, selectNotes, copySelection, cutSelection, pasteNotes]);
+  }, [editor.activeView, clip, liveSelectedNoteIds, selectNotes, copySelection, cutSelection, pasteNotes, gridSnap, showEditResult, transposeSelection]);
 
   // --- step input (P43): Enter = rest, Backspace = step back; only while step input is on ---
   const stepActive = useStepInput((s) => s.active && clip !== null && s.clipId === clip.id);
@@ -1024,6 +1059,7 @@ export function PianoRoll() {
           clipLengthBeats: clip.lengthBeats,
           scaleSnap: editor.scaleSnap,
           scalePcs: scaleInfo.scalePcs,
+          gridSnap,
         });
         const sourceById = new Map(snapshot.map((candidate) => [candidate.id, candidate]));
         const changed = finalNotes.some((candidate) => {
@@ -1127,7 +1163,7 @@ export function PianoRoll() {
 
       if (isResize) {
         const direction = event.key === 'ArrowRight' ? 1 : -1;
-        const finalNotes = resizeNoteGroup(snapshot, direction * gridSnap, clip.lengthBeats);
+        const finalNotes = resizeNoteGroup(snapshot, direction * gridSnap, clip.lengthBeats, gridSnap);
         const committed = commitNoteUpdates(
           clip.id,
           finalNotes.map((candidate) => ({
@@ -1173,6 +1209,7 @@ export function PianoRoll() {
         clipLengthBeats: clip.lengthBeats,
         scaleSnap: editor.scaleSnap,
         scalePcs: scaleInfo.scalePcs,
+        gridSnap,
         scaleBias:
           requestedPitchDelta > 0 ? 'up' : requestedPitchDelta < 0 ? 'down' : 'nearest',
       });
@@ -1239,7 +1276,7 @@ export function PianoRoll() {
       if (event.key === 'Enter' || event.key === ' ') {
         const durationBeats = Math.min(
           gridSnap,
-          clip.lengthBeats - keyboardCursor.startBeat,
+          beatDifference(clip.lengthBeats, keyboardCursor.startBeat, gridSnap),
         );
         if (durationBeats < MIN_EVENT_DURATION_BEATS) {
           setKeyboardAnnouncement('この位置にはノートを追加できません。');
@@ -1266,13 +1303,13 @@ export function PianoRoll() {
         return;
       }
 
-      const maximumStart = Math.max(0, clip.lengthBeats - Math.min(gridSnap, clip.lengthBeats));
+      const maximumStart = cursorEndStart(clip.lengthBeats, gridSnap);
       let startBeat = keyboardCursor.startBeat;
       let pitch = keyboardCursor.pitch;
       if (event.key === 'Home') startBeat = 0;
       else if (event.key === 'End') startBeat = maximumStart;
-      else if (event.key === 'ArrowLeft') startBeat = Math.max(0, startBeat - gridSnap);
-      else if (event.key === 'ArrowRight') startBeat = Math.min(maximumStart, startBeat + gridSnap);
+      else if (event.key === 'ArrowLeft') startBeat = Math.max(0, addGridBeats(startBeat, -gridSnap, gridSnap));
+      else if (event.key === 'ArrowRight') startBeat = Math.min(maximumStart, addGridBeats(startBeat, gridSnap, gridSnap));
       else {
         const direction = event.key === 'ArrowUp' ? 1 : -1;
         pitch = clampPitch(pitch + direction);
@@ -1326,7 +1363,7 @@ export function PianoRoll() {
   }
 
   return (
-    <div className="pr">
+    <div className="pr" ref={rootRef}>
       <span id={keyboardInstructionsId} className="visually-hidden">
         ノートでは、矢印キーで移動、Shiftと左右矢印で長さ変更、PageUpとPageDownで強さ変更、ShiftとPageUpまたはPageDownで前後のノートへ移動します。Enterで単独選択、Spaceで選択切替、ControlまたはCommandとAで現在クリップの編集音域にある音をすべて選択、ControlまたはCommandとDで複製、Cでコピー、Xで切り取り、Vで貼り付け(再生ヘッドがクリップ内ならその位置、外ならコピーした位置。Shiftも押すと、いつもコピーした位置)、Deleteで削除します。Escapeで入力位置へ戻ります。
       </span>
