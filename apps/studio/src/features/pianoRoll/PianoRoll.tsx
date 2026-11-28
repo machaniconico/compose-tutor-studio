@@ -33,6 +33,7 @@ import {
   GRID_SNAP_LABELS,
   addGridBeats,
   beatDifference,
+  cursorEndStart,
   PIANO_HIGH_MIDI,
   PIANO_LOW_MIDI,
   beatToX,
@@ -1302,7 +1303,7 @@ export function PianoRoll() {
         return;
       }
 
-      const maximumStart = Math.max(0, clip.lengthBeats - Math.min(gridSnap, clip.lengthBeats));
+      const maximumStart = cursorEndStart(clip.lengthBeats, gridSnap);
       let startBeat = keyboardCursor.startBeat;
       let pitch = keyboardCursor.pitch;
       if (event.key === 'Home') startBeat = 0;

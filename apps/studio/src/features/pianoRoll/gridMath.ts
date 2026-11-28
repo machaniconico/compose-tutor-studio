@@ -68,6 +68,18 @@ export function beatDifference(a: number, b: number, grid?: number): number {
   return x === null || y === null ? a - b : (x - y) / PPQ;
 }
 
+/**
+ * The last cursor start that still fits one grid step in a clip (the End key). Main's float clamp
+ * on the existing grids; on a triplet grid it is computed in whole ticks.
+ */
+export function cursorEndStart(clipLengthBeats: number, grid: number): number {
+  if (isTripletGrid(grid)) {
+    const length = wholeTick(clipLengthBeats);
+    if (length !== null) return Math.max(0, length - Math.min(Math.round(grid * PPQ), length)) / PPQ;
+  }
+  return Math.max(0, clipLengthBeats - Math.min(grid, clipLengthBeats));
+}
+
 /** Snap a beat value to the nearest grid line of `snap` beats. */
 export function snapBeat(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);
