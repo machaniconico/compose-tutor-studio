@@ -164,6 +164,13 @@ type RuntimeSession = PlaybackSession & {
   scheduleEvents: readonly ScheduledEvent[];
   /** Project the current scheduleEvents were built from. */
   scheduleProject: Project;
+  /**
+   * Every event this session has scheduled at any point. The natural-drain
+   * tail is planned from it so a live edit can only grow the planned tail,
+   * never cut sound (delay, reverb, release) that is already circulating.
+   */
+  readonly tailEvents: ScheduledEvent[];
+  readonly tailEventKeys: Set<string>;
   /** Note / drum events already handed to a voice and not yet finished. */
   firedVoices: FiredVoice[];
   readonly everAudibleTrackIds: Set<string>;
@@ -2070,7 +2077,7 @@ async function createRuntimeSessionImpl(
       const tail = planRuntimeAudioTail(
         project,
         latestTracks,
-        session?.scheduleEvents ?? scheduleEvents,
+        session?.tailEvents ?? scheduleEvents,
         startBeat,
         lengthBeats,
         everAudibleTrackIds,
@@ -2129,6 +2136,10 @@ async function createRuntimeSessionImpl(
       routingPlan,
       scheduleEvents,
       scheduleProject: project,
+      tailEvents: [...scheduleEvents],
+      tailEventKeys: new Set(scheduleEvents.map((event) => (
+        scheduleEventKey(event.payload as SchedulePayload, event.beat)
+      ))),
       firedVoices: [],
       everAudibleTrackIds,
       everAudibleEdgeIds,
@@ -2477,6 +2488,12 @@ export function applyRuntimeScheduleContentEdit(
   session.scheduler.replaceEventIndex(index);
   session.scheduleEvents = events;
   session.scheduleProject = project;
+  for (const event of events) {
+    const key = scheduleEventKey(event.payload as SchedulePayload, event.beat);
+    if (session.tailEventKeys.has(key)) continue;
+    session.tailEventKeys.add(key);
+    session.tailEvents.push(event);
+  }
 
   const { anchorBeat, anchorTime } = session;
   const playheadBeat = now < anchorTime

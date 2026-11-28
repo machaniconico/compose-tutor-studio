@@ -437,6 +437,32 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(rec.drums[0]!.velocity).toBe(100);
   });
 
+  it('曲末の直前に最後のノートを消しても、もう鳴っているディレイの残響を切らない - live-edit fix E', async () => {
+    const end = store().project.lengthBeats;
+    const id = melodyId();
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => ({
+        ...t,
+        effects: t.id === id
+          ? [{ id: 'fx', type: 'delay' as const, enabled: true, params: { delayTime: 1, feedback: 0.8, mix: 1 } }]
+          : t.effects,
+        clips: t.id === id ? [{ ...melody([[60, end - 1, 1]], 0, end), trackId: id }] : [],
+      })),
+    }));
+    useStore.setState((s) => ({ past: [], future: [], transport: { ...s.transport, positionBeat: end - 2 } }));
+    await play();
+    await runFor(0.9);
+    expect(count(60)).toBe(1);
+
+    editNotes(() => []);
+    await runFor(1.5);
+
+    // The song ended at 1.0 s; the delay tail keeps the graph alive past 2.4 s.
+    expect(store().transport.phase).toBe('stopped');
+    expect(rec.disposed).toBe(0);
+  });
+
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
     setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
     store().setLoopRange(0, 4);
