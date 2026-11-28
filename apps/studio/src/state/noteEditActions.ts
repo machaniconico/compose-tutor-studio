@@ -25,17 +25,12 @@
 
 import {
   MAX_EVENTS_PER_CLIP,
-  MAX_RUNTIME_SCHEDULE_EVENTS,
   MIN_EVENT_DURATION_BEATS,
   PPQ,
   beatTick,
-  GROOVE_RESOLVER_PPQ,
   clipContentOwnerId,
-  isGrooveResolvedMode,
   midiClipNaturalPatternLength,
-  resolveGrooveNoteSpan,
   resolveClipContent,
-  visitMidiClipNoteOccurrences,
   type Clip,
   type NoteEvent,
   type Project,
@@ -185,9 +180,10 @@ export function withOwnerNotes(project: Project, ownerId: string, notes: NoteEve
 // buildScheduleEvents による事後確認
 // ---------------------------------------------------------------------------
 
-function scheduleOf(project: Project): ScheduledEvent[] | null {
+/** `cut: false` は、スウィングの重なり切り詰めの前(「選んでいない音は変わらない」の比較用)。 */
+function scheduleOf(project: Project, cut = true): ScheduledEvent[] | null {
   try {
-    return buildScheduleEvents(project);
+    return buildScheduleEvents(project, { skipSwingCut: !cut });
   } catch {
     return null;
   }
@@ -249,37 +245,28 @@ function loopProblem(target: EditTarget, before: readonly NoteEvent[], after: re
 function occurrenceKeys(project: Project, ownerId: string, ids: ReadonlySet<string>): string[] | null {
   const keys: string[] = [];
   if (ids.size === 0) return keys;
-  const resolved = isGrooveResolvedMode(project);
   try {
-    for (const track of project.tracks) {
-      if (track.type === 'master') continue;
-      const preset = track.instrument?.preset ?? 'warmPad';
-      for (const clip of track.clips) {
-        if (clipContentOwnerId(project, clip.id) !== ownerId) continue;
-        const content = resolveClipContent(project, clip);
-        if (!content || content.type !== 'midi' || !content.notes || content.notes.length === 0) continue;
-        visitMidiClipNoteOccurrences(content, MAX_RUNTIME_SCHEDULE_EVENTS, (occurrence) => {
-          if (!ids.has(occurrence.note.id)) return;
-          let beat = content.startBeat + occurrence.localStartBeat;
-          let durationBeats = occurrence.durationBeats;
-          if (resolved) {
-            // buildScheduleEvents と同じ groove 解決(swing 後の onset / 長さ、落ちる音は予定に出ない)。
-            const span = resolveGrooveNoteSpan(project, beat, durationBeats, content.startBeat + content.lengthBeats);
-            if (!span) return;
-            beat = span.onsetTick / GROOVE_RESOLVER_PPQ;
-            durationBeats = (span.endTick - span.onsetTick) / GROOVE_RESOLVER_PPQ;
-          }
-          keys.push(JSON.stringify([
-            beat,
-            'note',
-            track.id,
-            preset,
-            occurrence.note.pitch,
-            durationBeats,
-            occurrence.note.velocity,
-          ]));
-        });
-      }
+    // buildScheduleEvents そのもの(スウィング後の onset / 長さ、同じ高さの重なりの切り詰め込み)から、
+    // この音の予定だけを拾う。
+    const sources = new Map<object, { clipId: string; noteId: string }>();
+    const events = buildScheduleEvents(project, {
+      skipSwingCut: true,
+      onClipNote: (payload, source) => sources.set(payload, source),
+    });
+    for (const event of events) {
+      const payload = event.payload as SchedulePayload;
+      const source = sources.get(payload);
+      if (!source || payload.kind !== 'note' || !ids.has(source.noteId)) continue;
+      if (clipContentOwnerId(project, source.clipId) !== ownerId) continue;
+      keys.push(JSON.stringify([
+        event.beat,
+        'note',
+        payload.trackId,
+        payload.preset,
+        payload.pitch,
+        payload.durationBeats,
+        payload.velocity,
+      ]));
     }
   } catch {
     return null;
@@ -335,10 +322,13 @@ export function scheduleProblem(
   addedIds: ReadonlySet<string>,
   overlapReason: (pitch: number) => string,
 ): string | null {
-  const a = scheduleOf(before);
-  const b = scheduleOf(after);
-  if (a === null || b === null || !sane(b)) return SOUND_CHANGED;
-  const pitch = scheduleOverlapPitch(b, target.trackIds);
+  // 重なりの確認は切り詰めた後の予定(実際に鳴る形)で、「選んでいない音は変わらない」の比較は
+  // 切り詰める前の予定で行う(隣の音を編集しただけで、選んでいない音の長さが変わって見えるため)。
+  const a = scheduleOf(before, false);
+  const b = scheduleOf(after, false);
+  const bCut = scheduleOf(after);
+  if (a === null || b === null || bCut === null || !sane(b)) return SOUND_CHANGED;
+  const pitch = scheduleOverlapPitch(bCut, target.trackIds);
   if (pitch !== null) return overlapReason(pitch);
   const removed = occurrenceKeys(before, target.owner.id, removedIds);
   const added = occurrenceKeys(after, target.owner.id, addedIds);

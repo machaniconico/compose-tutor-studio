@@ -22,6 +22,7 @@ import {
   MIN_EVENT_DURATION_BEATS,
   finalizeGrooveTrackDrums,
   GROOVE_RESOLVER_PPQ,
+  cutSwingOverlaps,
   isGrooveResolvedMode,
   projectDrumStep,
   realizeChordTrack,
@@ -37,6 +38,7 @@ import {
   type NoteEvent,
   type DrumLane,
   type DrumScheduleOccurrence,
+  type GrooveNoteSpan,
   type Track,
   type Clip,
   type ClipIndex,
@@ -1251,6 +1253,33 @@ export function panToCc(pan: number): number {
 
 // --- Note / clip conversion ---
 
+/** Resolved-mode pitched notes of one track, written after the swing-overlap cut. */
+type ResolvedNoteCollector = Array<{
+  pitch: number;
+  velocity: number;
+  span: GrooveNoteSpan;
+  label: string;
+}>;
+
+function flushResolvedNotes(
+  collector: ResolvedNoteCollector,
+  channel: number,
+  ppq: number,
+  messages: MidiMessage[],
+): void {
+  const cut = cutSwingOverlaps(
+    collector.map((note) => ({ group: String(note.pitch), span: note.span })),
+  );
+  collector.forEach((note, index) => {
+    const startTick = resolverTickToMidi(note.span.onsetTick, ppq, `${note.label} start`);
+    const endTick = quantizedEndTick(
+      startTick, cut[index]!.endTick / GROOVE_RESOLVER_PPQ, ppq, `${note.label} end`,
+    );
+    messages.push({ tick: startTick, bytes: [0x90 | channel, note.pitch, note.velocity] });
+    messages.push({ tick: endTick, bytes: [0x80 | channel, note.pitch, 0] });
+  });
+}
+
 /**
  * Convert a single clip's notes into absolute-tick MIDI messages.
  * Honors `clip.loop`: when true, the clip's notes are unrolled across the clip
@@ -1263,6 +1292,7 @@ function appendClipNotes(
   messages: MidiMessage[],
   budget: MidiExportBudget,
   resolvedProject: Project | null,
+  collector: ResolvedNoteCollector | null,
 ): void {
   const notes = clip.notes ?? [];
   if (notes.length === 0) return;
@@ -1293,7 +1323,7 @@ function appendClipNotes(
   const clipEndTick = beatToTick(clipEndBeat, ppq, `clip ${clip.id} end`);
   const occurrenceTicks = (
     occurrence: MidiClipNoteOccurrence,
-  ): Readonly<{ startTick: number; endTick: number }> | null => {
+  ): Readonly<{ startTick: number; endTick: number; span?: GrooveNoteSpan }> | null => {
     const { note } = occurrence;
     const startBeat = clip.startBeat + occurrence.localStartBeat;
     if (resolvedProject) {
@@ -1305,7 +1335,7 @@ function appendClipNotes(
       const endTick = quantizedEndTick(
         startTick, span.endTick / GROOVE_RESOLVER_PPQ, ppq, `note ${note.id} end`,
       );
-      return { startTick, endTick };
+      return { startTick, endTick, span };
     }
     const endBeat = Math.min(
       clipEndBeat,
@@ -1342,6 +1372,10 @@ function appendClipNotes(
 
     const pitch = midiDataByte(note.pitch, `note ${note.id} pitch`);
     const velocity = midiVelocity(note.velocity, `note ${note.id} velocity`);
+    if (collector && ticks.span) {
+      collector.push({ pitch, velocity, span: ticks.span, label: `note ${note.id}` });
+      return;
+    }
     messages.push({ tick: ticks.startTick, bytes: [0x90 | channel, pitch, velocity] });
     messages.push({ tick: ticks.endTick, bytes: [0x80 | channel, pitch, 0] });
   });
@@ -1355,6 +1389,7 @@ function appendRealizedChordNotes(
   messages: MidiMessage[],
   budget: MidiExportBudget,
   resolvedProject: Project | null,
+  collector: ResolvedNoteCollector | null,
 ): void {
   budget.reserve(notes.length * 2);
   for (const note of notes) {
@@ -1367,6 +1402,15 @@ function appendRealizedChordNotes(
         resolvedProject, note.startBeat, note.durationBeats, note.startBeat + note.durationBeats,
       );
       if (!span) continue;
+      if (collector) {
+        collector.push({
+          pitch: midiDataByte(note.pitch, 'realized chord note pitch'),
+          velocity: midiVelocity(note.velocity, 'realized chord note velocity'),
+          span,
+          label: 'realized chord note',
+        });
+        continue;
+      }
       startTick = resolverTickToMidi(span.onsetTick, ppq, 'realized chord note start');
       endTick = quantizedEndTick(
         startTick, span.endTick / GROOVE_RESOLVER_PPQ, ppq, 'realized chord note end',
@@ -1679,6 +1723,7 @@ function buildInstrumentTrack(
   // Legacy mode (swing 0, choke off) keeps main's v10 bytes exactly.
   const resolvedProject = isGrooveResolvedMode(project) ? project : null;
   const resolvedDrums: DrumScheduleOccurrence[] = [];
+  const resolvedNotes: ResolvedNoteCollector | null = resolvedProject ? [] : null;
   for (const clip of track.clips) {
     const effectiveClip = resolveClipContent(project, clip, clipIndex);
     if (!effectiveClip) {
@@ -1696,13 +1741,14 @@ function buildInstrumentTrack(
           : null,
       );
     } else if (effectiveClip.type === 'midi') {
-      appendClipNotes(effectiveClip, channel, ppq, msgs, budget, resolvedProject);
+      appendClipNotes(effectiveClip, channel, ppq, msgs, budget, resolvedProject, resolvedNotes);
     }
   }
   if (resolvedProject && resolvedDrums.length > 0) {
     appendResolvedTrackDrums(resolvedProject, resolvedDrums, ppq, msgs);
   }
-  appendRealizedChordNotes(realizedChordNotes, channel, ppq, msgs, budget, resolvedProject);
+  appendRealizedChordNotes(realizedChordNotes, channel, ppq, msgs, budget, resolvedProject, resolvedNotes);
+  if (resolvedNotes) flushResolvedNotes(resolvedNotes, channel, ppq, msgs);
   assertNoAmbiguousNoteOverlap(msgs, track);
   return buildTrackChunk(range ? clipMessagesToRange(msgs, range) : msgs);
 }

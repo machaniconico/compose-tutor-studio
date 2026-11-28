@@ -37,7 +37,21 @@ function onsetLimitTick(project: GrooveProject, spanEndBeat: number): number {
   return Math.min(beatTick(spanEndBeat), beatTick(project.lengthBeats));
 }
 
-export type GrooveNoteSpan = Readonly<{ onsetTick: number; endTick: number }>;
+/**
+ * A resolved pitched note. `sourceStartTick` / `sourceEndTick` are the same
+ * note before swing (the stored grid), used to tell a swing-made overlap from
+ * one that is already in the stored notes.
+ */
+/** Float-noise tolerance for stored-overlap checks (well under 1/480 beat). */
+const STORED_OVERLAP_EPSILON_BEATS = 1e-9;
+
+export type GrooveNoteSpan = Readonly<{
+  onsetTick: number;
+  endTick: number;
+  /** Exact (unrounded) source position and end in beats. */
+  sourceStartBeat: number;
+  sourceEndBeat: number;
+}>;
 
 /**
  * Resolve one pitched note (a clip note occurrence or one realized chord voice).
@@ -61,7 +75,54 @@ export function resolveGrooveNoteSpan(
     beatTick(spanEndBeat),
     Math.max(onsetTick + 1, beatTick(onsetBeat + durationBeats)),
   );
-  return { onsetTick, endTick };
+  return {
+    onsetTick,
+    endTick,
+    sourceStartBeat: sourceBeat,
+    sourceEndBeat: Math.min(spanEndBeat, sourceBeat + durationBeats),
+  };
+}
+
+/**
+ * The one swing-overlap rule shared by playback, WAV, MIDI export and the edit
+ * checks. `group` is one track + one pitch. When swing makes a note run into
+ * the next onset of the same group, the earlier note is cut at that onset
+ * (its sounding length stays at least 1 tick). Notes that already overlap in
+ * the stored grid (before swing) are left alone. Returns the spans in input order.
+ */
+export function cutSwingOverlaps(
+  entries: ReadonlyArray<Readonly<{ group: string; span: GrooveNoteSpan }>>,
+): GrooveNoteSpan[] {
+  const result = entries.map((entry) => entry.span);
+  const byGroup = new Map<string, number[]>();
+  entries.forEach((entry, index) => {
+    const list = byGroup.get(entry.group);
+    if (list) list.push(index);
+    else byGroup.set(entry.group, [index]);
+  });
+  for (const indexes of byGroup.values()) {
+    if (indexes.length < 2) continue;
+    indexes.sort((a, b) => result[a]!.onsetTick - result[b]!.onsetTick || a - b);
+    for (let i = 0; i + 1 < indexes.length; i += 1) {
+      const current = result[indexes[i]!]!;
+      const next = result[indexes[i + 1]!]!;
+      // Cut only a pure swing overlap: the stored notes do not overlap (exact beats, with a
+      // tolerance far below one tick for float noise), they keep their source order, and their
+      // sounding onsets are strictly increasing. Anything else is left as it was.
+      if (
+        next.onsetTick < current.endTick
+        && next.onsetTick > current.onsetTick
+        && current.sourceStartBeat < next.sourceStartBeat
+        && current.sourceEndBeat <= next.sourceStartBeat + STORED_OVERLAP_EPSILON_BEATS
+      ) {
+        result[indexes[i]!] = {
+          ...current,
+          endTick: Math.max(current.onsetTick + 1, next.onsetTick),
+        };
+      }
+    }
+  }
+  return result;
 }
 
 /**

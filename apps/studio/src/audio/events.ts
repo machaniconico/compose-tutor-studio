@@ -11,6 +11,7 @@ import {
   compileDrumStepProjector,
   compileMusicalTime,
   createDrumScheduleEvent,
+  cutSwingOverlaps,
   finalizeGrooveTrackDrums,
   GROOVE_RESOLVER_PPQ,
   isGrooveResolvedMode,
@@ -24,6 +25,7 @@ import {
   resolveGrooveNoteSpan,
   visitMidiClipNoteOccurrences,
   type DrumScheduleOccurrence,
+  type GrooveNoteSpan,
   type Project,
 } from '@cts/project-model';
 import type { ScheduledEvent } from './scheduler';
@@ -84,8 +86,18 @@ export function drumStepToBeat(
  * Legacy mode (`swing === 0 && !hiHatChoke`) is main's v10 projection. In
  * resolved mode every onset, drop and end comes from the shared 480 PPQ groove
  * resolver in `@cts/project-model`, so WAV and MIDI hear the same events.
+ * `options.onClipNote` reports which clip note each note event came from;
+ * `options.skipSwingCut` returns the notes before the swing overlap cut.
  */
-export function buildScheduleEvents(project: Project): ScheduledEvent[] {
+export function buildScheduleEvents(
+  project: Project,
+  options: Readonly<{
+    onClipNote?: (payload: NoteScheduleEvent, source: Readonly<{ clipId: string; noteId: string }>) => void;
+    /** Edit checks compare "who sounds how" before the swing overlap cut. */
+    skipSwingCut?: boolean;
+  }> = {},
+): ScheduledEvent[] {
+  const { onClipNote, skipSwingCut = false } = options;
   const musicalTime = compileMusicalTime(project);
   const clipIndex = buildClipIndex(project);
   assertScheduleEventBudget(project, {
@@ -106,6 +118,8 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
 
     const preset = track.instrument?.preset ?? 'warmPad';
     const trackDrums: DrumScheduleOccurrence[] = [];
+    // Resolved-mode notes of this track, so swing overlaps can be cut once at the end.
+    const trackNotes: Array<{ payload: NoteScheduleEvent; span: GrooveNoteSpan }> = [];
 
     // Chord Track events are project-level harmony metadata rather than clip
     // notes. Realize them onto the dedicated Chords instrument so live playback
@@ -115,25 +129,25 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
       for (const note of realizedChords.notes) {
         let beat = note.startBeat;
         let durationBeats = note.durationBeats;
+        let span: GrooveNoteSpan | null = null;
         if (resolved) {
-          const span = resolveGrooveNoteSpan(
+          span = resolveGrooveNoteSpan(
             project, note.startBeat, note.durationBeats, note.startBeat + note.durationBeats,
           );
           if (!span) continue;
           beat = span.onsetTick / GROOVE_RESOLVER_PPQ;
           durationBeats = (span.endTick - span.onsetTick) / GROOVE_RESOLVER_PPQ;
         }
-        events.push({
-          beat,
-          payload: {
-            kind: 'note',
-            trackId: track.id,
-            preset,
-            pitch: note.pitch,
-            durationBeats,
-            velocity: note.velocity,
-          } satisfies NoteScheduleEvent,
-        });
+        const payload: NoteScheduleEvent = {
+          kind: 'note',
+          trackId: track.id,
+          preset,
+          pitch: note.pitch,
+          durationBeats,
+          velocity: note.velocity,
+        };
+        if (span) trackNotes.push({ payload, span });
+        events.push({ beat, payload });
       }
     }
 
@@ -154,8 +168,9 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
             const { note } = occurrence;
             let beat = effectiveClip.startBeat + occurrence.localStartBeat;
             let durationBeats = occurrence.durationBeats;
+            let span: GrooveNoteSpan | null = null;
             if (resolved) {
-              const span = resolveGrooveNoteSpan(
+              span = resolveGrooveNoteSpan(
                 project,
                 beat,
                 durationBeats,
@@ -165,17 +180,17 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
               beat = span.onsetTick / GROOVE_RESOLVER_PPQ;
               durationBeats = (span.endTick - span.onsetTick) / GROOVE_RESOLVER_PPQ;
             }
-            events.push({
-              beat,
-              payload: {
-                kind: 'note',
-                trackId: track.id,
-                preset,
-                pitch: note.pitch,
-                durationBeats,
-                velocity: note.velocity,
-              } satisfies NoteScheduleEvent,
-            });
+            const payload: NoteScheduleEvent = {
+              kind: 'note',
+              trackId: track.id,
+              preset,
+              pitch: note.pitch,
+              durationBeats,
+              velocity: note.velocity,
+            };
+            if (span) trackNotes.push({ payload, span });
+            events.push({ beat, payload });
+            onClipNote?.(payload, { clipId: clip.id, noteId: note.id });
           },
         );
       }
@@ -207,6 +222,15 @@ export function buildScheduleEvents(project: Project): ScheduledEvent[] {
           if (resolvedEvent) trackDrums.push(resolvedEvent);
         }
       }
+    }
+    // Swing may push a note into the next same-pitch onset: cut the earlier one there.
+    if (!skipSwingCut && trackNotes.length > 1) {
+      const cut = cutSwingOverlaps(
+        trackNotes.map(({ payload, span }) => ({ group: String(payload.pitch), span })),
+      );
+      trackNotes.forEach(({ payload, span }, index) => {
+        payload.durationBeats = (cut[index]!.endTick - span.onsetTick) / GROOVE_RESOLVER_PPQ;
+      });
     }
     if (trackDrums.length > 0) events.push(...finalizeGrooveTrackDrums(project, trackDrums));
   }

@@ -305,7 +305,7 @@ P70 読み込みとネイティブ検証
 PR 本文の「判断をお願いしたい点」から集めました。いずれもユーザー判断待ちです。
 - [#67](https://github.com/machaniconico/compose-tutor-studio/pull/67)(P31): 曲を短くしたとき、範囲外のコードとセクションを自動で取り除く仕様でよいか。
 - [#75](https://github.com/machaniconico/compose-tutor-studio/pull/75): web のサイズ上限の引き上げ(方針変更)を認めるか。元に戻すか別の上限にするか。
-- [#78](https://github.com/machaniconico/compose-tutor-studio/pull/78)(P33): スウィング 50 で、隣り合う音を同じ高さへ移すと、スウィングで 60 tick 重なり断られる。再生・書き出し共通の規則(スウィング起因の重なりは前の音を止める等)を変えるか。
+- [#78](https://github.com/machaniconico/compose-tutor-studio/pull/78)(P33): スウィング 50 で、隣り合う音を同じ高さへ移すと、スウィングで 60 tick 重なり断られる。再生・書き出し共通の規則(スウィング起因の重なりは前の音を止める等)を変えるか。 → 変えました: スウィング起因の重なりは前の音を次の鳴り始めで止めます(docs/02、`fix/swing-overlap-cut`)。
 - [#79](https://github.com/machaniconico/compose-tutor-studio/pull/79)(P42): 録音中に再生を押すと音が後ろにずれる。A 録音中は再生不可、B 伴奏を聞きながら録音、のどちらか。
 - [#79](https://github.com/machaniconico/compose-tutor-studio/pull/79)(P42): 「クリップの末尾まで繰り返す」オンのクリップへ重ね録りすると繰り返し周期が変わる(鉛筆ツールも同じで main からの挙動)。
 - [#84](https://github.com/machaniconico/compose-tutor-studio/pull/84)(P70): wave5 で鳴らなかったコードトラックが変換後は鳴る。
