@@ -6,7 +6,7 @@ import {
   type FormEvent,
   type Ref,
 } from 'react';
-import { useStore, type TransportState } from '../../state/store';
+import { MIDI_RECORDING_PLAY_REFUSAL, useStore, type TransportState } from '../../state/store';
 import {
   beatToBarPosition,
   compileMusicalTime,
@@ -56,6 +56,7 @@ type PlaybackLifecycleControlProps = {
   onPlay: () => void;
   onStop: () => void;
   playDisabled?: boolean;
+  playDisabledReason?: string;
 };
 
 /** Format an absolute beat against the project's active time-signature map. */
@@ -607,6 +608,7 @@ export function PlaybackLifecycleControl({
   onPlay,
   onStop,
   playDisabled = false,
+  playDisabledReason,
 }: PlaybackLifecycleControlProps) {
   const isStarting = transport.phase === 'starting';
   const isPlaying = transport.phase === 'playing';
@@ -640,6 +642,8 @@ export function PlaybackLifecycleControl({
         aria-busy={isStarting || undefined}
         aria-describedby="transport-playback-status"
         disabled={!isActive && playDisabled}
+        title={!isActive && playDisabled ? playDisabledReason : undefined}
+        aria-label={!isActive && playDisabled && playDisabledReason ? '再生（録音中は使えません）' : undefined}
         onClick={() => (isActive ? onStop() : onPlay())}
       >
         {isStarting ? '開始を中止' : isPlaying ? '一時停止' : '再生'}
@@ -706,6 +710,7 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
     postRollValue: string;
   } | null>(null);
   const [punchRangeError, setPunchRangeError] = useState<string | null>(null);
+  const midiRecordingActive = useStore((s) => s.midiRecordingActive);
   const recordingControlsLocked = audioRecordingOperationId !== null;
   const punchControlsLocked = isPunchEditingLocked(
     transport.phase,
@@ -885,7 +890,8 @@ export function TransportBar({ onOpenGuide, guideButtonRef }: TransportBarProps)
           transport={transport}
           onPlay={play}
           onStop={stop}
-          playDisabled={recordingControlsLocked}
+          playDisabled={recordingControlsLocked || midiRecordingActive}
+          playDisabledReason={midiRecordingActive ? MIDI_RECORDING_PLAY_REFUSAL : undefined}
         />
 
         <RecordingOpenControl

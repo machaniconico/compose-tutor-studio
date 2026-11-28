@@ -229,6 +229,9 @@ export type ProjectSaveState = {
   retry: RetryPolicy | null;
 };
 
+/** Play during a MIDI take would start the clock mid-take and shift the recorded notes later. */
+export const MIDI_RECORDING_PLAY_REFUSAL = '録音中は再生できません。録音を止めてから再生してください。';
+
 export type PersistenceNotice = Readonly<{
   kind: 'recovered' | 'warning';
   message: string;
@@ -3461,6 +3464,10 @@ export function createStudioStore(
     // --- transport ---
     play: () => {
       const state = get();
+      if (state.midiRecordingActive) {
+        set({ persistenceNotice: { kind: 'warning', message: MIDI_RECORDING_PLAY_REFUSAL } });
+        return;
+      }
       if (
         state.projectOperationBusy
         || state.audioRecordingOperationId !== null
@@ -3537,6 +3544,7 @@ export function createStudioStore(
         && punch.playbackEndBeat >= punch.punchOutBeat;
       if (
         state.projectOperationBusy
+        || state.midiRecordingActive
         || state.audioRecordingOperationId !== operationId
         || state.transport.phase !== 'stopped'
         || (!oneShotIntentValid && !cycleIntentValid && !punchIntentValid)
