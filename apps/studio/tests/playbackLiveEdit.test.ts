@@ -505,6 +505,22 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(rec.releasedVoices.filter((v) => v.pitch === 60)).toEqual([]);
   });
 
+  it('再生の準備中にトラック名だけを変えても、開始時に作り直さない - live-edit fix A (critic minor 1)', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    const before = vi.mocked(buildScheduleEvents).mock.calls.length;
+    store().play();
+    const id = melodyId();
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => (t.id === id ? { ...t, name: 'メロディ2' } : t)),
+    }));
+    await vi.advanceTimersByTimeAsync(50);
+    expect(store().transport.phase).toBe('playing');
+
+    // Exactly one build: the startup schedule.
+    expect(vi.mocked(buildScheduleEvents).mock.calls.length).toBe(before + 1);
+  });
+
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
     setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
     store().setLoopRange(0, 4);

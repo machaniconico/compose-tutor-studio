@@ -1095,7 +1095,11 @@ export function initAudioBridge(): () => void {
       // The session was built from the Project of its start request. A note
       // edit adopted while it was starting is applied before the first audible
       // look-ahead window can drift further; seek replacements start here too.
-      applyPendingScheduleEdit();
+      // A rename or mixer edit during startup changes nothing to rebuild.
+      const started = bridge.controller?.activeSession;
+      if (started && hasScheduleContentChanged(started.scheduleProject, useStore.getState().project)) {
+        applyPendingScheduleEdit();
+      }
     },
     failStart: (requestId, error) => {
       const store = useStore.getState();
