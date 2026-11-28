@@ -104,6 +104,7 @@ import {
   createScheduleEventIndex,
   LOOKAHEAD_S,
   loopBeatTimeMapping,
+  nextIndexedEventsInWindow,
   preflightLoopScheduleDensity,
   resolveDrumOccurrence,
   Scheduler,
@@ -113,7 +114,7 @@ import {
   type LoopRegion,
   type ScheduledEvent,
 } from './scheduler';
-import { SynthVoiceManager } from './synth';
+import { SynthVoiceManager, type SynthVoiceHandle } from './synth';
 import {
   DEFAULT_AUDIO_TAIL_SAMPLE_RATE,
   FINAL_TAIL_FADE_SECONDS,
@@ -159,11 +160,25 @@ type RuntimeSession = PlaybackSession & {
   readonly projectSnapshot: Project;
   readonly contextGeneration: number;
   readonly routingPlan: CompiledAudioRoutingPlan;
-  readonly scheduleEvents: readonly ScheduledEvent[];
+  /** Current schedule; replaced in place by a live note-content edit. */
+  scheduleEvents: readonly ScheduledEvent[];
+  /** Note / drum events already handed to a voice and not yet finished. */
+  firedVoices: FiredVoice[];
   readonly everAudibleTrackIds: Set<string>;
   readonly everAudibleEdgeIds: Set<string>;
   positionTimer: ReturnType<typeof setInterval> | null;
   automationCycleBoundaryHandled: boolean;
+};
+
+/** One event the scheduler already fired, kept until its sound ends. */
+type FiredVoice = {
+  /** scheduleEventKey of the source event. */
+  readonly key: string;
+  readonly trackId: string;
+  readonly time: number;
+  readonly endTime: number;
+  /** Synth voice for a note; null for a drum hit, which cannot be cancelled. */
+  readonly handle: SynthVoiceHandle | null;
 };
 
 type NaturalDrainControls = Readonly<{
@@ -1080,6 +1095,31 @@ export function initAudioBridge(): () => void {
     });
   });
 
+  // Note-content edits are coalesced to one rebuild on the next timer turn, so
+  // a drag that commits many Project states rebuilds the schedule once.
+  let scheduleEditTimer: ReturnType<typeof setTimeout> | null = null;
+  const applyPendingScheduleEdit = (): void => {
+    scheduleEditTimer = null;
+    const session = controller.activeSession;
+    if (!session?.scheduler.isRunning) return;
+    const state = useStore.getState();
+    if (
+      state.transport.phase !== 'playing'
+      || state.transport.playbackRequestId !== session.requestId
+      || state.project.id !== session.projectSnapshot.id
+      || hasPlaybackTopologyChanged(session.projectSnapshot, state.project)
+    ) {
+      return;
+    }
+    try {
+      applyRuntimeScheduleContentEdit(session, state.project, getAudioEngine().now());
+    } catch {
+      // An edit past the schedule budget cannot be half-applied: stop the
+      // session like any other live resource failure.
+      useStore.getState().interruptPlayback(session.requestId, 'audio-resource-limit');
+    }
+  };
+
   // Dispose sessions captured from obsolete topology, including a natural
   // drain whose transport already reached stopped. Apply compatible mixer
   // changes to the accepted running session only.
@@ -1148,6 +1188,13 @@ export function initAudioBridge(): () => void {
       )
     ) {
       return;
+    }
+    if (
+      scheduleEditTimer === null
+      && controller.activeSession?.scheduler.isRunning
+      && hasScheduleContentChanged(previous.project, next.project)
+    ) {
+      scheduleEditTimer = setTimeout(applyPendingScheduleEdit, 0);
     }
     const trackMixChanged = hasLiveMixChanged(
       previous.project.tracks,
@@ -1226,6 +1273,8 @@ export function initAudioBridge(): () => void {
   controller.reconcile();
 
   return () => {
+    if (scheduleEditTimer !== null) clearTimeout(scheduleEditTimer);
+    scheduleEditTimer = null;
     for (const unsubscribe of bridge.unsub) unsubscribe();
     bridge.unsub = [];
     bridge.installed = false;
@@ -2008,7 +2057,7 @@ async function createRuntimeSessionImpl(
       const tail = planRuntimeAudioTail(
         project,
         latestTracks,
-        scheduleEvents,
+        session?.scheduleEvents ?? scheduleEvents,
         startBeat,
         lengthBeats,
         everAudibleTrackIds,
@@ -2066,6 +2115,7 @@ async function createRuntimeSessionImpl(
       contextGeneration,
       routingPlan,
       scheduleEvents,
+      firedVoices: [],
       everAudibleTrackIds,
       everAudibleEdgeIds,
       positionTimer: null,
@@ -2282,18 +2332,26 @@ function scheduleAudioForWindow(
 
 /** Schedule a batch of due note/drum events for one generation only. */
 function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
+  const now = getAudioEngine().now();
+  session.firedVoices = session.firedVoices.filter((voice) => voice.endTime >= now);
   for (const event of due) {
     const payload = event.payload as SchedulePayload;
+    const key = scheduleEventKey(payload, event.beat);
     if (payload.kind === 'note') {
       const synth = session.synths.get(payload.trackId);
       if (!synth) continue;
       const { transportTempo, anchorBeat, anchorTime, loop, tempoChangeBeats } = session;
       const startBeat = timeToBeat(event.time, transportTempo, anchorBeat, anchorTime);
       const cutoff = session.cutoffLanes.get(payload.trackId);
-      synth.noteOn(
+      const durationSeconds = mappedBeatDurationSeconds(
+        transportTempo,
+        startBeat,
+        payload.durationBeats,
+      );
+      const handle = synth.noteOn(
         payload.pitch,
         event.time,
-        mappedBeatDurationSeconds(transportTempo, startBeat, payload.durationBeats),
+        durationSeconds,
         payload.velocity,
         undefined,
         cutoff ? (detune, stopTime) => scheduleFilterCutoff(
@@ -2301,6 +2359,13 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
             session.projectSnapshot.lengthBeats, loop, tempoChangeBeats,
           ) : undefined,
       );
+      session.firedVoices.push({
+        key,
+        trackId: payload.trackId,
+        time: event.time,
+        endTime: event.time + durationSeconds,
+        handle: handle ?? null,
+      });
     } else {
       const { anchorBeat, anchorTime, transportTempo } = session;
       let choke: { tick: number } | { stopTime: number } | undefined;
@@ -2319,8 +2384,110 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
       session.drums
         .get(payload.trackId)
         ?.trigger(payload.lane, event.time, payload.velocity, payload.voiceSeed, choke);
+      session.firedVoices.push({
+        key,
+        trackId: payload.trackId,
+        time: event.time,
+        endTime: event.time,
+        handle: null,
+      });
     }
   }
+}
+
+/** Stable identity of one schedule event: what sounds, where, at which source beat. */
+function scheduleEventKey(payload: SchedulePayload, sourceBeat: number): string {
+  return payload.kind === 'note'
+    ? `n|${payload.trackId}|${payload.preset}|${payload.pitch}|${payload.velocity}|${payload.durationBeats}|${sourceBeat}`
+    : `d|${payload.trackId}|${JSON.stringify(payload)}|${sourceBeat}`;
+}
+
+/**
+ * Whether an edit that kept the playback topology may still change what the
+ * schedule plays: clip contents (notes, drum steps) or project-level harmony.
+ * Mixer-only edits keep every clips array and top-level field by reference.
+ */
+export function hasScheduleContentChanged(previous: Project, next: Project): boolean {
+  if (previous === next) return false;
+  for (const key of Object.keys(next) as Array<keyof Project>) {
+    if (key !== 'tracks' && previous[key] !== next[key]) return true;
+  }
+  return next.tracks.some((track, index) => previous.tracks[index]?.clips !== track.clips);
+}
+
+/**
+ * Apply a note-content edit to a running session without restarting it.
+ *
+ * The events are rebuilt with the same buildScheduleEvents used at startup
+ * and swapped into the scheduler, so later windows and loop passes play the
+ * edit. Events already handed to the lookahead (onset in the future) are
+ * diffed by key and onset time: removed or changed ones are cancelled and
+ * new ones fired. A sounding note whose event no longer exists gets the
+ * synth's short release. Unchanged voices are left alone.
+ */
+export function applyRuntimeScheduleContentEdit(
+  session: RuntimeSession,
+  project: Project,
+  now: number,
+): void {
+  const events = buildScheduleEvents(project);
+  const index = createScheduleEventIndex(events, session.loop);
+  if (session.loop) {
+    const density = preflightLoopScheduleDensity(
+      index,
+      RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
+      MAX_RUNTIME_EVENTS_PER_DENSITY_WINDOW,
+    );
+    if (!density.ok) {
+      throw new ScheduleEventLimitError(
+        density.limit,
+        density.observed,
+        'density',
+        density.windowStartBeat,
+      );
+    }
+  }
+  session.scheduler.replaceEventIndex(index);
+  session.scheduleEvents = events;
+
+  const { anchorBeat, anchorTime } = session;
+  const playheadBeat = now < anchorTime
+    ? anchorBeat
+    : timeToBeat(now, session.transportTempo, anchorBeat, anchorTime);
+  const frontierBeat = session.scheduler.scheduledThroughBeat;
+  const due = frontierBeat > playheadBeat
+    ? nextIndexedEventsInWindow(index, playheadBeat, frontierBeat, session.tempo, anchorBeat, anchorTime)
+    : [];
+
+  const live = session.firedVoices.filter((voice) => voice.endTime >= now);
+  const pending = new Map<string, FiredVoice[]>();
+  for (const voice of live) {
+    if (voice.time < now) continue;
+    const slot = `${voice.key}@${voice.time}`;
+    const list = pending.get(slot);
+    if (list) list.push(voice);
+    else pending.set(slot, [voice]);
+  }
+  const added: DueEvent[] = [];
+  for (const event of due) {
+    const slot = `${scheduleEventKey(event.payload as SchedulePayload, event.beat)}@${event.time}`;
+    if (!pending.get(slot)?.pop()) added.push(event);
+  }
+
+  const cancelled = new Set<FiredVoice>();
+  for (const list of pending.values()) for (const voice of list) cancelled.add(voice);
+  const currentKeys = new Set(events.map((event) => (
+    scheduleEventKey(event.payload as SchedulePayload, event.beat)
+  )));
+  for (const voice of live) {
+    if (voice.time < now && voice.handle && !currentKeys.has(voice.key)) cancelled.add(voice);
+  }
+  for (const voice of cancelled) {
+    // Drum hits have no handle; at most one lookahead window of them remains.
+    if (voice.handle) session.synths.get(voice.trackId)?.releaseVoice(voice.handle, now);
+  }
+  session.firedVoices = live.filter((voice) => !cancelled.has(voice));
+  if (added.length > 0) fireEvents(session, added);
 }
 
 function frozenAutomationValueAt(

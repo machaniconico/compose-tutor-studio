@@ -3,6 +3,7 @@ import { metronomeBeatEvents } from '../src/audio/metronome';
 import {
   advanceBeat,
   beatToTime,
+  createScheduleEventIndex,
   isValidLoop,
   nextEventsInWindow,
   projectLengthBeats,
@@ -186,6 +187,36 @@ describe('nextEventsInWindow (loop wrap)', () => {
 describe('Scheduler metronome windows', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('replaces the event index of a running schedule without moving the frontier', () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const fired: unknown[] = [];
+    const scheduler = new Scheduler({
+      clock: () => now,
+      fire: (due) => fired.push(...due.map((event) => event.payload)),
+      tickMs: 25,
+      lookaheadS: 0.1,
+    });
+    const loop: LoopRegion = { startBeat: 0, endBeat: 4 };
+    scheduler.start([{ beat: 0, payload: 'a' }, { beat: 2, payload: 'b' }], 120, 0, loop, Infinity);
+    expect(fired).toEqual(['a']);
+    const frontier = scheduler.scheduledThroughBeat;
+
+    scheduler.replaceEventIndex(
+      createScheduleEventIndex([{ beat: 0, payload: 'a' }, { beat: 3, payload: 'c' }], loop),
+    );
+    expect(scheduler.scheduledThroughBeat).toBe(frontier);
+    expect(() => scheduler.replaceEventIndex(createScheduleEventIndex([], null))).toThrow(RangeError);
+
+    for (let step = 1; step <= 96; step += 1) {
+      now = step * 0.025;
+      vi.advanceTimersByTime(25);
+    }
+    // 2.4 s: beat 3 of the first pass, then beat 0 of the second pass.
+    expect(fired).toEqual(['a', 'c', 'a']);
+    scheduler.stop();
   });
 
   it('advances raw lookahead windows even when no musical events are due', () => {

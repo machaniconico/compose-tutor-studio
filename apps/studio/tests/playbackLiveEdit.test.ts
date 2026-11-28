@@ -3,15 +3,16 @@ import { createMidiClip, type Clip, type Project } from '@cts/project-model';
 import type { TrackGraph } from '../src/audio/graph';
 
 // US-012b (wave5 playbackLiveEdit) invariants checked against main's playback.
-// Main's design differs: a clip-layout or tempo edit stops playback
-// (hasPlaybackTopologyChanged) and note-content edits are not applied to the
-// running session. Real Scheduler on a hand-driven audio clock; the synth mock
-// records what is actually triggered and what is released/disposed.
+// A clip-layout or tempo edit stops playback (hasPlaybackTopologyChanged);
+// note-content edits are applied to the running session (G1-G4). Real
+// Scheduler on a hand-driven audio clock; the synth mock records what is
+// actually triggered and what is released/disposed.
 const rec = vi.hoisted(() => ({
   now: 10,
   notes: [] as Array<{ pitch: number; start: number; duration: number }>,
   disposed: 0,
   released: 0,
+  releasedVoices: [] as Array<{ pitch: number; start: number; when: number }>,
 }));
 
 vi.mock('../src/audio/engine', () => {
@@ -74,6 +75,10 @@ vi.mock('../src/audio/synth', () => ({
   SynthVoiceManager: class {
     noteOn = vi.fn((pitch: number, start: number, duration: number) => {
       rec.notes.push({ pitch, start, duration });
+      return { pitch, start };
+    });
+    releaseVoice = vi.fn((handle: { pitch: number; start: number }, when: number) => {
+      rec.releasedVoices.push({ ...handle, when });
     });
     releaseAll = vi.fn(() => { rec.released += 1; });
     dispose = vi.fn(() => { rec.disposed += 1; });
@@ -143,6 +148,7 @@ beforeEach(() => {
   rec.notes.length = 0;
   rec.disposed = 0;
   rec.released = 0;
+  rec.releasedVoices.length = 0;
   useStore.setState((s) => ({
     project: initialProject,
     past: [],
@@ -191,7 +197,7 @@ const newNote = (pitch: number, startBeat: number) =>
 // Default tempo is 120 bpm: one beat is 0.5 s.
 const TWO_NOTES_THEN_TAIL = [[60, 0, 1], [62, 4, 1], [64, 7, 1]] as Array<[number, number, number]>;
 
-describe('note-content edit while playing (US-012b, main: session keeps its frozen snapshot)', () => {
+describe('note-content edit while playing (US-012b)', () => {
   it('keeps the same playback session running when a note is deleted', async () => {
     setClips([melody(TWO_NOTES_THEN_TAIL)]);
     const requestId = await play();
@@ -256,10 +262,90 @@ describe('note-content edit while playing (US-012b, main: session keeps its froz
     expect(count(60)).toBe(3);
   });
 
-  it.todo('削除した未再生ノートは鳴らない(main は再生開始時の凍結スナップショットのまま鳴る) - docs/05 known playback live-edit gaps G1');
-  it.todo('再生ヘッドより先に追加したノートが同じパスで鳴る(main は鳴らない) - docs/05 known playback live-edit gaps G2');
-  it.todo('鳴っている最中のノートを削除すると解放される(main は鳴り続ける) - docs/05 known playback live-edit gaps G3');
-  it.todo('ループ再生中のノート編集が次のパスで聞こえる(main は旧内容を繰り返す) - docs/05 known playback live-edit gaps G4');
+  it('削除した未再生ノートは鳴らない - docs/05 G1', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(6);
+
+    expect(count(62)).toBe(0);
+    expect(count(64)).toBe(1);
+  });
+
+  it('再生ヘッドより先に追加したノートが同じパスで鳴る - docs/05 G2', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.concat([newNote(71, 5)]));
+    await runFor(6);
+
+    expect(count(71)).toBe(1);
+    // Beat 5 at 120 bpm is 2.5 s after the 10 s start.
+    expect(rec.notes.find((n) => n.pitch === 71)?.start).toBeCloseTo(12.5, 6);
+    expect(count(62)).toBe(1);
+  });
+
+  it('鳴っている最中のノートを削除すると短いリリースで止まる - docs/05 G3', async () => {
+    setClips([melody([[60, 0, 1], [62, 2, 6]])]);
+    await play();
+    await runFor(2);
+    expect(count(62)).toBe(1);
+    const editAt = rec.now;
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(0.1);
+
+    const released = rec.releasedVoices.filter((v) => v.pitch === 62);
+    expect(released).toHaveLength(1);
+    // Released at the next tick with the synth's soft release, not a hard dispose.
+    expect(released[0]!.when).toBeGreaterThanOrEqual(editAt);
+    expect(released[0]!.when).toBeLessThan(editAt + 0.1);
+    expect(rec.disposed).toBe(0);
+    expect(rec.released).toBe(0);
+    expect(rec.releasedVoices.filter((v) => v.pitch !== 62)).toHaveLength(0);
+    expect(store().transport.phase).toBe('playing');
+  });
+
+  it('先読み済みのノートも差分で取り消し・追加し、未変更のノートは鳴らし直さない - docs/05 G1/G2', async () => {
+    setClips([melody([[60, 0, 1], [62, 4, 1], [64, 4, 1]])]);
+    await play();
+    await runFor(1);
+    // 11.9 s: the 120 ms lookahead has already handed beat 4 (12.0 s) to the synth.
+    rec.now = 11.9;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(rec.notes.filter((n) => n.start === 12)).toHaveLength(2);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62).concat([newNote(71, 3.95)]));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(rec.releasedVoices).toEqual([{ pitch: 62, start: 12, when: 11.9 }]);
+    expect(count(71)).toBe(1);
+    expect(count(64)).toBe(1);
+    await runFor(1);
+    expect(count(64)).toBe(1);
+    expect(count(71)).toBe(1);
+  });
+
+  it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
+    setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
+    store().setLoopRange(0, 4);
+    await play();
+    await runFor(1.5);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62).concat([newNote(71, 3)]));
+    await runFor(3);
+
+    // One pass is 2 s: passes start at 10 s, 12 s and 14 s. The second pass
+    // (12-14 s) is the first one scheduled entirely after the edit.
+    const afterEdit = rec.notes.filter((n) => n.start > 11.6);
+    expect(afterEdit.filter((n) => n.pitch === 62)).toHaveLength(0);
+    expect(afterEdit.filter((n) => n.pitch === 71).map((n) => n.start))
+      .toEqual([expect.closeTo(13.5, 6)]);
+    expect(count(60)).toBe(3);
+  });
 });
 
 describe('clip layout and tempo edit while playing (US-012b, main: topology change stops playback)', () => {
@@ -321,5 +407,5 @@ describe('clip layout and tempo edit while playing (US-012b, main: topology chan
     expect(store().transport.phase).toBe('stopped');
   });
 
-  it.todo('クリップの移動・削除・テンポ変更後も再生が止まらず即時に反映される(main は停止する設計) - docs/05 known playback live-edit gaps G5');
+  it.todo('クリップの移動・削除・テンポ変更後も再生が止まらず即時に反映される(main は停止する設計) - docs/05 §6.1.6.1 G5');
 });
