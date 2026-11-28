@@ -16,6 +16,7 @@ import {
   melodyNotesOnProjectTimeline,
   type CoachSeverity,
 } from '../../state/coach';
+import { AutoAccompanimentAssistant } from './AutoAccompanimentAssistant';
 import { CompingAssistant } from './CompingAssistant';
 import { HummingMelodyAssistant } from '../hummingToMelody/HummingMelodyAssistant';
 
@@ -32,6 +33,7 @@ export function AssistantPanel() {
     <div className="assistant">
       <HummingMelodyAssistant />
       <CoachPanel />
+      <AutoAccompanimentAssistant />
       <BassAssistant />
       <CompingAssistant />
       <MelodyAssistant />
