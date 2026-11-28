@@ -112,12 +112,19 @@ vi.mock('../../src/audio/graph', async (importOriginal) => {
       new Map(
         project.tracks.map((track) => [
           track.id,
-          {
-            input: {} as GainNode,
-            scheduleAutomation: vi.fn(),
-            schedulePunchAudibility: vi.fn(),
-            dispose: vi.fn(),
-          },
+          // Any graph method (applyScalar, scheduleAutomation, ...) is an accepted no-op.
+          new Proxy(
+            { input: {} as GainNode } as Record<string | symbol, unknown>,
+            {
+              get(target, prop) {
+                if (prop in target) return target[prop];
+                if (typeof prop !== 'string') return undefined;
+                const fn = vi.fn();
+                target[prop] = fn;
+                return fn;
+              },
+            },
+          ),
         ]),
       ) as unknown as Map<string, TrackGraph>,
   };
@@ -251,9 +258,27 @@ const unreleased = (pitch: number) =>
 
 async function startPlayback(
   notes: readonly NoteSpec[],
-  options: { loop?: readonly [number, number] } = {},
+  options: { loop?: readonly [number, number]; panLane?: boolean } = {},
 ): Promise<void> {
-  useStore.setState({ project: buildProject(notes) });
+  const project = buildProject(notes);
+  if (options.panLane) {
+    const { track } = clipOf(project);
+    project.automationLanes = [
+      {
+        id: 'lane-pan',
+        bypassed: false,
+        target: { type: 'track-pan', trackId: track.id },
+        points: [
+          { id: 'pan-0', beat: 0, value: -0.5, interpolation: 'linear' },
+          { id: 'pan-1', beat: 16, value: 0.5, interpolation: 'hold' },
+        ],
+      },
+    ];
+  }
+  useStore.setState({ project });
+  if (options.panLane) {
+    useStore.getState().setTrackAutomationMode(clipOf(project).track.id, 'read');
+  }
   if (options.loop) {
     expect(useStore.getState().setLoopRange(options.loop[0], options.loop[1])).toBe(true);
   }
@@ -525,5 +550,51 @@ describe('live edit acceptance: note edits during playback', () => {
     expect(noteOnsOf(62)).toHaveLength(1);
     expect(noteOnsOf(64)).toHaveLength(1);
     expect(noteOnsOf(SENTINEL_PITCH)).toHaveLength(1);
+  });
+
+  describe('N7: note edits still take effect after a scalar change on a track that has an automation lane', () => {
+    async function playWithLaneThenChangeVolume(notes: readonly NoteSpec[]): Promise<void> {
+      await startPlayback(notes, { panLane: true });
+      await runUntil(0.5);
+      expect(useStore.getState().transport.phase).toBe('playing');
+      const { track } = clipOf(useStore.getState().project);
+      useStore.getState().setTrackVolume(track.id, 0.6);
+      await tick(0.1);
+      expect(useStore.getState().transport.phase).toBe('playing');
+    }
+
+    it('N7 G1: a note deleted before it has sounded does not sound', async () => {
+      await playWithLaneThenChangeVolume([[62, 4, 1]]);
+      await runUntil(1.0);
+      useStore.getState().removeNote(clipId(), noteIdByPitch(62));
+      await runUntil(4);
+      expect(unreleased(62)).toHaveLength(0);
+    });
+
+    it('N7 G2: a note added ahead of the playhead sounds', async () => {
+      await playWithLaneThenChangeVolume([]);
+      await runUntil(1.0);
+      useStore.getState().addNote(clipId(), {
+        pitch: 71,
+        startBeat: 5,
+        durationBeats: 1,
+        velocity: 100,
+      });
+      await runUntil(4);
+      const sounded = noteOnsOf(71);
+      expect(sounded).toHaveLength(1);
+      expect(sounded[0]!.time).toBeCloseTo(anchor() + 5 * BEAT, 2);
+      expect(releasedHandles().has(sounded[0]!.handle)).toBe(false);
+    });
+
+    it('N7 G3: deleting a sounding note releases its voice', async () => {
+      await playWithLaneThenChangeVolume([[60, 0.5, 6]]);
+      await runUntil(2.0);
+      const voices = noteOnsOf(60);
+      expect(voices).toHaveLength(1);
+      useStore.getState().removeNote(clipId(), noteIdByPitch(60));
+      await tick(0.1);
+      expect(rec.releases.some((entry) => entry.handle === voices[0]!.handle)).toBe(true);
+    });
   });
 });
