@@ -180,9 +180,10 @@ export function withOwnerNotes(project: Project, ownerId: string, notes: NoteEve
 // buildScheduleEvents による事後確認
 // ---------------------------------------------------------------------------
 
-function scheduleOf(project: Project): ScheduledEvent[] | null {
+/** `cut: false` は、スウィングの重なり切り詰めの前(「選んでいない音は変わらない」の比較用)。 */
+function scheduleOf(project: Project, cut = true): ScheduledEvent[] | null {
   try {
-    return buildScheduleEvents(project);
+    return buildScheduleEvents(project, { skipSwingCut: !cut });
   } catch {
     return null;
   }
@@ -248,7 +249,10 @@ function occurrenceKeys(project: Project, ownerId: string, ids: ReadonlySet<stri
     // buildScheduleEvents そのもの(スウィング後の onset / 長さ、同じ高さの重なりの切り詰め込み)から、
     // この音の予定だけを拾う。
     const sources = new Map<object, { clipId: string; noteId: string }>();
-    const events = buildScheduleEvents(project, (payload, source) => sources.set(payload, source));
+    const events = buildScheduleEvents(project, {
+      skipSwingCut: true,
+      onClipNote: (payload, source) => sources.set(payload, source),
+    });
     for (const event of events) {
       const payload = event.payload as SchedulePayload;
       const source = sources.get(payload);
@@ -318,10 +322,13 @@ export function scheduleProblem(
   addedIds: ReadonlySet<string>,
   overlapReason: (pitch: number) => string,
 ): string | null {
-  const a = scheduleOf(before);
-  const b = scheduleOf(after);
-  if (a === null || b === null || !sane(b)) return SOUND_CHANGED;
-  const pitch = scheduleOverlapPitch(b, target.trackIds);
+  // 重なりの確認は切り詰めた後の予定(実際に鳴る形)で、「選んでいない音は変わらない」の比較は
+  // 切り詰める前の予定で行う(隣の音を編集しただけで、選んでいない音の長さが変わって見えるため)。
+  const a = scheduleOf(before, false);
+  const b = scheduleOf(after, false);
+  const bCut = scheduleOf(after);
+  if (a === null || b === null || bCut === null || !sane(b)) return SOUND_CHANGED;
+  const pitch = scheduleOverlapPitch(bCut, target.trackIds);
   if (pitch !== null) return overlapReason(pitch);
   const removed = occurrenceKeys(before, target.owner.id, removedIds);
   const added = occurrenceKeys(after, target.owner.id, addedIds);

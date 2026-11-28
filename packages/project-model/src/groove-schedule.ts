@@ -42,11 +42,15 @@ function onsetLimitTick(project: GrooveProject, spanEndBeat: number): number {
  * note before swing (the stored grid), used to tell a swing-made overlap from
  * one that is already in the stored notes.
  */
+/** Float-noise tolerance for stored-overlap checks (well under 1/480 beat). */
+const STORED_OVERLAP_EPSILON_BEATS = 1e-9;
+
 export type GrooveNoteSpan = Readonly<{
   onsetTick: number;
   endTick: number;
-  sourceStartTick: number;
-  sourceEndTick: number;
+  /** Exact (unrounded) source position and end in beats. */
+  sourceStartBeat: number;
+  sourceEndBeat: number;
 }>;
 
 /**
@@ -71,12 +75,12 @@ export function resolveGrooveNoteSpan(
     beatTick(spanEndBeat),
     Math.max(onsetTick + 1, beatTick(onsetBeat + durationBeats)),
   );
-  const sourceStartTick = beatTick(sourceBeat);
-  const sourceEndTick = Math.min(
-    beatTick(spanEndBeat),
-    Math.max(sourceStartTick + 1, beatTick(sourceBeat + durationBeats)),
-  );
-  return { onsetTick, endTick, sourceStartTick, sourceEndTick };
+  return {
+    onsetTick,
+    endTick,
+    sourceStartBeat: sourceBeat,
+    sourceEndBeat: Math.min(spanEndBeat, sourceBeat + durationBeats),
+  };
 }
 
 /**
@@ -102,7 +106,15 @@ export function cutSwingOverlaps(
     for (let i = 0; i + 1 < indexes.length; i += 1) {
       const current = result[indexes[i]!]!;
       const next = result[indexes[i + 1]!]!;
-      if (next.onsetTick < current.endTick && current.sourceEndTick <= next.sourceStartTick) {
+      // Cut only a pure swing overlap: the stored notes do not overlap (exact beats, with a
+      // tolerance far below one tick for float noise), they keep their source order, and their
+      // sounding onsets are strictly increasing. Anything else is left as it was.
+      if (
+        next.onsetTick < current.endTick
+        && next.onsetTick > current.onsetTick
+        && current.sourceStartBeat < next.sourceStartBeat
+        && current.sourceEndBeat <= next.sourceStartBeat + STORED_OVERLAP_EPSILON_BEATS
+      ) {
         result[indexes[i]!] = {
           ...current,
           endTick: Math.max(current.onsetTick + 1, next.onsetTick),

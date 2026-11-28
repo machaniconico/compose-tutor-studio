@@ -180,7 +180,7 @@ describe('swing overlap cut: edit checks (#78)', () => {
 
 describe('cutSwingOverlaps (shared rule)', () => {
   const span = (onsetTick: number, endTick: number, sourceStartTick: number, sourceEndTick: number) =>
-    ({ onsetTick, endTick, sourceStartTick, sourceEndTick });
+    ({ onsetTick, endTick, sourceStartBeat: sourceStartTick / PPQ, sourceEndBeat: sourceEndTick / PPQ });
 
   it('keeps the sounding length at least 1 tick', () => {
     const cut = cutSwingOverlaps([
@@ -196,5 +196,56 @@ describe('cutSwingOverlaps (shared rule)', () => {
       { group: 'b', span: span(120, 240, 120, 240) },
     ]);
     expect(cut[0]!.endTick).toBe(180);
+  });
+});
+
+// Codex review: exact stored overlap, editing the later note, same-tick / reversed onsets.
+describe('swing overlap cut: narrowed rule (review round 2)', () => {
+  const t = (ticks: number) => ticks / PPQ;
+
+  it('A: a stored overlap hidden by tick rounding is not cut, and MIDI still refuses', () => {
+    // 60 at [120, 240.25) and [240, 300): the first really runs 0.25 tick into the second.
+    const specs: Spec[] = [['a', 60, t(120), t(120.25)], ['b', 60, t(240), t(60)]];
+    const project = melodyProject(specs, { swing: 50 });
+    // 480 PPQ に丸めた長さ(120 tick)のまま。切られると 60 tick になる。
+    expect(melodyNotes(project, 60)[0]!.durationBeats).toBe(t(120));
+    expect(projectToMidiResult(project).ok).toBe(false);
+  });
+
+  it('B: editing only the later note to the same pitch succeeds and cuts the earlier note', () => {
+    const specs: Spec[] = [['a', 60, t(120), t(120)], ['b', 62, t(240), t(60)]];
+    const outcome = transposeNotesInProject(melodyProject(specs, { swing: 50 }), 'mel', ['b'], { semitones: -2 });
+    if (!outcome.ok) throw new Error(outcome.reason);
+    expect(melodyNotes(outcome.project, 60)).toEqual([
+      { beat: t(180), durationBeats: t(60) },
+      { beat: t(240), durationBeats: t(60) },
+    ]);
+  });
+
+  it('C1: two notes that sound on the same tick are not cut; MIDI and the edit refuse', () => {
+    const same: Spec[] = [['a', 60, t(120), t(60)], ['b', 60, t(180), t(60)]];
+    const project = melodyProject(same, { swing: 50 });
+    expect(melodyNotes(project, 60).map((n) => n.beat)).toEqual([t(180), t(180)]);
+    expect(melodyNotes(project, 60)[0]!.durationBeats).toBe(t(60));
+    expect(projectToMidiResult(project).ok).toBe(false);
+    const edit = transposeNotesInProject(
+      melodyProject([['a', 62, t(120), t(60)], ['b', 60, t(180), t(60)]], { swing: 50 }),
+      'mel', ['a'], { semitones: -2 },
+    );
+    expect(edit.ok).toBe(false);
+    if (!edit.ok) expect(edit.reason).toMatch(/重なって/);
+  });
+
+  it('C2: swing reversing the source order is not cut; MIDI and the edit refuse', () => {
+    const rev: Spec[] = [['a', 60, t(120), t(59)], ['b', 60, t(179), t(60)]];
+    const project = melodyProject(rev, { swing: 50 });
+    expect(melodyNotes(project, 60).find((n) => n.beat === t(180))!.durationBeats).toBe(t(59));
+    expect(projectToMidiResult(project).ok).toBe(false);
+    const edit = transposeNotesInProject(
+      melodyProject([['a', 62, t(120), t(59)], ['b', 60, t(179), t(60)]], { swing: 50 }),
+      'mel', ['a'], { semitones: -2 },
+    );
+    expect(edit.ok).toBe(false);
+    if (!edit.ok) expect(edit.reason).toMatch(/重なって/);
   });
 });
