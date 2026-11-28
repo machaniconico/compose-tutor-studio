@@ -258,6 +258,7 @@ export function App() {
           const state = useStore.getState();
           return (
             state.audioRecordingOperationId !== null
+            || state.midiRecordingActive
             || state.saveState.phase === 'pending'
             || state.saveState.phase === 'error'
           );

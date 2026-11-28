@@ -99,7 +99,7 @@ function noteName(pitch: number): string {
 }
 
 /** 拍を整数 tick に直す。目盛りから外れていれば null。 */
-function exactTicks(beat: number): number | null {
+export function exactTicks(beat: number): number | null {
   if (typeof beat !== 'number' || !Number.isFinite(beat)) return null;
   const ticks = Math.round(beat * PPQ);
   return Number.isSafeInteger(ticks) && ticks / PPQ === beat ? ticks : null;
@@ -170,7 +170,7 @@ function placementProblem(project: Project, target: EditTarget, note: NoteEvent)
   return null;
 }
 
-function withOwnerNotes(project: Project, ownerId: string, notes: NoteEvent[]): Project {
+export function withOwnerNotes(project: Project, ownerId: string, notes: NoteEvent[]): Project {
   return {
     ...project,
     tracks: project.tracks.map((track) =>
@@ -287,17 +287,28 @@ function occurrenceKeys(project: Project, ownerId: string, ids: ReadonlySet<stri
   return keys;
 }
 
+export function roundedNoteTickSpan(beat: number, durationBeats: number): readonly [number, number] {
+  const start = Math.round(beat * PPQ);
+  return [start, Math.max(start + 1, Math.round((beat + durationBeats) * PPQ))];
+}
+
+export function tickSpansOverlap(
+  left: readonly [number, number],
+  right: readonly [number, number],
+): boolean {
+  return left[0] < right[1] && right[0] < left[1];
+}
+
 /** D2: 同じトラック・同じ高さで、MIDI 書き出しと同じ丸めの tick 区間が交わる音の高さ。 */
 function scheduleOverlapPitch(events: readonly ScheduledEvent[], trackIds: ReadonlySet<string>): number | null {
   const spans = new Map<string, Array<readonly [number, number]>>();
   for (const event of events) {
     const payload = event.payload as SchedulePayload;
     if (payload.kind !== 'note' || !trackIds.has(payload.trackId)) continue;
-    const start = Math.round(event.beat * PPQ);
-    const end = Math.max(start + 1, Math.round((event.beat + payload.durationBeats) * PPQ));
+    const span = roundedNoteTickSpan(event.beat, payload.durationBeats);
     const key = `${payload.trackId}\u0000${payload.pitch}`;
     const list = spans.get(key) ?? [];
-    list.push([start, end]);
+    list.push(span);
     spans.set(key, list);
   }
   for (const [key, list] of spans) {

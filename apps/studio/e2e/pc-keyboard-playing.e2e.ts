@@ -35,3 +35,28 @@ for (const size of [{ width: 1_024, height: 640 }, { width: 1_440, height: 900 }
     expect(pageErrors).toEqual([]);
   });
 }
+
+test('records a PC keyboard note into the selected clip and undoes the take', async ({ page }) => {
+  await page.goto('/');
+  const welcome = page.getByRole('dialog', { name: 'ようこそ' });
+  if (await welcome.isVisible()) await welcome.getByRole('button', { name: 'あとで', exact: true }).click();
+  await page.getByRole('button', { name: '☰ プロジェクト', exact: true }).click();
+  await page.getByRole('dialog', { name: 'プロジェクト', exact: true })
+    .locator('button.template-card--blank').click();
+  await expect(page.getByRole('textbox', { name: 'プロジェクト名', exact: true })).toHaveValue('新しい曲');
+
+  await page.getByRole('button', { name: 'PC鍵盤で弾く', exact: true }).click();
+  const panel = page.getByRole('group', { name: 'PC鍵盤で弾く' });
+  await panel.getByRole('button', { name: 'MIDI 録音', exact: true }).click();
+  const stop = panel.getByRole('button', { name: 'MIDI 録音を停止', exact: true });
+  await expect(stop).toBeEnabled();
+  await page.keyboard.press('a', { delay: 120 });
+  await stop.click();
+  await expect(panel.getByText('録音を反映しました。 入らなかった音は 0 音です。')).toBeVisible();
+  const note = page.locator('.pr__note[aria-label^="C4。"]');
+  await expect(note).toHaveCount(1);
+
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+z');
+  await expect(note).toHaveCount(0);
+});

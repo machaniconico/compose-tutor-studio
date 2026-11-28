@@ -84,6 +84,20 @@ import {
   type AutomationRecordingRuntimeState,
 } from '../audio/automationRecording';
 
+import {
+  DISCARD_MIDI_TAKE_LABEL,
+  feedMidiRecordingEvent,
+  refuseMidiRecording,
+  startMidiRecording as startMidiTake,
+  stopMidiRecording as stopMidiTake,
+  type MidiRecordingEvent,
+  type MidiRecordingOptions,
+  type MidiRecordingRefusal,
+  type MidiRecordingSession,
+  type MidiRecordingStarted,
+  type MidiRecordingStopped,
+} from './midiRecording';
+
 export type EditorView =
   | 'pianoRoll'
   | 'drums'
@@ -307,6 +321,8 @@ export type StoreState = {
   projectOperationBusy: boolean;
   /** Runtime-only token protecting an in-flight microphone take and its asset commit. */
   audioRecordingOperationId: number | null;
+  midiRecordingActive: boolean;
+  midiRecordingStopFailure: MidiRecordingRefusal | null;
   /** Runtime-only single-input destination. Never serialized into the Project. */
   armedAudioTrackId: string | null;
   /** Runtime-only host device preference. Never serialized into the Project. */
@@ -470,6 +486,13 @@ export type StoreState = {
   setPunchRoll: (preRollBeats: number, postRollBeats: number) => boolean;
   togglePunch: () => void;
   toggleMetronome: () => void;
+
+  // MIDI recording lifecycle (runtime-only)
+  startMidiRecording: (options: MidiRecordingOptions, elapsed?: () => number) => MidiRecordingStarted | MidiRecordingRefusal;
+  feedMidiRecording: (event: MidiRecordingEvent) => void;
+  stopMidiRecording: (stop?: { timeSec: number }) => MidiRecordingStopped | MidiRecordingRefusal | null;
+  finalizeMidiRecording: () => boolean;
+  discardMidiRecording: () => void;
 
   // microphone recording lifecycle (runtime-only)
   /**
@@ -1712,6 +1735,27 @@ export function createStudioStore(
   let initializationFailed = false;
   let nativeCloseFenced = false;
   let nextAudioRecordingOperationId = 1;
+  let midiTake: MidiRecordingSession | null = null;
+  let midiTakeElapsed: (() => number) | undefined;
+  const retainMidiTake = (refusal: MidiRecordingRefusal): MidiRecordingRefusal => {
+    const failure = {
+      ...refusal,
+      message: `${refusal.message} PC鍵盤の「${DISCARD_MIDI_TAKE_LABEL}」を選べます。`,
+    };
+    set({ midiRecordingStopFailure: failure });
+    return failure;
+  };
+  const clearMidiTake = (): void => {
+    midiTake = null;
+    midiTakeElapsed = undefined;
+    set((state) => ({
+      midiRecordingActive: false,
+      midiRecordingStopFailure: null,
+      persistenceNotice: state.midiRecordingStopFailure?.message === state.persistenceNotice?.message
+        ? null
+        : state.persistenceNotice,
+    }));
+  };
   let erasePromise: Promise<boolean> | null = null;
   const pendingDeleteIds = new Map<string, string>();
 
@@ -1821,15 +1865,34 @@ export function createStudioStore(
 
   const runProjectOperation = async (
     operation: () => Promise<boolean>,
+    incomingProjectId?: string | null,
   ): Promise<boolean> => {
     const current = get();
     if (current.projectOperationBusy || current.audioRecordingOperationId !== null) return false;
     if (!current.finalizeAutomationRecording('project-activation')) return false;
+    if (current.midiRecordingActive) {
+      const failure = current.midiRecordingStopFailure;
+      if (
+        (failure !== null && failure.code !== 'invalid-options' && failure.code !== 'project-busy')
+        || incomingProjectId === null
+        || incomingProjectId === current.project.id
+        || !current.finalizeMidiRecording()
+      ) {
+        set({
+          persistenceNotice: {
+            kind: 'warning',
+            message: get().midiRecordingStopFailure?.message ?? '録音中のテイクを先に止めてください',
+          },
+        });
+        return false;
+      }
+    }
     // A gesture left open must never be applied to the next project, and its
     // mid-drag state must not be flushed by the switch.
     closeProjectTransaction('cancel');
     set({ projectOperationBusy: true });
     try {
+      if (current.midiRecordingActive && !(await prepareProjectSwitch())) return false;
       return await operation();
     } catch {
       set({
@@ -1905,7 +1968,7 @@ export function createStudioStore(
     // A project switch/delete may be reconciling a durable head. Never race
     // that reversible cancellation path with the coordinator's permanent seal.
     if (
-      (stateAtCall.projectOperationBusy || stateAtCall.audioRecordingOperationId !== null)
+      (stateAtCall.projectOperationBusy || stateAtCall.audioRecordingOperationId !== null || stateAtCall.midiRecordingActive)
       && stateAtCall.localDataErase.phase === 'idle'
     ) {
       return Promise.resolve(false);
@@ -2293,6 +2356,7 @@ export function createStudioStore(
     loaded: LoadedProject | null,
     audioAssetIssues: Readonly<Record<string, AudioAssetRuntimeIssue>> = {},
   ): boolean => {
+    if (get().midiRecordingActive) return false;
     const activationId = uid('activation');
     const persisted = loaded !== null;
     const expectedHeadVersion = expectedHeadForLoaded(loaded);
@@ -2406,8 +2470,19 @@ export function createStudioStore(
     }
 
     if (restored.value) {
-      const audioIssues = await inspectAudioAssetIssues(restored.value.project);
-      if (!activateProject(restored.value.project, restored.value, audioIssues)) {
+      const loaded = restored.value;
+      const audioIssues = await inspectAudioAssetIssues(loaded.project);
+      const hadMidiTake = get().midiRecordingActive;
+      const activate = () => activateProject(loaded.project, loaded, audioIssues);
+      const activated = hadMidiTake
+        ? await runProjectOperation(async () => activate(), loaded.project.id)
+        : activate();
+      if (!activated) {
+        if (hadMidiTake) {
+          initializationFailed = true;
+          set({ persistenceReady: true });
+          return false;
+        }
         set({
           persistenceReady: true,
           persistenceNotice: {
@@ -2510,8 +2585,9 @@ export function createStudioStore(
     }>,
     automationAuthorization?: AutomationRecordingOwnership,
     automationReadScalarTarget?: AutomationTarget,
+    committingMidiTake = false,
   ): boolean => {
-    if (get().projectOperationBusy) return false;
+    if (get().projectOperationBusy || get().midiRecordingActive !== committingMidiTake) return false;
     if (
       openProjectTransaction !== null
       && (recordingAuthorization !== undefined || automationAuthorization !== undefined)
@@ -2561,6 +2637,14 @@ export function createStudioStore(
     const stamped: Project = { ...next, updatedAt: nowIso() };
     const encoded = encodeProjectJson(stamped);
     if (!encoded.ok) {
+      if (committingMidiTake) {
+        retainMidiTake(refuseMidiRecording(
+          encoded.error.code === 'too-large' ? 'project-too-large'
+            : encoded.error.code === 'serialization-failed' ? 'project-serialization-failed'
+              : 'project-invalid',
+        ));
+        return false;
+      }
       // This candidate was never adopted or sent to the repository. Keep the
       // durability state of the current valid project intact; a rejected edit
       // is not a failed save of the project the user still has on screen.
@@ -2710,6 +2794,8 @@ export function createStudioStore(
     persistenceReady: false,
     projectOperationBusy: false,
     audioRecordingOperationId: null,
+    midiRecordingActive: false,
+    midiRecordingStopFailure: null,
     armedAudioTrackId: null,
     preferredMicrophoneInputDeviceId: null,
     recordingLatencyCompensationMode: 'estimated',
@@ -2726,13 +2812,13 @@ export function createStudioStore(
     past: [],
     future: [],
 
-    applyProjectChange: (fn) => commitProject(fn(get().project)),
+    applyProjectChange: (fn) => !get().midiRecordingActive && commitProject(fn(get().project)),
     splitClipAtBeat: (clipId, beat) => {
       const state = get();
       const { project } = state;
       const fail = (code: SplitClipFailure): SplitClipResult =>
         ({ ok: false, project, code, reason: SPLIT_CLIP_MESSAGES[code] });
-      if (state.audioRecordingOperationId !== null || automationCoordinator.hasActivePass()) {
+      if (state.audioRecordingOperationId !== null || state.midiRecordingActive || automationCoordinator.hasActivePass()) {
         return fail('split-recording');
       }
       if (state.projectOperationBusy || state.isProjectTransactionOpen()) {
@@ -2754,7 +2840,7 @@ export function createStudioStore(
     },
     applyVerifiedAudioAssetAddition: (fn, verifiedAudioAssetId) => {
       const state = get();
-      if (state.audioRecordingOperationId !== null) return false;
+      if (state.audioRecordingOperationId !== null || state.midiRecordingActive) return false;
       return commitProject(fn(state.project), verifiedAudioAssetId);
     },
     applyVerifiedRecordingAudioAssetAddition: (addition) => {
@@ -3243,7 +3329,7 @@ export function createStudioStore(
         playbackRequestId: requestId,
         currentBeat,
         graph,
-        audioRecordingActive: state.audioRecordingOperationId !== null,
+        audioRecordingActive: state.audioRecordingOperationId !== null || state.midiRecordingActive,
       });
       publishAutomationRuntime();
       return result.ok;
@@ -3595,6 +3681,7 @@ export function createStudioStore(
       const projectLength = transportProjectLengthBeats(before.project);
       if (
         before.audioRecordingOperationId !== null
+        || before.midiRecordingActive
         || !isExactLoopRangeValid(startBeat, endBeat, projectLength)
       ) {
         return false;
@@ -3636,7 +3723,7 @@ export function createStudioStore(
     },
     toggleLoop: () => {
       const before = get();
-      if (before.audioRecordingOperationId !== null) return;
+      if (before.audioRecordingOperationId !== null || before.midiRecordingActive) return;
       if (
         before.transport.phase !== 'stopped'
         && !finalizeAutomationPass('seek')
@@ -3644,7 +3731,7 @@ export function createStudioStore(
         return;
       }
       set((s) => {
-        if (s.audioRecordingOperationId !== null) return s;
+        if (s.audioRecordingOperationId !== null || s.midiRecordingActive) return s;
         const projectLength = transportProjectLengthBeats(s.project);
         const bounds = safeLoopBounds(
           s.transport.loopStartBeat,
@@ -3679,6 +3766,7 @@ export function createStudioStore(
       const projectLength = transportProjectLengthBeats(state.project);
       if (
         state.audioRecordingOperationId !== null
+        || state.midiRecordingActive
         || state.projectOperationBusy
         || state.transport.phase !== 'stopped'
         || !isExactLoopRangeValid(punchInBeat, punchOutBeat, projectLength)
@@ -3704,6 +3792,7 @@ export function createStudioStore(
       const state = get();
       if (
         state.audioRecordingOperationId !== null
+        || state.midiRecordingActive
         || state.projectOperationBusy
         || state.transport.phase !== 'stopped'
         || !Number.isSafeInteger(preRollBeats)
@@ -3731,6 +3820,7 @@ export function createStudioStore(
       set((state) => {
         if (
           state.audioRecordingOperationId !== null
+          || state.midiRecordingActive
           || state.projectOperationBusy
           || state.transport.phase !== 'stopped'
         ) {
@@ -3763,6 +3853,52 @@ export function createStudioStore(
       set((s) => s.audioRecordingOperationId === null
         ? { transport: { ...s.transport, metronome: !s.transport.metronome } }
         : s),
+
+    startMidiRecording: (options, elapsed) => {
+      const state = get();
+      if (state.audioRecordingOperationId !== null) return refuseMidiRecording('audio-recording-active');
+      if (state.midiRecordingActive) return refuseMidiRecording('midi-recording-active');
+      if (state.projectOperationBusy || state.localDataErase.phase !== 'idle' || automationCoordinator.hasActivePass()) {
+        return refuseMidiRecording('project-busy');
+      }
+      const started = startMidiTake(state.project, options);
+      if (!started.ok) return started;
+      if (openProjectTransaction !== null && !closeProjectTransaction('commit')) {
+        return refuseMidiRecording('project-busy');
+      }
+      midiTake = started.session;
+      midiTakeElapsed = elapsed;
+      set({ midiRecordingActive: true });
+      return started;
+    },
+    feedMidiRecording: (event) => {
+      if (midiTake !== null) midiTake = feedMidiRecordingEvent(midiTake, event);
+    },
+    stopMidiRecording: (stop) => {
+      if (midiTake === null) return null;
+      const elapsed = stop === undefined ? midiTakeElapsed?.() : undefined;
+      const timeSec = elapsed !== undefined && Number.isFinite(elapsed)
+        ? Math.max(elapsed, midiTake.lastTimeSec)
+        : midiTake.lastTimeSec;
+      const before = get().midiRecordingStopFailure;
+      const result = stopMidiTake(get().project, midiTake, stop ?? { timeSec });
+      if (!result.ok) return retainMidiTake(result);
+      if (result.changed
+        && !commitProject(result.project, undefined, undefined, undefined, undefined, true)) {
+        const failure = get().midiRecordingStopFailure;
+        if (failure !== null && failure !== before) return failure;
+        return retainMidiTake(refuseMidiRecording('project-busy'));
+      }
+      clearMidiTake();
+      return result;
+    },
+    finalizeMidiRecording: () => {
+      if (midiTake === null) return !get().midiRecordingActive;
+      return get().stopMidiRecording({ timeSec: midiTake.lastTimeSec })?.ok === true;
+    },
+    discardMidiRecording: () => {
+      if (midiTake !== null) clearMidiTake();
+    },
 
     // --- microphone recording lifecycle ---
     setAudioTrackArmed: (trackId) => {
@@ -3891,6 +4027,7 @@ export function createStudioStore(
       if (
         state.projectOperationBusy
         || state.audioRecordingOperationId !== null
+        || state.midiRecordingActive
         || automationCoordinator.hasActivePass()
         || state.localDataErase.phase !== 'idle'
       ) {
@@ -3921,7 +4058,7 @@ export function createStudioStore(
 
     // --- history ---
     undo: () => {
-      if (get().projectOperationBusy || get().audioRecordingOperationId !== null) return;
+      if (get().projectOperationBusy || get().audioRecordingOperationId !== null || get().midiRecordingActive) return;
       if (!finalizeAutomationPass('undo')) return;
       closeProjectTransaction('commit');
       const { past, project, future } = get();
@@ -3951,7 +4088,7 @@ export function createStudioStore(
       void refreshAudioAssetIssuesNow(restored);
     },
     redo: () => {
-      if (get().projectOperationBusy || get().audioRecordingOperationId !== null) return;
+      if (get().projectOperationBusy || get().audioRecordingOperationId !== null || get().midiRecordingActive) return;
       if (!finalizeAutomationPass('redo')) return;
       closeProjectTransaction('commit');
       const { past, project, future } = get();
@@ -3980,8 +4117,8 @@ export function createStudioStore(
       }
       void refreshAudioAssetIssuesNow(restored);
     },
-    canUndo: () => get().audioRecordingOperationId === null && get().past.length > 0,
-    canRedo: () => get().audioRecordingOperationId === null && get().future.length > 0,
+    canUndo: () => get().audioRecordingOperationId === null && !get().midiRecordingActive && get().past.length > 0,
+    canRedo: () => get().audioRecordingOperationId === null && !get().midiRecordingActive && get().future.length > 0,
     beginProjectTransaction: (token, pointerId) => {
       const state = get();
       if (automationCoordinator.hasActivePass()) {
@@ -3996,6 +4133,7 @@ export function createStudioStore(
       if (
         state.projectOperationBusy
         || state.audioRecordingOperationId !== null
+        || state.midiRecordingActive
         || state.localDataErase.phase !== 'idle'
       ) {
         return false;
@@ -4128,6 +4266,10 @@ export function createStudioStore(
     },
     tryBeginNativeClose: () => {
       const state = get();
+      if (state.midiRecordingActive) {
+        set({ persistenceNotice: { kind: 'warning', message: 'MIDI 録音を止めてから終了してください。' } });
+        return false;
+      }
       if (
         nativeCloseFenced ||
         state.projectOperationBusy ||
@@ -4217,7 +4359,7 @@ export function createStudioStore(
         if (assetNotice) set({ persistenceNotice: assetNotice });
       }
       return true;
-    }),
+    }, id),
     recoverProjectBranch: (projectId, branchId) => runProjectOperation(async () => {
       if (!(await prepareProjectSwitch())) return false;
       if (!repository.loadProjectBranch) {
@@ -4303,7 +4445,7 @@ export function createStudioStore(
         payload: { key: stamped.key, bpm: stamped.bpm },
       });
       return true;
-    }),
+    }, project?.id),
     deleteProject: (id) => runProjectOperation(async () => {
       const active = get();
       const deletingActive = active.project.id === id;
@@ -4417,7 +4559,7 @@ export function createStudioStore(
         });
       }
       return true;
-    }),
+    }, null),
     clearPersistenceNotice: () => set({ persistenceNotice: null }),
     refreshAudioAssetIssues: () => refreshAudioAssetIssuesNow(),
     eraseAllLocalData: eraseAllLocalDataNow,
