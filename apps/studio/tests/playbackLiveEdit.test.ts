@@ -329,6 +329,21 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(count(71)).toBe(1);
   });
 
+  it('再生の準備中に消したノートも、再生が始まったら鳴らない - live-edit fix A', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    store().play();
+    expect(store().transport.phase).toBe('starting');
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await vi.advanceTimersByTimeAsync(50);
+    expect(store().transport.phase).toBe('playing');
+
+    await runFor(6);
+
+    expect(count(62)).toBe(0);
+    expect(count(60)).toBe(1);
+    expect(count(64)).toBe(1);
+  });
+
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
     setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
     store().setLoopRange(0, 4);

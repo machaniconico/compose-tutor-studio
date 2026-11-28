@@ -162,6 +162,8 @@ type RuntimeSession = PlaybackSession & {
   readonly routingPlan: CompiledAudioRoutingPlan;
   /** Current schedule; replaced in place by a live note-content edit. */
   scheduleEvents: readonly ScheduledEvent[];
+  /** Project the current scheduleEvents were built from. */
+  scheduleProject: Project;
   /** Note / drum events already handed to a voice and not yet finished. */
   firedVoices: FiredVoice[];
   readonly everAudibleTrackIds: Set<string>;
@@ -1065,7 +1067,13 @@ export function initAudioBridge(): () => void {
     },
     createSession: (requestId, handlers, isCurrent) =>
       createRuntimeSession(requestId, handlers, isCurrent),
-    confirmStarted: (requestId) => useStore.getState().confirmPlaybackStarted(requestId),
+    confirmStarted: (requestId) => {
+      useStore.getState().confirmPlaybackStarted(requestId);
+      // The session was built from the Project of its start request. A note
+      // edit adopted while it was starting is applied before the first audible
+      // look-ahead window can drift further; seek replacements start here too.
+      applyPendingScheduleEdit();
+    },
     failStart: (requestId, error) => {
       const store = useStore.getState();
       store.failPlaybackStart(requestId, classifyPlaybackStartFailure(error));
@@ -1098,13 +1106,15 @@ export function initAudioBridge(): () => void {
   // Note-content edits are coalesced to one rebuild on the next timer turn, so
   // a drag that commits many Project states rebuilds the schedule once.
   let scheduleEditTimer: ReturnType<typeof setTimeout> | null = null;
-  const applyPendingScheduleEdit = (): void => {
+  function applyPendingScheduleEdit(): void {
+    if (scheduleEditTimer !== null) clearTimeout(scheduleEditTimer);
     scheduleEditTimer = null;
-    const session = controller.activeSession;
+    const session = bridge.controller?.activeSession;
     if (!session?.scheduler.isRunning) return;
     const state = useStore.getState();
     if (
-      state.transport.phase !== 'playing'
+      state.project === session.scheduleProject
+      || state.transport.phase !== 'playing'
       || state.transport.playbackRequestId !== session.requestId
       || state.project.id !== session.projectSnapshot.id
       || hasPlaybackTopologyChanged(session.projectSnapshot, state.project)
@@ -1118,7 +1128,7 @@ export function initAudioBridge(): () => void {
       // session like any other live resource failure.
       useStore.getState().interruptPlayback(session.requestId, 'audio-resource-limit');
     }
-  };
+  }
 
   // Dispose sessions captured from obsolete topology, including a natural
   // drain whose transport already reached stopped. Apply compatible mixer
@@ -2115,6 +2125,7 @@ async function createRuntimeSessionImpl(
       contextGeneration,
       routingPlan,
       scheduleEvents,
+      scheduleProject: project,
       firedVoices: [],
       everAudibleTrackIds,
       everAudibleEdgeIds,
@@ -2449,6 +2460,7 @@ export function applyRuntimeScheduleContentEdit(
   }
   session.scheduler.replaceEventIndex(index);
   session.scheduleEvents = events;
+  session.scheduleProject = project;
 
   const { anchorBeat, anchorTime } = session;
   const playheadBeat = now < anchorTime
