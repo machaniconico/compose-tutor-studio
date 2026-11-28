@@ -119,7 +119,8 @@ vi.mock('../../src/audio/graph', async (importOriginal) => {
               get(target, prop) {
                 if (prop in target) return target[prop];
                 if (typeof prop !== 'string') return undefined;
-                const fn = vi.fn();
+                // Production reads a boolean: true means the scalar was applied live.
+                const fn = vi.fn(() => true);
                 target[prop] = fn;
                 return fn;
               },
