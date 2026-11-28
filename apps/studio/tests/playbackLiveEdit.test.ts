@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMidiClip, type Clip, type Project } from '@cts/project-model';
+import { createDrumClip, createMidiClip, type Clip, type DrumEvent, type Project } from '@cts/project-model';
 import type { TrackGraph } from '../src/audio/graph';
 
 // US-012b (wave5 playbackLiveEdit) invariants checked against main's playback.
@@ -13,6 +13,7 @@ const rec = vi.hoisted(() => ({
   disposed: 0,
   released: 0,
   releasedVoices: [] as Array<{ pitch: number; start: number; when: number }>,
+  drums: [] as Array<{ lane: string; time: number; velocity: number }>,
 }));
 
 vi.mock('../src/audio/engine', () => {
@@ -88,7 +89,9 @@ vi.mock('../src/audio/synth', () => ({
 vi.mock('../src/audio/drums', () => ({
   createNoiseBuffer: () => ({}),
   DrumVoiceManager: class {
-    trigger = vi.fn();
+    trigger = vi.fn((lane: string, time: number, velocity: number) => {
+      rec.drums.push({ lane, time, velocity });
+    });
     dispose = vi.fn();
   },
 }));
@@ -149,6 +152,7 @@ beforeEach(() => {
   rec.disposed = 0;
   rec.released = 0;
   rec.releasedVoices.length = 0;
+  rec.drums.length = 0;
   useStore.setState((s) => ({
     project: initialProject,
     past: [],
@@ -393,6 +397,44 @@ describe('note-content edit while playing (US-012b)', () => {
 
     expect(rec.releasedVoices.map((v) => v.pitch)).toEqual([62]);
     expect(count(65)).toBe(0);
+  });
+
+  it('先読み済みのドラムは差分を取らず、先読みより後のドラム編集だけが反映される - live-edit fix D', async () => {
+    const drumTrack = store().project.tracks.find((t) => t.type === 'drum');
+    if (!drumTrack) throw new Error('no drum track');
+    const hits = (events: Array<[number, number]>): DrumEvent[] =>
+      events.map(([stepIndex, velocity]) => ({ id: `d${stepIndex}`, lane: 'kick', stepIndex, velocity }));
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => ({
+        ...t,
+        clips: t.id === drumTrack.id
+          ? [{ ...createDrumClip(t.id, 0, 8), id: 'drum-live', drumEvents: hits([[8, 100], [16, 100]]) }]
+          : [],
+      })),
+    }));
+    useStore.setState({ past: [], future: [] });
+    await play();
+    await runFor(0.5);
+    // 10.9 s: the look-ahead has already handed the step-8 kick (beat 2, 11.0 s) over.
+    rec.now = 10.9;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(rec.drums.map((d) => d.time)).toEqual([11]);
+
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((c) => (
+          c.id === 'drum-live' ? { ...c, drumEvents: hits([[8, 40], [20, 100]]) } : c
+        )),
+      })),
+    }));
+    await runFor(3);
+
+    // No second hit for the re-voiced step 8; step 16 removed; step 20 (12.5 s) added.
+    expect(rec.drums.map((d) => d.time)).toEqual([11, 12.5]);
+    expect(rec.drums[0]!.velocity).toBe(100);
   });
 
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {

@@ -178,6 +178,7 @@ type FiredVoice = {
   readonly key: string;
   /** Source identity of a sounding note: track, preset, pitch, onset beat. */
   readonly sourceKey: string;
+  readonly kind: SchedulePayload['kind'];
   readonly trackId: string;
   readonly time: number;
   readonly endTime: number;
@@ -2375,6 +2376,7 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
       session.firedVoices.push({
         key,
         sourceKey: noteSourceKey(payload, event.beat),
+        kind: 'note',
         trackId: payload.trackId,
         time: event.time,
         endTime: event.time + durationSeconds,
@@ -2401,6 +2403,7 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
       session.firedVoices.push({
         key,
         sourceKey: key,
+        kind: 'drum',
         trackId: payload.trackId,
         time: event.time,
         endTime: event.time,
@@ -2485,9 +2488,13 @@ export function applyRuntimeScheduleContentEdit(
     : [];
 
   const live = session.firedVoices.filter((voice) => voice.endTime >= now);
+  // Drum hits (and the choke stops computed when they fired) have no cancel
+  // handle. They are not diffed inside the already-scheduled window, so a
+  // drum edit is heard only after the frontier: no double hits, no orphan
+  // choke cut-offs.
   const pending = new Map<string, FiredVoice[]>();
   for (const voice of live) {
-    if (voice.time < now) continue;
+    if (voice.time < now || voice.kind !== 'note') continue;
     const slot = `${voice.key}@${voice.time}`;
     const list = pending.get(slot);
     if (list) list.push(voice);
@@ -2495,6 +2502,7 @@ export function applyRuntimeScheduleContentEdit(
   }
   const added: DueEvent[] = [];
   for (const event of due) {
+    if ((event.payload as SchedulePayload).kind !== 'note') continue;
     const slot = `${scheduleEventKey(event.payload as SchedulePayload, event.beat)}@${event.time}`;
     if (!pending.get(slot)?.pop()) added.push(event);
   }
@@ -2518,7 +2526,6 @@ export function applyRuntimeScheduleContentEdit(
     else cancelled.add(voice);
   }
   for (const voice of cancelled) {
-    // Drum hits have no handle; at most one lookahead window of them remains.
     if (voice.handle) session.synths.get(voice.trackId)?.releaseVoice(voice.handle, now);
   }
   session.firedVoices = live.filter((voice) => !cancelled.has(voice));

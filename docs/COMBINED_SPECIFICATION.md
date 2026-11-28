@@ -2083,7 +2083,9 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 | G4 | ループ中の編集が次のパスで聞こえる | 対応済み | ループ0-4拍で62を削除し71を追加すると、次のパスから62は鳴らず71が鳴る |
 | G5 | クリップ移動・削除・テンポ変更が再生を止めず即時に反映される | 対応しない(設計差) | クリップ移動、削除、`setBpm(90)`のいずれも`transport.phase`が`stopped`になり、voice managerが`dispose`される |
 
-既知の制限: ドラムの音は取り消し用のhandleを持たないため、先読み(最大120ms)に入った後に消したドラムは鳴ることがある。再生開始の準備中(`starting`)に行った編集は、その再生には入らない。
+ドラム: ドラムの音とchokeの停止時刻は取り消し用のhandleを持たない。そのため既に先読みしたwindow(`scheduledThroughBeat`より前)ではドラムeventの差分を取らず、ドラムの編集は先読みの境界より後(最大120ms先)から反映する。二重に鳴ることも、相手のいないchokeで音が切れることもない。ただし、先読み済みのOpen Hatのchoke時刻は発音時に決まるため、境界より後のClosed Hatを消しても、そのOpen Hatは元の時刻で切れる。
+
+再生開始の準備中(`starting`)に行った編集は、sessionが動き始めた直後(`confirmStarted`)に、sessionを作ったProjectと今のProjectが違えば同じ手順で反映する。シーク後の作り直しのsessionも同じ。
 
 ### 6.1.7 Elastic Audio Worker / DSP / cache
 
