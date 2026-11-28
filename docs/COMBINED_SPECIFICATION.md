@@ -1310,6 +1310,16 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 - メトロノームはMaster volumeに追従し、Master meterはpost-faderの実出力レベルを表示する
 - Track Listで変更したcanonical synth音色は保存済みProjectを正本とし、次のライブ再生とWAV書き出しで同じ音色を使う。Masterとdrum Trackにはsynth音色selectorを表示しない
 
+#### Undoの粒度（連続スライダー）
+
+- フェーダー、パン、音色の「かんたん調整」、ドラムのスイング / 全体の確率 / 強さのゆらぎ / 選択ステップの確率、エフェクトのつまみ、センド量のドラッグは、pointerdownでProject transactionを開き、ドラッグ中は値をそのまま鳴らし続け、pointerupまたはlost captureで1 Undoにまとめる。ドラッグ中はUndo履歴と保存を増やさない
+- 元の値へ戻して終えたドラッグはno-opとし、transactionを取り消してUndo履歴を増やさない（フェーダー・パンの既存の確定動作は変えない）
+- pointercancelとEscapeはドラッグ前へ戻し、履歴に残さない。ドラッグ中のスライダー自身のblur、ウィンドウblur、タブが隠れた時、コンポーネントの取り外し時は、その時点の値を1 Undoとして確定する。プロジェクト切替で残ったドラッグは新しいプロジェクトへ適用せず捨てる。録音開始は開いたドラッグを1 Undoで確定してから編集を止める
+- ドラッグごとに固有のtokenを持ち、前のスライダーから遅れて届いたblurなど他のドラッグ由来のイベントは次のドラッグを閉じない。ドラッグ中に別のpointerが押されても引き継がず、開始したpointerのpointerup / pointercancelだけが終わらせる。Escape後の書き込み停止は、そのpointerを離すまで続き、他のキーでは解除されない。ドラッグ中に編集対象（Track・Clip）の選択が変わった時は、元の対象に1 Undoで確定し、離すまで以降の動きを書き込まない
+- ドラッグ中の矢印キーは無視する
+- transactionは同時に1つだけ。別のドラッグ中・録音中に始めた2つ目のドラッグは拒否し、そのpointerが離れるまで値を書かない
+- キーボードの矢印キーはtransactionを開かず、1回の操作ごとに1 Undoとする（フェーダーと同じ）
+
 ### 2.7 Project / Portable Project / MIDI交換
 
 - Project menuでは、metadata-onlyの操作を`編集情報のみ (.ctsproj.json)`、音声素材を含む操作を`音声素材を含む持ち運び用 (.ctsbundle)`として別section・別button・別file acceptへ分ける。`.ctsproj.json`は「曲の編集情報をexactに交換するが音声fileは含まない」、`.ctsbundle`は「利用中の音声素材を含む別端末用コピー」と操作前に説明する
@@ -1411,7 +1421,7 @@ Audio Clipを選択した場合は、通常Clip panelの代わりに音声素材
 | Cmd/Ctrl+S | 実装済み | 保存 |
 | Cmd+Z（macOS）/ Ctrl+Z（その他） | 実装済み | 元に戻す（入力欄への入力中・IME変換中・ダイアログ表示中は無効） |
 | Cmd+Shift+Z（macOS）/ Ctrl+Shift+Z（その他） | 実装済み | やり直す（同上） |
-| Escape（ドラッグ中） | 実装済み | ノート・オートメーション点・フェーダーのドラッグを取り消し、ドラッグ前に戻す（入力欄にフォーカス中・IME変換中は無効。Undo履歴に残さない） |
+| Escape（ドラッグ中） | 実装済み | ノート・オートメーション点・フェーダー・音色のかんたん調整・ドラムのスイング / 確率 / ゆらぎ・エフェクトとセンドのつまみのドラッグを取り消し、ドラッグ前に戻す（入力欄にフォーカス中・IME変換中は無効。Undo履歴に残さない） |
 | R | 現行未実装（予約） | 録音/入力開始 |
 | B | 現行未実装（予定） | Browser表示切替 |
 | L | 現行未実装（予定） | Learn Panel表示切替 |

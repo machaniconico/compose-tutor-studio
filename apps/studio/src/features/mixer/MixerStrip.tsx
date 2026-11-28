@@ -36,6 +36,7 @@ import {
 } from '../../state/routingActions';
 import { pushToast } from '../../state/tutorialBridge';
 import { useAutomationGesture } from '../automation/useAutomationGesture';
+import { useRangeTransaction } from '../common/useRangeTransaction';
 
 type EffectInfo = {
   label: string;
@@ -432,6 +433,7 @@ function RoutingControls(props: {
   buses: readonly Track[];
 }) {
   const { track, accessibleName, buses } = props;
+  const rangeTransaction = useRangeTransaction(track.id);
   const routing = useStore((state) => state.project.audioRouting);
   const output = routing.outputs.find((route) => route.sourceTrackId === track.id);
   const sends = routing.sends.filter((send) => send.sourceTrackId === track.id);
@@ -551,12 +553,13 @@ function RoutingControls(props: {
                   step={0.01}
                   value={send.gain}
                   aria-label={`${sendAccessibleName}の送り量`}
-                  onChange={(event) => {
+                  {...rangeTransaction.props}
+                  onChange={rangeTransaction.guard((event) => {
                     reportRoutingResult(
                       updateStudioAudioSend(send.id, { gain: Number(event.currentTarget.value) }),
                       '',
                     );
-                  }}
+                  })}
                 />
               </label>
               <button
@@ -749,6 +752,7 @@ function EffectEditor(props: {
   ordinal: number;
 }) {
   const { trackId, trackName, effect, ordinal } = props;
+  const rangeTransaction = useRangeTransaction(`${trackId}:${effect.id}`);
 
   if (!isInsertEffectType(effect.type)) {
     const effectLabel = `${trackName} 未対応の効果 ${ordinal}`;
@@ -813,9 +817,9 @@ function EffectEditor(props: {
               step={0.01}
               value={value}
               aria-label={`${effectLabel} ${control.label}`}
-              onChange={(e) =>
-                updateTrackEffectParam(trackId, effect.id, control.key, Number(e.target.value))
-              }
+              {...rangeTransaction.props}
+              onChange={rangeTransaction.guard((e) =>
+                updateTrackEffectParam(trackId, effect.id, control.key, Number(e.target.value)))}
             />
             <span
               aria-hidden="true"
