@@ -2504,6 +2504,7 @@ export function applyRuntimeScheduleContentEdit(
       );
     }
   }
+  const previousEvents = session.scheduleEvents;
   session.scheduler.replaceEventIndex(index);
   session.scheduleEvents = events;
   session.scheduleProject = project;
@@ -2545,21 +2546,34 @@ export function applyRuntimeScheduleContentEdit(
 
   const cancelled = new Set<FiredVoice>();
   for (const list of pending.values()) for (const voice of list) cancelled.add(voice);
-  // Sounding notes are matched one-to-one against the source notes that still
-  // exist, so deleting one of two identical notes releases exactly one voice.
-  // Only a removed note (a pitch change removes the old pitch) is released.
-  const remainingSources = new Map<string, number>();
-  for (const event of events) {
-    const payload = event.payload as SchedulePayload;
-    if (payload.kind !== 'note') continue;
-    const sourceKey = noteSourceKey(payload, event.beat);
-    remainingSources.set(sourceKey, (remainingSources.get(sourceKey) ?? 0) + 1);
-  }
+  // A sounding voice is released only when its source note's multiplicity
+  // drops: (count before - count after) voices per source key, latest-started
+  // first. Loop passes and long notes share one source key, so an edit that
+  // keeps the note (or only changes its velocity / duration) releases nothing.
+  const countSources = (list: readonly ScheduledEvent[]): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const event of list) {
+      const payload = event.payload as SchedulePayload;
+      if (payload.kind !== 'note') continue;
+      const sourceKey = noteSourceKey(payload, event.beat);
+      counts.set(sourceKey, (counts.get(sourceKey) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const sourcesBefore = countSources(previousEvents);
+  const sourcesAfter = countSources(events);
+  const soundingByKey = new Map<string, FiredVoice[]>();
   for (const voice of live) {
-    if (voice.time >= now || !voice.handle) continue;
-    const remaining = remainingSources.get(voice.sourceKey) ?? 0;
-    if (remaining > 0) remainingSources.set(voice.sourceKey, remaining - 1);
-    else cancelled.add(voice);
+    if (voice.time >= now || !voice.handle || voice.kind !== 'note') continue;
+    const list = soundingByKey.get(voice.sourceKey);
+    if (list) list.push(voice);
+    else soundingByKey.set(voice.sourceKey, [voice]);
+  }
+  for (const [sourceKey, voices] of soundingByKey) {
+    const dropped = (sourcesBefore.get(sourceKey) ?? 0) - (sourcesAfter.get(sourceKey) ?? 0);
+    if (dropped <= 0) continue;
+    voices.sort((left, right) => right.time - left.time);
+    for (const voice of voices.slice(0, dropped)) cancelled.add(voice);
   }
   for (const voice of cancelled) {
     if (voice.handle) session.synths.get(voice.trackId)?.releaseVoice(voice.handle, now);

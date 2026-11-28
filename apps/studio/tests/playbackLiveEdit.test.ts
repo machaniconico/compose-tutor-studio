@@ -490,6 +490,21 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(vi.mocked(buildScheduleEvents).mock.calls.length).toBe(builds + 1);
   });
 
+  it('ループの2周が重なって鳴る長いノートは、別の高さのノートを消しても止めない - live-edit fix H', async () => {
+    setClips([melody([[60, 0, 8], [64, 1, 1]], 0, 8)]);
+    store().setLoopRange(0, 4);
+    await play();
+    await runFor(2.5);
+    // Passes start at 10 s and 12 s; both 8-beat voices of pitch 60 are sounding.
+    expect(rec.notes.filter((n) => n.pitch === 60).map((n) => n.start)).toEqual([10, 12]);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 64));
+    await runFor(0.1);
+
+    // Only the deleted pitch may be released; both pitch-60 voices keep sounding.
+    expect(rec.releasedVoices.filter((v) => v.pitch === 60)).toEqual([]);
+  });
+
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
     setClips([melody([[60, 0, 1], [62, 2, 1]], 0, 4)]);
     store().setLoopRange(0, 4);

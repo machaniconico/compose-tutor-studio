@@ -468,7 +468,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 1. audio bridgeのstore購読が、topologyを保ったまま`buildScheduleEvents`の読む値(clipの中身、コードトラック、swing、hi-hat choke、曲の長さ・テンポ・拍子)が変わった編集だけを検出し(`hasScheduleContentChanged`)、`setTimeout(0)`で次のtimer turnへまとめる。ドラッグで連続する編集も1回の再構築になる。`updatedAt`、名前、色、ミキサーの値だけの変更(トラック名の変更など)では作り直さない。
 2. 採用済みProjectから起動時と同じ`buildScheduleEvents`でeventを作り直し、ループ時は同じdensity preflightを通してから`Scheduler.replaceEventIndex`で差し替える。anchorと先読みの境界(`scheduledThroughBeat`)は動かさないので、以後のwindowとループの次のpassは新しい内容になる。予算超過は部分適用せず`audio-resource-limit`で停止する。
 3. 先読みで既にvoiceへ渡したeventは、内容(トラック・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。開始時刻がまだ先のvoiceは、gainの予定を`cancelScheduledValues`で消して0にし、sourceをその場でstop・切断するため、1 sampleも鳴らない。
-4. 発音中のvoiceは、元のノート(トラック・音色・音高・元の開始拍)で、残っているノートと1対1に突き合わせる。同じノートが2つ鳴っていて1つを消せば、止まるのは1つだけである。ノートが消えた時(音高を変えた時を含む)だけ、同じ`releaseVoice`の短いfade(30ms)で止め、クリックを出さない。強さや長さだけが変わった時(隣の編集でスイングの切り詰めが変わった時を含む)は触れず、最初に予定した通りに鳴り終わる。鳴らし直しもしない。
+4. 発音中のvoiceは、元のノート(トラック・音色・音高・元の開始拍)ごとに、編集の前と後でそのノートが何個あるかを数える。減った数だけ、遅く始まったvoiceから止める。同じノートが2つ鳴っていて1つを消せば、止まるのは1つだけである。ループの周どうしで重なって鳴る長いノートのように、数が変わらなければ何も止めない。ノートが消えた時(音高を変えた時を含む)だけ、同じ`releaseVoice`の短いfade(30ms)で止め、クリックを出さない。強さや長さだけが変わった時(隣の編集でスイングの切り詰めが変わった時を含む)は触れず、最初に予定した通りに鳴り終わる。鳴らし直しもしない。
 5. 曲末の残響(tail): sessionは一度でもscheduleしたeventをすべて覚えておき、自然終了のtailはその全体から計画する。ノートを消しても計画したtailは縮まず、もう鳴っているディレイやリバーブの残響を途中で切らない(古い計画と新しい計画の大きい方)。
 6. 処理はtimer turnとstore購読の中だけで行い、AudioWorkletなどaudio realtime callbackでは重い処理をしない。WAV / MIDI exportは変更しない。
 
