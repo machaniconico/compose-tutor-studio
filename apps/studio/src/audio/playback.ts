@@ -199,6 +199,8 @@ type FiredVoice = {
   /** Source identity of a sounding note: track, preset, pitch, onset beat. */
   readonly sourceKey: string;
   readonly kind: SchedulePayload['kind'];
+  /** Scheduled length of the source note in beats (0 for a drum hit). */
+  readonly durationBeats: number;
   readonly trackId: string;
   readonly time: number;
   readonly endTime: number;
@@ -2406,6 +2408,7 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
         key,
         sourceKey: noteSourceKey(payload, event.beat),
         kind: 'note',
+        durationBeats: payload.durationBeats,
         trackId: payload.trackId,
         time: event.time,
         endTime: event.time + durationSeconds,
@@ -2433,6 +2436,7 @@ function fireEvents(session: RuntimeSession, due: DueEvent[]): void {
         key,
         sourceKey: key,
         kind: 'drum',
+        durationBeats: 0,
         trackId: payload.trackId,
         time: event.time,
         endTime: event.time,
@@ -2562,19 +2566,31 @@ export function applyRuntimeScheduleContentEdit(
 
   const cancelled = new Set<FiredVoice>();
   for (const list of pending.values()) for (const voice of list) cancelled.add(voice);
-  // A sounding voice is released only when its source note's multiplicity
-  // drops: (count before - count after) voices per source key, latest-started
-  // first. Loop passes and long notes share one source key, so an edit that
-  // keeps the note (or only changes its velocity / duration) releases nothing.
-  const countSources = (list: readonly ScheduledEvent[]): Map<string, number> => {
-    const counts = new Map<string, number>();
+  // Sounding voices are released per source key (track, preset, pitch, onset
+  // beat) and per pass (voice start time). Nothing is released while the
+  // key's count of source notes does not drop, so loop passes, long notes and
+  // velocity / duration-only edits (also swing cuts) keep sounding. When it
+  // drops, each pass first releases the voices whose scheduled length matches
+  // a removed source note (before minus after, as a multiset of lengths), and
+  // then keeps at most the after-count, releasing the latest-started extras.
+  // Deleting a note therefore releases its voice on every pass, and of two
+  // same-pitch notes with one onset the one actually deleted stops.
+  const countSources = (list: readonly ScheduledEvent[]): Map<string, Map<number, number>> => {
+    const counts = new Map<string, Map<number, number>>();
     for (const event of list) {
       const payload = event.payload as SchedulePayload;
       if (payload.kind !== 'note') continue;
       const sourceKey = noteSourceKey(payload, event.beat);
-      counts.set(sourceKey, (counts.get(sourceKey) ?? 0) + 1);
+      const lengths = counts.get(sourceKey) ?? new Map<number, number>();
+      lengths.set(payload.durationBeats, (lengths.get(payload.durationBeats) ?? 0) + 1);
+      counts.set(sourceKey, lengths);
     }
     return counts;
+  };
+  const total = (lengths: Map<number, number> | undefined): number => {
+    let sum = 0;
+    for (const count of lengths?.values() ?? []) sum += count;
+    return sum;
   };
   const sourcesBefore = countSources(previousEvents);
   const sourcesAfter = countSources(events);
@@ -2586,9 +2602,15 @@ export function applyRuntimeScheduleContentEdit(
     else soundingByKey.set(voice.sourceKey, [voice]);
   }
   for (const [sourceKey, voices] of soundingByKey) {
-    const after = sourcesAfter.get(sourceKey) ?? 0;
-    if ((sourcesBefore.get(sourceKey) ?? 0) - after <= 0) continue;
-    // 周(発音時刻)ごとに、残ってよい声は編集後の元ノート数まで。消えたノートは全周で止める。
+    const before = sourcesBefore.get(sourceKey);
+    const afterLengths = sourcesAfter.get(sourceKey);
+    const after = total(afterLengths);
+    if (total(before) - after <= 0) continue;
+    const removedLengths = new Map<number, number>();
+    for (const [length, count] of before ?? []) {
+      const removed = count - (afterLengths?.get(length) ?? 0);
+      if (removed > 0) removedLengths.set(length, removed);
+    }
     const byPass = new Map<number, FiredVoice[]>();
     for (const voice of voices) {
       const list = byPass.get(voice.time);
@@ -2596,7 +2618,18 @@ export function applyRuntimeScheduleContentEdit(
       else byPass.set(voice.time, [voice]);
     }
     for (const group of byPass.values()) {
-      for (const voice of group.slice(after)) cancelled.add(voice);
+      const removedHere = new Map(removedLengths);
+      const kept: FiredVoice[] = [];
+      for (const voice of [...group].reverse()) {
+        const left = removedHere.get(voice.durationBeats) ?? 0;
+        if (left > 0) {
+          removedHere.set(voice.durationBeats, left - 1);
+          cancelled.add(voice);
+        } else {
+          kept.unshift(voice);
+        }
+      }
+      for (const voice of kept.slice(after)) cancelled.add(voice);
     }
   }
   for (const voice of cancelled) {

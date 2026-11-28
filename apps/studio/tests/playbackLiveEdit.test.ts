@@ -14,6 +14,9 @@ const rec = vi.hoisted(() => ({
   released: 0,
   releasedVoices: [] as Array<{ pitch: number; start: number; when: number }>,
   drums: [] as Array<{ lane: string; time: number; velocity: number }>,
+  /** Scheduled duration (s) of each released voice, in release order. */
+  releasedDurations: [] as number[],
+  handleDurations: new WeakMap<object, number>(),
 }));
 
 vi.mock('../src/audio/engine', () => {
@@ -76,10 +79,13 @@ vi.mock('../src/audio/synth', () => ({
   SynthVoiceManager: class {
     noteOn = vi.fn((pitch: number, start: number, duration: number) => {
       rec.notes.push({ pitch, start, duration });
-      return { pitch, start };
+      const handle = { pitch, start };
+      rec.handleDurations.set(handle, duration);
+      return handle;
     });
     releaseVoice = vi.fn((handle: { pitch: number; start: number }, when: number) => {
       rec.releasedVoices.push({ ...handle, when });
+      rec.releasedDurations.push(rec.handleDurations.get(handle) ?? Number.NaN);
     });
     releaseAll = vi.fn(() => { rec.released += 1; });
     dispose = vi.fn(() => { rec.disposed += 1; });
@@ -159,6 +165,7 @@ beforeEach(() => {
   rec.released = 0;
   rec.releasedVoices.length = 0;
   rec.drums.length = 0;
+  rec.releasedDurations.length = 0;
   useStore.setState((s) => ({
     project: initialProject,
     past: [],
@@ -532,6 +539,29 @@ describe('note-content edit while playing (US-012b)', () => {
 
     // Exactly one build: the startup schedule.
     expect(vi.mocked(buildScheduleEvents).mock.calls.length).toBe(before + 1);
+  });
+
+  it('高さと開始が同じで長さが違うノートの長い方を消すと、その音が止まる - live-edit fix B3', async () => {
+    setClips([melody([[62, 0, 1], [62, 0, 8]])]);
+    await play();
+    await runFor(1);
+
+    editNotes((ns) => ns.filter((n) => n.durationBeats !== 8));
+    await runFor(0.1);
+
+    // The 8-beat voice (4 s) is released; the 1-beat one already ended.
+    expect(rec.releasedDurations).toEqual([4]);
+  });
+
+  it('高さと開始が同じで長さが違うノートの短い方を消すと、短い方だけが止まる - live-edit fix B3', async () => {
+    setClips([melody([[62, 0, 1], [62, 0, 8]])]);
+    await play();
+    await runFor(0.2);
+
+    editNotes((ns) => ns.filter((n) => n.durationBeats !== 1));
+    await runFor(0.1);
+
+    expect(rec.releasedDurations).toEqual([0.5]);
   });
 
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {
