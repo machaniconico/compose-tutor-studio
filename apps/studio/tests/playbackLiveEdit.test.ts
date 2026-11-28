@@ -641,8 +641,6 @@ describe('clip layout and tempo edit while playing (US-012b, main: topology chan
 
     expect(store().transport.phase).toBe('stopped');
   });
-
-  it.todo('クリップの移動・削除・テンポ変更後も再生が止まらず即時に反映される(main は停止する設計) - docs/05 §6.1.6.1 G5');
 });
 
 describe('live-edit session state stays bounded (live-edit fix I)', () => {
