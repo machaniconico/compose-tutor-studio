@@ -29,8 +29,11 @@ import {
   MIN_EVENT_DURATION_BEATS,
   PPQ,
   beatTick,
+  GROOVE_RESOLVER_PPQ,
   clipContentOwnerId,
+  isGrooveResolvedMode,
   midiClipNaturalPatternLength,
+  resolveGrooveNoteSpan,
   resolveClipContent,
   visitMidiClipNoteOccurrences,
   type Clip,
@@ -246,6 +249,7 @@ function loopProblem(target: EditTarget, before: readonly NoteEvent[], after: re
 function occurrenceKeys(project: Project, ownerId: string, ids: ReadonlySet<string>): string[] | null {
   const keys: string[] = [];
   if (ids.size === 0) return keys;
+  const resolved = isGrooveResolvedMode(project);
   try {
     for (const track of project.tracks) {
       if (track.type === 'master') continue;
@@ -256,13 +260,22 @@ function occurrenceKeys(project: Project, ownerId: string, ids: ReadonlySet<stri
         if (!content || content.type !== 'midi' || !content.notes || content.notes.length === 0) continue;
         visitMidiClipNoteOccurrences(content, MAX_RUNTIME_SCHEDULE_EVENTS, (occurrence) => {
           if (!ids.has(occurrence.note.id)) return;
+          let beat = content.startBeat + occurrence.localStartBeat;
+          let durationBeats = occurrence.durationBeats;
+          if (resolved) {
+            // buildScheduleEvents と同じ groove 解決(swing 後の onset / 長さ、落ちる音は予定に出ない)。
+            const span = resolveGrooveNoteSpan(project, beat, durationBeats, content.startBeat + content.lengthBeats);
+            if (!span) return;
+            beat = span.onsetTick / GROOVE_RESOLVER_PPQ;
+            durationBeats = (span.endTick - span.onsetTick) / GROOVE_RESOLVER_PPQ;
+          }
           keys.push(JSON.stringify([
-            content.startBeat + occurrence.localStartBeat,
+            beat,
             'note',
             track.id,
             preset,
             occurrence.note.pitch,
-            occurrence.durationBeats,
+            durationBeats,
             occurrence.note.velocity,
           ]));
         });
