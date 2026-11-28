@@ -753,6 +753,8 @@ describe('note edits after a read-mode mixer commit kept the session (live-edit 
       },
       automationRecordingCommitRequestId: requestId,
     }));
+    // The next commit clears the marker, as commitProject does.
+    useStore.setState({ automationRecordingCommitRequestId: null });
     await runFor(0.05);
     expect(store().transport.phase).toBe('playing');
     expect(store().transport.playbackRequestId).toBe(requestId);
@@ -762,6 +764,29 @@ describe('note edits after a read-mode mixer commit kept the session (live-edit 
 
     expect(store().transport.phase).toBe('playing');
     expect(count(62)).toBe(0);
+  });
+
+  it('取り消しで戻した確定がクリップ位置を変えるなら、再生はすぐ止まる - live-edit fix B5b', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    withPanLane();
+    const token = {};
+    expect(store().beginProjectTransaction(token)).toBe(true);
+    moveClips(2);
+    const requestId = await play();
+    expect(store().transport.phase).toBe('playing');
+    await runFor(1);
+    store().setTrackVolume(melodyId(), 0.5);
+    await runFor(0.05);
+    expect(store().transport.playbackRequestId).toBe(requestId);
+    expect(store().transport.phase).toBe('playing');
+
+    // The rollback is a read-mode scalar commit that also moves the clip back to 0.
+    expect(store().cancelProjectTransaction(token)).toBe(true);
+
+    expect(store().project.tracks.find((t) => t.id === melodyId())!.clips[0]!.startBeat).toBe(0);
+    expect(store().transport.phase).toBe('stopped');
+    expect(store().transport.audioIssue).toBe('interrupted');
+    expect(rec.disposed).toBeGreaterThan(0);
   });
 });
 

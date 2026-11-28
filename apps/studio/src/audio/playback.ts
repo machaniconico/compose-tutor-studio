@@ -1144,13 +1144,24 @@ export function initAudioBridge(): () => void {
   let scheduleEditTimer: ReturnType<typeof setTimeout> | null = null;
   // The running session survived this Project commit: advance its topology
   // baseline and queue a schedule rebuild when the commit changed content.
-  function keepSessionAcross(project: Project, previousProject: Project): void {
+  // Returns false when the commit changed topology beyond what its kind
+  // accepts: the baseline then stays put and playback stops right away.
+  function keepSessionAcross(
+    project: Project,
+    previousProject: Project,
+    accepted: KeptSessionChange,
+  ): boolean {
     const session = bridge.controller?.activeSession;
-    if (!session?.scheduler.isRunning) return;
+    if (!session?.scheduler.isRunning) return true;
+    if (keptSessionTopologyChanged(session.topologyBaseline, project, accepted)) {
+      useStore.getState().interruptPlayback(session.requestId, 'interrupted');
+      return false;
+    }
     session.topologyBaseline = project;
     if (scheduleEditTimer === null && hasScheduleContentChanged(previousProject, project)) {
       scheduleEditTimer = setTimeout(applyPendingScheduleEdit, 0);
     }
+    return true;
   }
   function applyPendingScheduleEdit(): void {
     if (scheduleEditTimer !== null) clearTimeout(scheduleEditTimer);
@@ -1194,7 +1205,7 @@ export function initAudioBridge(): () => void {
       // The active pass intentionally keeps playing its frozen session snapshot.
       // This also preserves an already-started natural tail. Later note edits
       // are checked against this commit, not the startup snapshot.
-      keepSessionAcross(next.project, previous.project);
+      keepSessionAcross(next.project, previous.project, 'automation');
       return;
     }
     if (automationReadScalarCommitPreservesRuntimeSession(
@@ -1204,6 +1215,9 @@ export function initAudioBridge(): () => void {
     )) {
       const session = controller.activeSession;
       if (!session?.scheduler.isRunning) return;
+      // A transaction rollback is marked as a read-scalar commit too and may
+      // carry a clip move back: check topology before touching the mix.
+      if (!keepSessionAcross(next.project, previous.project, 'mix')) return;
       try {
         const applied = applyRuntimeReadScalarMixState(
           session,
@@ -1211,7 +1225,6 @@ export function initAudioBridge(): () => void {
           next.automationReadScalarCommit!.targets,
           getAudioEngine().now(),
         );
-        if (applied) keepSessionAcross(next.project, previous.project);
         if (!applied) {
           const replaced = replaceRuntimePlaybackAtCurrentPosition(
             next.transport.playbackRequestId,
@@ -1253,7 +1266,7 @@ export function initAudioBridge(): () => void {
     ) {
       return;
     }
-    keepSessionAcross(next.project, previous.project);
+    if (!keepSessionAcross(next.project, previous.project, 'mix')) return;
     const trackMixChanged = hasLiveMixChanged(
       previous.project.tracks,
       next.project.tracks,
@@ -2572,6 +2585,51 @@ export function hasScheduleContentChanged(previous: Project, next: Project): boo
       || prior.instrument?.preset !== track.instrument?.preset
       || prior.clips !== track.clips;
   });
+}
+
+/**
+ * What a commit that keeps the running session is accepted to change: live
+ * mix scalars (ordinary mixer edits and Read-mode scalar commits, also for
+ * targets that have a lane), or additionally the automation lanes and read
+ * state (an automation punch-out, whose pass keeps its frozen snapshot).
+ */
+type KeptSessionChange = 'mix' | 'automation';
+
+/**
+ * Whether a kept-session commit changed playback topology beyond its kind.
+ * The accepted fields are copied from the baseline before the standard
+ * topology check, so a clip move or tempo change still counts even when it
+ * arrives on a read-scalar commit (a transaction rollback).
+ */
+export function keptSessionTopologyChanged(
+  baseline: Project,
+  next: Project,
+  accepted: KeptSessionChange,
+): boolean {
+  const baselineTracks = new Map(baseline.tracks.map((track) => [track.id, track]));
+  const normalized: Project = {
+    ...next,
+    tracks: next.tracks.map((track) => {
+      const prior = baselineTracks.get(track.id);
+      return prior
+        ? {
+          ...track,
+          volume: prior.volume,
+          pan: prior.pan,
+          mute: prior.mute,
+          solo: prior.solo,
+          effects: prior.effects,
+        }
+        : track;
+    }),
+    ...(accepted === 'automation'
+      ? {
+        automationLanes: baseline.automationLanes,
+        automationReadState: baseline.automationReadState,
+      }
+      : {}),
+  };
+  return hasPlaybackTopologyChanged(baseline, normalized);
 }
 
 /**
