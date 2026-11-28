@@ -229,7 +229,7 @@ function clipOf(project: Project) {
 
 function noteIdByPitch(pitch: number, nth = 0): string {
   const { clip } = clipOf(useStore.getState().project);
-  const matches = clip.notes.filter((note) => note.pitch === pitch);
+  const matches = (clip.notes ?? []).filter((note) => note.pitch === pitch);
   const found = matches[nth];
   if (!found) throw new Error(`no note with pitch ${pitch}`);
   return found.id;
@@ -449,7 +449,7 @@ describe('live edit acceptance: note edits during playback', () => {
     expect(noteOnsOf(62).filter((entry) => !releasedHandles().has(entry.handle))).toHaveLength(1);
     expect(noteOnsOf(62)).toHaveLength(1);
     useStore.getState().undo();
-    expect(clipOf(useStore.getState().project).clip.notes.some((note) => note.pitch === 62)).toBe(true);
+    expect(clipOf(useStore.getState().project).clip.notes?.some((note) => note.pitch === 62)).toBe(true);
     await runUntil(5.0); // pass 3 starts at 4.0 s, its note at 4.5 s
     const t0 = anchor();
     const pass3 = noteOnsOf(62).filter((entry) => Math.abs(entry.time - (t0 + 4.5)) < 0.05);
