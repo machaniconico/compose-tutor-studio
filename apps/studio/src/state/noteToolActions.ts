@@ -98,12 +98,28 @@ const LOOP_SWING = 'ループしているクリップにスイングがかかっ
  * 1 回目と変わるので、レガート・連結は断る(周ごとの計算はしない)。
  */
 function loopSwingProblem(project: Project, target: EditTarget, placement: Clip, ordered: readonly NoteEvent[]): string | null {
-  if (!target.placements.some((clip) => clip.loop)) return null;
-  const moved = ordered.some((note) => {
-    const span = soundingSpan(project, placement, note);
-    return span === null || span.onsetTick !== beatTick(placement.startBeat + note.startBeat);
-  });
-  return moved ? LOOP_SWING : null;
+  void placement;
+  const period = midiClipNaturalPatternLength(target.owner.notes ?? []);
+  // 1 回目だけでなく、ループするすべての配置の各周で鳴り始めが動くかを見る(周数は上限つき)。
+  const MAX_PASSES = 4096;
+  for (const clip of target.placements) {
+    if (!clip.loop || !(period > 0)) continue;
+    const passes = Math.min(MAX_PASSES, Math.ceil(clip.lengthBeats / period));
+    for (let pass = 0; pass < passes; pass += 1) {
+      for (const note of ordered) {
+        const local = pass * period + note.startBeat;
+        if (local >= clip.lengthBeats) continue;
+        const span = resolveGrooveNoteSpan(
+          project,
+          clip.startBeat + local,
+          note.durationBeats,
+          clip.startBeat + clip.lengthBeats,
+        );
+        if (span === null || span.onsetTick !== beatTick(clip.startBeat + local)) return LOOP_SWING;
+      }
+    }
+  }
+  return null;
 }
 
 /** 変えた項目だけ整数 tick を求め、クリップ・曲の終わりに収まるか(tick で数える)確かめる。 */
