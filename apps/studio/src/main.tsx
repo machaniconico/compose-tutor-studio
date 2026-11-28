@@ -144,8 +144,11 @@ registerAutomationGestureLifecycle({
   endActiveGestures: () => useStore.getState().endActiveAutomationGestures(),
 });
 registerRuntimeCaptureLifecycle({
-  finalize: (boundary) =>
-    useStore.getState().finalizeAutomationRecording(boundary),
+  finalize: (boundary) => {
+    const state = useStore.getState();
+    state.finalizeMidiRecording();
+    return state.finalizeAutomationRecording(boundary);
+  },
   cancel: () => useStore.getState().cancelAutomationRecording(),
 });
 void start().catch((error: unknown) => {

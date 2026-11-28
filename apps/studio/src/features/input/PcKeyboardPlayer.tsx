@@ -1,9 +1,14 @@
+import { PPQ } from '@cts/project-model';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../../state/store';
+import { DISCARD_MIDI_TAKE_LABEL } from '../../state/midiRecording';
 import { holdNote, releaseHeldNote, stopPreview } from '../../audio/livePreview';
 import { isAnyDialogOpen } from '../common/dialogState';
 import { matchShortcut } from '../common/keymap';
+import { GRID_SNAP_LABELS, GRID_SNAP_OPTIONS } from '../pianoRoll/gridMath';
+import type { MidiRecordingNoteInput } from './midiRecordingInput';
+import { usePcMidiRecording } from './usePcMidiRecording';
 import { buildPlayingLayout } from './pcKeyboardLayout';
 import {
   getPcKeyboardMode,
@@ -23,23 +28,38 @@ function isAltGraph(event: KeyboardEvent): boolean {
 /**
  * Plays the selected instrument track from the computer keyboard while the
  * mode is on. Sound goes through the live preview (own bus, bounded voices);
- * nothing here touches the project or the undo history.
+ * during a take, note edges also go to the MIDI recording input.
  */
-function useKeyboardPlaying(active: boolean): void {
+function useKeyboardPlaying(active: boolean, noteInput: MidiRecordingNoteInput): void {
   useEffect(() => {
     if (!active) return undefined;
+    const recordedKeys = new Map<string, number>();
+    const finishKey = (code: string) => {
+      const pitch = recordedKeys.get(code);
+      if (pitch === undefined) return;
+      recordedKeys.delete(code);
+      noteInput({ type: 'off', pitch, velocity: 0 });
+    };
+    const releaseAll = () => {
+      stopPreview();
+      for (const code of recordedKeys.keys()) finishKey(code);
+    };
+    const unsubscribe = useStore.subscribe((state, previous) => {
+      if (state.midiRecordingActive !== previous.midiRecordingActive) recordedKeys.clear();
+    });
+
     const onKeyDown = (event: KeyboardEvent) => {
       // A modifier changes what the held keys mean (Cmd+A, AltGr...) and the
       // browser may swallow their key-ups: let go of everything at once.
       if (MODIFIER_KEYS.has(event.key)) {
-        stopPreview();
+        releaseAll();
         return;
       }
       if (event.defaultPrevented || isAnyDialogOpen() || isAltGraph(event)) return;
       const action = matchShortcut(event, 'playing');
       if (action === null) return;
       if (action === 'exitPlayingMode') {
-        stopPreview();
+        releaseAll();
         setPcKeyboardPlaying(false);
         return;
       }
@@ -61,27 +81,38 @@ function useKeyboardPlaying(active: boolean): void {
       }).find((candidate) => candidate.code === event.code);
       if (assignment?.pitch == null) return;
       holdNote(event.code, track.instrument, assignment.pitch);
+      if (useStore.getState().midiRecordingActive) {
+        recordedKeys.set(event.code, assignment.pitch);
+        noteInput({ type: 'on', pitch: assignment.pitch, velocity: 90 });
+      }
     };
     // Key-up always releases, whatever the focus or modifiers are by then.
     const onKeyUp = (event: KeyboardEvent) => {
       // Backstop: a key-up that still reports a held modifier means key-ups were suppressed.
-      if (event.metaKey || event.ctrlKey || event.altKey) stopPreview();
-      else releaseHeldNote(event.code);
+      if (event.metaKey || event.ctrlKey || event.altKey) releaseAll();
+      else {
+        releaseHeldNote(event.code);
+        finishKey(event.code);
+      }
     };
     // A key-up eaten by a dropdown, dialog or other pointer action must not leave a note on.
-    const releaseAll = () => stopPreview();
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('pointerdown', releaseAll, true);
+    window.addEventListener('blur', releaseAll);
+    document.addEventListener('visibilitychange', releaseAll);
     document.addEventListener('focusin', releaseAll, true);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('pointerdown', releaseAll, true);
+      window.removeEventListener('blur', releaseAll);
+      document.removeEventListener('visibilitychange', releaseAll);
+      unsubscribe();
       document.removeEventListener('focusin', releaseAll, true);
-      stopPreview();
+      releaseAll();
     };
-  }, [active]);
+  }, [active, noteInput]);
 }
 
 export function PcKeyboardPlayer() {
@@ -95,7 +126,11 @@ export function PcKeyboardPlayer() {
   const recording = useStore(
     (s) => s.audioRecordingOperationId !== null || s.automationRecording.ownership !== null,
   );
-  useKeyboardPlaying(mode.playing);
+  const midi = usePcMidiRecording(mode.playing);
+  const [recordMode, setRecordMode] = useState<'overdub' | 'replace'>('overdub');
+  const [countIn, setCountIn] = useState(false);
+  const [quantize, setQuantize] = useState(0);
+  useKeyboardPlaying(mode.playing, midi.noteInput);
   // Unmounting (the track list leaving the screen) ends playing mode.
   useEffect(() => () => setPcKeyboardPlaying(false), []);
 
@@ -167,6 +202,56 @@ export function PcKeyboardPlayer() {
               </li>
             ))}
           </ul>
+          <div className="pr__midi-recording" role="group" aria-label="MIDI 録音">
+            <button
+              type="button"
+              disabled={midi.arming || recording || (!midi.active && selectedTrackType !== 'instrument')}
+              onClick={() => midi.active
+                ? midi.finish()
+                : void midi.start({
+                    mode: recordMode,
+                    countInBars: countIn ? 1 : 0,
+                    autoQuantize: quantize === 0 ? null : quantize * PPQ,
+                  })}
+            >
+              {midi.active ? 'MIDI 録音を停止' : 'MIDI 録音'}
+            </button>
+            <select
+              aria-label="録音方法"
+              value={recordMode}
+              disabled={midi.active || midi.arming}
+              onChange={(event) => setRecordMode(event.target.value === 'replace' ? 'replace' : 'overdub')}
+            >
+              <option value="overdub">音を重ねる</option>
+              <option value="replace">録音した範囲を置き換える</option>
+            </select>
+            <label className="pr__field">
+              <input
+                type="checkbox"
+                checked={countIn}
+                disabled={midi.active || midi.arming}
+                onChange={(event) => setCountIn(event.target.checked)}
+              />
+              <span>１小節カウント</span>
+            </label>
+            <label className="pr__field">
+              <span>音の始まりをそろえる</span>
+              <select
+                value={quantize}
+                disabled={midi.active || midi.arming}
+                onChange={(event) => setQuantize(Number(event.target.value))}
+              >
+                <option value={0}>オフ</option>
+                {GRID_SNAP_OPTIONS.map((grid) => (
+                  <option key={grid} value={grid}>グリッド {GRID_SNAP_LABELS[grid]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="pr__popover-help" role="status">{midi.arming ? '録音を準備しています。' : midi.status}</p>
+          {midi.canDiscard && (
+            <button type="button" onClick={midi.discard}>{DISCARD_MIDI_TAKE_LABEL}</button>
+          )}
           {selectedTrackType !== 'instrument' ? (
             <p className="pr__popover-help" role="status">
               楽器トラックを選ぶと、音が鳴ります。

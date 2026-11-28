@@ -371,6 +371,12 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 5. A/Bは選択Clipの`pitchEnabled`だけをfalseにしたlive用immutable Project snapshotを作り、timing markerと他のClipを保持する。live中の切替はposition beatを保持して通常request generationを1回進める。Project / history / revision / autosave / SQLite / `.ctsproj.json`、全体 / 選択Track WAV snapshotは変更しない。
 6. audioWarp付きClipのloop化、take folder化、Auto Punch spanning Clip化はdomain境界で拒否する。manual formant / vibrato編集、polyphonic pitch、take folder / loop-cycle、phase-coherent multitrack、audio quantize / groove、audio follow / Smart Tempoはこのtransactionに含めない。
 
+### 5.13 MIDI 録音（P42）
+
+- `state/midiRecording.ts` はテンポマップで入力の経過秒を曲の絶対位置へ変換し、開始と終了を個別に PPQ 480 の整数 tick に丸める。カウントインは録音を始める位置の拍子を使い、ループの所要時間はテンポマップから求める。自動クオンタイズは絶対 tick の開始位置に適用し、保存は既存のクリップ相対の拍に変換する。
+- ストアの録音ロックは音声録音、プロジェクト編集と編集トランザクション、取り消しとやり直しを止める。停止時に変更を履歴と自動保存へ１件反映する。曲を切り替える場合は最後に受け取った入力時刻で停止し、切り替え前の曲へ反映して保存する。
+- PC 鍵盤とカウントのクリックはトランスポートと同じ `AudioContext` の時計を使う。今後の MIDI デバイス入力は `MidiRecordingNoteInput` に接続できる。
+
 ## 6. Audio実装方針
 
 ### 6.1 MVP
