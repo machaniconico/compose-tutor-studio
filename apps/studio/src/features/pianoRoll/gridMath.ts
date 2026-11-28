@@ -42,20 +42,27 @@ function wholeTick(beat: number): number | null {
   return Number.isSafeInteger(tick) && tick / PPQ === beat ? tick : null;
 }
 
+/** True for a triplet grid (a whole number of ticks that is not a power-of-two fraction of a beat). */
+export function isTripletGrid(grid: number): boolean {
+  return typeof grid === 'number' && grid > 0 && wholeTick(grid) !== null && !Number.isInteger(Math.log2(grid));
+}
+
 /**
- * `beat + delta` for grid-derived values: when both are whole ticks the sum is
- * done in integer ticks and converted once (so 1/3 + 1/3 is 320/480). Any other
- * value, and a zero delta, is returned exactly as plain addition would.
+ * `beat + delta` for a grid-derived value. On a triplet grid, when both are whole ticks the
+ * sum is done in integer ticks and converted once (1/3 + 1/3 is 320/480). On every other
+ * grid (and without a grid) it is main's plain float addition, bit for bit.
  */
-export function addGridBeats(beat: number, delta: number): number {
+export function addGridBeats(beat: number, delta: number, grid?: number): number {
+  if (grid === undefined || !isTripletGrid(grid)) return beat + delta;
   if (delta === 0) return beat;
   const a = wholeTick(beat);
   const b = wholeTick(delta);
   return a === null || b === null ? beat + delta : (a + b) / PPQ;
 }
 
-/** `a - b` for grid-derived values, in integer ticks when both are whole ticks. */
-export function beatDifference(a: number, b: number): number {
+/** `a - b` for a grid-derived value: integer ticks on a triplet grid, main's float subtraction otherwise. */
+export function beatDifference(a: number, b: number, grid?: number): number {
+  if (grid === undefined || !isTripletGrid(grid)) return a - b;
   const x = wholeTick(a);
   const y = wholeTick(b);
   return x === null || y === null ? a - b : (x - y) / PPQ;
@@ -64,13 +71,13 @@ export function beatDifference(a: number, b: number): number {
 /** Snap a beat value to the nearest grid line of `snap` beats. */
 export function snapBeat(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);
-  return Math.max(0, tickAligned(Math.round(beat / snap) * snap));
+  return Math.max(0, isTripletGrid(snap) ? tickAligned(Math.round(beat / snap) * snap) : Math.round(beat / snap) * snap);
 }
 
 /** Snap a beat value DOWN to the grid line at or before it (for placement). */
 export function floorToGrid(beat: number, snap: number): number {
   if (snap <= 0) return Math.max(0, beat);
-  return Math.max(0, tickAligned(Math.floor(beat / snap) * snap));
+  return Math.max(0, isTripletGrid(snap) ? tickAligned(Math.floor(beat / snap) * snap) : Math.floor(beat / snap) * snap);
 }
 
 /** Quantize a note start to the grid; keeps non-negative. */

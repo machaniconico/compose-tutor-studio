@@ -197,6 +197,8 @@ type NoteTranslation = {
   scaleSnap: boolean;
   scalePcs: ReadonlySet<number>;
   scaleBias?: 'nearest' | 'up' | 'down';
+  /** 今のグリッド(三連符のときだけ整数 tick で足す)。 */
+  gridSnap?: number;
 };
 
 function crossedDragThreshold(drag: NoteDragState, clientX: number, clientY: number): boolean {
@@ -258,7 +260,7 @@ export function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
     }
     return {
       ...source,
-      startBeat: addGridBeats(source.startBeat, beatDelta),
+      startBeat: addGridBeats(source.startBeat, beatDelta, args.gridSnap),
       pitch,
     };
   });
@@ -268,6 +270,7 @@ export function resizeNoteGroup(
   snapshot: readonly NoteEvent[],
   requestedDelta: number,
   clipLengthBeats: number,
+  gridSnap?: number,
 ): NoteEvent[] {
   if (snapshot.length === 0) return [];
   const minimumDelta = Math.max(
@@ -284,7 +287,7 @@ export function resizeNoteGroup(
   );
   return snapshot.map((note) => ({
     ...note,
-    durationBeats: addGridBeats(note.durationBeats, durationDelta),
+    durationBeats: addGridBeats(note.durationBeats, durationDelta, gridSnap),
   }));
 }
 
@@ -329,14 +332,14 @@ export function buildNoteGesturePreview(
     const beatDelta = xToBeat(dx, drag.ppb);
     const remainingBeats = Math.max(
       MIN_EVENT_DURATION_BEATS,
-      beatDifference(drag.clipLengthBeats, source.startBeat),
+      beatDifference(drag.clipLengthBeats, source.startBeat, drag.gridSnap),
     );
     let durationBeats = source.durationBeats + beatDelta;
     durationBeats = shiftKey
       ? Math.max(MIN_EVENT_DURATION_BEATS, durationBeats)
       : Math.max(
           MIN_EVENT_DURATION_BEATS,
-          beatDifference(snapBeat(source.startBeat + durationBeats, drag.gridSnap), source.startBeat),
+          beatDifference(snapBeat(source.startBeat + durationBeats, drag.gridSnap), source.startBeat, drag.gridSnap),
         );
     durationBeats = Math.min(remainingBeats, durationBeats);
     return {
@@ -350,7 +353,7 @@ export function buildNoteGesturePreview(
   const rawBeatDelta = xToBeat(dx, drag.ppb);
   const requestedBeatDelta = shiftKey
     ? rawBeatDelta
-    : beatDifference(snapBeat(anchor.startBeat + rawBeatDelta, drag.gridSnap), anchor.startBeat);
+    : beatDifference(snapBeat(anchor.startBeat + rawBeatDelta, drag.gridSnap), anchor.startBeat, drag.gridSnap);
   const requestedPitchDelta = -Math.round((clientY - drag.startY) / drag.rowHeight);
   const previewNotes = translateNoteGroup({
     snapshot: drag.snapshot,
@@ -360,6 +363,7 @@ export function buildNoteGesturePreview(
     clipLengthBeats: drag.clipLengthBeats,
     scaleSnap: drag.scaleSnap,
     scalePcs: drag.scalePcs,
+    gridSnap: drag.gridSnap,
     scaleBias:
       requestedPitchDelta > 0 ? 'up' : requestedPitchDelta < 0 ? 'down' : 'nearest',
   });
@@ -1054,6 +1058,7 @@ export function PianoRoll() {
           clipLengthBeats: clip.lengthBeats,
           scaleSnap: editor.scaleSnap,
           scalePcs: scaleInfo.scalePcs,
+          gridSnap,
         });
         const sourceById = new Map(snapshot.map((candidate) => [candidate.id, candidate]));
         const changed = finalNotes.some((candidate) => {
@@ -1157,7 +1162,7 @@ export function PianoRoll() {
 
       if (isResize) {
         const direction = event.key === 'ArrowRight' ? 1 : -1;
-        const finalNotes = resizeNoteGroup(snapshot, direction * gridSnap, clip.lengthBeats);
+        const finalNotes = resizeNoteGroup(snapshot, direction * gridSnap, clip.lengthBeats, gridSnap);
         const committed = commitNoteUpdates(
           clip.id,
           finalNotes.map((candidate) => ({
@@ -1203,6 +1208,7 @@ export function PianoRoll() {
         clipLengthBeats: clip.lengthBeats,
         scaleSnap: editor.scaleSnap,
         scalePcs: scaleInfo.scalePcs,
+        gridSnap,
         scaleBias:
           requestedPitchDelta > 0 ? 'up' : requestedPitchDelta < 0 ? 'down' : 'nearest',
       });
@@ -1269,7 +1275,7 @@ export function PianoRoll() {
       if (event.key === 'Enter' || event.key === ' ') {
         const durationBeats = Math.min(
           gridSnap,
-          beatDifference(clip.lengthBeats, keyboardCursor.startBeat),
+          beatDifference(clip.lengthBeats, keyboardCursor.startBeat, gridSnap),
         );
         if (durationBeats < MIN_EVENT_DURATION_BEATS) {
           setKeyboardAnnouncement('この位置にはノートを追加できません。');
@@ -1301,8 +1307,8 @@ export function PianoRoll() {
       let pitch = keyboardCursor.pitch;
       if (event.key === 'Home') startBeat = 0;
       else if (event.key === 'End') startBeat = maximumStart;
-      else if (event.key === 'ArrowLeft') startBeat = Math.max(0, addGridBeats(startBeat, -gridSnap));
-      else if (event.key === 'ArrowRight') startBeat = Math.min(maximumStart, addGridBeats(startBeat, gridSnap));
+      else if (event.key === 'ArrowLeft') startBeat = Math.max(0, addGridBeats(startBeat, -gridSnap, gridSnap));
+      else if (event.key === 'ArrowRight') startBeat = Math.min(maximumStart, addGridBeats(startBeat, gridSnap, gridSnap));
       else {
         const direction = event.key === 'ArrowUp' ? 1 : -1;
         pitch = clampPitch(pitch + direction);

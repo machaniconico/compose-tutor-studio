@@ -25,13 +25,13 @@ describe('grid arithmetic helpers', () => {
   it('addGridBeats / beatDifference are exact on triplet grids and leave other values alone', () => {
     let beat = 0;
     for (let i = 1; i <= 200; i += 1) {
-      beat = addGridBeats(beat, 1 / 6);
+      beat = addGridBeats(beat, 1 / 6, 1 / 6);
       expect(beat).toBe((i * 80) / PPQ);
     }
-    expect(beatDifference(1, 1 / 3)).toBe(320 / PPQ);
-    expect(addGridBeats(0.999999999, 0)).toBe(0.999999999);
-    expect(addGridBeats(0.3001, 0.25)).toBe(0.3001 + 0.25);
-    expect(beatDifference(0.3001, 0.1)).toBe(0.3001 - 0.1);
+    expect(beatDifference(1, 1 / 3, 1 / 3)).toBe(320 / PPQ);
+    expect(addGridBeats(0.999999999, 0, 1 / 3)).toBe(0.999999999);
+    expect(addGridBeats(0.3001, 0.25, 1 / 3)).toBe(0.3001 + 0.25);
+    expect(beatDifference(0.3001, 0.1, 1 / 3)).toBe(0.3001 - 0.1);
   });
   it('gives the same doubles as main for the four existing grids', () => {
     for (const grid of [0.25, 0.5, 1, 2]) {
@@ -41,10 +41,10 @@ describe('grid arithmetic helpers', () => {
         expect(snapBeat(raw, grid)).toBe(Math.max(0, Math.round(raw / grid) * grid));
         expect(floorToGrid(raw, grid)).toBe(Math.max(0, Math.floor(raw / grid) * grid));
         const snapped = snapBeat(start + raw, grid);
-        expect(beatDifference(snapped, start)).toBe(snapped - start);
-        expect(addGridBeats(start, grid)).toBe(start + grid);
-        expect(addGridBeats(start, -grid)).toBe(start - grid);
-        expect(addGridBeats(start, beatDifference(snapped, start))).toBe(start + (snapped - start));
+        expect(beatDifference(snapped, start, grid)).toBe(snapped - start);
+        expect(addGridBeats(start, grid, grid)).toBe(start + grid);
+        expect(addGridBeats(start, -grid, grid)).toBe(start - grid);
+        expect(addGridBeats(start, beatDifference(snapped, start, grid), grid)).toBe(start + (snapped - start));
         // the drag previews (move and resize) match main's formulas on these grids
         const source = note('a', 60, start, 1);
         const move = mod.buildNoteGesturePreview(drag('move', source, grid), { clientX: raw * 100, clientY: 0, shiftKey: false });
@@ -70,10 +70,10 @@ describe('triplet drags and steps land on whole ticks', () => {
   it('keyboard translate / resize by grid steps stay on whole ticks', () => {
     let notes = [note('a', 60, 0, 1 / 3)];
     for (let i = 0; i < 7; i += 1) {
-      notes = mod.translateNoteGroup({ snapshot: notes, anchorId: 'a', requestedBeatDelta: 1 / 6, requestedPitchDelta: 0, clipLengthBeats: 8, scaleSnap: false, scalePcs: new Set() });
+      notes = mod.translateNoteGroup({ snapshot: notes, anchorId: 'a', requestedBeatDelta: 1 / 6, requestedPitchDelta: 0, clipLengthBeats: 8, scaleSnap: false, scalePcs: new Set(), gridSnap: 1 / 6 });
     }
     expect(notes[0]!.startBeat).toBe(560 / PPQ);
-    expect(mod.resizeNoteGroup(notes, 1 / 6, 8)[0]!.durationBeats).toBe(240 / PPQ);
+    expect(mod.resizeNoteGroup(notes, 1 / 6, 8, 1 / 6)[0]!.durationBeats).toBe(240 / PPQ);
   });
 });
 
