@@ -12,8 +12,8 @@
 //   (スウィング込み、P20 の resolveGrooveNoteSpan)。いちばん後ろの音は変えない。
 // - スタッカート: 長さを半分(STACCATO_RATIO)にする。tick に四捨五入し、最低 1 tick。
 //   すでに 1 tick の音は変えない。
-// - 連結: 同じ高さで、次の音が前の音の終わりと接するか重なる選んだ音を 1 つにする。
-//   いちばん早い音の id と強さを残し、終わりはいちばん遅い終わり。
+// - 連結: 同じ高さで、鳴る区間(スウィング込み)が接する・重なる選んだ音だけを 1 つにする。長さ =
+//   最後の終わりの鳴る時刻 − 最初の鳴り始め。いちばん早く鳴る音の id と強さを残す。
 // - 分割: 再生ヘッドの位置(クリップ内の tick)で、またぐ選んだ音を 2 つにする。
 //   ループするクリップは (再生ヘッド − クリップの始まり) mod 周期 の位置で元の音を分ける(全部の繰り返しが分かれる)。
 //   どちらも 1 tick 以上。後半は同じ高さ・強さで、新しい id。
@@ -216,39 +216,46 @@ export function staccatoNotesInProject(project: Project, clipId: string, noteIds
   });
 }
 
-/** 連結: 同じ高さで接する・重なる選んだ音を 1 つに。いちばん早い音の id と強さを残す。 */
+/**
+ * 連結: 同じ高さで、鳴る区間(スウィング込み)が接する・重なる選んだ音を 1 つにする。
+ * 長さは「最後の終わりの鳴る時刻 − 最初の鳴り始め」。いちばん早く鳴る音の id と強さを残す。
+ */
 export function joinNotesInProject(project: Project, clipId: string, noteIds: readonly string[]): NoteEditOutcome {
-  return runTool(project, clipId, noteIds, (ordered) => {
-    const info = ordered.map((note) => ({ note, ticks: ticksOf(note) }));
-    if (info.some((entry) => entry.ticks === null)) return OFF_GRID;
-    const byPitch = new Map<number, typeof info>();
-    for (const entry of info) byPitch.set(entry.note.pitch, [...(byPitch.get(entry.note.pitch) ?? []), entry]);
+  return runTool(project, clipId, noteIds, (ordered, target) => {
+    const placement = placementOf(target, clipId);
+    type Entry = { note: NoteEvent; span: GrooveNoteSpan };
+    const byPitch = new Map<number, Entry[]>();
+    for (const note of ordered) {
+      const span = soundingSpan(project, placement, note);
+      if (span === null) continue;
+      byPitch.set(note.pitch, [...(byPitch.get(note.pitch) ?? []), { note, span }]);
+    }
     const replace = new Map<string, readonly NoteEvent[]>();
     for (const group of byPitch.values()) {
-      group.sort((a, b) => a.ticks!.start - b.ticks!.start || (a.note.id < b.note.id ? -1 : a.note.id > b.note.id ? 1 : 0));
+      group.sort((a, b) => a.span.onsetTick - b.span.onsetTick || (a.note.id < b.note.id ? -1 : a.note.id > b.note.id ? 1 : 0));
       let head = group[0]!;
-      let end = head.ticks!.start + head.ticks!.duration;
+      let end = head.span.endTick;
       let joined: string[] = [];
       const flush = (): void => {
         if (joined.length === 0) return;
-        replace.set(head.note.id, [{ ...head.note, durationBeats: (end - head.ticks!.start) / PPQ }]);
+        replace.set(head.note.id, [{ ...head.note, durationBeats: (end - head.span.onsetTick) / PPQ }]);
         for (const id of joined) replace.set(id, []);
         joined = [];
       };
       for (const entry of group.slice(1)) {
-        if (entry.ticks!.start <= end) {
+        if (entry.span.onsetTick <= end) {
           joined.push(entry.note.id);
-          end = Math.max(end, entry.ticks!.start + entry.ticks!.duration);
+          end = Math.max(end, entry.span.endTick);
         } else {
           flush();
           head = entry;
-          end = entry.ticks!.start + entry.ticks!.duration;
+          end = entry.span.endTick;
         }
       }
       flush();
     }
     if (replace.size === 0) {
-      return 'つなげられる音がありません。同じ高さで、隣り合う(または重なる)音を 2 つ以上選んでください。';
+      return 'つなげられる音がありません。同じ高さで、鳴る時間が隣り合う(または重なる)音を 2 つ以上選んでください。';
     }
     const heads = [...replace.values()].filter((notes) => notes.length === 1).length;
     return {
