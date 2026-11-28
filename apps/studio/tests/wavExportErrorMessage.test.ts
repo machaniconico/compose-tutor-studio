@@ -5,7 +5,7 @@ import { AudioClipPlanLimitError } from '../src/audio/audioClipPlanner';
 import { WavRenderLimitError } from '../src/audio/wav';
 import { AudioWarpDspError } from '../src/audio/audioWarpDsp';
 import { AudioWarpPlanError } from '../src/audio/audioWarpPlan';
-import { wavExportFailureMessage } from '../src/features/export/ExportMenuContent';
+import { wavExportFailureMessage, wavLevelsMessage } from '../src/features/export/ExportMenuContent';
 
 describe('wavExportFailureMessage', () => {
   it.each([
@@ -45,5 +45,39 @@ describe('wavExportFailureMessage', () => {
     expect(message).toContain('Elastic Audio');
     expect(message).toContain('元の音声素材');
     expect(message).not.toContain('private detail');
+  });
+});
+
+describe('wavLevelsMessage', () => {
+  const base = { appliedGainDb: 0, limitedByPeak: false, normalized: false, outputLoudness: 0 };
+
+  it('shows the measured loudness with a plain explanation', () => {
+    const text = wavLevelsMessage({ ...base, loudness: -13.6 });
+    expect(text).toContain('約 -14 LUFS');
+    expect(text).toContain('配信サービスはだいたい −14 LUFS に合わせます');
+  });
+
+  it('says so when the sound is too quiet to measure', () => {
+    expect(wavLevelsMessage({ ...base, loudness: -Infinity })).toContain('測れません');
+  });
+
+  it('explains a peak-limited normalization as quieter than the target', () => {
+    const text = wavLevelsMessage({
+      loudness: -20, outputLoudness: -18, appliedGainDb: 2, limitedByPeak: true, normalized: true,
+    });
+    expect(text).toContain('約 -18 LUFS にそろえました');
+    expect(text).toContain('目標の −14 LUFS より小さい');
+  });
+
+  it('says nothing was normalized when the loudness could not be measured', () => {
+    const text = wavLevelsMessage({
+      loudness: -Infinity, outputLoudness: -Infinity, appliedGainDb: 0, limitedByPeak: false, normalized: true,
+    });
+    expect(text).toContain('短すぎる・静かすぎるため測れず、音量はそろえていません');
+  });
+
+  it('shows the measured output loudness and no peak value when normalize is off', () => {
+    const text = wavLevelsMessage({ ...base, loudness: -13.6 });
+    expect(text).not.toMatch(/dBTP|ピーク/);
   });
 });

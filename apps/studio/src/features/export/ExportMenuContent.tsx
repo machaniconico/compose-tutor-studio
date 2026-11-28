@@ -1,7 +1,7 @@
 // Export menu in the top bar: MIDI / WAV / project-file export, and project-file
 // import. Surfaces progress + errors as toasts and emits export app events.
 
-import { useRef, useState, type MutableRefObject } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { MidiExportError, projectToMidi } from '@cts/midi-io';
 import {
   DEFAULT_MAX_PROJECT_JSON_BYTES,
@@ -21,6 +21,7 @@ import {
   WavRenderLimitError,
   DEFAULT_WAV_FORMAT,
   type WavFormatOptions,
+  type WavRenderLevels,
 } from '../../audio/wav';
 import { AudioAssetPlaybackError } from '../../audio/audioAssetResolver';
 import { AudioClipPlanLimitError } from '../../audio/audioClipPlanner';
@@ -117,15 +118,54 @@ export function wavExportFailureMessage(error: unknown): string {
   return 'WAVの書き出しに失敗しました。';
 }
 
+/** Beginner-facing summary of a render's loudness (and of the gain, when normalized). */
+export function wavLevelsMessage(levels: WavRenderLevels): string {
+  if (!Number.isFinite(levels.loudness)) {
+    return levels.normalized
+      ? '短すぎる・静かすぎるため測れず、音量はそろえていません。'
+      : '短すぎる・静かすぎるため、音の大きさ(ラウドネス)を測れませんでした。';
+  }
+  const rounded = Math.round(levels.loudness);
+  if (!levels.normalized) {
+    return `音の大きさ: 約 ${rounded} LUFS。配信サービスはだいたい −14 LUFS に合わせます。`;
+  }
+  // The "after" value is measured on the normalized samples, never original + gain.
+  const after = Math.round(levels.outputLoudness);
+  const gain = levels.appliedGainDb.toFixed(1);
+  const base = `音の大きさ: 約 ${rounded} LUFS から約 ${after} LUFS にそろえました(音量 ${levels.appliedGainDb >= 0 ? '+' : ''}${gain} dB)。`;
+  return levels.limitedByPeak
+    ? `${base} 音割れを防ぐため上げすぎず、目標の −14 LUFS より小さい音になっています。`
+    : base;
+}
+
+/** Last render's loudness line. Its setter is handed to the parent through a ref (no parent state). */
+function WavLevelsStatus({
+  publishRef,
+}: {
+  publishRef: MutableRefObject<((message: string | null) => void) | null>;
+}) {
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    publishRef.current = setMessage;
+    return () => {
+      publishRef.current = null;
+    };
+  }, [publishRef]);
+  return message ? <p className="export-menu__hint" role="status">{message}</p> : null;
+}
+
 /** Compact sample rate / bit depth / dither row. Writes its choice into `formatRef`. */
 function WavFormatControls({
   formatRef,
+  normalizeRef,
   disabled,
 }: {
   formatRef: MutableRefObject<Required<WavFormatOptions>>;
+  normalizeRef: MutableRefObject<boolean>;
   disabled: boolean;
 }) {
   const [format, setFormat] = useState({ ...formatRef.current });
+  const [normalize, setNormalize] = useState(normalizeRef.current);
   const update = (patch: Partial<Required<WavFormatOptions>>) => {
     const next = { ...format, ...patch };
     formatRef.current = next;
@@ -163,6 +203,18 @@ function WavFormatControls({
           onChange={(e) => update({ dither: e.target.checked })}
         />
         ディザ
+      </label>
+      <label title="曲全体に同じ音量調整をかけて、約 −14 LUFS にそろえます。音割れを防ぐため上げすぎることはなく、その場合は目標より小さい音になります。">
+        <input
+          type="checkbox"
+          checked={normalize}
+          disabled={disabled}
+          onChange={(e) => {
+            normalizeRef.current = e.target.checked;
+            setNormalize(e.target.checked);
+          }}
+        />
+        音量をそろえる(−14 LUFS)
       </label>
     </div>
   );
@@ -216,6 +268,8 @@ export function ExportMenuContent({
   // Export format is dialog-local UI state, not project data. The ref is the
   // single source for export handlers; WavFormatControls owns the visible state.
   const wavFormatRef = useRef<Required<WavFormatOptions>>({ ...DEFAULT_WAV_FORMAT });
+  const normalizeRef = useRef(false);
+  const publishLevelsRef = useRef<((message: string | null) => void) | null>(null);
 
   const project = useStore((s) => s.project);
   const loopEnabled = useStore((s) => s.transport.loopEnabled);
@@ -277,8 +331,11 @@ export function ExportMenuContent({
       const rendered = await renderProjectToWav(project, {
         ...format,
         ...(exportRange ? { range: exportRange } : {}),
+        measureLoudness: true,
+        normalize: normalizeRef.current,
       });
       const fileName = `${stem}.wav`;
+      const levelsText = rendered.levels ? wavLevelsMessage(rendered.levels) : null;
       const result = await saveWavRenderLease(rendered, fileName, {
         runtime: isNative ? 'native' : 'web',
         exportNative: (bytes, suggestedFileName) =>
@@ -290,7 +347,8 @@ export function ExportMenuContent({
         type: 'export.wav',
         payload: { format: 'wav', sampleRate: format.sampleRate, bitDepth: format.bitDepth },
       });
-      pushToast('WAVファイルを書き出しました。', 'success');
+      publishLevelsRef.current?.(levelsText);
+      pushToast(levelsText ? `WAVファイルを書き出しました。${levelsText}` : 'WAVファイルを書き出しました。', 'success');
     } catch (error) {
       pushToast(wavExportFailureMessage(error), 'error');
     } finally {
@@ -308,8 +366,11 @@ export function ExportMenuContent({
       const rendered = await renderSelectedTrackToWav(project, selectedWav.track.id, {
         ...format,
         ...(exportRange ? { range: exportRange } : {}),
+        measureLoudness: true,
+        normalize: normalizeRef.current,
       });
       const fileName = selectedTrackWavFileName(project.title, selectedWav.track.name);
+      const levelsText = rendered.levels ? wavLevelsMessage(rendered.levels) : null;
       const result = await saveWavRenderLease(rendered, fileName, {
         runtime: isNative ? 'native' : 'web',
         exportNative: (bytes, suggestedFileName) =>
@@ -321,7 +382,11 @@ export function ExportMenuContent({
         type: 'export.wav',
         payload: { format: 'wav', sampleRate: format.sampleRate, bitDepth: format.bitDepth },
       });
-      pushToast(`「${selectedWav.track.name}」をWAVファイルに書き出しました。`, 'success');
+      publishLevelsRef.current?.(levelsText);
+      pushToast(
+        `「${selectedWav.track.name}」をWAVファイルに書き出しました。${levelsText ?? ''}`,
+        'success',
+      );
     } catch (error) {
       pushToast(wavExportFailureMessage(error), 'error');
     } finally {
@@ -596,7 +661,12 @@ export function ExportMenuContent({
                 unavailableReason={loopRange.ok ? null : loopRange.message}
                 disabled={operationBusy}
               />
-              <WavFormatControls formatRef={wavFormatRef} disabled={operationBusy} />
+              <WavFormatControls
+                formatRef={wavFormatRef}
+                normalizeRef={normalizeRef}
+                disabled={operationBusy}
+              />
+              <WavLevelsStatus publishRef={publishLevelsRef} />
               <p className="export-menu__hint">
                 MIDIは他のアプリで編集でき、WAVはそのまま再生・共有できます。
               </p>
