@@ -149,6 +149,9 @@ type ActiveVoice = {
   disposed: boolean;
 };
 
+/** Opaque reference to one sounding voice, returned by `noteOn`. */
+export type SynthVoiceHandle = ActiveVoice;
+
 /**
  * A polyphonic synth bound to one output node (the track's gain input).
  * One instance per instrument track.
@@ -192,8 +195,8 @@ export class SynthVoiceManager {
     velocity: number,
     options?: SynthNoteOptions,
     scheduleFilterDetune?: (detune: AudioParam, stopTime: number) => void,
-  ): void {
-    if (this.disposed) return;
+  ): SynthVoiceHandle | null {
+    if (this.disposed) return null;
     this.reap(startTime);
     this.steal(startTime);
 
@@ -267,6 +270,7 @@ export class SynthVoiceManager {
         osc.stop(activeVoice.stopAt);
       }
       if (!activeVoice.disposed) this.scheduledVoices.push(activeVoice);
+      return activeVoice;
     } catch (error) {
       stopOscillators(oscillators, this.ctx.currentTime);
       if (voice) {
@@ -276,6 +280,12 @@ export class SynthVoiceManager {
       }
       throw error;
     }
+  }
+
+  /** Short release of one voice (a held live note); no-op once it is gone. */
+  releaseVoice(handle: SynthVoiceHandle, when: number): void {
+    if (this.disposed) return;
+    this.requestSoftStop(handle as ActiveVoice, when, 0.03, 0.05);
   }
 
   /** Request a short release without disconnecting before the sources end. */

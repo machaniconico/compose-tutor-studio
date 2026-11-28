@@ -16,6 +16,7 @@ import {
   melodyNotesOnProjectTimeline,
   type CoachSeverity,
 } from '../../state/coach';
+import { CompingAssistant } from './CompingAssistant';
 import { HummingMelodyAssistant } from '../hummingToMelody/HummingMelodyAssistant';
 
 const BASS_MODES: { value: BassMode; label: string; hint: string }[] = [
@@ -32,6 +33,7 @@ export function AssistantPanel() {
       <HummingMelodyAssistant />
       <CoachPanel />
       <BassAssistant />
+      <CompingAssistant />
       <MelodyAssistant />
     </div>
   );

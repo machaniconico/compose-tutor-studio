@@ -10,13 +10,20 @@ import type { ChordEvent, InstrumentConfig, Project } from '@cts/project-model';
 import { findChordTrack, realizeChordPitches } from '@cts/project-model';
 import { useStore } from '../state/store';
 import { getAudioEngine } from './engine';
-import { SynthVoiceManager, resolveSynthPatch } from './synth';
+import { SynthVoiceManager, resolveSynthPatch, type SynthVoiceHandle } from './synth';
 import { SYNTH_OSCILLATOR_STOP_PAD_SECONDS } from './voiceTiming';
 
 /** Maximum simultaneous preview voices (the synth steals the oldest beyond it). */
 export const MAX_PREVIEW_VOICES = 16;
 /** Hard upper bound of one preview voice, seconds. */
 export const MAX_PREVIEW_SECONDS = 2;
+/**
+ * Hard upper bound of one key-held (PC keyboard) note, seconds. The voice is
+ * scheduled for exactly this long, so it ends by itself if key-up never comes.
+ */
+export const MAX_HELD_SECONDS = 8;
+/** Longest release tail of a held note, seconds. */
+const MAX_HELD_RELEASE_SECONDS = 1;
 export const NOTE_PREVIEW_SECONDS = 0.35;
 export const CHORD_PREVIEW_SECONDS = 1.2;
 const PREVIEW_VELOCITY = 90;
@@ -38,6 +45,19 @@ function fitEnvelope(instrument: InstrumentConfig | undefined, requested: number
   return { hold, envelope: { attack, decay, sustain: env.sustain, release } };
 }
 
+/**
+ * Envelope and hold of a held note so that note-on through release and the
+ * oscillator stop pad end by MAX_HELD_SECONDS: hold = max - pad - release.
+ */
+function heldEnvelope(instrument: InstrumentConfig | undefined) {
+  const env = resolveSynthPatch(instrument).env;
+  const release = Math.min(env.release, MAX_HELD_RELEASE_SECONDS);
+  const hold = Math.max(MIN_HOLD_SECONDS, MAX_HELD_SECONDS - SYNTH_OSCILLATOR_STOP_PAD_SECONDS - release);
+  const attack = Math.min(env.attack, 0.5);
+  const decay = Math.min(env.decay, 1);
+  return { hold, envelope: { attack, decay, sustain: env.sustain, release } };
+}
+
 export type PreviewTarget = { context: BaseAudioContext; master: AudioNode };
 
 /** Owns the preview bus and one voice manager (the track being auditioned). */
@@ -48,6 +68,8 @@ export class LivePreview {
   private synthInstrument: InstrumentConfig | undefined;
   /** Bumped by every cancel/start so a start that awaited audio init can detect it is stale. */
   private epoch = 0;
+  /** Held live notes by key id, and ids still waiting for audio init. */
+  private readonly held = new Map<string, { voice: SynthVoiceHandle | null }>();
 
   constructor(
     private readonly getTarget: () => Promise<PreviewTarget>,
@@ -90,9 +112,62 @@ export class LivePreview {
     }
   }
 
+  /**
+   * Start a note that sounds until `release(id)` (or MAX_HELD_SECONDS). A
+   * second `hold` of the same id is ignored (key repeat); distinct ids on one
+   * pitch are independent voices. Shares the synth, so the voice cap holds.
+   */
+  async hold(id: string, instrument: InstrumentConfig | undefined, pitch: number): Promise<void> {
+    if (this.held.has(id) || !Number.isInteger(pitch) || pitch < 0 || pitch > 127) return;
+    if (this.held.size >= MAX_PREVIEW_VOICES) return;
+    const entry: { voice: SynthVoiceHandle | null } = { voice: null };
+    this.held.set(id, entry);
+    const epoch = this.epoch;
+    let target: PreviewTarget;
+    try {
+      target = await this.getTarget();
+    } catch (error) {
+      if (this.held.get(id) === entry) this.held.delete(id);
+      throw error;
+    }
+    // Released, cancelled or refused while audio was starting: never sound.
+    if (epoch !== this.epoch || this.held.get(id) !== entry || !this.isAllowed()) {
+      if (this.held.get(id) === entry) this.held.delete(id);
+      return;
+    }
+    const { context, master } = target;
+    if (!this.bus || this.busContext !== context) {
+      this.disposeSynth();
+      const bus = context.createGain();
+      bus.connect(master);
+      this.bus = bus;
+      this.busContext = context;
+    }
+    if (!this.synth || this.synthInstrument !== instrument) {
+      this.disposeSynth();
+      this.synth = new SynthVoiceManager(context, this.bus, instrument, MAX_PREVIEW_VOICES);
+      this.synthInstrument = instrument;
+    }
+    const held = heldEnvelope(instrument);
+    const voice = this.synth.noteOn(pitch, context.currentTime, held.hold, PREVIEW_VELOCITY, {
+      envelope: held.envelope,
+    });
+    if (voice) entry.voice = voice;
+    else this.held.delete(id);
+  }
+
+  /** Key-up: release that one note (or drop a start still waiting for audio). */
+  release(id: string): void {
+    if (!this.held.has(id)) return;
+    const voice = this.held.get(id)?.voice;
+    this.held.delete(id);
+    if (voice && this.synth && this.busContext) this.synth.releaseVoice(voice, this.busContext.currentTime);
+  }
+
   /** Release everything now and invalidate starts still waiting for audio. */
   cancel(): void {
     this.epoch += 1;
+    this.held.clear();
     const ctx = this.busContext;
     if (this.synth && ctx) this.synth.releaseAll(ctx.currentTime);
   }
@@ -111,6 +186,8 @@ export class LivePreview {
   }
 
   private disposeSynth(): void {
+    // Held voices die with their synth; pending starts (voice null) stay valid.
+    for (const [id, entry] of this.held) if (entry.voice) this.held.delete(id);
     this.synth?.dispose();
     this.synth = null;
     this.synthInstrument = undefined;
@@ -170,6 +247,16 @@ export function previewChord(project: Project, chord: ChordEvent): boolean {
   if (pitches.length === 0) return false;
   run(shared().play(instrumentForChords(project), pitches, CHORD_PREVIEW_SECONDS, true));
   return true;
+}
+
+/** Start a key-held note on the shared preview. Refused while recording. */
+export function holdNote(id: string, instrument: InstrumentConfig | undefined, pitch: number): void {
+  if (!canPreview()) return;
+  run(shared().hold(id, instrument, pitch));
+}
+
+export function releaseHeldNote(id: string): void {
+  singleton?.release(id);
 }
 
 export function stopPreview(): void {

@@ -1907,6 +1907,35 @@ input[type='range'] {
   color: var(--text-dim);
 }
 
+/* トラック一覧の見出しにある ⌨ ボタン。パネルは一覧のスクロールに切られないよう画面に固定して出す。 */
+.track-list__header .pr__popover-anchor {
+  margin-left: auto;
+}
+
+.pr__pckeys {
+  position: fixed;
+  right: auto;
+  max-width: min(420px, 90vw);
+}
+
+.pr__pckeys-title {
+  font-size: 12px;
+}
+
+.pr__keymap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+
+.pr__keymap li.is-off {
+  color: var(--text-dim);
+}
+
 /* 結果の 1 行は行を増やさず、ツールバーの下に重ねて出す。 */
 .pr__edit-message {
   position: absolute;
@@ -2216,6 +2245,48 @@ button.pr__note:hover {
   padding: var(--sp-1) var(--sp-2);
   background: var(--bg-panel-2);
   border-radius: var(--radius-sm);
+}
+
+.assistant__comping-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.assistant__comping-form label {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.assistant__comping-form select,
+.assistant__comping-form input {
+  min-width: 0;
+  width: 100%;
+}
+
+.assistant__comping-check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.assistant__comping-message {
+  margin: var(--sp-2) 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.assistant__comping-message.is-error {
+  color: var(--danger, #d85f68);
 }
 
 .assistant__melody-buttons {

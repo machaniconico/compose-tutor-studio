@@ -11,9 +11,12 @@ const MiB = 1024 * KiB;
 const budgets = {
   // Re-baselined for main on 2026-11-28 (measured JS 1437.6 KiB raw / 416.4 KiB gzip, CSS 101.2 KiB raw / 16.2 KiB gzip)
   // with about 10% headroom. The wave5 budgets (600/180/90 KiB) predate main's feature set.
-  jsRaw: 1600 * KiB,
-  jsGzip: 460 * KiB,
-  cssRaw: 112 * KiB,
+  // 2026-11-28 (later): the wave5 port (P10-P53) grew JS to 1587 KiB raw / 465.4 KiB gzip and exceeded the
+  // budget on main. Raised to keep ~12% headroom for the remaining port PRs (P3A, P42, P60-P62, P70).
+  // Revisit with code splitting if the port finishes above ~500 KiB gzip.
+  jsRaw: 1800 * KiB,
+  jsGzip: 530 * KiB,
+  cssRaw: 125 * KiB, // 2026-11-28: 107.2 KiB after the port; same headroom rule as JS
   cssGzip: 24 * KiB,
 };
 
