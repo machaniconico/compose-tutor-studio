@@ -2440,17 +2440,36 @@ function noteSourceKey(payload: NoteScheduleEvent, sourceBeat: number): string {
   return `${payload.trackId}|${payload.preset}|${payload.pitch}|${sourceBeat}`;
 }
 
+/** Project fields that buildScheduleEvents reads besides the tracks. */
+const SCHEDULE_PROJECT_FIELDS = [
+  'chordTrack',
+  'swing',
+  'hiHatChoke',
+  'lengthBeats',
+  'tempoMap',
+  'timeSignature',
+  'timeSignatureMap',
+] as const satisfies ReadonlyArray<keyof Project>;
+
 /**
- * Whether an edit that kept the playback topology may still change what the
- * schedule plays: clip contents (notes, drum steps) or project-level harmony.
- * Mixer-only edits keep every clips array and top-level field by reference.
+ * Whether an edit may change what buildScheduleEvents produces: clip contents
+ * (notes, drum steps), the Chord Track, swing / choke, or the musical
+ * timeline. `updatedAt`, names, colours and mixer values are ignored, so a
+ * rename or a fader drag never rebuilds the schedule.
  */
 export function hasScheduleContentChanged(previous: Project, next: Project): boolean {
   if (previous === next) return false;
-  for (const key of Object.keys(next) as Array<keyof Project>) {
-    if (key !== 'tracks' && previous[key] !== next[key]) return true;
-  }
-  return next.tracks.some((track, index) => previous.tracks[index]?.clips !== track.clips);
+  if (SCHEDULE_PROJECT_FIELDS.some((key) => previous[key] !== next[key])) return true;
+  if (previous.tracks.length !== next.tracks.length) return true;
+  return next.tracks.some((track, index) => {
+    const prior = previous.tracks[index];
+    return !prior
+      || prior.id !== track.id
+      || prior.type !== track.type
+      || prior.role !== track.role
+      || prior.instrument?.preset !== track.instrument?.preset
+      || prior.clips !== track.clips;
+  });
 }
 
 /**

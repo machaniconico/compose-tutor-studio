@@ -96,6 +96,12 @@ vi.mock('../src/audio/drums', () => ({
   },
 }));
 
+vi.mock('../src/audio/events', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/audio/events')>();
+  return { ...actual, buildScheduleEvents: vi.fn(actual.buildScheduleEvents) };
+});
+
+import { buildScheduleEvents } from '../src/audio/events';
 import { initAudioBridge } from '../src/audio/playback';
 import { useStore } from '../src/state/store';
 
@@ -461,6 +467,27 @@ describe('note-content edit while playing (US-012b)', () => {
     // The song ended at 1.0 s; the delay tail keeps the graph alive past 2.4 s.
     expect(store().transport.phase).toBe('stopped');
     expect(rec.disposed).toBe(0);
+  });
+
+  it('トラック名の変更(updatedAtだけが変わる編集)ではスケジュールを作り直さない - live-edit fix F', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    await play();
+    await runFor(0.5);
+    const builds = vi.mocked(buildScheduleEvents).mock.calls.length;
+    const id = melodyId();
+
+    store().applyProjectChange((p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => (t.id === id ? { ...t, name: 'メロディ2' } : t)),
+    }));
+    await runFor(0.5);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(vi.mocked(buildScheduleEvents).mock.calls.length).toBe(builds);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(0.1);
+    expect(vi.mocked(buildScheduleEvents).mock.calls.length).toBe(builds + 1);
   });
 
   it('ループ再生中のノート編集が次のパスで聞こえる - docs/05 G4', async () => {

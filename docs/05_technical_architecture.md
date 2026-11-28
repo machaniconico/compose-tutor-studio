@@ -465,7 +465,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 - ノート内容(ノート、ドラムのステップ、コードトラック)だけの編集はtopologyの外で、再生は止まらず、今の再生に反映される。
 
 反映のしくみ:
-1. audio bridgeのstore購読が、topologyを保ったままclip内容かProject直下の値が変わった編集を検出し、`setTimeout(0)`で次のtimer turnへまとめる。ドラッグで連続する編集も1回の再構築になる。
+1. audio bridgeのstore購読が、topologyを保ったまま`buildScheduleEvents`の読む値(clipの中身、コードトラック、swing、hi-hat choke、曲の長さ・テンポ・拍子)が変わった編集だけを検出し(`hasScheduleContentChanged`)、`setTimeout(0)`で次のtimer turnへまとめる。ドラッグで連続する編集も1回の再構築になる。`updatedAt`、名前、色、ミキサーの値だけの変更(トラック名の変更など)では作り直さない。
 2. 採用済みProjectから起動時と同じ`buildScheduleEvents`でeventを作り直し、ループ時は同じdensity preflightを通してから`Scheduler.replaceEventIndex`で差し替える。anchorと先読みの境界(`scheduledThroughBeat`)は動かさないので、以後のwindowとループの次のpassは新しい内容になる。予算超過は部分適用せず`audio-resource-limit`で停止する。
 3. 先読みで既にvoiceへ渡したeventは、内容(トラック・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。開始時刻がまだ先のvoiceは、gainの予定を`cancelScheduledValues`で消して0にし、sourceをその場でstop・切断するため、1 sampleも鳴らない。
 4. 発音中のvoiceは、元のノート(トラック・音色・音高・元の開始拍)で、残っているノートと1対1に突き合わせる。同じノートが2つ鳴っていて1つを消せば、止まるのは1つだけである。ノートが消えた時(音高を変えた時を含む)だけ、同じ`releaseVoice`の短いfade(30ms)で止め、クリックを出さない。強さや長さだけが変わった時(隣の編集でスイングの切り詰めが変わった時を含む)は触れず、最初に予定した通りに鳴り終わる。鳴らし直しもしない。
@@ -485,6 +485,8 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 ドラム: ドラムの音とchokeの停止時刻は取り消し用のhandleを持たない。そのため既に先読みしたwindow(`scheduledThroughBeat`より前)ではドラムeventの差分を取らず、ドラムの編集は先読みの境界より後(最大120ms先)から反映する。二重に鳴ることも、相手のいないchokeで音が切れることもない。ただし、先読み済みのOpen Hatのchoke時刻は発音時に決まるため、境界より後のClosed Hatを消しても、そのOpen Hatは元の時刻で切れる。
 
 再生開始の準備中(`starting`)に行った編集は、sessionが動き始めた直後(`confirmStarted`)に、sessionを作ったProjectと今のProjectが違えば同じ手順で反映する。シーク後の作り直しのsessionも同じ。
+
+対応しないこと: ノートの終わり(note-off)を過ぎて、シンセの自然なリリースで減衰している最中の音は、そのノートを消してもそのまま鳴り終わる。すでに消えていく途中の音なので、取り消しの対象にしない。
 
 ### 6.1.7 Elastic Audio Worker / DSP / cache
 
