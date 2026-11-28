@@ -211,13 +211,7 @@ function capturePointer(element: HTMLElement | null, pointerId: number): boolean
   }
 }
 
-/** 三連符グリッドの足し算で出る 1e-9 拍未満のずれだけを、いちばん近い tick に直す(自由位置の音は動かさない)。 */
-function withoutTickDrift(beat: number): number {
-  const tick = Math.round(beat * PPQ);
-  return Math.abs(beat * PPQ - tick) < 1e-6 ? tick / PPQ : beat;
-}
-
-function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
+export function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
   const { snapshot } = args;
   const anchor = snapshot.find((note) => note.id === args.anchorId) ?? snapshot[0];
   if (!anchor) return [];
@@ -262,13 +256,13 @@ function translateNoteGroup(args: NoteTranslation): NoteEvent[] {
     }
     return {
       ...source,
-      startBeat: withoutTickDrift(source.startBeat + beatDelta),
+      startBeat: source.startBeat + beatDelta,
       pitch,
     };
   });
 }
 
-function resizeNoteGroup(
+export function resizeNoteGroup(
   snapshot: readonly NoteEvent[],
   requestedDelta: number,
   clipLengthBeats: number,
@@ -288,7 +282,7 @@ function resizeNoteGroup(
   );
   return snapshot.map((note) => ({
     ...note,
-    durationBeats: withoutTickDrift(note.durationBeats + durationDelta),
+    durationBeats: note.durationBeats + durationDelta,
   }));
 }
 
