@@ -2063,14 +2063,14 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 ### 6.1.6.1 再生中のノート編集(playback live edit)
 
 再生中のProject編集は次の2通りに分かれる。
-- クリップ配置・テンポ・楽器・オートメーションなどplayback topologyに触れる編集(`hasPlaybackTopologyChanged`)は再生を停止する。playheadは保持され、再生は自動では再開しない。
+- クリップ配置・テンポ・拍子・曲の長さ・swing・hi-hat choke・楽器・オートメーションなどplayback topologyに触れる編集(`hasPlaybackTopologyChanged`)は再生を停止する。playheadは保持され、再生は自動では再開しない。
 - ノート内容(ノート、ドラムのステップ、コードトラック)だけの編集はtopologyの外で、再生は止まらず、今の再生に反映される。
 
 反映のしくみ:
-1. audio bridgeのstore購読が、topologyを保ったまま`buildScheduleEvents`の読む値(clipの中身、コードトラック、swing、hi-hat choke、曲の長さ・テンポ・拍子)が変わった編集だけを検出し(`hasScheduleContentChanged`)、`setTimeout(0)`で次のtimer turnへまとめる。ドラッグで連続する編集も1回の再構築になる。`updatedAt`、名前、色、ミキサーの値だけの変更(トラック名の変更など)では作り直さない。
+1. audio bridgeのstore購読が、topologyを保ったまま`buildScheduleEvents`の読む値(clipの中身とコードトラック)が変わった編集だけを検出し(`hasScheduleContentChanged`)、`setTimeout(0)`で次のtimer turnへまとめる。ドラッグで連続する編集も1回の再構築になる。`updatedAt`、名前、色、ミキサーの値だけの変更(トラック名の変更など)では作り直さない。
 2. 採用済みProjectから起動時と同じ`buildScheduleEvents`でeventを作り直し、ループ時は同じdensity preflightを通してから`Scheduler.replaceEventIndex`で差し替える。anchorと先読みの境界(`scheduledThroughBeat`)は動かさないので、以後のwindowとループの次のpassは新しい内容になる。予算超過は部分適用せず`audio-resource-limit`で停止する。
 3. 先読みで既にvoiceへ渡したeventは、内容(トラック・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。開始時刻がまだ先のvoiceは、gainの予定を`cancelScheduledValues`で消して0にし、sourceをその場でstop・切断するため、1 sampleも鳴らない。
-4. 発音中のvoiceは、元のノート(トラック・音色・音高・元の開始拍)ごとに、編集の前と後でそのノートが何個あるかを数える。減った数だけ、遅く始まったvoiceから止める。同じノートが2つ鳴っていて1つを消せば、止まるのは1つだけである。ループの周どうしで重なって鳴る長いノートのように、数が変わらなければ何も止めない。ノートが消えた時(音高を変えた時を含む)だけ、同じ`releaseVoice`の短いfade(30ms)で止め、クリックを出さない。強さや長さだけが変わった時(隣の編集でスイングの切り詰めが変わった時を含む)は触れず、最初に予定した通りに鳴り終わる。鳴らし直しもしない。
+4. 発音中のvoiceは、元のノート(トラック・音色・音高・元の開始拍)と周(発音時刻)ごとにまとめて扱う。編集の前と後でその元のノートの数を数え、減らなければ何も止めない。ループの周どうしで重なって鳴る長いノートや、強さ・長さだけの変更(隣の編集でスイングの切り詰めが変わった時を含む)は、最初に予定した通りに鳴り終わる。数が減った時は、各周でまず、消えたノートと同じ長さで予定したvoiceを止め(前後の長さの差を数で引いて決める)、それでも編集後の数より多ければ、遅く始まったvoiceから止める。このためノートを消すとすべての周でそのvoiceが止まり、高さと開始が同じで長さが違う2つのノートは、消した方が止まる。止める時は`releaseVoice`の短いfade(30ms)を使い、クリックを出さない。鳴らし直しはしない。
 5. 曲末の残響(tail): 編集で差し替える直前に、それまでのscheduleが必要としたtailの長さを計画し、sessionはその最大値(秒数2つ)だけを持つ。自然終了のtailは、今のscheduleの計画とこの最大値の大きい方にする。ノートを消しても計画したtailは縮まず、もう鳴っているディレイやリバーブの残響を途中で切らない。何回編集しても持つ状態の大きさは変わらない。ループ再生は自然終了しないので計画しない。
 6. 処理はtimer turnとstore購読の中だけで行い、AudioWorkletなどaudio realtime callbackでは重い処理をしない。WAV / MIDI exportは変更しない。
 
@@ -2086,7 +2086,7 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 
 ドラム: ドラムの音とchokeの停止時刻は取り消し用のhandleを持たない。そのため既に先読みしたwindow(`scheduledThroughBeat`より前)ではドラムeventの差分を取らず、ドラムの編集は先読みの境界より後(最大120ms先)から反映する。二重に鳴ることも、相手のいないchokeで音が切れることもない。ただし、先読み済みのOpen Hatのchoke時刻は発音時に決まるため、境界より後のClosed Hatを消しても、そのOpen Hatは元の時刻で切れる。
 
-再生開始の準備中(`starting`)に行った編集は、sessionが動き始めた直後(`confirmStarted`)に、sessionを作ったProjectと今のProjectが違えば同じ手順で反映する。シーク後の作り直しのsessionも同じ。
+再生開始の準備中(`starting`)に行った編集は、sessionが動き始めた直後(`confirmStarted`)に、sessionを作ったProjectから今のProjectまでに`hasScheduleContentChanged`の変更があれば同じ手順で反映する。シーク後の作り直しのsessionも同じ。
 
 対応しないこと: ノートの終わり(note-off)を過ぎて、シンセの自然なリリースで減衰している最中の音は、そのノートを消してもそのまま鳴り終わる。すでに消えていく途中の音なので、取り消しの対象にしない。
 

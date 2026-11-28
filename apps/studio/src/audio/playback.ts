@@ -2462,7 +2462,12 @@ function noteSourceKey(payload: NoteScheduleEvent, sourceBeat: number): string {
   return `${payload.trackId}|${payload.preset}|${payload.pitch}|${sourceBeat}`;
 }
 
-/** Project fields that buildScheduleEvents reads besides the tracks. */
+/**
+ * Project fields that buildScheduleEvents reads besides the tracks. Only the
+ * Chord Track can change live: swing, choke, length, tempo and meter are
+ * playback topology and stop the session first; they are listed so this check
+ * stays correct on its own.
+ */
 const SCHEDULE_PROJECT_FIELDS = [
   'chordTrack',
   'swing',
@@ -2474,10 +2479,10 @@ const SCHEDULE_PROJECT_FIELDS = [
 ] as const satisfies ReadonlyArray<keyof Project>;
 
 /**
- * Whether an edit may change what buildScheduleEvents produces: clip contents
- * (notes, drum steps), the Chord Track, swing / choke, or the musical
- * timeline. `updatedAt`, names, colours and mixer values are ignored, so a
- * rename or a fader drag never rebuilds the schedule.
+ * Whether an edit may change what buildScheduleEvents produces. During
+ * playback that means clip contents (notes, drum steps) or the Chord Track.
+ * `updatedAt`, names, colours and mixer values are ignored, so a rename or a
+ * fader drag never rebuilds the schedule.
  */
 export function hasScheduleContentChanged(previous: Project, next: Project): boolean {
   if (previous === next) return false;
