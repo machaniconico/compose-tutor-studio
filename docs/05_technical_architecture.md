@@ -110,6 +110,7 @@ Studio bridgeは採用済みProject参照を購読し、eventless編集、Undo/R
 - Built-in synth/drum playback
 - Basic effects
 - Offline render(`renderProjectToWav`の`sampleRate` 44.1 / 48 kHz・`bitDepth` 16 / 24・`dither`。既定の16-bit・ディザOFFは従来とバイト一致、計画・予算は`WavRenderPlan.sampleRate / bitDepth`で拡縮する)
+- ループ範囲の書き出し: `resolveExportRange`(project-model `export-range.ts`)がWAV・MIDI共通の範囲規則(整数tick、曲長で切り詰め、空は不可)を持つ。WAVは`WavRenderOptions.range`で`lengthBeats = loopEnd`のProjectを0拍からレンダーし先頭frameを切り捨てる。MIDIは`MidiExportOptions.range`(PPQ 480のtick。出力PPQが480以外なら`invalid-options`で拒否)で各MTrkのmessageを範囲へclipしてずらす。範囲はUI stateでschema変更なし。境界規則は`02_feature_specification.md`の10.1 / 10.2
 - Audio Assetのchecksum付きresolve / decode cacheとAudio Clip window plan
 - Audio Clipのpitch解析、versioned WSOLA派生PCM Worker、content-addressed single-flight LRU
 - Transient center-vocal reduction and PCM 16-bit WAV encode

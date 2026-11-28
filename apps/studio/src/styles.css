@@ -3327,6 +3327,18 @@ button.pr__note:hover {
   flex-wrap: wrap;
 }
 
+.export-menu__range {
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: 12px;
+}
+.export-menu__range label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.export-menu__range .export-menu__hint { flex: 1 1 100%; }
+
 .export-menu__wav-format {
   align-items: center;
   gap: var(--sp-3);

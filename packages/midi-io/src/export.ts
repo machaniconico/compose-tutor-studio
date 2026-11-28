@@ -165,6 +165,13 @@ export type MidiExportOptions = Readonly<{
    * Both kinds of event count toward maxEvents.
    */
   includeProgramAndKey?: boolean;
+  /**
+   * Export only [startTick, endTick) (PPQ 480, from `resolveExportRange`).
+   * Events are shifted so startTick becomes tick 0; notes are clipped to the
+   * range and the tempo/meter in effect at startTick are written at tick 0.
+   * Omitted: whole song, byte-identical to the unranged export.
+   */
+  range?: Readonly<{ startTick: number; endTick: number }>;
 }>;
 
 export class MidiExportError extends Error {
@@ -241,6 +248,7 @@ function resolveExportOptions(options: MidiExportOptions | undefined): {
   ppq: number;
   maxEvents: number;
   includeProgramAndKey: boolean;
+  range: Readonly<{ startTick: number; endTick: number }> | undefined;
 } {
   const ppq = options?.ppq ?? PPQ;
   if (!Number.isSafeInteger(ppq) || ppq <= 0 || ppq > MAX_MIDI_PPQ) {
@@ -261,7 +269,19 @@ function resolveExportOptions(options: MidiExportOptions | undefined): {
       { limit: MAX_MIDI_EXPORT_EVENTS, observed: maxEvents },
     );
   }
-  return { ppq, maxEvents, includeProgramAndKey: options?.includeProgramAndKey ?? true };
+  const range = options?.range;
+  if (
+    range !== undefined
+    && (!Number.isSafeInteger(range.startTick)
+      || !Number.isSafeInteger(range.endTick)
+      || range.startTick < 0
+      || range.endTick <= range.startTick)
+  ) {
+    exportFailure('invalid-options', 'range must be integer ticks with 0 <= startTick < endTick', {
+      observed: range.endTick - range.startTick,
+    });
+  }
+  return { ppq, maxEvents, includeProgramAndKey: options?.includeProgramAndKey ?? true, range };
 }
 
 // --- Meta event builders ---
@@ -1543,6 +1563,83 @@ function assertNoAmbiguousNoteOverlap(
   }
 }
 
+/** A range in output-PPQ ticks. */
+type MidiTickRange = Readonly<{ start: number; end: number }>;
+
+function toMidiTickRange(
+  range: Readonly<{ startTick: number; endTick: number }> | undefined,
+  ppq: number,
+): MidiTickRange | undefined {
+  if (!range) return undefined;
+  const start = beatToTick(range.startTick / GROOVE_RESOLVER_PPQ, ppq, 'range start');
+  const end = beatToTick(range.endTick / GROOVE_RESOLVER_PPQ, ppq, 'range end');
+  // A range narrower than one output tick still exports that tick.
+  return { start, end: end > start ? end : start + 1 };
+}
+
+/**
+ * Cut absolute-tick messages to [range.start, range.end) and shift them so the
+ * range start is tick 0. A note keeps only its overlap with the range (so a note
+ * already sounding at the start begins at tick 0, and a note running past the end
+ * ends at the range end); a note with no overlap is dropped. Other messages are
+ * setup messages at tick 0: they stay at tick 0 and later ones are shifted.
+ */
+function clipMessagesToRange(
+  messages: readonly MidiMessage[],
+  range: MidiTickRange,
+): MidiMessage[] {
+  const rank = (message: MidiMessage): number => {
+    const status = (message.bytes[0] ?? 0) & 0xf0;
+    if (status === 0x80 || (status === 0x90 && message.bytes[2] === 0)) return 0;
+    return status === 0x90 ? 2 : 1;
+  };
+  const sorted = [...messages].sort((a, b) => a.tick - b.tick || rank(a) - rank(b));
+  const out: MidiMessage[] = [];
+  const open = new Map<number, MidiMessage>();
+  for (const message of sorted) {
+    const statusByte = message.bytes[0] ?? 0;
+    const kind = rank(message);
+    if (kind === 1) {
+      if (message.tick >= range.end) continue;
+      out.push({ tick: Math.max(0, message.tick - range.start), bytes: message.bytes });
+      continue;
+    }
+    const key = (statusByte & 0x0f) * 128 + (message.bytes[1] ?? 0);
+    if (kind === 2) {
+      open.set(key, message);
+      continue;
+    }
+    const on = open.get(key);
+    if (!on) continue;
+    open.delete(key);
+    // A one-shot drum hit that began before the range is not retriggered: the
+    // WAV render has already ended it. Melodic notes are clipped instead.
+    if ((statusByte & 0x0f) === DRUM_CHANNEL && on.tick < range.start) continue;
+    const start = Math.max(on.tick, range.start);
+    const end = Math.min(message.tick, range.end);
+    if (end <= start) continue;
+    out.push({ tick: start - range.start, bytes: on.bytes });
+    out.push({ tick: end - range.start, bytes: message.bytes });
+  }
+  return out;
+}
+
+/** Keep the map value in effect at range.start (at tick 0) plus changes inside the range. */
+function clipMapMessagesToRange(
+  messages: readonly MidiMessage[],
+  range: MidiTickRange,
+): MidiMessage[] {
+  let inEffect: MidiMessage | undefined;
+  const inside: MidiMessage[] = [];
+  for (const message of messages) {
+    if (message.tick <= range.start) inEffect = message;
+    else if (message.tick < range.end) {
+      inside.push({ tick: message.tick - range.start, bytes: message.bytes });
+    }
+  }
+  return [...(inEffect ? [{ tick: 0, bytes: inEffect.bytes }] : []), ...inside];
+}
+
 /** Build one MTrk for an instrument/drum track, including CC7/CC10 at start. */
 function buildInstrumentTrack(
   project: Project,
@@ -1555,6 +1652,7 @@ function buildInstrumentTrack(
   budget: MidiExportBudget,
   realizedChordNotes: readonly RealizedChordNote[] = [],
   includeProgram = false,
+  range?: MidiTickRange,
 ): Uint8Array {
   if (!Number.isSafeInteger(channel) || channel < 0 || channel > 15) {
     exportFailure('invalid-project', `track ${track.id} cannot be assigned a MIDI channel`);
@@ -1606,7 +1704,7 @@ function buildInstrumentTrack(
   }
   appendRealizedChordNotes(realizedChordNotes, channel, ppq, msgs, budget, resolvedProject);
   assertNoAmbiguousNoteOverlap(msgs, track);
-  return buildTrackChunk(msgs);
+  return buildTrackChunk(range ? clipMessagesToRange(msgs, range) : msgs);
 }
 
 // --- Top-level export ---
@@ -1636,7 +1734,15 @@ export function projectToMidiResult(
     // Resolved mode always writes the shared resolver's 480 PPQ so no two
     // live/WAV onsets collapse onto one MIDI tick. Legacy keeps main's PPQ.
     const ppq = isResolvedModeInput(project) ? GROOVE_RESOLVER_PPQ : resolved.ppq;
-    const bytes = projectToMidiWithinBudget(project, ppq, budget, resolved.includeProgramAndKey);
+    if (resolved.range && ppq !== GROOVE_RESOLVER_PPQ) {
+      // Coarser ticks would round the range edges onto neighbouring events.
+      exportFailure('invalid-options', `range export requires ppq ${GROOVE_RESOLVER_PPQ}`, {
+        observed: ppq,
+      });
+    }
+    const bytes = projectToMidiWithinBudget(
+      project, ppq, budget, resolved.includeProgramAndKey, toMidiTickRange(resolved.range, ppq),
+    );
     return { ok: true, bytes, eventCount: budget.eventCount, effectivePpq: ppq };
   } catch (error) {
     if (error instanceof MidiExportError) return { ok: false, error: error.failure };
@@ -1655,6 +1761,7 @@ function projectToMidiWithinBudget(
   ppq: number,
   budget: MidiExportBudget,
   includeProgramAndKey: boolean,
+  range?: MidiTickRange,
 ): Uint8Array {
   if (typeof project !== 'object' || project === null) {
     exportFailure('invalid-project', 'project must be an object');
@@ -1690,23 +1797,38 @@ function projectToMidiWithinBudget(
   }
   // Keep map order canonical. Distinct beats may quantize to the same tick at
   // a low PPQ; stable insertion makes the later map point the effective value.
-  for (const event of tempoMap) {
-    metaMessages.push({
-      tick: beatToTick(event.beat, ppq, `tempo ${event.id} beat`),
-      bytes: tempoMeta(event.bpm),
-    });
-  }
-  for (const event of timeSignatureMap) {
-    metaMessages.push({
-      tick: beatToTick(event.beat, ppq, `time signature ${event.id} beat`),
-      bytes: timeSigMeta(event.numerator, event.denominator),
-    });
-  }
+  const tempoMessages: MidiMessage[] = tempoMap.map((event) => ({
+    tick: beatToTick(event.beat, ppq, `tempo ${event.id} beat`),
+    bytes: tempoMeta(event.bpm),
+  }));
+  const timeSignatureMessages: MidiMessage[] = timeSignatureMap.map((event) => ({
+    tick: beatToTick(event.beat, ppq, `time signature ${event.id} beat`),
+    bytes: timeSigMeta(event.numerator, event.denominator),
+  }));
+  const chordMessages: MidiMessage[] = [];
+  let chordInEffect: MidiMessage | undefined;
   for (const chord of project.chordTrack) {
-    metaMessages.push({
-      tick: beatToTick(chord.startBeat, ppq, `chord ${chord.id} start`),
-      bytes: markerMeta(chord.symbol),
-    });
+    const tick = beatToTick(chord.startBeat, ppq, `chord ${chord.id} start`);
+    const bytes = markerMeta(chord.symbol);
+    if (range && tick < range.start) {
+      // The chord still sounding at the range start is announced at tick 0.
+      const endTick = beatToTick(chord.startBeat + chord.durationBeats, ppq, `chord ${chord.id} end`);
+      if (endTick > range.start) chordInEffect = { tick: 0, bytes };
+      continue;
+    }
+    chordMessages.push({ tick, bytes });
+  }
+  if (range) {
+    metaMessages.push(
+      ...clipMapMessagesToRange(tempoMessages, range),
+      ...clipMapMessagesToRange(timeSignatureMessages, range),
+      ...(chordInEffect ? [chordInEffect] : []),
+      ...chordMessages
+        .filter((message) => message.tick >= range.start && message.tick < range.end)
+        .map((message) => ({ tick: message.tick - range.start, bytes: message.bytes })),
+    );
+  } else {
+    metaMessages.push(...tempoMessages, ...timeSignatureMessages, ...chordMessages);
   }
   const tempoTrack = buildTrackChunk(metaMessages);
 
@@ -1744,6 +1866,7 @@ function projectToMidiWithinBudget(
         budget,
         realizedNotes,
         includeProgramAndKey,
+        range,
       ),
     );
   }

@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   state: null as unknown as {
     project: Project;
     editor: { selectedTrackId: string | null };
+    transport: { loopEnabled: boolean; loopStartBeat: number; loopEndBeat: number };
     replaceProject: (project: Project) => Promise<boolean>;
   },
 }));
@@ -188,6 +189,7 @@ beforeEach(() => {
   mocks.state = {
     project: createEmptyProject({ title: 'portable-ui' }),
     editor: { selectedTrackId: null },
+    transport: { loopEnabled: false, loopStartBeat: 0, loopEndBeat: 0 },
     replaceProject: mocks.replaceProject,
   };
 });

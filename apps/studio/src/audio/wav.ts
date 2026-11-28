@@ -13,6 +13,8 @@ import {
   RUNTIME_SCHEDULE_DENSITY_WINDOW_BEATS,
   ScheduleEventLimitError,
   type CompiledAudioRoutingPlan,
+  exportRangeOnsetBeforeEnd,
+  type ExportRange,
   type Project,
 } from '@cts/project-model';
 import {
@@ -553,6 +555,15 @@ export function buildWavAudioClipPlans(project: Project): AudioClipPlaybackPlan[
 }
 
 export type WavRenderOptions = WavFormatOptions & Readonly<{
+  /**
+   * Export only [startBeat, endBeat) (from `resolveExportRange`). The song is
+   * rendered from beat 0 so automation, tempo and voices that began before the
+   * range are exact, then the output before startBeat is trimmed. Notes that
+   * start before the range and still sound at its start are kept; nothing starts
+   * at or after endBeat, and notes that started earlier ring out with the same
+   * release tail as a full-song export. Omitted: whole song (unchanged bytes).
+   */
+  range?: Pick<ExportRange, 'startTick' | 'endTick' | 'startBeat' | 'endBeat'>;
   audioAssetResolver?: AudioAssetBytesResolver | null;
   audioAssetCache?: AudioAssetPlaybackCache;
   audioClipBufferCache?: AudioClipBufferCache;
@@ -800,13 +811,23 @@ export function planSelectedTrackWavRender(
 }
 
 async function renderWavWithRouting(
-  project: Project,
-  sourceProject: Project,
+  fullProject: Project,
+  fullSourceProject: Project,
   routingPlan: CompiledAudioRoutingPlan,
   routingMix: ResolvedAudioRoutingMix,
   options: WavRenderOptions,
 ): Promise<WavRenderLease> {
-  const events = buildWavScheduleEvents(sourceProject);
+  const range = options.range;
+  // A range render ends the "song" at the range end, so every length-based rule
+  // (tail, automation window, budgets) sees the same project as a full export.
+  const project = range ? { ...fullProject, lengthBeats: range.endBeat } : fullProject;
+  const sourceProject = range
+    ? { ...fullSourceProject, lengthBeats: range.endBeat }
+    : fullSourceProject;
+  const events = range
+    ? buildWavScheduleEvents(sourceProject).filter((event) =>
+        exportRangeOnsetBeforeEnd(event.beat, range))
+    : buildWavScheduleEvents(sourceProject);
   const audioClipPlans = buildWavAudioClipPlans(sourceProject);
   const plan = planWavRender(project, events, audioClipPlans, {
     plan: routingPlan,
@@ -1038,10 +1059,18 @@ async function renderWavWithRouting(
       }
 
       const rendered = await ctx.startRendering();
-      const wav = encodeWav(rendered, plan.sampleRate, {
-        bitDepth: plan.bitDepth,
-        dither: options.dither === true,
-      });
+      const wav = encodeWav(
+        range ? trimLeadingFrames(
+            rendered,
+            tempo.beatToSeconds(range.startBeat),
+            range.startTick > 0,
+          ) : rendered,
+        plan.sampleRate,
+        {
+          bitDepth: plan.bitDepth,
+          dither: options.dither === true,
+        },
+      );
       const blob = new Blob([wav], { type: 'audio/wav' });
       const lease: WavRenderLease = {
         blob,
@@ -1085,6 +1114,34 @@ async function renderWavWithRouting(
       if (!reservationTransferred) resourceReservation.release();
     }
   }
+}
+
+/** Fade-in applied to the first frames of a range export that does not start at tick 0. */
+const RANGE_START_FADE_SECONDS = 0.005;
+
+/** Drop the audio before `startSeconds` (rounded to a whole frame, never emptying the buffer). */
+function trimLeadingFrames(
+  buffer: AudioBuffer,
+  startSeconds: number,
+  fadeIn: boolean,
+): Float32Array[] {
+  const startFrame = Math.min(
+    Math.max(0, buffer.length - 1),
+    Math.round(startSeconds * buffer.sampleRate),
+  );
+  const trimmed = collectChannels(buffer).map((channel) =>
+    // Fading edits the samples, so copy them rather than touching the render buffer.
+    fadeIn ? channel.slice(startFrame) : channel.subarray(startFrame));
+  if (!fadeIn) return trimmed;
+  // The cut can land mid-waveform; a short linear fade-in avoids a click.
+  const fadeFrames = Math.round(RANGE_START_FADE_SECONDS * buffer.sampleRate);
+  for (const channel of trimmed) {
+    const frames = Math.min(fadeFrames, channel.length);
+    for (let frame = 0; frame < frames; frame += 1) {
+      channel[frame] = (channel[frame] ?? 0) * (frame / fadeFrames);
+    }
+  }
+  return trimmed;
 }
 
 function audioTailSources(
