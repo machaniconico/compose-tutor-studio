@@ -15,6 +15,7 @@
 // - 連結: 同じ高さで、次の音が前の音の終わりと接するか重なる選んだ音を 1 つにする。
 //   いちばん早い音の id と強さを残し、終わりはいちばん遅い終わり。
 // - 分割: 再生ヘッドの位置(クリップ内の tick)で、またぐ選んだ音を 2 つにする。
+//   ループするクリップは (再生ヘッド − クリップの始まり) mod 周期 の位置で元の音を分ける(全部の繰り返しが分かれる)。
 //   どちらも 1 tick 以上。後半は同じ高さ・強さで、新しい id。
 // - グリッド移動: 開始位置を「グリッド幅 × 段数」tick だけ動かす(長さ・高さは変えない)。
 // - ベロシティランプ: 開始位置が最初の音の強さ from、最後の音の強さ to で、間は拍位置に比例して
@@ -353,10 +354,14 @@ export function playheadTickInClip(project: Project, clipId: string, positionBea
   const target = locateTarget(project, clipId);
   if (typeof target === 'string') return target;
   const placement = target.placements.find((clip) => clip.id === clipId) ?? target.placements[0]!;
-  const local = beatTick(positionBeat) - beatTick(placement.startBeat);
+  let local = beatTick(positionBeat) - beatTick(placement.startBeat);
   if (!Number.isFinite(positionBeat) || !Number.isSafeInteger(local) || local <= 0 || local >= beatTick(placement.lengthBeats)) {
     return '再生ヘッドがクリップの外にあります。分けたい音の途中に再生ヘッドを置いてください。';
   }
+  // ループするクリップは、再生ヘッドをループ 1 周の中の位置に直す((再生ヘッド − クリップの始まり) mod 周期)。
+  const period = beatTick(midiClipNaturalPatternLength(target.owner.notes ?? []));
+  if (placement.loop && period > 0) local %= period;
+  if (local <= 0) return '再生ヘッドがループの頭にあります。分けたい音の途中に再生ヘッドを置いてください。';
   return local;
 }
 
