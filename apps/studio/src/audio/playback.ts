@@ -164,6 +164,13 @@ type RuntimeSession = PlaybackSession & {
   scheduleEvents: readonly ScheduledEvent[];
   /** Project the current scheduleEvents were built from. */
   scheduleProject: Project;
+  /**
+   * Latest Project this session was kept alive across. Starts as the startup
+   * snapshot and advances on every accepted commit that keeps the session
+   * (mixer edits, read-mode scalar commits, automation punch-out commits), so
+   * a live note edit is checked against the topology the session follows now.
+   */
+  topologyBaseline: Project;
   /** Source placement and note of each note payload in scheduleEvents (see buildLiveSchedule). */
   noteSources: NoteSourceIndex;
   /**
@@ -1135,6 +1142,16 @@ export function initAudioBridge(): () => void {
   // Note-content edits are coalesced to one rebuild on the next timer turn, so
   // a drag that commits many Project states rebuilds the schedule once.
   let scheduleEditTimer: ReturnType<typeof setTimeout> | null = null;
+  // The running session survived this Project commit: advance its topology
+  // baseline and queue a schedule rebuild when the commit changed content.
+  function keepSessionAcross(project: Project, previousProject: Project): void {
+    const session = bridge.controller?.activeSession;
+    if (!session?.scheduler.isRunning) return;
+    session.topologyBaseline = project;
+    if (scheduleEditTimer === null && hasScheduleContentChanged(previousProject, project)) {
+      scheduleEditTimer = setTimeout(applyPendingScheduleEdit, 0);
+    }
+  }
   function applyPendingScheduleEdit(): void {
     if (scheduleEditTimer !== null) clearTimeout(scheduleEditTimer);
     scheduleEditTimer = null;
@@ -1146,8 +1163,13 @@ export function initAudioBridge(): () => void {
       || state.transport.phase !== 'playing'
       || state.transport.playbackRequestId !== session.requestId
       || state.project.id !== session.projectSnapshot.id
-      || hasPlaybackTopologyChanged(session.projectSnapshot, state.project)
     ) {
+      return;
+    }
+    if (hasPlaybackTopologyChanged(session.topologyBaseline, state.project)) {
+      // Every commit that keeps the session advances its baseline, so this is
+      // a topology change nothing else stopped. Never drop the edit silently.
+      useStore.getState().interruptPlayback(session.requestId, 'interrupted');
       return;
     }
     try {
@@ -1170,7 +1192,9 @@ export function initAudioBridge(): () => void {
       next.automationRecordingCommitRequestId,
     )) {
       // The active pass intentionally keeps playing its frozen session snapshot.
-      // This also preserves an already-started natural tail.
+      // This also preserves an already-started natural tail. Later note edits
+      // are checked against this commit, not the startup snapshot.
+      keepSessionAcross(next.project, previous.project);
       return;
     }
     if (automationReadScalarCommitPreservesRuntimeSession(
@@ -1187,6 +1211,7 @@ export function initAudioBridge(): () => void {
           next.automationReadScalarCommit!.targets,
           getAudioEngine().now(),
         );
+        if (applied) keepSessionAcross(next.project, previous.project);
         if (!applied) {
           const replaced = replaceRuntimePlaybackAtCurrentPosition(
             next.transport.playbackRequestId,
@@ -1228,13 +1253,7 @@ export function initAudioBridge(): () => void {
     ) {
       return;
     }
-    if (
-      scheduleEditTimer === null
-      && controller.activeSession?.scheduler.isRunning
-      && hasScheduleContentChanged(previous.project, next.project)
-    ) {
-      scheduleEditTimer = setTimeout(applyPendingScheduleEdit, 0);
-    }
+    keepSessionAcross(next.project, previous.project);
     const trackMixChanged = hasLiveMixChanged(
       previous.project.tracks,
       next.project.tracks,
@@ -2158,6 +2177,7 @@ async function createRuntimeSessionImpl(
       routingPlan,
       scheduleEvents,
       scheduleProject: project,
+      topologyBaseline: project,
       noteSources: scheduleNoteSources,
       planTail: loop ? null : planTail,
       plannedTail: { tailSeconds: 0, postLimiterTailSeconds: 0 },

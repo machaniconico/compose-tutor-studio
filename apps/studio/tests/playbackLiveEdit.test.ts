@@ -68,6 +68,9 @@ vi.mock('../src/audio/graph', async (importOriginal) => {
   return {
     ...actual,
     assertRoutingGraphNodeBudget: vi.fn(),
+    // The read-mode mixer commit (fix B5) applies scalars to real nodes; the
+    // mocked graphs have none, so report the update as applied.
+    applyReadScalarMixState: vi.fn(() => true),
     buildTrackGraphs: vi.fn((_c: unknown, _o: unknown, project: Project) =>
       new Map(project.tracks.map((t) => [t.id, {
         input: {} as GainNode,
@@ -661,6 +664,104 @@ describe('note-content edit while playing (US-012b)', () => {
     expect(afterEdit.filter((n) => n.pitch === 71).map((n) => n.start))
       .toEqual([expect.closeTo(13.5, 6)]);
     expect(count(60)).toBe(3);
+  });
+});
+
+describe('note edits after a read-mode mixer commit kept the session (live-edit fix B5)', () => {
+  function withPanLane(): void {
+    const id = melodyId();
+    store().applyProjectChange((p) => ({
+      ...p,
+      automationLanes: [{
+        id: 'lane-pan',
+        bypassed: false,
+        target: { type: 'track-pan', trackId: id },
+        points: [
+          { id: 'p0', beat: 0, value: 0, interpolation: 'linear' },
+          { id: 'p1', beat: 8, value: 0.2, interpolation: 'linear' },
+        ],
+      }],
+    } as Project));
+    useStore.setState({ past: [], future: [] });
+  }
+
+  async function moveFaderKeepingSession(): Promise<void> {
+    const requestId = store().transport.playbackRequestId;
+    store().setTrackVolume(melodyId(), 0.5);
+    await runFor(0.05);
+    expect(store().project.tracks.find((t) => t.id === melodyId())!.volume).toBe(0.5);
+    expect(store().transport.phase).toBe('playing');
+    expect(store().transport.playbackRequestId).toBe(requestId);
+  }
+
+  it('オートメーションのある曲でレーンのない音量を動かした後も、消した未再生ノートは鳴らない - live-edit fix B5 (G1)', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    withPanLane();
+    await play();
+    await runFor(1);
+    await moveFaderKeepingSession();
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(4);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(count(62)).toBe(0);
+  });
+
+  it('オートメーションのある曲でレーンのない音量を動かした後も、先に足したノートは鳴る - live-edit fix B5 (G2)', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    withPanLane();
+    await play();
+    await runFor(1);
+    await moveFaderKeepingSession();
+
+    editNotes((ns) => ns.concat([newNote(71, 5)]));
+    await runFor(4);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(count(71)).toBe(1);
+  });
+
+  it('オートメーションのある曲でレーンのない音量を動かした後も、鳴っているノートを消すと止まる - live-edit fix B5 (G3)', async () => {
+    setClips([melody([[60, 0.5, 6]])]);
+    withPanLane();
+    await play();
+    await runFor(1);
+    await moveFaderKeepingSession();
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 60));
+    await runFor(0.2);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(rec.releasedVoices.map((v) => v.pitch)).toEqual([60]);
+  });
+
+  it('オートメーション記録の確定で再生が続いた後も、消した未再生ノートは鳴らない - live-edit fix B5 (automation write)', async () => {
+    setClips([melody(TWO_NOTES_THEN_TAIL)]);
+    withPanLane();
+    const requestId = await play();
+    await runFor(1);
+    // The store's automation punch-out commit: the lane changes, the transport
+    // and session are kept, and the commit marker names this playback.
+    useStore.setState((state) => ({
+      project: {
+        ...state.project,
+        automationLanes: state.project.automationLanes.map((lane) => ({
+          ...lane,
+          points: lane.points.map((point) => ({ ...point, value: 0.4 })),
+        })),
+      },
+      automationRecordingCommitRequestId: requestId,
+    }));
+    await runFor(0.05);
+    expect(store().transport.phase).toBe('playing');
+    expect(store().transport.playbackRequestId).toBe(requestId);
+
+    editNotes((ns) => ns.filter((n) => n.pitch !== 62));
+    await runFor(4);
+
+    expect(store().transport.phase).toBe('playing');
+    expect(count(62)).toBe(0);
   });
 });
 

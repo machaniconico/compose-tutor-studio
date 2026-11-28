@@ -2067,9 +2067,9 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 - ノート内容(ノート、ドラムのステップ、コードトラック)だけの編集はtopologyの外で、再生は止まらず、今の再生に反映される。
 
 反映のしくみ:
-1. audio bridgeのstore購読が、topologyを保ったまま`buildScheduleEvents`の読む値(clipの中身とコードトラック)が変わった編集だけを検出し(`hasScheduleContentChanged`)、`setTimeout(0)`で次のtimer turnへまとめる。ドラッグで連続する編集も1回の再構築になる。`updatedAt`、名前、色、ミキサーの値だけの変更(トラック名の変更など)では作り直さない。
+1. audio bridgeのstore購読が、topologyを保ったまま`buildScheduleEvents`の読む値(clipの中身とコードトラック)が変わった編集だけを検出し(`hasScheduleContentChanged`)、`setTimeout(0)`で次のtimer turnへまとめる。同じtask turnの中で続いた編集は1回の再構築にまとまる。ただしドラッグはpointermoveのたびに確定することがあり、その場合はイベントごとに1回ずつ再構築する。`updatedAt`、名前、色、ミキサーの値だけの変更(トラック名の変更など)では作り直さない。
 2. 採用済みProjectから起動時と同じ`buildScheduleEvents`でeventを作り直し、ループ時は同じdensity preflightを通してから`Scheduler.replaceEventIndex`で差し替える。anchorと先読みの境界(`scheduledThroughBeat`)は動かさないので、以後のwindowとループの次のpassは新しい内容になる。予算超過は部分適用せず`audio-resource-limit`で停止する。
-3. 先読みで既にvoiceへ渡したeventは、内容(トラック・ノートID・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。開始時刻がまだ先のvoiceは、gainの予定を`cancelScheduledValues`で消して0にし、sourceをその場でstop・切断するため、1 sampleも鳴らない。
+3. 先読みで既にvoiceへ渡したeventは、内容(トラック・配置(クリップ)ID・ノートID・音色・音高・強さ・長さ)と元の拍から作るkeyと発音時刻で、新しいeventの`[playhead, frontier)`と突き合わせる。消えた・変わった未発音のvoiceは`SynthVoiceManager.releaseVoice`で取り消し、新しいeventだけをその場で発音する。開始時刻がまだ先のvoiceは、gainの予定を`cancelScheduledValues`で消して0にし、sourceをその場でstop・切断するため、1 sampleも鳴らない。
 4. 発音中のvoiceは、元のノートの身元(トラック・配置(クリップ)ID・ノートID・音高・元の開始拍)で見分ける。身元は`buildScheduleEvents`の`onClipNote`(クリップのノート)と`onChordNote`(コードトラックの音。ノートIDはコードのID、クリップIDはなし)の報告から、再生セッションだけが持つ索引に記録し、`JSON.stringify`で区切りの紛れなく文字列にする。scheduleのpayloadそのものは変えないので、WAV / MIDI exportと固定済みのschedule goldenは変わらない。索引にないnote eventは開発時に例外にし、本番では他の身元と重ならない専用の値で扱う。編集後のscheduleのどこにもその身元がない時、つまりノートやコードを消した・動かした・音高を変えた時だけ、`releaseVoice`の短いfade(30ms)で止め、クリックを出さない。強さや長さだけの変更(隣の編集でスイングの切り詰めが変わった時を含む)では止めず、最初に予定した通りに鳴り終わる。ループの各周は同じ身元、重複したノートはノートID、連動コピーは配置IDで区別されるので、数を数える必要はない。連動コピーが動かしたノートと同じ絶対位置を受け継いでも、元の配置の音は止まる。ノートを消せばすべての周でその音が止まり、重複したノートや重なった同じ和音は消した方だけが止まる。鳴らし直しはしない。
 5. 曲末の残響(tail): 編集で差し替える直前に、それまでのscheduleが必要としたtailの長さを計画し、sessionはその最大値(秒数2つ)だけを持つ。自然終了のtailは、今のscheduleの計画とこの最大値の大きい方にする。ノートを消しても計画したtailは縮まず、もう鳴っているディレイやリバーブの残響を途中で切らない。何回編集しても持つ状態の大きさは変わらない。ループ再生は自然終了しないので計画しない。
 6. 処理はtimer turnとstore購読の中だけで行い、AudioWorkletなどaudio realtime callbackでは重い処理をしない。WAV / MIDI exportは変更しない。
@@ -2085,6 +2085,8 @@ WebのIndexedDB repositoryはstore / read / checksum検証とdeduplicateを提�
 | G5 | クリップ移動・削除・テンポ変更が再生を止めず即時に反映される | 対応しない(設計差) | クリップ移動、削除、`setBpm(90)`のいずれも`transport.phase`が`stopped`になり、voice managerが`dispose`される |
 
 ドラム: ドラムの音とchokeの停止時刻は取り消し用のhandleを持たない。そのため既に先読みしたwindow(`scheduledThroughBeat`より前)ではドラムeventの差分を取らず、ドラムの編集は先読みの境界より後(最大120ms先)から反映する。二重に鳴ることも、相手のいないchokeで音が切れることもない。ただし、先読み済みのOpen Hatのchoke時刻は発音時に決まるため、境界より後のClosed Hatを消しても、そのOpen Hatは元の時刻で切れる。
+
+topologyの比較の基準: 再生セッションは「今従っているProject」を基準として持つ。開始時のsnapshotから始め、セッションを止めずに受け入れた確定(ミキサーの編集、Readモードでレーンのない値を動かした確定、オートメーション記録の確定)のたびに、その時のProjectへ進める。ノート編集はこの基準と比べるので、オートメーションのある曲で音量を動かした後も反映される。基準と比べてtopologyが変わっていたのに止まっていない場合は、編集を黙って捨てず再生を止める。
 
 再生開始の準備中(`starting`)に行った編集は、sessionが動き始めた直後(`confirmStarted`)に、sessionを作ったProjectから今のProjectまでに`hasScheduleContentChanged`の変更があれば同じ手順で反映する。シーク後の作り直しのsessionも同じ。
 
